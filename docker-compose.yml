@@ -1,0 +1,49 @@
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - php
+      - db
+    links:
+      - php
+      - db
+    network_mode: bridge
+
+  php:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    volumes:
+      - ./:/var/www/html
+    environment:
+      DB_HOST: db
+      DB_NAME: kungfu_md
+      DB_USER: kungfu_md
+      DB_PASS: ${DB_PASS:-kungfu_dev_password}
+    links:
+      - db
+    network_mode: bridge
+
+  db:
+    image: mysql:5.7
+    platform: linux/amd64
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_DATABASE: kungfu_md
+      MYSQL_USER: kungfu_md
+      MYSQL_PASSWORD: ${DB_PASS:-kungfu_dev_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-kungfu_dev_root_password}
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --max-connections=1000
+    network_mode: bridge
+
+volumes:
+  db_data:

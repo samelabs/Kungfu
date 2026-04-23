@@ -1,0 +1,20 @@
+
+RewriteEngine On
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+RedirectMatch 404 ^/(config|core|logs|docker|scripts|_archive)(/|$)
+
+<FilesMatch "^(\.gitignore|\.htaccess|docker-compose\.yml|init\.sql|nginx\.conf|claude_code_env\.sh|\.env)$">
+    Require all denied
+</FilesMatch>
+
+RewriteCond %{THE_REQUEST} \s/+.+\.php[\s?] [NC]
+RewriteCond %{REQUEST_URI} !^/index\.php$ [NC]
+RewriteRule ^ - [R=404,L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]

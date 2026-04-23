@@ -1,0 +1,22 @@
+# Temporary files
+*.pid
+*.txt.backup
+*.bak
+*.bak-*
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local/runtime files
+.env
+.env.local
+config/config.php
+logs/
+
+# Dependency/build output
+vendor/
+node_modules/
