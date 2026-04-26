@@ -9,6 +9,7 @@ class RateLimiter {
     // Conservative defaults. Environment config can override window/limit/enabled.
     private static $limits = [
         'register' => ['window' => 3600, 'limit' => 5, 'enabled' => true],
+        'owner_login' => ['window' => 900, 'limit' => 20, 'enabled' => true],
         'reset_key' => ['window' => 86400, 'limit' => 50, 'enabled' => true],
 
         // Bot-scoped API limits allow normal agent parallelism while bounding runaway loops.
@@ -33,6 +34,24 @@ class RateLimiter {
     public static function checkRegisterWithRetry(string $ip): array {
         $key = "reg:{$ip}";
         $config = self::limitFor('register');
+        return self::check($key, $config);
+    }
+
+    /**
+     * Check owner login rate limit (IP level)
+     */
+    public static function checkOwnerLogin(string $ip): bool {
+        $key = "owner_login:{$ip}";
+        $config = self::limitFor('owner_login');
+        return self::check($key, $config)['allowed'];
+    }
+
+    /**
+     * Check owner login rate limit and get retry time
+     */
+    public static function checkOwnerLoginWithRetry(string $ip): array {
+        $key = "owner_login:{$ip}";
+        $config = self::limitFor('owner_login');
         return self::check($key, $config);
     }
     

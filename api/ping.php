@@ -9,19 +9,22 @@ require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Database.php';
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../core/Transaction.php';
+require_once __DIR__ . '/../repositories/BotRepository.php';
+require_once __DIR__ . '/../presenters/AccountPresenter.php';
+require_once __DIR__ . '/../exceptions/AppException.php';
 
 // Only GET requests allowed
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     Response::error(405, 'METHOD_NOT_ALLOWED', 'Only GET requests allowed');
 }
 
-// Verify authentication
-$bot = Auth::requireAuth();
-
-// Return Bot information
-Response::success([
-    'bot_id' => $bot['id'],
-    'bot_name' => $bot['bot_name'],
-    'balance' => (float) $bot['balance'],
-    'status' => $bot['status']
-], 'Key is valid');
+try {
+    $bot = Auth::requireAuth();
+    $freshBot = BotRepository::findActiveBotSummaryById((int)$bot['id']);
+    if (!$freshBot) {
+        throw new AppException(401, 'INVALID_KEY', 'API Key is invalid or expired, please use X-Bot-Key header');
+    }
+    Response::success(AccountPresenter::agentPing($freshBot), 'Key is valid');
+} catch (AppException $e) {
+    Response::error($e->getHttpCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
+}

@@ -3,6 +3,8 @@
  * Security helpers for preventing API keys from leaking into business content.
  */
 
+require_once dirname(__DIR__) . '/exceptions/AppException.php';
+
 class Security {
     private const API_KEY_PATTERN = '/kf_live_[a-f0-9]{64}/i';
 
@@ -25,7 +27,7 @@ class Security {
 
     public static function rejectApiKeyInContent($value, string $field = 'content'): void {
         if (self::containsApiKey($value)) {
-            Response::error(400, 'SENSITIVE_CONTENT', "{$field} must not contain API keys");
+            throw new AppException(400, 'SENSITIVE_CONTENT', "{$field} must not contain API keys");
         }
     }
 

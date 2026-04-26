@@ -36,6 +36,7 @@ return [
     // Rate limiting configuration
     'rate_limits' => [
         'register' => ['window' => 3600, 'limit' => 5],
+        'owner_login' => ['window' => 900, 'limit' => 20],
         'list' => ['window' => 60, 'limit' => 120],
         'get' => ['window' => 60, 'limit' => 300],
         'push' => ['window' => 3600, 'limit' => 60],

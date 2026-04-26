@@ -9,10 +9,6 @@ services:
     depends_on:
       - php
       - db
-    links:
-      - php
-      - db
-    network_mode: bridge
 
   php:
     build:
@@ -24,10 +20,7 @@ services:
       DB_HOST: db
       DB_NAME: kungfu_md
       DB_USER: kungfu_md
-      DB_PASS: ${DB_PASS:-kungfu_dev_password}
-    links:
-      - db
-    network_mode: bridge
+      DB_PASS: ${DB_PASS}
 
   db:
     image: mysql:5.7
@@ -37,13 +30,12 @@ services:
     environment:
       MYSQL_DATABASE: kungfu_md
       MYSQL_USER: kungfu_md
-      MYSQL_PASSWORD: ${DB_PASS:-kungfu_dev_password}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-kungfu_dev_root_password}
+      MYSQL_PASSWORD: ${DB_PASS}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - db_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --max-connections=1000
-    network_mode: bridge
 
 volumes:
   db_data:

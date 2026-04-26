@@ -36,6 +36,7 @@ return [
     // Rate limiting configuration (keep consistent with RateLimiter)
     'rate_limits' => [
         'register' => ['window' => 3600, 'limit' => 5],      // IP level
+        'owner_login' => ['window' => 900, 'limit' => 20],   // IP level
         'list' => ['window' => 60, 'limit' => 120],          // Bot level
         'get' => ['window' => 60, 'limit' => 300],
         'push' => ['window' => 3600, 'limit' => 60],

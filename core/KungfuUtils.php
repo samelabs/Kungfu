@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/PublicCode.php';
+require_once dirname(__DIR__) . '/exceptions/AppException.php';
 
 class KungfuUtils
 {
@@ -23,7 +24,7 @@ class KungfuUtils
         );
 
         if (!$kungfu) {
-            Response::error(404, 'NOT_FOUND', 'Kungfu not found');
+            throw new AppException(404, 'NOT_FOUND', 'Kungfu not found');
         }
 
         return $kungfu;
@@ -33,7 +34,7 @@ class KungfuUtils
     {
         $kungfu = self::requireActiveByCode($code, $select);
         if ((int)$kungfu['bot_id'] !== $botId) {
-            Response::error(403, 'NOT_OWNER', $ownerError);
+            throw new AppException(403, 'NOT_OWNER', $ownerError);
         }
 
         return $kungfu;

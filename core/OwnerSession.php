@@ -2,13 +2,31 @@
 
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Auth.php';
-require_once __DIR__ . '/Response.php';
 require_once __DIR__ . '/Security.php';
+require_once dirname(__DIR__) . '/repositories/BotRepository.php';
+require_once dirname(__DIR__) . '/exceptions/AppException.php';
 
 class OwnerSession
 {
     private const SESSION_KEY = 'owner_bot_id';
     private const SESSION_LIFETIME = 60 * 60 * 24;
+
+    private static function sessionSecure(): bool
+    {
+        return !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    }
+
+    private static function configureSession(): void
+    {
+        ini_set('session.gc_maxlifetime', (string)self::SESSION_LIFETIME);
+        session_set_cookie_params([
+            'lifetime' => self::SESSION_LIFETIME,
+            'path' => '/',
+            'secure' => self::sessionSecure(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
 
     private static function boot(): void
     {
@@ -16,15 +34,7 @@ class OwnerSession
             return;
         }
 
-        ini_set('session.gc_maxlifetime', (string)self::SESSION_LIFETIME);
-        session_set_cookie_params([
-            'lifetime' => self::SESSION_LIFETIME,
-            'path' => '/',
-            'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
-
+        self::configureSession();
         session_start();
     }
 
@@ -35,26 +45,20 @@ class OwnerSession
 
         $nameValidation = Auth::validateBotName($name);
         if (!$nameValidation['valid']) {
-            Response::error(400, 'INVALID_NAME', $nameValidation['errors'][0]);
+            throw new AppException(400, 'INVALID_NAME', $nameValidation['errors'][0]);
         }
 
         $passwordValidation = Auth::validatePassword($password);
         if (!$passwordValidation['valid']) {
-            Response::error(400, 'INVALID_PASSWORD', $passwordValidation['errors'][0]);
+            throw new AppException(400, 'INVALID_PASSWORD', $passwordValidation['errors'][0]);
         }
 
         Security::rejectApiKeyInContent([$name, $password], 'human credentials');
 
-        $db = Database::getInstance();
-        $bot = $db->fetchOne(
-            "SELECT id, bot_name, password_hash, status
-             FROM tb_bots
-             WHERE bot_name = :name AND status = 'active'",
-            [':name' => $name]
-        );
+        $bot = BotRepository::findActiveBotCredentialsByName($name);
 
         if (!$bot || empty($bot['password_hash']) || !Auth::verifyPassword($password, $bot['password_hash'])) {
-            Response::error(401, 'INVALID_CREDENTIALS', 'Bot name or password is incorrect');
+            throw new AppException(401, 'INVALID_CREDENTIALS', 'Bot name or password is incorrect');
         }
 
         self::boot();
@@ -76,13 +80,7 @@ class OwnerSession
             return null;
         }
 
-        $db = Database::getInstance();
-        $bot = $db->fetchOne(
-            "SELECT id, bot_name, balance, status, key_issued_at
-             FROM tb_bots
-             WHERE id = :id AND status = 'active'",
-            [':id' => $botId]
-        );
+        $bot = BotRepository::findOwnerSessionBotById($botId);
 
         if (!$bot) {
             unset($_SESSION[self::SESSION_KEY]);
@@ -96,7 +94,7 @@ class OwnerSession
     {
         $bot = self::current();
         if (!$bot) {
-            Response::error(401, 'OWNER_LOGIN_REQUIRED', 'Owner login required');
+            throw new AppException(401, 'OWNER_LOGIN_REQUIRED', 'Owner login required');
         }
 
         return $bot;

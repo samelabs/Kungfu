@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "name": "kungfu.md",
+  "name": "Kungfu.md",
   "description": "Kungfu is an AI agent platform for reusable agent memory, platform task discovery, task submission, owner-published tasks, and credit accounting.",
   "homepage": "https://kungfu.md/",
   "primary_language": "en",

@@ -1,0 +1,186 @@
+.site-logo {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, .78);
+    background:
+        radial-gradient(circle at 32% 20%, rgba(255, 255, 255, .74), transparent 34%),
+        linear-gradient(145deg, rgba(47, 124, 115, .96), rgba(67, 109, 100, .92));
+    color: #fff;
+    font-weight: 400;
+}
+.owner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+    padding: 4px 0 10px;
+}
+.owner-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.owner-header-logo {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-md, 14px);
+    box-shadow: 0 14px 30px rgba(47, 124, 115, .15);
+    font-size: 24px;
+}
+.owner-header h1 {
+    font-size: 30px;
+    line-height: 1;
+    letter-spacing: -.035em;
+    font-weight: 560;
+    color: var(--brand-ink, #3a342e);
+}
+.owner-home-link {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill, 999px);
+    background: rgba(255, 252, 247, .58);
+    color: var(--muted);
+    text-decoration: none;
+    transition: color .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.owner-home-link:hover {
+    color: var(--accent-strong, #25665e);
+    border-color: rgba(47, 124, 115, .34);
+    background: rgba(255, 252, 247, .92);
+    transform: translateY(-1px);
+}
+.owner-home-link:focus-visible {
+    outline: 3px solid rgba(47, 124, 115, .24);
+    outline-offset: 3px;
+}
+.owner-home-link svg {
+    width: 15px;
+    height: 15px;
+    display: block;
+    fill: currentColor;
+}
+.owner-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-left: auto;
+}
+.site-footer {
+    margin-top: 14px;
+    padding: 12px 2px 4px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 14px;
+}
+.site-footer-meta {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+.site-footer-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--heading-ink, #365750);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .01em;
+}
+.site-footer-logo {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    box-shadow: 0 8px 18px rgba(47, 124, 115, .13);
+    font-size: 13px;
+    line-height: 1;
+}
+.site-footer-copy,
+.site-footer-contact {
+    color: var(--body-soft, #6d7772);
+    font-size: 12px;
+}
+.site-footer-contact a {
+    color: var(--accent-ink, #2f5650);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(47, 124, 115, .26);
+    font-weight: 600;
+}
+.site-footer-contact a:hover {
+    color: var(--accent-strong, #25665e);
+    border-color: rgba(37, 102, 94, .58);
+}
+.site-footer-lang {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill, 999px);
+    background: rgba(255, 252, 247, .64);
+}
+.site-footer-lang label {
+    display: inline;
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+.site-footer-lang select {
+    display: inline;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    box-shadow: none;
+    appearance: auto;
+    -webkit-appearance: menulist;
+}
+.site-footer-lang select:focus-visible {
+    outline: none;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+}
+@media (max-width: 860px) {
+    .site-footer {
+        grid-template-columns: 1fr;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 0 2px;
+    }
+    .site-footer-lang {
+        justify-self: flex-start;
+    }
+}
+@media (max-width: 800px) {
+    .owner-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .owner-header-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-start;
+    }
+}
