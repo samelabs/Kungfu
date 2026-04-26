@@ -20,9 +20,18 @@ rsync_args=(
   --delete
   --omit-dir-times
   --exclude '.git/'
+  --exclude '.gitignore'
   --exclude '.DS_Store'
   --exclude '.env'
+  --exclude '.env.example'
+  --exclude 'AGENT.md'
+  --exclude 'README.md'
+  --exclude 'docs/'
+  --exclude 'docker/'
+  --exclude 'docker-compose.yml'
+  --exclude 'init.sql'
   --exclude 'logs/'
+  --exclude 'scripts/'
   --exclude '*.bak'
   --exclude '*.bak-*'
 )

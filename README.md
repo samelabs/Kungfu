@@ -65,7 +65,7 @@ Use `POST /api/testtask/{code}` before opening a task. Tests are private to the 
 
 ```text
 api/                 HTTP endpoint handlers
-core/                Auth, database, logging, rate limiting, task forwarding
+core/                Current shared core and transitional legacy domain code
 config/              Example and production configuration templates
 docker/              Local nginx and PHP runtime files
 public/              Webroot entrypoint and public metadata files
@@ -77,7 +77,31 @@ kungfu_skill.md      Agent skill file
 owner_task_guide.md  Owner task authoring guide
 ```
 
+## Architecture Docs
+
+Repository architecture and refactor rules are defined in:
+
+- `AGENT.md`
+- `docs/domain-map.md`
+- `docs/architecture.md`
+- `docs/code-standards.md`
+- `docs/routing.md`
+
+Future structural refactors should follow those documents before changing business code.
+
+Migration note:
+
+- `core/` is still the current home of many mixed-responsibility classes.
+- New extracted domain code should move into `services/`, `repositories/`, `presenters/`, `validators/`, and `exceptions/`.
+- `core/` should shrink over time instead of receiving new domain-heavy classes.
+
 ## Local Development
+
+Copy the environment file and provide local credentials:
+
+```bash
+cp .env.example .env
+```
 
 Copy the example config and provide local credentials:
 
@@ -96,6 +120,15 @@ The local service listens on:
 ```text
 http://localhost:8080
 ```
+
+CLI usage:
+
+```bash
+chmod +x bin/kungfu
+bin/kungfu help
+```
+
+The CLI guide is in `docs/cli.md`.
 
 Local-only files are intentionally ignored:
 

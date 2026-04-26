@@ -16,9 +16,46 @@ define('CONFIG_PATH', ROOT_PATH . '/config');
 define('WEB_PATH', ROOT_PATH . '/web');
 
 require_once CORE_PATH . '/Response.php';
+require_once CORE_PATH . '/I18n.php';
+
+$APP_LOCALE = app_i18n_resolve_locale();
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = trim($uri, '/');
+
+if (strpos($uri, 'assets/') === 0) {
+    $assetRelative = substr($uri, strlen('assets/'));
+    $assetPath = ROOT_PATH . '/public/assets/' . $assetRelative;
+    $realAssetPath = realpath($assetPath);
+    $publicAssetsRoot = realpath(ROOT_PATH . '/public/assets');
+
+    if (
+        !$realAssetPath ||
+        !$publicAssetsRoot ||
+        strncmp($realAssetPath, $publicAssetsRoot, strlen($publicAssetsRoot)) !== 0 ||
+        !is_file($realAssetPath)
+    ) {
+        Response::error(404, 'NOT_FOUND', 'Asset not found');
+    }
+
+    $ext = strtolower(pathinfo($realAssetPath, PATHINFO_EXTENSION));
+    $mimeTypes = [
+        'css' => 'text/css; charset=utf-8',
+        'js' => 'application/javascript; charset=utf-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        'gif' => 'image/gif',
+    ];
+    $mime = $mimeTypes[$ext] ?? 'application/octet-stream';
+
+    header('Content-Type: ' . $mime);
+    header('Cache-Control: public, max-age=300');
+    readfile($realAssetPath);
+    exit;
+}
 
 // Homepage
 if ($uri === '' || $uri === 'index.html' || $uri === 'index.php') {
@@ -107,6 +144,20 @@ if ($uri === 'robots.txt') {
     exit;
 }
 
+if ($uri === 'manifest.webmanifest') {
+    header('Content-Type: application/manifest+json; charset=utf-8');
+    header('Cache-Control: public, max-age=300');
+    readfile(ROOT_PATH . '/public/manifest.webmanifest');
+    exit;
+}
+
+if ($uri === 'sw.js') {
+    header('Content-Type: application/javascript; charset=utf-8');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    readfile(ROOT_PATH . '/public/sw.js');
+    exit;
+}
+
 if ($uri === 'llms.txt') {
     header('Content-Type: text/plain; charset=utf-8');
     readfile(ROOT_PATH . '/llms.txt');
@@ -122,6 +173,12 @@ if ($uri === 'openai.json' || $uri === '.well-known/openai.json') {
 if ($uri === 'kungfu_skill.md') {
     header('Content-Type: text/markdown; charset=utf-8');
     readfile(ROOT_PATH . '/kungfu_skill.md');
+    exit;
+}
+
+if ($uri === 'owner_task_guide.md') {
+    header('Content-Type: text/markdown; charset=utf-8');
+    readfile(ROOT_PATH . '/owner_task_guide.md');
     exit;
 }
 
@@ -202,7 +259,7 @@ if (preg_match('#^api/owner/tasks/([a-f0-9]{12})$#i', $uri, $matches)) {
     $_GET['code'] = $matches[1];
     $uri = 'api/owner/tasks';
 }
-if (preg_match('#^api/owner/tasks/([a-f0-9]{12})/(open|close|add-budget|edit)$#i', $uri, $matches)) {
+if (preg_match('#^api/owner/tasks/([a-f0-9]{12})/(open|close|add-budget|edit|refund)$#i', $uri, $matches)) {
     $_GET['code'] = $matches[1];
     $_GET['action'] = $matches[2];
     $uri = 'api/owner/tasks';

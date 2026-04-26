@@ -7,19 +7,13 @@
 require_once __DIR__ . '/../../core/OwnerSession.php';
 require_once __DIR__ . '/../../core/Response.php';
 require_once __DIR__ . '/../../core/Logger.php';
+require_once __DIR__ . '/../../core/RateLimiter.php';
+require_once __DIR__ . '/../../services/OwnerSessionService.php';
+require_once __DIR__ . '/../../exceptions/AppException.php';
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $bot = OwnerSession::current();
-        if (!$bot) {
-            Response::error(401, 'OWNER_LOGIN_REQUIRED', 'Owner login required');
-        }
-
-        Response::success([
-            'bot_id' => (int)$bot['id'],
-            'bot_name' => $bot['bot_name'],
-            'status' => $bot['status']
-        ], 'Owner session active');
+        Response::success(OwnerSessionService::current(), 'Owner session active');
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -32,20 +26,25 @@ try {
             Response::error(400, 'MISSING_FIELD', 'Missing required fields: name, password');
         }
 
-        $bot = OwnerSession::login((string)$input['name'], (string)$input['password']);
-        Response::success([
-            'bot_id' => (int)$bot['id'],
-            'bot_name' => $bot['bot_name'],
-            'status' => $bot['status']
-        ], 'Owner login successful');
+        $ip = Logger::getClientIp();
+        $rateCheck = RateLimiter::checkOwnerLoginWithRetry($ip);
+        if (!$rateCheck['allowed']) {
+            Response::rateLimit($rateCheck['retry_after'], $rateCheck['limit'], $rateCheck['window']);
+        }
+
+        Response::success(
+            OwnerSessionService::login((string)$input['name'], (string)$input['password']),
+            'Owner login successful'
+        );
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-        OwnerSession::logout();
-        Response::success([], 'Owner logout successful');
+        Response::success(OwnerSessionService::logout(), 'Owner logout successful');
     }
 
     Response::error(405, 'METHOD_NOT_ALLOWED', 'Only GET, POST, and DELETE requests allowed');
+} catch (AppException $e) {
+    Response::error($e->getHttpCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
 } catch (Exception $e) {
     Logger::fileLog('ERROR', 'Owner session API failed: ' . $e->getMessage(), [
         'method' => $_SERVER['REQUEST_METHOD'] ?? '',

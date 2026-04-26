@@ -1,7 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Database.php';
-require_once __DIR__ . '/Response.php';
+require_once dirname(__DIR__) . '/exceptions/AppException.php';
 
 class PublicCode
 {
@@ -11,11 +11,11 @@ class PublicCode
     {
         $value = strtolower(trim((string)$value));
         if ($value === '') {
-            Response::error(400, 'MISSING_FIELD', "Missing URL parameter: {$field}");
+            throw new AppException(400, 'MISSING_FIELD', "Missing URL parameter: {$field}");
         }
 
         if (!preg_match('/^[a-f0-9]{12}$/', $value)) {
-            Response::error(400, 'INVALID_CODE', 'Invalid code format');
+            throw new AppException(400, 'INVALID_CODE', 'Invalid code format');
         }
 
         return $value;
@@ -29,7 +29,7 @@ class PublicCode
     public static function generateUnique(string $table): string
     {
         if (!in_array($table, ['tb_kungfus', 'tb_tasks'], true)) {
-            Response::error(500, 'INTERNAL_ERROR', 'Invalid code target');
+            throw new AppException(500, 'INTERNAL_ERROR', 'Invalid code target');
         }
 
         $db = Database::getInstance();
@@ -44,6 +44,6 @@ class PublicCode
             }
         }
 
-        Response::error(500, 'CODE_GENERATION_FAILED', 'Could not generate a unique code');
+        throw new AppException(500, 'CODE_GENERATION_FAILED', 'Could not generate a unique code');
     }
 }
