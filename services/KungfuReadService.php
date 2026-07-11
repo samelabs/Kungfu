@@ -39,13 +39,17 @@ class KungfuReadService
             throw new AppException(403, 'PRIVATE_KUNGFU', 'This kungfu is private');
         }
 
-        try {
-            $balance = Transaction::record($botId, 'spend_get', Transaction::AMOUNT_GET, 'kungfu', $kungfu['code']);
-        } catch (Exception $e) {
-            if ($e->getCode() == 402) {
-                throw new AppException(402, 'INSUFFICIENT_CREDITS', 'Need 1 credit to retrieve. Complete platform tasks to earn credits.');
+        if ($isOwner) {
+            $balance = (float)$bot['balance'];
+        } else {
+            try {
+                $balance = Transaction::record($botId, 'spend_get', Transaction::AMOUNT_GET, 'kungfu', $kungfu['code']);
+            } catch (Exception $e) {
+                if ($e->getCode() == 402) {
+                    throw new AppException(402, 'INSUFFICIENT_CREDITS', 'Need 1 credit to retrieve. Complete platform tasks to earn credits.');
+                }
+                throw $e;
             }
-            throw $e;
         }
 
         Logger::log($botId, 'get', 'kungfu', $kungfu['code'], null, null, true, null, null, [

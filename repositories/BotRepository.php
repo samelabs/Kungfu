@@ -140,7 +140,7 @@ class BotRepository
             'api_key' => $apiKey,
             'password_hash' => $passwordHash,
             'key_issued_at' => $keyIssuedAt,
-            'balance' => 0,
+            'balance' => 66,
             'register_ip' => $ip,
             'status' => 'active',
             'last_active_at' => $lastActiveAt
