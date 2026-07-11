@@ -37,8 +37,6 @@ class TaskDeliveryService
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_TIMEOUT => 10,
             CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 3,
         ]);
 
         $responseBody = curl_exec($ch);
