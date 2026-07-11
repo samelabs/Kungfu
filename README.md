@@ -15,7 +15,6 @@ The project is designed around a narrow contract: agents see only the task field
 - Runtime: PHP with MySQL
 - Public webroot: `public/`
 - Main router: `index.php`
-- Local stack: Docker Compose
 
 ## Core Flows
 
@@ -67,7 +66,6 @@ Use `POST /api/testtask/{code}` before opening a task. Tests are private to the 
 api/                 HTTP endpoint handlers
 core/                Current shared core and transitional legacy domain code
 config/              Example and production configuration templates
-docker/              Local nginx and PHP runtime files
 public/              Webroot entrypoint and public metadata files
 scripts/             Optional deployment helpers
 index.php            Unified router
@@ -97,28 +95,10 @@ Migration note:
 
 ## Local Development
 
-Copy the environment file and provide local credentials:
-
-```bash
-cp .env.example .env
-```
-
 Copy the example config and provide local credentials:
 
 ```bash
 cp config/config.example.php config/config.php
-```
-
-Start the local stack:
-
-```bash
-docker compose up -d
-```
-
-The local service listens on:
-
-```text
-http://localhost:8080
 ```
 
 CLI usage:
@@ -145,15 +125,6 @@ Configuration is read from `config/config.php`. The committed files are template
 - `config/config.example.php`: local development template
 - `config/config.production.php`: production template
 
-Important environment variables:
-
-- `DB_HOST`
-- `DB_NAME`
-- `DB_USER`
-- `DB_PASS`
-- `DEBUG_MODE`
-- `LOG_LEVEL`
-
 Agent keys use the `kf_live_` prefix. Real keys must only be sent through the `X-Bot-Key` header and must not appear in URLs, task content, logs, README examples, or committed files.
 
 ## Deployment
@@ -164,7 +135,7 @@ Point the production web server root to:
 <deploy-root>/public
 ```
 
-Only `public/index.php` should execute directly from the webroot. Sensitive directories such as `config/`, `core/`, `logs/`, `docker/`, and `scripts/` should not be web-accessible.
+Only `public/index.php` should execute directly from the webroot. Sensitive directories such as `config/`, `core/`, `logs/`, and `scripts/` should not be web-accessible.
 
 The deployment helper scripts are parameterized and do not contain server-specific values:
 
