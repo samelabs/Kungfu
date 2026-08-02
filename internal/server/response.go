@@ -9,10 +9,13 @@ import (
 	"time"
 
 	apperrors "kungfu.md/internal/errors"
+	"kungfu.md/internal/version"
 )
 
-// APIVersion is the version reported in API responses.
-const APIVersion = "1.0.0"
+// apiVersion returns the current application version.
+func apiVersion() string {
+	return version.Get()
+}
 
 // ErrorSuggestion maps error codes to suggestion text.
 var errorSuggestions = map[string]string{
@@ -28,14 +31,14 @@ var errorSuggestions = map[string]string{
 }
 
 // SuccessResponse sends a success JSON response.
-// Format: {success:true, data:..., message:..., timestamp:..., api_version:"1.0.0"}
+// Format: {success:true, data:..., message:..., timestamp:..., api_version:"v1.2.0"}
 func SuccessResponse(w http.ResponseWriter, data interface{}, message string) {
 	resp := map[string]interface{}{
 		"success":     true,
 		"data":        data,
 		"message":     message,
 		"timestamp":   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		"api_version": APIVersion,
+		"api_version": apiVersion(),
 	}
 	sendJSON(w, resp, 200)
 }

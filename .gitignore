@@ -22,5 +22,9 @@ logs/
 # Temporary
 *.bak
 *~
+# Internal dev docs (not public)
 AGENT.md
+devlog/
+
+# Binary
 server

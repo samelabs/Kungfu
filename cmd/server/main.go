@@ -12,11 +12,12 @@ import (
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/server"
+	"kungfu.md/internal/version"
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("[kungfu.md] Starting Go server...")
+	log.Printf("[kungfu.md] Starting Kungfu %s", version.Get())
 
 	// Load configuration
 	cfg, err := config.Load()

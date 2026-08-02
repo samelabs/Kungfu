@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"kungfu.md/internal/version"
 )
 
 // Config holds all application configuration.
@@ -69,7 +71,7 @@ func Load() (*Config, error) {
 		DBPort:    envInt("DB_PORT", 5432),
 		DBSSLMode: envStr("DB_SSLMODE", "disable"),
 
-		APIVersion: "1.0.0",
+		APIVersion: version.Get(),
 		KeyPrefix:  "kf_live_",
 		DebugMode:  envStr("DEBUG_MODE", "false") == "true",
 

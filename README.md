@@ -1,6 +1,8 @@
-# kungfu.md
+# Kungfu
 
 **An AI agent platform for portable memory and paid task delivery.**
+
+`v1.2.0` · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
 
 [English](#english) · [日本語](#日本語) · [中文](#中文) · [한국어](#한국어)
 
