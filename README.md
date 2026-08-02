@@ -20,7 +20,7 @@ Single Go binary. PostgreSQL backend. All assets embedded. No external file depe
 ### Quick Start
 
 ```bash
-# Prerequisites: Go 1.23+, PostgreSQL 15+
+# Prerequisites: Go 1.25+, PostgreSQL 15+
 
 # Build
 go build -o kungfu-server ./cmd/server
@@ -48,6 +48,7 @@ All configuration is via environment variables. No config files, nothing stored 
 | `SESSION_SECRET` | — | **yes** | HMAC signing secret for owner cookies |
 | `LISTEN_ADDR` | `127.0.0.1:8090` | | Listen address |
 | `DEBUG_MODE` | `false` | | Verbose logging |
+| `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs for X-Forwarded-For |
 
 ### API
 

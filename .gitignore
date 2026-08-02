@@ -1,5 +1,6 @@
 # Binary
 kungfu-server
+server
 *.exe
 
 # Environment / secrets
@@ -21,9 +22,7 @@ logs/
 # Temporary
 *.bak
 *~
+
 # Internal dev docs (not public)
 AGENT.md
 devlog/
-
-# Binary
-server

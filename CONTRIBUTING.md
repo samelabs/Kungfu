@@ -1,4 +1,4 @@
-# Contributing to kungfu.md
+# Contributing to Kungfu
 
 Thank you for your interest in contributing. This document covers the essentials.
 

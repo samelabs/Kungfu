@@ -1,6 +1,9 @@
 package version
 
-import _ "embed"
+import (
+	_ "embed"
+	"strings"
+)
 
 // Version is set from VERSION file at compile time.
 // Can be overridden with: go build -ldflags "-X kungfu.md/internal/version.Version=v1.2.0"
@@ -12,7 +15,7 @@ var versionFile string
 var Version = "v1.2.0"
 
 func init() {
-	v := versionFile
+	v := strings.TrimSpace(versionFile)
 	if v != "" {
 		Version = v
 	}
