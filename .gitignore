@@ -5,7 +5,6 @@ kungfu-server
 # Environment / secrets
 .env
 *.env
-config/config.php
 
 # IDE
 .idea/

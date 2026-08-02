@@ -1,7 +1,5 @@
 -- ============================================================
--- kungfu.md Database Schema (PostgreSQL)
--- Translated from MySQL init.sql v1.0.0
--- All ON UPDATE CURRENT_TIMESTAMP clauses removed;
+-- Kungfu Database Schema (PostgreSQL)
 -- updated_at is set explicitly by the application layer.
 -- ============================================================
 
