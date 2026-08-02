@@ -1,22 +1,24 @@
-# Temporary files
-*.pid
-*.txt.backup
-*.bak
-*.bak-*
-*.swp
-*.swo
-*~
+# Binary
+kungfu-server
+*.exe
 
-# OS files
+# Environment / secrets
+.env
+*.env
+config/config.php
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Local/runtime files
-.env
-.env.local
-config/config.php
+# Logs
 logs/
 
-# Dependency/build output
-vendor/
-node_modules/
+# Temporary
+*.bak
+*~
