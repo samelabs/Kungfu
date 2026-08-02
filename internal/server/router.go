@@ -3,22 +3,25 @@ package server
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
 	"kungfu.md/internal/config"
+	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 )
 
 // Server holds all dependencies.
 type Server struct {
-	Config      *config.Config
-	Pool        *pg.Pool
-	RateLimiter *ratelimit.Limiter
-	Router      http.Handler
+	Config         *config.Config
+	Pool           *pg.Pool
+	RateLimiter    *ratelimit.Limiter
+	Router         http.Handler
+	TrustedProxies []*net.IPNet
 }
 
 // New creates a new server with all routes configured.
@@ -39,9 +42,10 @@ func New(cfg *config.Config, pool *pg.Pool) *Server {
 	rl := ratelimit.NewLimiter(rlConfigs)
 
 	s := &Server{
-		Config:      cfg,
-		Pool:        pool,
-		RateLimiter: rl,
+		Config:         cfg,
+		Pool:           pool,
+		RateLimiter:    rl,
+		TrustedProxies: middleware.ParseTrustedCIDRs(cfg.TrustedProxyCIDRs),
 	}
 
 	s.Router = s.buildRouter()
@@ -153,6 +157,8 @@ func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 // requireObject: if true, body must be a JSON object (not just any valid JSON).
 // emptyMessage: message for empty body case ("Request body must be valid JSON" vs "...JSON object")
 func parseJSONBodyRequired(r *http.Request, requireObject bool, emptyMessage string) (map[string]interface{}, error) {
+	// Cap body at 256KB to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(nil, r.Body, 262144)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, &parseError{msg: emptyMessage}

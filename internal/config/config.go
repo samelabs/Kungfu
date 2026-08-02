@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration.
@@ -47,6 +48,10 @@ type Config struct {
 	// PostAPI HTTP client timeouts
 	PostAPITimeout        int // seconds (total request timeout)
 	PostAPIConnectTimeout int // seconds (connect timeout)
+
+	// Trusted proxy CIDRs for client IP extraction (comma-separated env var)
+	// When set, X-Forwarded-For is only honored from these IPs.
+	TrustedProxyCIDRs []string
 }
 
 type RateLimitConfig struct {
@@ -83,6 +88,8 @@ func Load() (*Config, error) {
 
 		PostAPITimeout:        10,
 		PostAPIConnectTimeout: 5,
+
+		TrustedProxyCIDRs: parseCIDRList(envStr("TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")),
 
 		RateLimits: defaultRateLimits(),
 	}
@@ -137,4 +144,19 @@ func generateRandomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func parseCIDRList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		c := strings.TrimSpace(p)
+		if c != "" {
+			result = append(result, c)
+		}
+	}
+	return result
 }

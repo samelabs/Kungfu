@@ -38,6 +38,15 @@ func main() {
 	// Create HTTP server
 	srv := server.New(cfg, pool)
 
+	// Start rate limiter GC every 5 minutes
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			srv.RateLimiter.GC()
+		}
+	}()
+
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      srv,

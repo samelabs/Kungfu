@@ -314,7 +314,7 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ip := middleware.GetClientIP(r)
+	ip := middleware.GetClientIP(r, s.TrustedProxies)
 	rlResult := s.RateLimiter.CheckOwnerLogin(ip)
 	if !rlResult.Allowed {
 		RateLimitResponse(w, rlResult.RetryAfter, rlResult.Limit, rlResult.Window)
@@ -323,13 +323,16 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 
 	// Look up bot by name
 	bot, err := repository.FindActiveBotCredentialsByName(r.Context(), s.Pool, name)
+
+	// Verify password (always run bcrypt even if bot is nil to prevent timing oracle)
+	const dummyHash = "$2a$10$00000000000000000000000000000000000000000000000000000001"
 	if err != nil || bot == nil {
+		_ = authImpl.VerifyPassword(password, dummyHash)
 		ErrorResponse(w, 401, "INVALID_CREDENTIALS", "Bot name or password is incorrect", nil)
 		return
 	}
 
-	// Verify password
-	if !verifyPassword(password, bot.PasswordHash) {
+	if !authImpl.VerifyPassword(password, bot.PasswordHash) {
 		ErrorResponse(w, 401, "INVALID_CREDENTIALS", "Bot name or password is incorrect", nil)
 		return
 	}
@@ -762,11 +765,6 @@ func handleAppError(w http.ResponseWriter, err error) {
 		return
 	}
 	ErrorResponse(w, 500, "INTERNAL_ERROR", "An internal error occurred", nil)
-}
-
-// verifyPassword wraps auth.VerifyPassword.
-func verifyPassword(password, hash string) bool {
-	return authImpl.VerifyPassword(password, hash)
 }
 
 // setOwnerCookie wraps auth.SetOwnerSessionCookie.

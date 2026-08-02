@@ -53,7 +53,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := middleware.GetClientIP(r)
+	ip := middleware.GetClientIP(r, s.TrustedProxies)
 
 	// Rate limit check (IP level)
 	rlResult := s.RateLimiter.CheckRegister(ip)
