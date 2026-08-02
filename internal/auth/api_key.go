@@ -17,9 +17,9 @@ import (
 
 // API key format: kf_live_ + 64 hex chars = 72 chars total
 const (
-	keyPrefix    = "kf_live_"
-	keyTotalLen  = 72
-	keyHexLen    = 64
+	keyPrefix   = "kf_live_"
+	keyTotalLen = 72
+	keyHexLen   = 64
 )
 
 var (

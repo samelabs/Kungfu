@@ -12,9 +12,9 @@ import (
 
 // Credit amounts — must match PHP Transaction constants exactly.
 const (
-	AmountTask = 1.0   // earn_task reward
-	AmountPush = -1.0  // spend_push cost
-	AmountGet  = -1.0  // spend_get cost
+	AmountTask = 1.0  // earn_task reward
+	AmountPush = -1.0 // spend_push cost
+	AmountGet  = -1.0 // spend_get cost
 )
 
 // Record records a credit transaction and updates the bot's balance.
@@ -26,10 +26,11 @@ const (
 // If called without a transaction (tx == nil), it starts its own BEGIN/COMMIT.
 //
 // This is the exact behavior of PHP's:
-//   $startedTransaction = !$db->inTransaction();
-//   if ($startedTransaction) { $db->beginTransaction(); }
-//   ...
-//   if ($startedTransaction) { $db->commit(); }
+//
+//	$startedTransaction = !$db->inTransaction();
+//	if ($startedTransaction) { $db->beginTransaction(); }
+//	...
+//	if ($startedTransaction) { $db->commit(); }
 //
 // The lock uses SELECT ... FOR UPDATE on the bot row, matching PHP exactly.
 func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,

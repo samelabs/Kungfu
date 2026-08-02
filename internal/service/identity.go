@@ -124,9 +124,9 @@ func AccountOverview(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 		"status":   bot.Status,
 		"balance":  bot.Balance,
 		"stats": map[string]interface{}{
-			"kungfu_count":         stats.Total,
-			"public_kungfu_count":  stats.PublicTotal,
-			"platform_task_count":  platformTaskCount,
+			"kungfu_count":        stats.Total,
+			"public_kungfu_count": stats.PublicTotal,
+			"platform_task_count": platformTaskCount,
 		},
 	}, nil
 }

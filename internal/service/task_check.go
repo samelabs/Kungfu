@@ -13,27 +13,27 @@ import (
 // Each rule has: [http_code, error_code, agent_message, log_message]
 // agent_message is what the agent sees; log_message is what goes to the DB log.
 type TaskCheckRule struct {
-	HTTPCode  int
-	Code      string
-	AgentMsg  string
-	LogMsg    string
+	HTTPCode int
+	Code     string
+	AgentMsg string
+	LogMsg   string
 }
 
 var taskCheckRules = map[string]TaskCheckRule{
-	"POSTAPI_EMPTY":         {503, "TASK_NOT_CONFIGURED", "Task postapi is not configured", "Task check: Post API is empty"},
-	"POSTAPI_TOO_LONG":      {500, "TASK_CONFIG_INVALID", "Task postapi exceeds maximum length", "Task check: Post API exceeds maximum length"},
-	"POSTAPI_INVALID_URL":   {500, "TASK_CONFIG_INVALID", "Task postapi is not a valid URL", "Task check: Post API is not a valid URL"},
+	"POSTAPI_EMPTY":          {503, "TASK_NOT_CONFIGURED", "Task postapi is not configured", "Task check: Post API is empty"},
+	"POSTAPI_TOO_LONG":       {500, "TASK_CONFIG_INVALID", "Task postapi exceeds maximum length", "Task check: Post API exceeds maximum length"},
+	"POSTAPI_INVALID_URL":    {500, "TASK_CONFIG_INVALID", "Task postapi is not a valid URL", "Task check: Post API is not a valid URL"},
 	"POSTAPI_INVALID_SCHEME": {500, "TASK_CONFIG_INVALID", "Task postapi must use http or https", "Task check: Post API must use http or https"},
-	"PRICE_INVALID":         {500, "TASK_CONFIG_INVALID", "Task price must be greater than zero", "Task check: price must be greater than zero"},
-	"TASK_NOT_OPEN":         {409, "TASK_NOT_OPEN", "Task is not open for submissions", "Task check: task is not open for submissions"},
-	"TASK_BUDGET_EXHAUSTED": {409, "TASK_BUDGET_EXHAUSTED", "Task budget is not enough for this submission", "Task check: task budget is not enough"},
+	"PRICE_INVALID":          {500, "TASK_CONFIG_INVALID", "Task price must be greater than zero", "Task check: price must be greater than zero"},
+	"TASK_NOT_OPEN":          {409, "TASK_NOT_OPEN", "Task is not open for submissions", "Task check: task is not open for submissions"},
+	"TASK_BUDGET_EXHAUSTED":  {409, "TASK_BUDGET_EXHAUSTED", "Task budget is not enough for this submission", "Task check: task budget is not enough"},
 }
 
 // TaskCheckError wraps a rule with its details.
 // PHP: TaskCheckException
 type TaskCheckError struct {
-	Rule     TaskCheckRule
-	Details  map[string]interface{}
+	Rule    TaskCheckRule
+	Details map[string]interface{}
 }
 
 func (e *TaskCheckError) Error() string {

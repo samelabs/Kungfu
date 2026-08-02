@@ -22,7 +22,8 @@ const minOpenBudget = 1000.0
 // openBudgetWhereClause mirrors PHP TaskUtils::openBudgetWhereClause($alias).
 // It returns the SQL fragment scoped to the given table alias.
 // PHP: "{$alias}.status = 'open' AND {$alias}.price > 0
-//       AND {$alias}.budget >= 1000.0 AND {$alias}.budget >= {$alias}.price"
+//
+//	AND {$alias}.budget >= 1000.0 AND {$alias}.budget >= {$alias}.price"
 func openBudgetWhereClause(alias string) string {
 	if alias == "" {
 		return "status = 'open' AND price > 0 AND budget >= 1000.0 AND budget >= price"
@@ -103,7 +104,8 @@ func TableExists(ctx context.Context, q pg.Querier, table string) (bool, error) 
 
 // -- 5. columnExists --
 // PHP: SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
-//      AND table_name = :table AND column_name = :column
+//
+//	AND table_name = :table AND column_name = :column
 func ColumnExists(ctx context.Context, q pg.Querier, table, column string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, `
@@ -119,9 +121,9 @@ func ColumnExists(ctx context.Context, q pg.Querier, table, column string) (bool
 // TaskWithStats holds a task row joined with aggregated log counts.
 type TaskWithStats struct {
 	model.Task
-	LogCount      int64
-	SuccessCount  int64
-	FailureCount  int64
+	LogCount     int64
+	SuccessCount int64
+	FailureCount int64
 }
 
 // -- 6. listOwnerTasksWithStats --
@@ -171,7 +173,8 @@ func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]
 
 // -- 7. findOwnerTaskByCode --
 // PHP: SELECT code, bot_id, title, requirements, postapi, budget, price, pinned, status,
-//      review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
+//
+//	review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
 func FindOwnerTaskByCode(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -281,7 +284,8 @@ type TaskLogEntry struct {
 
 // -- 12. findRecentLogsByTaskCode --
 // PHP: SELECT id, bot_id, action, response_code, success, error_code, error_message, created_at
-//      FROM tb_task_logs WHERE task_code = :code ORDER BY created_at DESC LIMIT :limit
+//
+//	FROM tb_task_logs WHERE task_code = :code ORDER BY created_at DESC LIMIT :limit
 func FindRecentLogsByTaskCode(ctx context.Context, q pg.Querier, code string, limit int) ([]TaskLogEntry, error) {
 	if limit <= 0 {
 		limit = 50 // matches PHP default
@@ -342,7 +346,8 @@ func InsertTask(ctx context.Context, q pg.Querier, in NewTaskInput) error {
 
 // -- 14. openOwnerTask --
 // PHP: UPDATE tb_tasks SET status='open', opened_at=COALESCE(opened_at,NOW()), closed_at=NULL
-//      WHERE code = :code AND bot_id = :bot_id
+//
+//	WHERE code = :code AND bot_id = :bot_id
 func OpenOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -392,7 +397,8 @@ func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code,
 
 // -- 18b. updateTaskBudgetAndStatus --
 // PHP: UPDATE tb_tasks SET budget=:budget, status=:status,
-//      closed_at = CASE WHEN :should_close = 1 THEN NOW() ELSE closed_at END WHERE id = :id
+//
+//	closed_at = CASE WHEN :should_close = 1 THEN NOW() ELSE closed_at END WHERE id = :id
 func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budget float64, status string, shouldClose bool) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks

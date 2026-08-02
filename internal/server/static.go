@@ -10,19 +10,19 @@ import (
 
 // assetMimeTypes maps file extensions to MIME types.
 var assetMimeTypes = map[string]string{
-	"css":          "text/css; charset=utf-8",
-	"js":           "application/javascript; charset=utf-8",
-	"svg":          "image/svg+xml",
-	"png":          "image/png",
-	"jpg":          "image/jpeg",
-	"jpeg":         "image/jpeg",
-	"webp":         "image/webp",
-	"gif":          "image/gif",
-	"json":         "application/json; charset=utf-8",
-	"txt":          "text/plain; charset=utf-8",
-	"md":           "text/markdown; charset=utf-8",
-	"xml":          "application/xml; charset=utf-8",
-	"webmanifest":  "application/manifest+json; charset=utf-8",
+	"css":         "text/css; charset=utf-8",
+	"js":          "application/javascript; charset=utf-8",
+	"svg":         "image/svg+xml",
+	"png":         "image/png",
+	"jpg":         "image/jpeg",
+	"jpeg":        "image/jpeg",
+	"webp":        "image/webp",
+	"gif":         "image/gif",
+	"json":        "application/json; charset=utf-8",
+	"txt":         "text/plain; charset=utf-8",
+	"md":          "text/markdown; charset=utf-8",
+	"xml":         "application/xml; charset=utf-8",
+	"webmanifest": "application/manifest+json; charset=utf-8",
 }
 
 // serveStaticFile returns a handler that serves a single embedded file.

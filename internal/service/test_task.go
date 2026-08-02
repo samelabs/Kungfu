@@ -20,10 +20,10 @@ import (
 //   - Different truncation limits
 
 const (
-	testMaxResponseBytes   = 16000 // MAX_RESPONSE_BYTES
-	testDBResponseBodyMax  = 65535 // DB_RESPONSE_BODY_MAX
-	testDBErrorMessageMax  = 256   // DB_ERROR_MESSAGE_MAX
-	testDBPayloadJSONMax   = 60000 // DB_PAYLOAD_JSON_MAX
+	testMaxResponseBytes  = 16000 // MAX_RESPONSE_BYTES
+	testDBResponseBodyMax = 65535 // DB_RESPONSE_BODY_MAX
+	testDBErrorMessageMax = 256   // DB_ERROR_MESSAGE_MAX
+	testDBPayloadJSONMax  = 60000 // DB_PAYLOAD_JSON_MAX
 )
 
 // TestTaskResult is the return value of TestTaskDeliver.
@@ -81,9 +81,9 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 			ifEmpty(postResult.ErrorMessage, "Task test delivery failed"),
 			map[string]interface{}{
 				"post": map[string]interface{}{
-					"delivered":      false,
-					"response_code":  postResult.ResponseCode,
-					"response_body":  testTruncateResponse(derefStr(postResult.ResponseBody)),
+					"delivered":     false,
+					"response_code": postResult.ResponseCode,
+					"response_body": testTruncateResponse(derefStr(postResult.ResponseBody)),
 				},
 			})
 	}

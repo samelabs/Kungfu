@@ -72,9 +72,9 @@ func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*mode
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
-		b          model.Bot
-		dbID       int32
-		balance    pgtype.Numeric
+		b           model.Bot
+		dbID        int32
+		balance     pgtype.Numeric
 		keyIssuedAt *time.Time
 	)
 	if err := row.Scan(&dbID, &b.BotName, &b.APIKey, &balance, &b.Status, &keyIssuedAt); err != nil {

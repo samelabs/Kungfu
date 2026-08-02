@@ -25,7 +25,7 @@ type Config struct {
 	DebugMode  bool
 
 	// Content limits (must match PHP exactly)
-	MaxContentSize      int
+	MaxContentSize       int
 	MaxDescriptionLength int
 	MaxTitleLength       int
 	MaxTags              int
@@ -40,17 +40,17 @@ type Config struct {
 	RateLimits map[string]RateLimitConfig
 
 	// HTTP server
-	ListenAddr   string
+	ListenAddr    string
 	SessionSecret string
 
 	// PostAPI HTTP client timeouts (matches CURLOPT)
-	PostAPITimeout       int // seconds (CURLOPT_TIMEOUT = 10)
+	PostAPITimeout        int // seconds (CURLOPT_TIMEOUT = 10)
 	PostAPIConnectTimeout int // seconds (CURLOPT_CONNECTTIMEOUT = 5)
 }
 
 type RateLimitConfig struct {
-	Window  int `json:"window"`
-	Limit   int `json:"limit"`
+	Window  int   `json:"window"`
+	Limit   int   `json:"limit"`
 	Enabled *bool `json:"enabled,omitempty"`
 }
 

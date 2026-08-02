@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"kungfu.md/internal/auth"
+	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/model"
-	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 )
@@ -122,4 +122,3 @@ func (s *Server) requireOwnerAuth(r *http.Request) (*model.Bot, error) {
 	}
 	return auth.RequireOwnerSession(r.Context(), lookupFn, r, s.Config.SessionSecret)
 }
-

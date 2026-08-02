@@ -12,11 +12,11 @@ import (
 // PostResult holds the result of a POST request.
 // Matches PHP TaskDeliveryService return format.
 type PostResult struct {
-	Success       bool
-	ResponseCode  *int   // nil if no response received (network error)
-	ResponseBody  *string // nil if no response body
-	ErrorCode     string // empty if success
-	ErrorMessage  string // empty if success
+	Success      bool
+	ResponseCode *int    // nil if no response received (network error)
+	ResponseBody *string // nil if no response body
+	ErrorCode    string  // empty if success
+	ErrorMessage string  // empty if success
 }
 
 // PostJSON sends a JSON POST request to a URL.
@@ -48,8 +48,8 @@ func init() {
 			DialContext: (&net.Dialer{
 				Timeout: 5 * time.Second, // CURLOPT_CONNECTTIMEOUT = 5
 			}).DialContext,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConns:    100,
+			IdleConnTimeout: 90 * time.Second,
 		},
 		// Do NOT follow redirects — matches PHP behavior (reverted CURLOPT_FOLLOWLOCATION)
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -108,20 +108,20 @@ func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
 	// Check for non-2xx (rejected)
 	if respCode < 200 || respCode >= 300 {
 		return PostResult{
-			Success:       false,
-			ResponseCode:  &respCode,
-			ResponseBody:  respBody,
-			ErrorCode:     errCfg.RejectedCode,
-			ErrorMessage:  errCfg.RejectedMessage,
+			Success:      false,
+			ResponseCode: &respCode,
+			ResponseBody: respBody,
+			ErrorCode:    errCfg.RejectedCode,
+			ErrorMessage: errCfg.RejectedMessage,
 		}
 	}
 
 	return PostResult{
-		Success:       true,
-		ResponseCode:  &respCode,
-		ResponseBody:  respBody,
-		ErrorCode:     "",
-		ErrorMessage:  "",
+		Success:      true,
+		ResponseCode: &respCode,
+		ResponseBody: respBody,
+		ErrorCode:    "",
+		ErrorMessage: "",
 	}
 }
 

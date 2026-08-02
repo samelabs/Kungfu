@@ -6,11 +6,11 @@ import "fmt"
 // It carries an HTTP status code, a machine-readable error code,
 // a human-readable message, optional details, and an optional cause.
 type AppError struct {
-	HTTPCode   int
-	Code       string
-	Message    string
-	Details    map[string]interface{}
-	Err        error // wrapped underlying error
+	HTTPCode int
+	Code     string
+	Message  string
+	Details  map[string]interface{}
+	Err      error // wrapped underlying error
 }
 
 func (e *AppError) Error() string {

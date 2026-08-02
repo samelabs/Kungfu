@@ -15,10 +15,10 @@ import (
 
 // Server holds all dependencies.
 type Server struct {
-	Config     *config.Config
-	Pool       *pg.Pool
+	Config      *config.Config
+	Pool        *pg.Pool
 	RateLimiter *ratelimit.Limiter
-	Router     http.Handler
+	Router      http.Handler
 }
 
 // New creates a new server with all routes configured.
@@ -240,10 +240,6 @@ func clampInt(val, min, max int) int {
 	}
 	return val
 }
-
-
-
-
 
 // Placeholder stubs - will be implemented in handler files
 // These reference functions defined in handler_*.go files

@@ -152,7 +152,8 @@ func GenerateUniqueKungfuCode(ctx context.Context, q pg.Querier) (string, error)
 
 // -- 9. insertNewKungfu --
 // PHP: Database::insert('tb_kungfus', [code, bot_id, title, tags_json, description,
-//      content, checksum, visibility='private', status='active'])
+//
+//	content, checksum, visibility='private', status='active'])
 func InsertNewKungfu(ctx context.Context, q pg.Querier, code string, botID int64, title, tagsJSON, description, content, checksum string) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO tb_kungfus
