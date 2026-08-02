@@ -11,8 +11,8 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// TestTaskService mirrors PHP services/TestTaskService.php.
-//
+// TestTaskService provides task delivery testing for owners.
+
 // Same flow as agent task submission but:
 //   - Owner-only (checks task.bot_id == botID)
 //   - No credit reward to the owner (Transaction::record is only for budget settlement)
@@ -34,7 +34,6 @@ type TestTaskResult struct {
 }
 
 // TestTaskDeliver lets an owner test their own task's postapi.
-// PHP: TestTaskService::deliver(botId, code, input)
 func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code string, input map[string]interface{}) (*TestTaskResult, error) {
 	// 1. Find task and verify ownership
 	task, err := repository.FindTaskByCode(ctx, pool, code)
@@ -107,7 +106,6 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 }
 
 // testEnsureBudgetAvailable checks task budget/status without locking.
-// PHP: TestTaskService::ensureBudgetAvailable
 func testEnsureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode string, price float64) *TaskCheckError {
 	task, err := repository.FindTaskBudgetStatusByCode(ctx, pool, taskCode)
 	if err != nil || task == nil {
@@ -123,7 +121,6 @@ func testEnsureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode stri
 }
 
 // testSettleBudget decrements the task budget without awarding credits.
-// PHP: TestTaskService::settleBudget
 // Returns billing map: {cost, budget, status}
 func testSettleBudget(ctx context.Context, pool *pg.Pool, taskCode string, price float64) map[string]interface{} {
 	tx, err := pool.TxBegin(ctx)
@@ -176,8 +173,7 @@ func testSettleBudget(ctx context.Context, pool *pg.Pool, taskCode string, price
 	}
 }
 
-// testLogEvent writes a task delivery log entry with PHP-compliant truncation.
-// PHP: TestTaskService::logEvent
+// testLogEvent writes a task delivery log entry .
 func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int64,
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
@@ -239,7 +235,6 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 }
 
 // testTruncateResponse truncates the response for API output.
-// PHP: TestTaskService::truncateResponse
 func testTruncateResponse(value string) string {
 	if len(value) <= testMaxResponseBytes {
 		return value
@@ -248,7 +243,6 @@ func testTruncateResponse(value string) string {
 }
 
 // truncateByBytes truncates a string to at most maxBytes.
-// PHP: TestTaskService::truncateByBytes
 func truncateByBytes(value string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return ""

@@ -11,12 +11,11 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// OwnerLogService mirrors PHP services/OwnerLogService.php.
+// OwnerLogService provides task delivery testing for owners.
 // It provides paginated log views for task owners.
 
 // GetOwnerLogs returns paginated log data for a bot owner.
-// PHP: OwnerLogService::getLogs(botId, type, page, pageSize, taskCode)
-//
+
 // type can be "credits", "agent", or "task" — each returns a different structure.
 func GetOwnerLogs(ctx context.Context, pool *pg.Pool, botID int64, logType string, page, pageSize int, taskCode string) (map[string]interface{}, error) {
 	offset := (page - 1) * pageSize
@@ -34,7 +33,6 @@ func GetOwnerLogs(ctx context.Context, pool *pg.Pool, botID int64, logType strin
 }
 
 // getCreditLogs returns credit transaction logs.
-// PHP: OwnerLogService::getLogs type='credits'
 func getCreditLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int) (map[string]interface{}, error) {
 	total, _ := repository.CountCreditLogs(ctx, pool, botID)
 	balance, _ := repository.FindBalanceByBotID(ctx, pool, botID)
@@ -57,7 +55,6 @@ func getCreditLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSi
 }
 
 // getAgentLogs returns operation (agent) logs.
-// PHP: OwnerLogService::getLogs type='agent'
 func getAgentLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int) (map[string]interface{}, error) {
 	total, _ := repository.CountAgentLogs(ctx, pool, botID)
 	rows, err := repository.ListAgentLogs(ctx, pool, botID, pageSize, offset)
@@ -78,7 +75,6 @@ func getAgentLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSiz
 }
 
 // getTaskLogs returns task delivery logs with optional task_code filter.
-// PHP: OwnerLogService::getLogs type='task'
 func getTaskLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int, taskCode string) (map[string]interface{}, error) {
 	total, _ := repository.CountTaskLogs(ctx, pool, botID, taskCode)
 
@@ -115,9 +111,9 @@ func getTaskLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize
 	}, nil
 }
 
-// --- presenter helpers (mirror PHP OwnerLogPresenter) ---
+// --- presenter helpers ---
 
-// paginationMap mirrors PHP OwnerLogPresenter::pagination.
+// paginationMap formats log entries for the owner dashboard.
 func paginationMap(page, pageSize int, total int64) map[string]interface{} {
 	totalPages := int64(1)
 	if total > 0 {
@@ -131,7 +127,7 @@ func paginationMap(page, pageSize int, total int64) map[string]interface{} {
 	}
 }
 
-// creditLogRow mirrors PHP OwnerLogPresenter::creditLogRow.
+// creditLogRow formats log entries for the owner dashboard.
 func creditLogRow(t *model.Transaction) map[string]interface{} {
 	return map[string]interface{}{
 		"id":            t.ID,
@@ -144,7 +140,7 @@ func creditLogRow(t *model.Transaction) map[string]interface{} {
 	}
 }
 
-// agentLogRow mirrors PHP OwnerLogPresenter::agentLogRow.
+// agentLogRow formats log entries for the owner dashboard.
 func agentLogRow(l *model.LogEntry) map[string]interface{} {
 	var requestData interface{}
 	if l.RequestData != nil && *l.RequestData != "" {
@@ -168,7 +164,7 @@ func agentLogRow(l *model.LogEntry) map[string]interface{} {
 	}
 }
 
-// taskLogRow mirrors PHP OwnerLogPresenter::taskLogRow.
+// taskLogRow formats log entries for the owner dashboard.
 func taskLogRow(r *repository.TaskLogRow) map[string]interface{} {
 	var payload interface{}
 	if r.PayloadJSON != nil && *r.PayloadJSON != "" {

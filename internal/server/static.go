@@ -80,7 +80,6 @@ func filepathExt(path string) string {
 }
 
 // agentHomeHandler routes agent/curl requests to llms.txt, browser requests to HTML.
-// Mirrors PHP index.php $isAgentRequest logic.
 func (s *Server) agentHomeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ua := strings.ToLower(r.UserAgent())

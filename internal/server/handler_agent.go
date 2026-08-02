@@ -82,7 +82,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-fetch fresh bot data (PHP does findActiveBotSummaryById)
+	// Re-fetch fresh bot data after authentication.
 	freshBot, err := repository.FindActiveBotSummaryByID(r.Context(), s.Pool, bot.ID)
 	if err != nil || freshBot == nil {
 		handleAppError(w, apperrors.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header"))

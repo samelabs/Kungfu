@@ -12,7 +12,7 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// MaxTaskResponseLogBytes matches PHP TaskSubmissionService::MAX_TASK_RESPONSE_LOG_BYTES
+// maxTaskResponseLogBytes caps how much of a task response body is persisted to the log.
 const maxTaskResponseLogBytes = 4000
 
 // TaskSubmitResult is the return value of Submit.
@@ -23,9 +23,7 @@ type TaskSubmitResult struct {
 }
 
 // Submit processes an agent task submission.
-//
-// PHP: TaskSubmissionService::submit(task, botId, input)
-//
+
 // Flow:
 // 1. TaskCheck: validate postapi/price/budget
 // 2. POST to owner's API (10s timeout, no redirect following)
@@ -111,7 +109,6 @@ func Submit(ctx context.Context, pool *pg.Pool, task map[string]interface{}, bot
 }
 
 // ensureBudgetAvailable checks task budget/status without locking.
-// PHP: TaskSubmissionService::ensureBudgetAvailable
 func ensureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode string, price float64) *TaskCheckError {
 	task, err := repository.FindTaskBudgetStatusByCode(ctx, pool, taskCode)
 	if err != nil || task == nil {
@@ -127,7 +124,6 @@ func ensureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode string, 
 }
 
 // settleDeliveredSubmission decrements task budget and awards credit in one transaction.
-// PHP: TaskSubmissionService::settleDeliveredSubmission
 func settleDeliveredSubmission(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, price float64) (float64, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
@@ -172,7 +168,6 @@ func settleDeliveredSubmission(ctx context.Context, pool *pg.Pool, taskCode stri
 }
 
 // insertTaskEventLog writes a task delivery log entry.
-// PHP: TaskSubmissionService::logTaskEvent
 func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, botID int64,
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
@@ -206,7 +201,6 @@ func truncateForLog(value string) string {
 	return value[:maxTaskResponseLogBytes] + "... [truncated]"
 }
 
-// logOperation DEPRECATED — use logOperation instead.
 // Keeping for reference during migration.
 
 // logOperation is a convenience wrapper for repository.InsertOperationLog.

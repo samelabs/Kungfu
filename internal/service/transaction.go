@@ -10,7 +10,7 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// Credit amounts — must match PHP Transaction constants exactly.
+// Credit amounts — credit costs.
 const (
 	AmountTask = 1.0  // earn_task reward
 	AmountPush = -1.0 // spend_push cost
@@ -18,21 +18,19 @@ const (
 )
 
 // Record records a credit transaction and updates the bot's balance.
-//
-// PHP: Transaction::record(botId, type, amount, refType, refId)
-//
+
 // Transaction nesting pattern (critical):
 // If called within an existing transaction (tx != nil), it does NOT start a new one.
 // If called without a transaction (tx == nil), it starts its own BEGIN/COMMIT.
+
 //
-// This is the exact behavior of PHP's:
-//
+
 //	$startedTransaction = !$db->inTransaction();
 //	if ($startedTransaction) { $db->beginTransaction(); }
 //	...
 //	if ($startedTransaction) { $db->commit(); }
-//
-// The lock uses SELECT ... FOR UPDATE on the bot row, matching PHP exactly.
+
+// The lock uses SELECT ... FOR UPDATE on the bot row, .
 func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	txnType string, amount float64, refType, refID *string) (float64, error) {
 
@@ -41,7 +39,7 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 		return 0, fmt.Errorf("begin transaction: %w", err)
 	}
 
-	// PHP catch on rollback: only rollback if we started it
+	// only rollback if we started it
 	defer func() {
 		if startedNew {
 			// Only reached if we return an error before commit
@@ -59,7 +57,6 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 
 	newBalance := currentBalance + amount
 
-	// PHP: if ($newBalance < 0) throw INSUFFICIENT_CREDITS
 	if newBalance < 0 {
 		return 0, errors.New(402, "INSUFFICIENT_CREDITS",
 			fmt.Sprintf("Insufficient credits. Need %v, have %v", absFloat(amount), currentBalance))
@@ -91,7 +88,6 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 }
 
 // GetBalance returns the current balance without modifying it.
-// PHP: Transaction::getBalance(botId)
 func GetBalance(ctx context.Context, pool *pg.Pool, botID int64) float64 {
 	balance, err := repository.FindBalanceByBotID(ctx, pool, botID)
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 )
 
 // GetClientIP extracts the client IP from request headers.
-// PHP: Logger::getClientIp()
 // Checks in order: CF-Connecting-IP, X-Forwarded-For, X-Forwarded, X-Cluster-Client-IP,
 // Forwarded-For, Forwarded, REMOTE_ADDR
 func GetClientIP(r *http.Request) string {

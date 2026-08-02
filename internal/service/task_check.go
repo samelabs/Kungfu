@@ -9,7 +9,6 @@ import (
 )
 
 // TaskCheckRule defines the four-tuple for each validation rule.
-// PHP: TaskCheckService::RULES
 // Each rule has: [http_code, error_code, agent_message, log_message]
 // agent_message is what the agent sees; log_message is what goes to the DB log.
 type TaskCheckRule struct {
@@ -30,7 +29,6 @@ var taskCheckRules = map[string]TaskCheckRule{
 }
 
 // TaskCheckError wraps a rule with its details.
-// PHP: TaskCheckException
 type TaskCheckError struct {
 	Rule    TaskCheckRule
 	Details map[string]interface{}
@@ -41,7 +39,6 @@ func (e *TaskCheckError) Error() string {
 }
 
 // RaiseRule raises a TaskCheckError for the given rule ID.
-// PHP: TaskCheckService::raise(ruleId, details)
 func RaiseRule(ruleID string, details ...map[string]interface{}) *TaskCheckError {
 	rule, ok := taskCheckRules[ruleID]
 	if !ok {
@@ -69,7 +66,6 @@ func (e *TaskCheckError) ToAppError() *errors.AppError {
 }
 
 // RunTaskCheck validates postapi and price, then calls the budget checker.
-// PHP: TaskCheckService::run(postapi, price, budgetChecker)
 func RunTaskCheck(postapi string, price float64, budgetChecker func() *TaskCheckError) *TaskCheckError {
 	if e := ValidatePostapi(postapi, 2048); e != nil {
 		return e
@@ -84,7 +80,6 @@ func RunTaskCheck(postapi string, price float64, budgetChecker func() *TaskCheck
 }
 
 // ValidatePostapi validates the postapi URL.
-// PHP: TaskCheckService::validatePostapi(postapi, maxLength=2048)
 func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
 	if postapi == "" {
 		return RaiseRule("POSTAPI_EMPTY")
@@ -93,8 +88,7 @@ func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
 		return RaiseRule("POSTAPI_TOO_LONG")
 	}
 
-	// PHP uses filter_var(FILTER_VALIDATE_URL) which is more permissive than Go's url.Parse.
-	// We replicate: check it parses as a URL with a host.
+	// Use Go's url.Parse to validate the URL and require a host component.
 	parsed, err := url.Parse(postapi)
 	if err != nil || parsed.Host == "" {
 		return RaiseRule("POSTAPI_INVALID_URL")
@@ -109,7 +103,6 @@ func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
 }
 
 // ValidatePrice validates that price is > 0.
-// PHP: TaskCheckService::validatePrice(price)
 func ValidatePrice(price float64) *TaskCheckError {
 	if price <= 0 {
 		return RaiseRule("PRICE_INVALID")

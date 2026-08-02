@@ -3,15 +3,12 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"kungfu.md/internal/pg"
-	"strings"
 
 	"kungfu.md/internal/security"
 )
 
 // LogInsertData holds parameters for inserting an operation log entry.
-// Maps to PHP Logger::log() parameters
 type LogInsertData struct {
 	BotID       *int64
 	Action      string
@@ -26,7 +23,6 @@ type LogInsertData struct {
 }
 
 // InsertOperationLog inserts an operation log entry into tb_logs.
-// PHP: Logger::log()
 // It masks sensitive data (API keys) and truncates long fields to 1000 chars.
 func InsertOperationLog(ctx context.Context, q pg.Querier, data LogInsertData) {
 	var requestDataJSON *string
@@ -48,7 +44,6 @@ func InsertOperationLog(ctx context.Context, q pg.Querier, data LogInsertData) {
 }
 
 // maskSensitiveData masks API keys and truncates long fields.
-// PHP: Logger::maskSensitiveData
 func maskSensitiveData(data map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for key, value := range data {
@@ -89,28 +84,9 @@ func maskSensitiveData(data map[string]interface{}) map[string]interface{} {
 }
 
 // MaskKey wraps security.MaskKey for logger compatibility.
-// PHP: Logger::maskKey
 func MaskKey(key string) string {
 	return security.MaskKey(key)
 }
 
 // FileLog writes a line to the file-based log.
-// PHP: Logger::fileLog
 // This is a fire-and-forget operation that must not affect the main flow.
-func FileLog(level, message string, context map[string]interface{}) {
-	// In Go, we use standard logging or structured logging.
-	// For now, this writes to stderr which nginx/PM2 captures.
-	// Keeping this simple to match PHP behavior of non-critical file logging.
-	go func() {
-		var contextStr string
-		if len(context) > 0 {
-			parts := make([]string, 0, len(context))
-			for k, v := range context {
-				parts = append(parts, k+"="+fmt.Sprintf("%v", v))
-			}
-			contextStr = " | " + strings.Join(parts, " ")
-		}
-		// Write to a file like PHP does
-		_ = contextStr // suppress unused warning for now
-	}()
-}

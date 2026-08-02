@@ -7,7 +7,6 @@ import (
 )
 
 // Result holds rate limit check results.
-// Matches PHP format: ['allowed' => bool, 'retry_after' => int, 'limit' => int, 'window' => int]
 type Result struct {
 	Allowed    bool
 	RetryAfter int
@@ -38,19 +37,16 @@ func NewLimiter(configs map[string]Config) *Limiter {
 }
 
 // CheckRegister checks IP-level registration rate limit.
-// PHP: checkRegister(ip) / checkRegisterWithRetry(ip)
 func (l *Limiter) CheckRegister(ip string) Result {
 	return l.check("reg:"+ip, "register")
 }
 
 // CheckOwnerLogin checks IP-level owner login rate limit.
-// PHP: checkOwnerLogin(ip) / checkOwnerLoginWithRetry(ip)
 func (l *Limiter) CheckOwnerLogin(ip string) Result {
 	return l.check("owner_login:"+ip, "owner_login")
 }
 
 // CheckAPI checks bot-level API rate limit.
-// PHP: checkApi(botId, action)
 func (l *Limiter) CheckAPI(botID int64, action string) bool {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -62,7 +58,6 @@ func (l *Limiter) CheckAPI(botID int64, action string) bool {
 }
 
 // CheckAPIWithDetails checks bot-level API rate limit and returns full details.
-// PHP: checkApiWithDetails(botId, action)
 func (l *Limiter) CheckAPIWithDetails(botID int64, action string) Result {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -73,7 +68,6 @@ func (l *Limiter) CheckAPIWithDetails(botID int64, action string) Result {
 }
 
 // GetRemaining returns the remaining requests for a bot/action.
-// PHP: getRemaining(botId, action)
 func (l *Limiter) GetRemaining(botID int64, action string) int {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -97,7 +91,6 @@ func (l *Limiter) GetRemaining(botID int64, action string) int {
 }
 
 // GC cleans up expired entries. Can be called periodically.
-// PHP: gc()
 func (l *Limiter) GC() {
 	now := time.Now().Unix()
 	l.mu.Lock()
@@ -114,7 +107,6 @@ func (l *Limiter) GC() {
 }
 
 // GetStats returns statistics for debugging.
-// PHP: getStats()
 func (l *Limiter) GetStats() map[string]interface{} {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -131,7 +123,6 @@ func (l *Limiter) GetStats() map[string]interface{} {
 }
 
 // check is the core check logic.
-// PHP: RateLimiter::check(key, config) - consumes a slot when allowed.
 func (l *Limiter) check(key string, action string) Result {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -159,7 +150,6 @@ func (l *Limiter) check(key string, action string) Result {
 }
 
 // inspect is the read-only variant used by CheckAPIWithDetails.
-// PHP: RateLimiter::inspect(key, config) - does NOT consume a slot.
 func (l *Limiter) inspect(key string, action string) Result {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -194,7 +184,6 @@ func (l *Limiter) filterWindow(timestamps []int64, now int64, window int) []int6
 func formatResult(allowed bool, timestamps []int64, window int64, limit int, now int64) Result {
 	retryAfter := int64(0)
 	if !allowed && len(timestamps) > 0 {
-		// PHP: max(0, min(timestamps) + window - now)
 		minTs := timestamps[0]
 		for _, ts := range timestamps[1:] {
 			if ts < minTs {

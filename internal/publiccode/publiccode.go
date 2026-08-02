@@ -13,13 +13,11 @@ const Length = 12
 var codePattern = regexp.MustCompile(`^[a-f0-9]{12}$`)
 
 // Require validates a code parameter. Returns error if invalid.
-// PHP: PublicCode::require
 func Require(value *string, field string) (string, error) {
 	if value == nil {
 		return "", fmt.Errorf("MISSING_FIELD: Missing URL parameter: %s", field)
 	}
 	v := *value
-	// PHP does strtolower(trim($value))
 	normalized := toLower(trim(v))
 	if normalized == "" {
 		return "", fmt.Errorf("MISSING_FIELD: Missing URL parameter: %s", field)
@@ -31,7 +29,6 @@ func Require(value *string, field string) (string, error) {
 }
 
 // Generate creates a random 12-hex-char code.
-// PHP: bin2hex(random_bytes(6))
 func Generate() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
@@ -40,7 +37,6 @@ func Generate() string {
 
 // GenerateUnique generates a code that doesn't exist in the given table.
 // The checkFunc should query the database to see if the code exists.
-// PHP: PublicCode::generateUnique (10 attempts)
 func GenerateUnique(checkFunc func(string) (bool, error)) (string, error) {
 	for attempt := 0; attempt < 10; attempt++ {
 		code := Generate()

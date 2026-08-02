@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"kungfu.md/internal/auth"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
@@ -12,7 +14,6 @@ import (
 )
 
 // RegistrationResult is the return value of Register.
-// PHP: RegistrationService::register return
 type RegistrationResult struct {
 	BotName string `json:"bot_name"`
 	Key     string `json:"key"`
@@ -21,11 +22,10 @@ type RegistrationResult struct {
 }
 
 // Register creates a new bot account.
-// PHP: RegistrationService::register(name, password, ip)
 func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*RegistrationResult, error) {
 	name = strings.TrimSpace(name)
 
-	// Validate bot name (PHP: 6-32 chars)
+	// Validate bot name (6-32 chars)
 	valid, errs := auth.ValidateBotName(name)
 	if !valid {
 		return nil, errors.New(400, "INVALID_NAME", errs[0])
@@ -76,11 +76,10 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 	logOperation(ctx, pool, &botID, "register", nil, nil,
 		map[string]interface{}{"bot_name": name}, true)
 
-	// PHP returns balance=0 even though DB has 66
 	return &RegistrationResult{
 		BotName: name,
 		Key:     apiKey,
-		Balance: 0, // PHP deliberately returns 0
+		Balance: 0, // API returns 0; the 66-credit bonus is in the DB
 		Message: "Registration successful. Give only the key to agents; keep the password for human key management.",
 	}, nil
 }
@@ -89,6 +88,9 @@ func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := err.Error()
-	return strings.Contains(s, "23505") || strings.Contains(s, "duplicate key")
+	var pgErr *pgconn.PgError
+	if stderrors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }

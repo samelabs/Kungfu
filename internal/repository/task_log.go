@@ -6,11 +6,10 @@ import (
 	"kungfu.md/internal/pg"
 )
 
-// TaskLogRepository mirrors PHP repositories/TaskLogRepository.php.
+// TaskLogRepository persists task delivery and lifecycle log rows.
 // Every method accepts a pg.Querier so it works with both *pgxpool.Pool and pgx.Tx.
 
 // NewTaskLogInput holds the fields needed to insert a task-log row.
-// Mirrors the PHP TaskLogRepository::insert([...]) array.
 type NewTaskLogInput struct {
 	TaskCode     string
 	BotID        *int64
@@ -23,9 +22,7 @@ type NewTaskLogInput struct {
 	ErrorMessage *string
 }
 
-// Insert mirrors PHP TaskLogRepository::insert(array $data).
-// PHP: Database::insert('tb_task_logs', $data)
-// success is a BOOLEAN column; PG accepts TRUE/FALSE directly.
+// InsertTaskLog inserts a task-log row. The success column is BOOLEAN in PG.
 func InsertTaskLog(ctx context.Context, q pg.Querier, in NewTaskLogInput) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO tb_task_logs

@@ -12,11 +12,11 @@ import (
 	"kungfu.md/internal/publiccode"
 )
 
-// KungfuRepository mirrors PHP repositories/KungfuRepository.php.
+// KungfuRepository persists kungfu (skill document) rows.
 // Every method accepts a pg.Querier so it works with both *pgxpool.Pool and pgx.Tx.
 
 // -- 1. countActiveByBotId --
-// PHP: SELECT COUNT(*) as total FROM tb_kungfus WHERE bot_id = :bot_id AND status = 'active'
+// CountActiveKungfusByBotID returns the number of active kungfus owned by a bot.
 func CountActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64) (int64, error) {
 	var count int64
 	err := q.QueryRow(ctx, `
@@ -110,7 +110,7 @@ func scanKungfu(row pgx.Row) (*model.Kungfu, error) {
 }
 
 // -- 5. updateVisibilityById --
-// PHP: UPDATE tb_kungfus SET visibility = :visibility, updated_at = NOW() WHERE id = :id
+// UpdateKungfuVisibilityByID sets visibility (public/private) for a kungfu.
 func UpdateKungfuVisibilityByID(ctx context.Context, q pg.Querier, id int64, visibility string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_kungfus SET visibility = $1, updated_at = NOW() WHERE id = $2`,
@@ -119,7 +119,7 @@ func UpdateKungfuVisibilityByID(ctx context.Context, q pg.Querier, id int64, vis
 }
 
 // -- 6. softDeleteById --
-// PHP: UPDATE tb_kungfus SET status = 'deleted' WHERE id = :id
+// SoftDeleteKungfuByID marks a kungfu as deleted (status='deleted') without removing the row.
 func SoftDeleteKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_kungfus SET status = 'deleted' WHERE id = $1`, id)
@@ -127,7 +127,7 @@ func SoftDeleteKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
 }
 
 // -- 7. updateContentById --
-// PHP: UPDATE tb_kungfus SET title, tags_json, description, content, checksum, updated_at
+// UpdateKungfuContentByID overwrites the editable content fields of a kungfu.
 func UpdateKungfuContentByID(ctx context.Context, q pg.Querier, id int64, title, tagsJSON, description, content, checksum string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_kungfus
@@ -139,8 +139,7 @@ func UpdateKungfuContentByID(ctx context.Context, q pg.Querier, id int64, title,
 }
 
 // -- 8. generateUniqueCode --
-// PHP: PublicCode::generateUnique('tb_kungfus')
-// Generates a 12-hex code that does not yet exist in tb_kungfus.
+// GenerateUniqueKungfuCode generates a 12-hex code that does not yet exist in tb_kungfus.
 func GenerateUniqueKungfuCode(ctx context.Context, q pg.Querier) (string, error) {
 	return publiccode.GenerateUnique(func(code string) (bool, error) {
 		var exists bool
@@ -151,9 +150,7 @@ func GenerateUniqueKungfuCode(ctx context.Context, q pg.Querier) (string, error)
 }
 
 // -- 9. insertNewKungfu --
-// PHP: Database::insert('tb_kungfus', [code, bot_id, title, tags_json, description,
-//
-//	content, checksum, visibility='private', status='active'])
+// InsertNewKungfu inserts a new private, active kungfu row.
 func InsertNewKungfu(ctx context.Context, q pg.Querier, code string, botID int64, title, tagsJSON, description, content, checksum string) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO tb_kungfus

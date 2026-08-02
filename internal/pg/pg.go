@@ -51,7 +51,7 @@ func (p *Pool) Close() {
 }
 
 // TxBegin starts a new transaction.
-// Mirrors PHP Database::beginTransaction()
+
 func (p *Pool) TxBegin(ctx context.Context) (pgx.Tx, error) {
 	return p.Pool.Begin(ctx)
 }
@@ -69,7 +69,6 @@ func (t *TxRunner) IsTx() bool {
 }
 
 // BeginOrUse starts a new transaction if none is active, or returns the existing one.
-// Mirrors PHP pattern: $startedTransaction = !$db->inTransaction()
 // Returns: tx, startedNew (true if caller should commit/rollback), err
 func (p *Pool) BeginOrUse(ctx context.Context, existing pgx.Tx) (pgx.Tx, bool, error) {
 	if existing != nil {
@@ -83,7 +82,6 @@ func (p *Pool) BeginOrUse(ctx context.Context, existing pgx.Tx) (pgx.Tx, bool, e
 }
 
 // CommitOrSkip commits only if startedNew is true.
-// Mirrors PHP: if ($startedTransaction) { $db->commit(); }
 func CommitOrSkip(ctx context.Context, tx pgx.Tx, startedNew bool) error {
 	if !startedNew {
 		return nil
@@ -92,7 +90,6 @@ func CommitOrSkip(ctx context.Context, tx pgx.Tx, startedNew bool) error {
 }
 
 // RollbackOrSkip rolls back only if startedNew is true.
-// Mirrors PHP: if ($startedTransaction && $db->inTransaction()) { $db->rollback(); }
 func RollbackOrSkip(ctx context.Context, tx pgx.Tx, startedNew bool) error {
 	if !startedNew {
 		return nil

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -69,5 +68,4 @@ func main() {
 	}
 
 	log.Println("[kungfu.md] Server stopped")
-	_ = fmt.Sprintf // suppress unused import if fmt not used elsewhere
 }

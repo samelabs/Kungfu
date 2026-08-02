@@ -36,7 +36,6 @@ type KungfuPushResult struct {
 }
 
 // Push creates or updates a kungfu.
-// PHP: KungfuManageService::push(botId, input, config)
 func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]interface{},
 	maxTitleLen, maxTags, maxTagLen, maxDescLen, maxContentSize int) (*KungfuPushResult, error) {
 
@@ -107,7 +106,6 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 }
 
 // Share makes a kungfu public.
-// PHP: KungfuManageService::share (idempotent: already public = no-op)
 func Share(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
 	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can change sharing status")
 	if err != nil {
@@ -132,7 +130,6 @@ func Share(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[st
 }
 
 // Unshare makes a kungfu private.
-// PHP: KungfuManageService::unshare (idempotent: already private = no-op)
 func Unshare(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
 	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can change sharing status")
 	if err != nil {
@@ -157,7 +154,6 @@ func Unshare(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[
 }
 
 // Delete soft-deletes a kungfu.
-// PHP: KungfuManageService::delete
 func Delete(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
 	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can delete this Kungfu")
 	if err != nil {
@@ -175,7 +171,6 @@ func Delete(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[s
 }
 
 // requireOwnedKungfu finds an owned kungfu or returns appropriate errors.
-// PHP: KungfuManageService::requireOwnedKungfu
 func requireOwnedKungfu(ctx context.Context, pool *pg.Pool, botID int64, code, ownerError string) (*model.Kungfu, error) {
 	k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, botID, code)
 	if err == nil && k != nil {
@@ -190,7 +185,6 @@ func requireOwnedKungfu(ctx context.Context, pool *pg.Pool, botID int64, code, o
 }
 
 // validateKungfuPayload validates input for push.
-// PHP: KungfuValidator::validatePayload
 func validateKungfuPayload(input map[string]interface{}, maxTitleLen, maxTags, maxTagLen, maxDescLen, maxContentSize int) (*KungfuPushInput, error) {
 	// Check required fields
 	for _, field := range []string{"title", "tags", "content"} {

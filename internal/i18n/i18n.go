@@ -23,14 +23,12 @@ func init() {
 }
 
 // SupportedLocales returns the list of supported locale codes.
-// PHP: app_i18n_supported_locales()
 func SupportedLocales() []string {
 	return []string{"en", "zh", "ja", "ko", "es"}
 }
 
 // NormalizeLocale normalizes a locale string to a supported code.
 // Returns "" if not recognized.
-// PHP: app_i18n_normalize_locale()
 func NormalizeLocale(locale string) string {
 	v := strings.ToLower(strings.TrimSpace(locale))
 	if v == "" {
@@ -65,7 +63,6 @@ func IsSupported(locale string) bool {
 }
 
 // ResolveLocale determines the locale from query param, cookie, or Accept-Language.
-// PHP: app_i18n_resolve_locale()
 func ResolveLocale(r *http.Request) string {
 	// 1. ?lang= query param
 	queryLocale := NormalizeLocale(r.URL.Query().Get("lang"))
@@ -110,7 +107,6 @@ func SetLangCookie(w http.ResponseWriter, locale string) {
 }
 
 // Translate looks up a dotted key in the locale catalog.
-// PHP: app_t(key, vars, locale)
 // Returns the key itself if not found.
 func Translate(locale, key string) string {
 	catalog, ok := locales[locale]
@@ -137,7 +133,6 @@ func T(locale, key string) string {
 
 // Scope returns a sub-catalog as a flat map for a given scope prefix.
 // Used to pass i18n data to JavaScript (window.OWNER_I18N).
-// PHP: app_i18n_scope(scope, locale)
 func Scope(locale, scope string) map[string]interface{} {
 	catalog, ok := locales[locale]
 	if !ok {
@@ -150,7 +145,6 @@ func Scope(locale, scope string) map[string]interface{} {
 }
 
 // LanguageOptions returns the language selector options.
-// PHP: app_i18n_language_options(displayLocale)
 func LanguageOptions(displayLocale string) []map[string]string {
 	if displayLocale == "" {
 		displayLocale = "en"
@@ -167,7 +161,6 @@ func LanguageOptions(displayLocale string) []map[string]string {
 }
 
 // LocaleURL builds a URL with ?lang=locale appended.
-// PHP: app_i18n_locale_url(locale, path)
 func LocaleURL(locale, path string) string {
 	normalized := NormalizeLocale(locale)
 	if normalized == "" {

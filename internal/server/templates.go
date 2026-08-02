@@ -22,7 +22,6 @@ type tmplData struct {
 }
 
 // renderTemplate renders an HTML page with i18n data.
-// This replaces PHP's require '*.tpl.php' pattern.
 func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, section string) {
 	locale := i18n.ResolveLocale(r)
 	if q := i18n.NormalizeLocale(r.URL.Query().Get("lang")); q != "" && i18n.IsSupported(q) {

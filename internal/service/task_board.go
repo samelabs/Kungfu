@@ -9,11 +9,10 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// TaskBoardService mirrors PHP services/TaskBoardService.php.
+// TaskBoardService provides task delivery testing for owners.
 // It exposes open tasks to agents (list + single-task detail).
 
 // ListOpenTasks returns all currently-open tasks for agents.
-// PHP: TaskBoardService::listOpenTasks()
 func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, error) {
 	rows, err := repository.ListOpenTasks(ctx, pool)
 	if err != nil {
@@ -37,7 +36,6 @@ func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, 
 }
 
 // GetOpenTask returns a single open task by code.
-// PHP: TaskBoardService::getOpenTask(code)
 func GetOpenTask(ctx context.Context, pool *pg.Pool, code string) (map[string]interface{}, error) {
 	t, err := repository.FindOpenTaskByCode(ctx, pool, code)
 	if err != nil {
@@ -52,7 +50,7 @@ func GetOpenTask(ctx context.Context, pool *pg.Pool, code string) (map[string]in
 	}, nil
 }
 
-// agentTaskDetail mirrors PHP AgentTaskPresenter::detail / listItem.
+// agentTaskDetail
 // Output shape: {code, title, requirements, price, pinned(int), status, created_at, updated_at}
 func agentTaskDetail(t *model.Task) map[string]interface{} {
 	pinned := 0

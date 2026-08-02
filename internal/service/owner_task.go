@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -13,26 +12,25 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// OwnerTaskService mirrors PHP services/OwnerTaskService.php.
+// OwnerTaskService provides task delivery testing for owners.
 // It provides full CRUD + budget management for task owners.
 
-// refundCooldownDays matches PHP OwnerTaskService::REFUND_COOLDOWN_DAYS
+// refundCooldownDays is the minimum wait before a closed task budget can be refunded
 const refundCooldownDays = 7
 
-// maxRequirementsLen mirrors PHP TaskValidator (mb_strlen(requirements) > 20000)
+// maxRequirementsLen is the maximum character count for task requirements
 const maxRequirementsLen = 20000
 
-// maxPostapiLen mirrors PHP TaskValidator::validatePostapi (strlen > 2048)
+// maxPostapiLen is the maximum byte length for a Post API URL
 const maxPostapiLen = 2048
 
 // OwnerTaskConfig holds the per-request owner config needed by task validation.
-// Mirrors the PHP $config array passed to OwnerTaskService methods.
+// OwnerTaskConfig holds per-request validation parameters.
 type OwnerTaskConfig struct {
 	MaxTitleLength int
 }
 
 // ListTasks returns all tasks owned by botID with aggregated log stats.
-// PHP: OwnerTaskService::listTasks(botId)
 func ListTasks(ctx context.Context, pool *pg.Pool, botID int64) (map[string]interface{}, error) {
 	rows, err := repository.ListOwnerTasksWithStats(ctx, pool, botID)
 	if err != nil {
@@ -53,7 +51,6 @@ func ListTasks(ctx context.Context, pool *pg.Pool, botID int64) (map[string]inte
 }
 
 // GetTask returns a single task with its recent logs.
-// PHP: OwnerTaskService::getTask(botId, code)
 func GetTask(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
 	task, err := ownerTask(ctx, pool, botID, code)
 	if err != nil {
@@ -84,7 +81,6 @@ type CreateTaskInput struct {
 }
 
 // CreateTask creates a new task owned by botID.
-// PHP: OwnerTaskService::createTask(botId, config, input)
 func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskConfig, input *CreateTaskInput) (map[string]interface{}, error) {
 	title := strings.TrimSpace(input.Title)
 	requirements := strings.TrimSpace(input.Requirements)
@@ -177,7 +173,6 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 }
 
 // SetTaskStatus opens or closes a task.
-// PHP: OwnerTaskService::setTaskStatus(botId, code, status)
 func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status string) (map[string]interface{}, error) {
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
@@ -226,7 +221,6 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 }
 
 // AddTaskBudget adds budget to a task, locking additional credits.
-// PHP: OwnerTaskService::addTaskBudget(botId, code, input)
 func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string, amount float64) (map[string]interface{}, error) {
 	amount = roundMoney(amount)
 	if amount <= 0 {
@@ -272,7 +266,7 @@ func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string,
 }
 
 // UpdateTaskBasicsInput holds optional fields for UpdateTaskBasics.
-// PHP uses array_key_exists to distinguish "field absent" from "field empty".
+// Pointer fields distinguish "absent" (nil) from "provided as empty".
 type UpdateTaskBasicsInput struct {
 	Title        *string
 	Requirements *string
@@ -281,7 +275,6 @@ type UpdateTaskBasicsInput struct {
 }
 
 // UpdateTaskBasics edits the basic fields of a closed task.
-// PHP: OwnerTaskService::updateTaskBasics(botId, code, config, input)
 func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code string, cfg *OwnerTaskConfig, input *UpdateTaskBasicsInput) (map[string]interface{}, error) {
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
@@ -347,7 +340,6 @@ func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code stri
 }
 
 // RefundTaskBudget refunds the remaining budget of a closed task to the owner.
-// PHP: OwnerTaskService::refundTaskBudget(botId, code)
 // Requires the task to be closed for at least refundCooldownDays (7) days.
 func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
 	tx, txErr := pool.TxBegin(ctx)
@@ -404,7 +396,6 @@ func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code stri
 // --- internal helpers ---
 
 // ownerTask finds a task owned by botID or returns 404.
-// PHP: OwnerTaskService::ownerTask
 func ownerTask(ctx context.Context, pool *pg.Pool, botID int64, code string) (*model.Task, error) {
 	task, err := repository.FindOwnerTaskByCode(ctx, pool, botID, code)
 	if err != nil {
@@ -417,7 +408,6 @@ func ownerTask(ctx context.Context, pool *pg.Pool, botID int64, code string) (*m
 }
 
 // canRefundBudget checks if enough time has passed since closing.
-// PHP: OwnerTaskService::canRefundBudget
 func canRefundBudget(closedAt string) bool {
 	if closedAt == "" {
 		return false
@@ -429,7 +419,7 @@ func canRefundBudget(closedAt string) bool {
 	return closed.Unix() <= (time.Now().Unix() - int64(refundCooldownDays)*86400)
 }
 
-// validateTaskBasics mirrors PHP TaskValidator::validateBasics.
+// validateTaskBasics formats log entries for the owner dashboard.
 func validateTaskBasics(title, requirements, postapi string, price float64, cfg *OwnerTaskConfig) error {
 	if title == "" {
 		return errors.New(400, "MISSING_FIELD", "Missing required field: title")
@@ -456,7 +446,7 @@ func validateTaskBasics(title, requirements, postapi string, price float64, cfg 
 	return nil
 }
 
-// validateBudget mirrors PHP TaskValidator::validatePayload budget checks.
+// validateBudget
 func validateBudget(budget float64) error {
 	if budget <= 0 {
 		return errors.New(400, "INVALID_BUDGET", "Budget must be greater than zero")
@@ -467,7 +457,7 @@ func validateBudget(budget float64) error {
 	return nil
 }
 
-// validatePostapiField mirrors PHP TaskValidator::validatePostapi.
+// validatePostapiField formats log entries for the owner dashboard.
 func validatePostapiField(postapi string) error {
 	if postapi == "" {
 		return errors.New(400, "MISSING_FIELD", "Missing required field: postapi")
@@ -478,7 +468,7 @@ func validatePostapiField(postapi string) error {
 	return nil
 }
 
-// assertOpenable mirrors PHP TaskValidator::assertOpenable.
+// assertOpenable formats log entries for the owner dashboard.
 func assertOpenable(postapi string, budget, price float64) error {
 	if err := validatePostapiField(postapi); err != nil {
 		return err
@@ -492,7 +482,7 @@ func assertOpenable(postapi string, budget, price float64) error {
 	return nil
 }
 
-// roundMoney mirrors PHP round(value, 4).
+// roundMoney)
 func roundMoney(v float64) float64 {
 	return math.Round(v*10000) / 10000
 }
@@ -506,7 +496,7 @@ func isInsufficientCredits(err error) bool {
 	return ok && ae.HTTPCode == 402
 }
 
-// ownerTaskSummary mirrors PHP OwnerTaskPresenter::summary.
+// ownerTaskSummary formats log entries for the owner dashboard.
 func ownerTaskSummary(t *model.Task, logCount, successCount, failureCount int64) map[string]interface{} {
 	pinned := 0
 	if t.Pinned {
@@ -530,7 +520,7 @@ func ownerTaskSummary(t *model.Task, logCount, successCount, failureCount int64)
 	}
 }
 
-// ownerTaskDetail mirrors PHP OwnerTaskPresenter::detail.
+// ownerTaskDetail formats log entries for the owner dashboard.
 // summary + postapi + review_note + reviewed_at
 func ownerTaskDetail(t *model.Task) map[string]interface{} {
 	m := ownerTaskSummary(t, 0, 0, 0)
@@ -543,7 +533,7 @@ func ownerTaskDetail(t *model.Task) map[string]interface{} {
 	return m
 }
 
-// ownerTaskDetailLogRow mirrors PHP TaskLogPresenter::ownerTaskDetailRow.
+// ownerTaskDetailLogRow formats log entries for the owner dashboard.
 func ownerTaskDetailLogRow(e *repository.TaskLogEntry) map[string]interface{} {
 	var botID interface{}
 	if e.BotID != nil {
@@ -565,7 +555,7 @@ func ownerTaskDetailLogRow(e *repository.TaskLogEntry) map[string]interface{} {
 	}
 }
 
-// taskLogActionLabel mirrors PHP TaskLogPresenter::actionLabel.
+// taskLogActionLabel formats log entries for the owner dashboard.
 func taskLogActionLabel(action string) string {
 	switch action {
 	case "kfcheck":
@@ -577,10 +567,4 @@ func taskLogActionLabel(action string) string {
 	default:
 		return action
 	}
-}
-
-// FormatMoney formats a money value to the PHP-compatible string.
-// Currently unused but kept for potential presenter use.
-func FormatMoney(v float64) string {
-	return fmt.Sprintf("%v", v)
 }

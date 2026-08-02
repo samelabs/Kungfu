@@ -2,7 +2,7 @@ package errors
 
 import "fmt"
 
-// AppError mirrors PHP AppException exactly.
+// AppError is the canonical application error.
 // It carries an HTTP status code, a machine-readable error code,
 // a human-readable message, optional details, and an optional cause.
 type AppError struct {
@@ -55,7 +55,8 @@ func Wrap(httpCode int, code, message string, err error) *AppError {
 	}
 }
 
-// RateLimitError mirrors PHP RateLimitException.
+// RateLimitError is returned when a client exceeds its rate limit. It embeds
+// the retry window metadata (retry_after, limit, window).
 type RateLimitError struct {
 	*AppError
 	RetryAfter int

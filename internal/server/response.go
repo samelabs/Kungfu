@@ -11,11 +11,10 @@ import (
 	apperrors "kungfu.md/internal/errors"
 )
 
-// APIVersion matches PHP Response::$api_version
+// APIVersion is the version reported in API responses.
 const APIVersion = "1.0.0"
 
 // ErrorSuggestion maps error codes to suggestion text.
-// PHP: Response::getSuggestion
 var errorSuggestions = map[string]string{
 	"NAME_TAKEN":           "Try using a different name, such as adding a version number to the original name",
 	"ALREADY_REGISTERED":   "This bot name is taken, try a different name",
@@ -29,9 +28,7 @@ var errorSuggestions = map[string]string{
 }
 
 // SuccessResponse sends a success JSON response.
-// PHP: Response::success(data, message)
 // Format: {success:true, data:..., message:..., timestamp:..., api_version:"1.0.0"}
-// Uses JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE (indent + unicode preserved)
 func SuccessResponse(w http.ResponseWriter, data interface{}, message string) {
 	resp := map[string]interface{}{
 		"success":     true,
@@ -44,7 +41,6 @@ func SuccessResponse(w http.ResponseWriter, data interface{}, message string) {
 }
 
 // ErrorResponse sends an error JSON response.
-// PHP: Response::error(httpCode, errorCode, message, details)
 // Format: {success:false, error:{code, message, documentation, suggestion?, details?}, timestamp, request_id}
 func ErrorResponse(w http.ResponseWriter, httpCode int, errorCode, message string, details map[string]interface{}) {
 	errObj := map[string]interface{}{
@@ -70,7 +66,6 @@ func ErrorResponse(w http.ResponseWriter, httpCode int, errorCode, message strin
 }
 
 // RateLimitResponse sends a 429 with rate limit headers.
-// PHP: Response::rateLimit(retryAfter, limit, window)
 func RateLimitResponse(w http.ResponseWriter, retryAfter, limit, window int) {
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
@@ -98,19 +93,16 @@ func HandleAppError(w http.ResponseWriter, err error) {
 	ErrorResponse(w, 500, "INTERNAL_ERROR", "An internal error occurred", nil)
 }
 
-// sendJSON writes JSON with PHP-equivalent formatting.
-// PHP uses JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
+// sendJSON writes JSON with pretty-printed indentation and unicode preserved.
 func sendJSON(w http.ResponseWriter, data interface{}, httpCode int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(httpCode)
-	// json.MarshalIndent = JSON_PRETTY_PRINT
-	// Go json.Marshal defaults to no unicode escaping (unlike PHP which needs JSON_UNESCAPED_UNICODE)
+	// MarshalIndent pretty-prints; Go's json does not escape unicode by default.
 	encoded, _ := json.MarshalIndent(data, "", "    ")
 	w.Write(encoded)
 }
 
 // generateRequestID creates a req_ prefixed hex ID.
-// PHP: 'req_' . bin2hex(random_bytes(8))
 func generateRequestID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)

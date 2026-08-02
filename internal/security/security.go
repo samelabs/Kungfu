@@ -5,12 +5,10 @@ import (
 	"regexp"
 )
 
-// APIKeyPattern matches kf_live_ followed by 64 hex chars.
-// PHP: '/kf_live_[a-f0-9]{64}/i' (case-insensitive)
+// APIKeyPattern matches kf_live_ followed by 64 hex chars (case-insensitive).
 var apiKeyPattern = regexp.MustCompile(`(?i)kf_live_[a-f0-9]{64}`)
 
 // ContainsAPIKey checks if a value (recursively for maps/slices) contains an API key pattern.
-// PHP: Security::containsApiKey
 func ContainsAPIKey(v interface{}) bool {
 	switch val := v.(type) {
 	case map[string]interface{}:
@@ -35,8 +33,7 @@ func ContainsAPIKey(v interface{}) bool {
 }
 
 // RejectAPIKeyInContent returns an error if the value contains an API key.
-// PHP: Security::rejectApiKeyInContent
-// Returns an error with code "SENSITIVE_CONTENT" matching PHP behavior.
+// The error uses the machine code "SENSITIVE_CONTENT".
 func RejectAPIKeyInContent(v interface{}, field string) error {
 	if ContainsAPIKey(v) {
 		return fmt.Errorf("SENSITIVE_CONTENT: %s must not contain API keys", field)
@@ -45,7 +42,6 @@ func RejectAPIKeyInContent(v interface{}, field string) error {
 }
 
 // RedactSecrets recursively replaces all API key patterns in strings with masked versions.
-// PHP: Security::redactSecrets
 func RedactSecrets(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
@@ -69,9 +65,7 @@ func RedactSecrets(v interface{}) interface{} {
 	}
 }
 
-// MaskKey masks an API key, showing first 8 and last 4 chars.
-// PHP: Security::maskKey
-// "kf_live_****1a2b"
+// MaskKey masks an API key, showing the first 8 and last 4 chars, e.g. "kf_live_****1a2b".
 func MaskKey(key string) string {
 	if len(key) <= 12 {
 		result := ""

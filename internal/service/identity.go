@@ -14,16 +14,16 @@ import (
 	"kungfu.md/internal/security"
 )
 
-// Identity services mirror PHP:
-//   - OwnerSessionService.php (login / current / logout)
-//   - AccountService.php (overview)
-//   - KeyService.php (current key)
-//   - ChangePasswordService.php
-//   - ResetKeyService.php
+// Identity services handle owner authentication and account management:
+//   - OwnerSession (login / current / logout)
+//   - Account (overview)
+//   - Key (current key)
+//   - ChangePassword
+//   - ResetKey
 
 // -- OwnerSession --
 
-// OwnerSessionResult mirrors PHP IdentityPresenter::ownerSession.
+// OwnerSessionResult formats log entries for the owner dashboard.
 type OwnerSessionResult struct {
 	BotID   int64  `json:"bot_id"`
 	BotName string `json:"bot_name"`
@@ -31,7 +31,6 @@ type OwnerSessionResult struct {
 }
 
 // OwnerLogin authenticates an owner by name+password.
-// PHP: OwnerSessionService::login → OwnerSession::login
 func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*OwnerSessionResult, error) {
 	name = strings.TrimSpace(name)
 
@@ -59,7 +58,7 @@ func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*Own
 		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
 	}
 
-	// In the PHP version, a session cookie is set here.
+	// Owner session cookie is set by the handler layer.
 	// In Go, session management is handled at the HTTP layer (JWT/cookie middleware).
 	// The service layer returns the identity; the handler issues the session token.
 
@@ -74,7 +73,6 @@ func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*Own
 }
 
 // OwnerCurrent returns the current owner session for a given botID.
-// PHP: OwnerSessionService::current → OwnerSession::current
 // In Go, the botID is resolved by the session middleware before calling this.
 func OwnerCurrent(ctx context.Context, pool *pg.Pool, botID int64) (*OwnerSessionResult, error) {
 	bot, err := repository.FindOwnerSessionBotByID(ctx, pool, botID)
@@ -92,7 +90,6 @@ func OwnerCurrent(ctx context.Context, pool *pg.Pool, botID int64) (*OwnerSessio
 }
 
 // OwnerLogout invalidates the owner session.
-// PHP: OwnerSessionService::logout
 // In Go, session invalidation is handled at the HTTP layer (clear cookie/token).
 // This is a no-op placeholder for service-layer symmetry.
 func OwnerLogout(ctx context.Context, pool *pg.Pool, botID int64) map[string]interface{} {
@@ -104,7 +101,7 @@ func OwnerLogout(ctx context.Context, pool *pg.Pool, botID int64) map[string]int
 
 // -- Account --
 
-// AccountOverview mirrors PHP AccountService::overview.
+// AccountOverview formats log entries for the owner dashboard.
 // Returns the owner's account summary with kungfu/task stats.
 func AccountOverview(ctx context.Context, pool *pg.Pool, botID int64) (map[string]interface{}, error) {
 	bot, err := repository.FindActiveBotAccountByID(ctx, pool, botID)
@@ -133,7 +130,7 @@ func AccountOverview(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 
 // -- Key --
 
-// CurrentOwnerKey mirrors PHP KeyService::currentOwnerKey.
+// CurrentOwnerKey formats log entries for the owner dashboard.
 // Returns the owner's current API key.
 func CurrentOwnerKey(ctx context.Context, pool *pg.Pool, botID int64) (map[string]interface{}, error) {
 	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)
@@ -161,7 +158,7 @@ func CurrentOwnerKey(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 
 // -- ChangePassword --
 
-// ChangePassword mirrors PHP ChangePasswordService::change.
+// ChangePassword formats log entries for the owner dashboard.
 // Requires name + current password + new password.
 func ChangePassword(ctx context.Context, pool *pg.Pool, name, password, newPassword string) (map[string]interface{}, error) {
 	name = strings.TrimSpace(name)
@@ -223,7 +220,7 @@ func ChangePassword(ctx context.Context, pool *pg.Pool, name, password, newPassw
 
 var apiKeyFormatRegex = regexp.MustCompile(`(?i)^kf_live_[a-f0-9]{64}$`)
 
-// ResetKey mirrors PHP ResetKeyService::reset.
+// ResetKey formats log entries for the owner dashboard.
 // Requires the current key to match + rate limit check.
 func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, botID int64, currentKey string) (map[string]interface{}, error) {
 	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)

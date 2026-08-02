@@ -10,10 +10,10 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// MinOpenBudget matches PHP TaskUtils::MIN_OPEN_BUDGET
+// MinOpenBudget is the minimum budget required to open a task
 const MinOpenBudget = 1000.0
 
-// -- KungfuReadService (maps to PHP services/KungfuReadService.php) --
+// -- Kungfu read operations --
 
 func ListKungfusForBot(ctx context.Context, pool *pg.Pool, botID int64, botBalance float64, limit, offset int) (map[string]interface{}, error) {
 	total, _ := repository.CountActiveKungfusByBotID(ctx, pool, botID)

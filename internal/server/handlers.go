@@ -574,7 +574,7 @@ func (s *Server) handleOwnerTaskAddBudget(w http.ResponseWriter, r *http.Request
 	amountStr, _ := input["amount"].(string)
 	if amountStr == "" {
 		if f, ok := input["amount"].(float64); ok {
-			amountStr = service.FormatMoney(f)
+			amountStr = strconv.FormatFloat(f, 'f', -1, 64)
 		}
 	}
 	amount, _ := strconv.ParseFloat(amountStr, 64)

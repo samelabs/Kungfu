@@ -54,7 +54,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildRouter creates the chi router with all routes.
-// Maps 1:1 to PHP index.php routing table.
 func (s *Server) buildRouter() http.Handler {
 	r := chi.NewRouter()
 
@@ -150,25 +149,6 @@ func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 
 // -- Helper functions --
 
-// parseJSONBody reads and parses JSON from request body.
-// Returns (data, error). If body is empty, returns nil, nil.
-// PHP: json_decode(file_get_contents('php://input'), true)
-func parseJSONBody(r *http.Request) (map[string]interface{}, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(body) == 0 {
-		return nil, nil
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
 // parseJSONBodyRequired reads and parses JSON, returning error if invalid.
 // requireObject: if true, body must be a JSON object (not just any valid JSON).
 // emptyMessage: message for empty body case ("Request body must be valid JSON" vs "...JSON object")
@@ -182,7 +162,7 @@ func parseJSONBodyRequired(r *http.Request, requireObject bool, emptyMessage str
 		if requireObject {
 			return nil, &parseError{msg: emptyMessage}
 		}
-		// PHP reset-key: empty body = empty input, no error
+		// Empty body is allowed for reset-key: treat as empty input, no error.
 		return map[string]interface{}{}, nil
 	}
 

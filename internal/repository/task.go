@@ -13,17 +13,15 @@ import (
 	"kungfu.md/internal/publiccode"
 )
 
-// TaskRepository mirrors PHP repositories/TaskRepository.php.
+// TaskRepository persists task rows.
 // Every method accepts a pg.Querier so it works with both *pgxpool.Pool and pgx.Tx.
 
-// minOpenBudget mirrors PHP TaskUtils::MIN_OPEN_BUDGET.
+// minOpenBudget is the minimum budget required for a task to be considered "open" on the board.
 const minOpenBudget = 1000.0
 
-// openBudgetWhereClause mirrors PHP TaskUtils::openBudgetWhereClause($alias).
-// It returns the SQL fragment scoped to the given table alias.
-// PHP: "{$alias}.status = 'open' AND {$alias}.price > 0
-//
-//	AND {$alias}.budget >= 1000.0 AND {$alias}.budget >= {$alias}.price"
+// openBudgetWhereClause returns the SQL fragment that defines an "open, fundable" task:
+// open status, positive price, and budget >= both the minimum and the per-unit price.
+// When alias is empty the columns are unqualified; otherwise they are prefixed with "alias.".
 func openBudgetWhereClause(alias string) string {
 	if alias == "" {
 		return "status = 'open' AND price > 0 AND budget >= 1000.0 AND budget >= price"
@@ -33,7 +31,7 @@ func openBudgetWhereClause(alias string) string {
 }
 
 // -- 1. countOpenTasks --
-// PHP: SELECT COUNT(*) AS count FROM tb_tasks t WHERE {$openWhere}
+// CountOpenTasks returns the number of tasks currently visible on the open board.
 func CountOpenTasks(ctx context.Context, q pg.Querier) (int64, error) {
 	var count int64
 	err := q.QueryRow(ctx, `
@@ -44,7 +42,7 @@ func CountOpenTasks(ctx context.Context, q pg.Querier) (int64, error) {
 }
 
 // -- 2. listOpenTasks --
-// PHP: SELECT t.* FROM tb_tasks t WHERE {$openWhere} ORDER BY t.pinned DESC, t.created_at DESC
+// ListOpenTasks returns all open, fundable tasks, pinned first then newest.
 func ListOpenTasks(ctx context.Context, q pg.Querier) ([]model.Task, error) {
 	rows, err := q.Query(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -72,7 +70,7 @@ func ListOpenTasks(ctx context.Context, q pg.Querier) ([]model.Task, error) {
 }
 
 // -- 3. findOpenTaskByCode --
-// PHP: SELECT t.* FROM tb_tasks t WHERE t.code = :code AND {$openWhere}
+// FindOpenTaskByCode returns the open, fundable task with the given code, or nil.
 func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -90,8 +88,7 @@ func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.
 }
 
 // -- 4. tableExists --
-// PHP: SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :table
-// PostgreSQL: current_schema() instead of DATABASE().
+// TableExists reports whether a table exists in the current schema.
 func TableExists(ctx context.Context, q pg.Querier, table string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, `
@@ -103,9 +100,7 @@ func TableExists(ctx context.Context, q pg.Querier, table string) (bool, error) 
 }
 
 // -- 5. columnExists --
-// PHP: SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
-//
-//	AND table_name = :table AND column_name = :column
+// ColumnExists reports whether a column exists on a table in the current schema.
 func ColumnExists(ctx context.Context, q pg.Querier, table, column string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, `
@@ -127,10 +122,10 @@ type TaskWithStats struct {
 }
 
 // -- 6. listOwnerTasksWithStats --
-// PHP: LEFT JOIN tb_task_logs aggregated by task_code, plus a no-logs fallback.
+// ListOwnerTasksWithStats returns an owner's tasks joined with aggregated log counts.
+// A LEFT JOIN is used so tasks with no logs still appear (log_count defaults to 0).
 func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]TaskWithStats, error) {
-	// Use a single query with a LEFT JOIN; the PHP branching on tableExists was a
-	// MySQL migration guard. tb_task_logs exists in the PG schema (001_schema.sql).
+	// tb_task_logs always exists in the PG schema (001_schema.sql), so no existence guard is needed.
 	rows, err := q.Query(ctx, `
 		SELECT t.id, t.code, t.bot_id, t.title, t.requirements, t.postapi, t.budget, t.price,
 		       t.pinned, t.status, t.review_note, t.created_at, t.updated_at, t.reviewed_at,
@@ -172,9 +167,7 @@ func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]
 }
 
 // -- 7. findOwnerTaskByCode --
-// PHP: SELECT code, bot_id, title, requirements, postapi, budget, price, pinned, status,
-//
-//	review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
+// FindOwnerTaskByCode returns the owner's task with the given code, or nil if not found.
 func FindOwnerTaskByCode(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -192,7 +185,7 @@ func FindOwnerTaskByCode(ctx context.Context, q pg.Querier, botID int64, code st
 }
 
 // -- 8. findTaskByCode --
-// PHP: SELECT * FROM tb_tasks WHERE code = :code
+// FindTaskByCode returns the task with the given code regardless of owner/status, or nil.
 func FindTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -217,7 +210,7 @@ type TaskBudgetStatus struct {
 }
 
 // -- 9. findTaskBudgetStatusByCode --
-// PHP: SELECT id, budget, status FROM tb_tasks WHERE code = :code
+// FindTaskBudgetStatusByCode returns the id/budget/status projection for budget checks.
 func FindTaskBudgetStatusByCode(ctx context.Context, q pg.Querier, code string) (*TaskBudgetStatus, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, budget, status
@@ -234,7 +227,7 @@ func FindTaskBudgetStatusByCode(ctx context.Context, q pg.Querier, code string) 
 }
 
 // -- 10. findTaskBudgetStatusByCodeForUpdate --
-// PHP: SELECT id, budget, status FROM tb_tasks WHERE code = :code FOR UPDATE
+// FindTaskBudgetStatusByCodeForUpdate is like FindTaskBudgetStatusByCode but locks the row (FOR UPDATE).
 func FindTaskBudgetStatusByCodeForUpdate(ctx context.Context, q pg.Querier, code string) (*TaskBudgetStatus, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, budget, status
@@ -252,7 +245,7 @@ func FindTaskBudgetStatusByCodeForUpdate(ctx context.Context, q pg.Querier, code
 }
 
 // -- 11. findOwnerTaskByCodeForUpdate --
-// PHP: SELECT ... FROM tb_tasks WHERE code = :code AND bot_id = :bot_id FOR UPDATE
+// FindOwnerTaskByCodeForUpdate returns the owner's task locked for update (FOR UPDATE).
 func FindOwnerTaskByCodeForUpdate(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
@@ -283,12 +276,10 @@ type TaskLogEntry struct {
 }
 
 // -- 12. findRecentLogsByTaskCode --
-// PHP: SELECT id, bot_id, action, response_code, success, error_code, error_message, created_at
-//
-//	FROM tb_task_logs WHERE task_code = :code ORDER BY created_at DESC LIMIT :limit
+// FindRecentLogsByTaskCode returns the most recent task-log entries for a task, newest first.
 func FindRecentLogsByTaskCode(ctx context.Context, q pg.Querier, code string, limit int) ([]TaskLogEntry, error) {
 	if limit <= 0 {
-		limit = 50 // matches PHP default
+		limit = 50
 	}
 	rows, err := q.Query(ctx, `
 		SELECT id, bot_id, action, response_code, success, error_code, error_message, created_at
@@ -317,7 +308,6 @@ func FindRecentLogsByTaskCode(ctx context.Context, q pg.Querier, code string, li
 }
 
 // NewTaskInput holds the fields needed to insert a new task row.
-// Mirrors the PHP insertTask([...]) array in OwnerTaskService.
 type NewTaskInput struct {
 	Code         string
 	BotID        int64
@@ -332,8 +322,7 @@ type NewTaskInput struct {
 }
 
 // -- 13. insertTask --
-// PHP: Database::insert('tb_tasks', $taskData)
-// Code generation uses PublicCode::generateUnique('tb_tasks'); the code is passed in here.
+// InsertTask inserts a new task row. The code must already be generated (see GenerateUniqueTaskCode).
 func InsertTask(ctx context.Context, q pg.Querier, in NewTaskInput) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO tb_tasks
@@ -345,9 +334,7 @@ func InsertTask(ctx context.Context, q pg.Querier, in NewTaskInput) error {
 }
 
 // -- 14. openOwnerTask --
-// PHP: UPDATE tb_tasks SET status='open', opened_at=COALESCE(opened_at,NOW()), closed_at=NULL
-//
-//	WHERE code = :code AND bot_id = :bot_id
+// OpenOwnerTask marks a task open: sets status, preserves the first opened_at, clears closed_at.
 func OpenOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -357,7 +344,7 @@ func OpenOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string) 
 }
 
 // -- 15. closeOwnerTask --
-// PHP: UPDATE tb_tasks SET status='closed', closed_at=NOW() WHERE code=:code AND bot_id=:bot_id
+// CloseOwnerTask marks a task closed and records closed_at.
 func CloseOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -367,7 +354,7 @@ func CloseOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string)
 }
 
 // -- 16. addOwnerTaskBudget --
-// PHP: UPDATE tb_tasks SET budget = budget + :amount WHERE code=:code AND bot_id=:bot_id
+// AddOwnerTaskBudget increments a task's budget by the given amount.
 func AddOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code string, amount float64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks SET budget = budget + $1, updated_at = NOW()
@@ -376,7 +363,7 @@ func AddOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code str
 }
 
 // -- 17. clearOwnerTaskBudget --
-// PHP: UPDATE tb_tasks SET budget = 0 WHERE code=:code AND bot_id=:bot_id
+// ClearOwnerTaskBudget zeroes a task's budget.
 func ClearOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks SET budget = 0, updated_at = NOW()
@@ -385,7 +372,7 @@ func ClearOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code s
 }
 
 // -- 18. updateOwnerTaskBasics --
-// PHP: UPDATE tb_tasks SET title, requirements, postapi, price
+// UpdateOwnerTaskBasics updates the editable basics: title, requirements, postapi, price.
 func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code, title, requirements string, postAPI *string, price float64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -396,9 +383,7 @@ func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code,
 }
 
 // -- 18b. updateTaskBudgetAndStatus --
-// PHP: UPDATE tb_tasks SET budget=:budget, status=:status,
-//
-//	closed_at = CASE WHEN :should_close = 1 THEN NOW() ELSE closed_at END WHERE id = :id
+// UpdateTaskBudgetAndStatus sets budget/status and conditionally stamps closed_at.
 func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budget float64, status string, shouldClose bool) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -412,8 +397,9 @@ func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budg
 }
 
 // -- 18c. decrementTaskBudgetForDelivery --
-// PHP: budget = budget - :price, then conditionally close if post-debit budget < minOpenBudget.
-// PostgreSQL evaluates the RHS once (budget - $1), so we can reference it directly.
+// DecrementTaskBudgetForDelivery debits price from a task's budget and auto-closes the
+// task if the resulting budget drops below minOpenBudget. PostgreSQL evaluates the RHS
+// expression (budget - $1) once per reference, so it is safe to repeat in the CASE.
 func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64, price float64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -426,7 +412,7 @@ func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64,
 	return err
 }
 
-// GenerateUniqueTaskCode mirrors PHP PublicCode::generateUnique('tb_tasks').
+// GenerateUniqueTaskCode returns a unique 12-hex code not yet present in tb_tasks.
 func GenerateUniqueTaskCode(ctx context.Context, q pg.Querier) (string, error) {
 	return publiccode.GenerateUnique(func(code string) (bool, error) {
 		var exists bool
@@ -499,7 +485,6 @@ type HomepageTask struct {
 }
 
 // QueryHomepageTasks returns up to 8 open tasks for the homepage board.
-// Mirrors the PHP index.tpl.php inline query.
 func QueryHomepageTasks(ctx context.Context, q pg.Querier) ([]HomepageTask, error) {
 	rows, err := q.Query(ctx, `
 		SELECT t.code, t.title, t.pinned, t.requirements, t.price, t.budget,

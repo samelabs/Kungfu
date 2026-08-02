@@ -13,14 +13,6 @@ import (
 )
 
 // scanBotBalance scans a numeric balance into float64.
-func scanBalance(target *float64) *pgtype.Numeric {
-	var n pgtype.Numeric
-	// We return a pointer that Scan writes to, then caller must convert.
-	// This is a helper - must be called with postProcess.
-	_ = n
-	_ = target
-	return &n
-}
 
 // numericToFloat converts pgtype.Numeric to float64 safely.
 func numericToFloat(n pgtype.Numeric) float64 {
@@ -30,7 +22,7 @@ func numericToFloat(n pgtype.Numeric) float64 {
 	return 0
 }
 
-// timeToStr converts time.Time to the PHP-compatible string format.
+// timeToStr converts time.Time to the canonical timestamp string format ("2006-01-02 15:04:05").
 func timeToStr(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
@@ -45,7 +37,7 @@ func timePtrToStr(t *time.Time) *string {
 }
 
 // -- 1. findActiveBotAccountById --
-// PHP: SELECT bot_name, status, balance FROM tb_bots WHERE id = :id AND status = 'active'
+// FindActiveBotAccountByID returns the active bot matching the id, or nil if not found.
 func FindActiveBotAccountByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT bot_name, status, balance
@@ -65,7 +57,7 @@ func FindActiveBotAccountByID(ctx context.Context, q pg.Querier, botID int64) (*
 }
 
 // -- 2. findActiveBotKeyById --
-// PHP: SELECT id, bot_name, api_key, balance, status, key_issued_at
+// FindActiveBotKeyByID returns the active bot with key fields, or nil if not found.
 func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, api_key, balance, status, key_issued_at
@@ -90,7 +82,7 @@ func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*mode
 }
 
 // -- 3. findActiveBotByApiKey --
-// PHP: SELECT id, bot_name, balance, status FROM tb_bots WHERE api_key = :key AND status = 'active'
+// FindActiveBotByAPIKey looks up an active bot by its API key, or nil if not found.
 func FindActiveBotByAPIKey(ctx context.Context, q pg.Querier, key string) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, balance, status
@@ -113,7 +105,7 @@ func FindActiveBotByAPIKey(ctx context.Context, q pg.Querier, key string) (*mode
 }
 
 // -- 4. findActiveBotSummaryById --
-// PHP: SELECT id, bot_name, balance, status FROM tb_bots WHERE id = :id AND status = 'active'
+// FindActiveBotSummaryByID returns a trimmed active bot summary, or nil if not found.
 func FindActiveBotSummaryByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, balance, status
@@ -144,7 +136,7 @@ func BotNameExists(ctx context.Context, q pg.Querier, name string) (bool, error)
 }
 
 // -- 6. findActiveBotCredentialsByName --
-// PHP: SELECT id, bot_name, password_hash, status FROM tb_bots WHERE bot_name = :name AND status = 'active'
+// FindActiveBotCredentialsByName returns the active bot's auth credentials by name.
 func FindActiveBotCredentialsByName(ctx context.Context, q pg.Querier, name string) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, password_hash, status
@@ -165,7 +157,7 @@ func FindActiveBotCredentialsByName(ctx context.Context, q pg.Querier, name stri
 }
 
 // -- 7. findOwnerSessionBotById --
-// PHP: SELECT id, bot_name, balance, status, key_issued_at FROM tb_bots WHERE id = :id AND status = 'active'
+// FindOwnerSessionBotByID returns the active bot with fields needed for owner-session views.
 func FindOwnerSessionBotByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, balance, status, key_issued_at
@@ -243,7 +235,8 @@ func UpdateLastActiveAt(ctx context.Context, q pg.Querier, botID int64) error {
 }
 
 // -- 13. insertRegisteredBot --
-// PHP: Database::insert('tb_bots', [...]) — uses NOW() for timestamps, balance=66, status='active'
+// InsertRegisteredBot inserts a freshly registered bot. New accounts are seeded
+// with balance=66 (a registration bonus) and status='active'.
 func InsertRegisteredBot(ctx context.Context, q pg.Querier, name, apiKey, passwordHash, ip string) (int64, error) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	var id int32

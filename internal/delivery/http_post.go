@@ -10,7 +10,6 @@ import (
 )
 
 // PostResult holds the result of a POST request.
-// Matches PHP TaskDeliveryService return format.
 type PostResult struct {
 	Success      bool
 	ResponseCode *int    // nil if no response received (network error)
@@ -20,13 +19,13 @@ type PostResult struct {
 }
 
 // PostJSON sends a JSON POST request to a URL.
-// Mirrors PHP TaskDeliveryService::postJson exactly:
-// - Content-Type: application/json
-// - Content-Length header
-// - 10 second total timeout (CURLOPT_TIMEOUT)
-// - 5 second connect timeout (CURLOPT_CONNECTTIMEOUT)
-// - Does NOT follow redirects (CURLOPT_FOLLOWLOCATION was reverted)
-//
+// Contract:
+//   - Content-Type: application/json
+//   - Content-Length header set explicitly
+//   - 10 second total timeout
+//   - 5 second connect timeout
+//   - Does NOT follow redirects (returns the raw response)
+
 // errorConfig controls the error codes/messages for different failure types:
 //   - networkCode / networkMessage / networkMessagePrefix: for transport errors
 //   - rejectedCode / rejectedMessage: for non-2xx HTTP responses
@@ -43,23 +42,22 @@ var sharedClient *http.Client
 
 func init() {
 	sharedClient = &http.Client{
-		Timeout: 10 * time.Second, // CURLOPT_TIMEOUT = 10
+		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
-				Timeout: 5 * time.Second, // CURLOPT_CONNECTTIMEOUT = 5
+				Timeout: 5 * time.Second,
 			}).DialContext,
 			MaxIdleConns:    100,
 			IdleConnTimeout: 90 * time.Second,
 		},
-		// Do NOT follow redirects — matches PHP behavior (reverted CURLOPT_FOLLOWLOCATION)
+		// Do NOT follow redirects — return the raw 3xx response to the caller.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 }
 
-// PostJSON sends a POST request with a JSON body.
-// PHP: TaskDeliveryService::postJson(url, payload, errors)
+// PostJSON sends a POST request with a JSON body, classifying failures via errCfg.
 func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -126,7 +124,6 @@ func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
 }
 
 // BuildPayload attaches task_code to the submission payload.
-// PHP: TaskDeliveryService::buildPayload
 func BuildPayload(taskCode string, payload map[string]interface{}) map[string]interface{} {
 	if payload == nil {
 		payload = map[string]interface{}{}
@@ -136,7 +133,6 @@ func BuildPayload(taskCode string, payload map[string]interface{}) map[string]in
 }
 
 // AgentSubmitErrorConfig returns the error config for agent task submissions.
-// PHP: TaskSubmissionService error labels
 func AgentSubmitErrorConfig() ErrorConfig {
 	return ErrorConfig{
 		NetworkCode:          "POSTAPI_NETWORK_ERROR",
@@ -148,7 +144,6 @@ func AgentSubmitErrorConfig() ErrorConfig {
 }
 
 // TestTaskErrorConfig returns the error config for owner test task.
-// PHP: TestTaskService error labels
 func TestTaskErrorConfig() ErrorConfig {
 	return ErrorConfig{
 		NetworkCode:          "TESTTASK_NETWORK_ERROR",

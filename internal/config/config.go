@@ -4,12 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 )
 
 // Config holds all application configuration.
-// Mirrors PHP config/config.php structure exactly.
+
 type Config struct {
 	// Database
 	DBHost    string
@@ -24,7 +25,7 @@ type Config struct {
 	KeyPrefix  string
 	DebugMode  bool
 
-	// Content limits (must match PHP exactly)
+	// Content limits
 	MaxContentSize       int
 	MaxDescriptionLength int
 	MaxTitleLength       int
@@ -36,16 +37,16 @@ type Config struct {
 	MaxLimit     int
 	MaxOffset    int
 
-	// Rate limiting (must match PHP RateLimiter defaults exactly)
+	// Rate limiting
 	RateLimits map[string]RateLimitConfig
 
 	// HTTP server
 	ListenAddr    string
 	SessionSecret string
 
-	// PostAPI HTTP client timeouts (matches CURLOPT)
-	PostAPITimeout        int // seconds (CURLOPT_TIMEOUT = 10)
-	PostAPIConnectTimeout int // seconds (CURLOPT_CONNECTTIMEOUT = 5)
+	// PostAPI HTTP client timeouts
+	PostAPITimeout        int // seconds (total request timeout)
+	PostAPIConnectTimeout int // seconds (connect timeout)
 }
 
 type RateLimitConfig struct {
@@ -99,11 +100,11 @@ func Load() (*Config, error) {
 
 func (c *Config) DatabaseURL() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		c.DBUser, c.DBPass, c.DBHost, c.DBPort, c.DBName, c.DBSSLMode)
+		url.QueryEscape(c.DBUser), url.QueryEscape(c.DBPass),
+		c.DBHost, c.DBPort, c.DBName, c.DBSSLMode)
 }
 
 func defaultRateLimits() map[string]RateLimitConfig {
-	// Must match PHP RateLimiter::$limits exactly
 	t := true
 	return map[string]RateLimitConfig{
 		"register":    {Window: 3600, Limit: 5, Enabled: &t},

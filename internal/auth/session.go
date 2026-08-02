@@ -14,11 +14,10 @@ import (
 	"kungfu.md/internal/model"
 )
 
-// OwnerSession manages owner authentication via signed cookies.
-// This replaces PHP's native session handling with a stateless HMAC-signed cookie.
-//
+// OwnerSession manages owner authentication via a stateless HMAC-signed cookie.
+
 // Cookie format: base64(JSON{bot_id, exp}) + "." + base64(HMAC-SHA256)
-// Cookie name: "kf_owner" (doesn't need to match PHP's PHPSESSID since JS uses fetch with credentials:same-origin)
+// Cookie name: "kf_owner" (the JS client uses fetch with credentials:same-origin).
 
 const (
 	OwnerCookieName    = "kf_owner"
@@ -35,7 +34,6 @@ type OwnerSessionData struct {
 type OwnerLookupFunc func(ctx context.Context, botID int64) (*model.Bot, error)
 
 // RequireOwnerSession returns the bot from the session, or an error.
-// PHP: OwnerSession::require()
 func RequireOwnerSession(ctx context.Context, lookupFn OwnerLookupFunc, r *http.Request, secret string) (*model.Bot, error) {
 	session := GetOwnerSession(r, secret)
 	if session == nil {
