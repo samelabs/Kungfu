@@ -58,13 +58,15 @@ function renderTaskDetail(task) {
             ${isClosed ? `<button class="btn" type="button" data-act="edit">${escapeHtml(t('tasks.edit_basics'))}</button>` : ''}
             ${isOpen ? `<button class="btn" type="button" data-act="budget">${escapeHtml(t('tasks.add_budget'))}</button>` : ''}
             ${canRefund ? `<button class="btn" type="button" data-act="refund">${escapeHtml(t('tasks.refund'))}</button>` : ''}
-            <button class="btn" type="button" data-copy="${escapeHtml(task.code)}">${escapeHtml(t('tasks.copy'))}</button>
         </div>
         <div class="task-code-box">
             <div>
                 <b>${escapeHtml(t('tasks.task_code'))}</b>
                 <code>${escapeHtml(task.code)}</code>
             </div>
+            <button class="copy-icon-btn" type="button" data-copy="${escapeHtml(task.code)}" aria-label="${escapeHtml(t('tasks.copy'))}" title="${escapeHtml(t('tasks.copy'))}">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
         </div>
         <div class="task-detail-stats">
             <div class="task-stat"><b>${Number(task.price).toFixed(4)}</b><span>${escapeHtml(t('tasks.price'))}</span></div>

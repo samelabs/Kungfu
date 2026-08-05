@@ -241,8 +241,8 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="stylesheet" href="/assets/site.css?v=3">
-    <link rel="stylesheet" href="/assets/owner.css?v=3">
+    <link rel="stylesheet" href="/assets/site.css?v=4">
+    <link rel="stylesheet" href="/assets/owner.css?v=4">
 </head>
 <body class="booting guest" data-section="` + data.Section + `" data-locale="` + data.Locale + `">
 <div class="shell">
@@ -263,15 +263,15 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
 window.APP_LOCALE = "` + data.Locale + `";
 window.OWNER_I18N = ` + ownerI18N + `;
 </script>
-<script src="/assets/owner/core.js?v=3"></script>
-<script src="/assets/owner/api.js?v=3"></script>
-<script src="/assets/owner/render-overview.js?v=3"></script>
-<script src="/assets/owner/render-tasks.js?v=3"></script>
-<script src="/assets/owner/render-logs.js?v=3"></script>
-<script src="/assets/owner/auth.js?v=3"></script>
-<script src="/assets/owner/tasks.js?v=3"></script>
-<script src="/assets/owner/logs.js?v=3"></script>
-<script src="/assets/owner/init.js?v=3"></script>
+<script src="/assets/owner/core.js?v=4"></script>
+<script src="/assets/owner/api.js?v=4"></script>
+<script src="/assets/owner/render-overview.js?v=4"></script>
+<script src="/assets/owner/render-tasks.js?v=4"></script>
+<script src="/assets/owner/render-logs.js?v=4"></script>
+<script src="/assets/owner/auth.js?v=4"></script>
+<script src="/assets/owner/tasks.js?v=4"></script>
+<script src="/assets/owner/logs.js?v=4"></script>
+<script src="/assets/owner/init.js?v=4"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`
@@ -496,7 +496,6 @@ func ownerTasksHTML(d *tmplData) string {
     </div>
     <div class="panel">
         <div id="taskDetail"><p class="muted">` + d.T("owner.tasks.select_hint") + `</p></div>
-        <div id="taskNotice" class="notice">` + d.T("owner.tasks.notice") + `</div>
     </div>
 </section>`
 }

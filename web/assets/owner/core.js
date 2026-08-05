@@ -72,18 +72,40 @@ function payload(form) {
     for (const [key, value] of new FormData(form).entries()) data[key] = value;
     return data;
 }
+let _toastTimer = null;
 function setNotice(id, data, kind = '') {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (!el.dataset.a11yInit) {
-        el.setAttribute('role', 'status');
-        el.setAttribute('aria-live', 'polite');
-        el.dataset.a11yInit = '1';
+    const text = noticeText(data);
+    // Empty = hide inline notice + dismiss toast
+    const inline = document.getElementById(id);
+    if (inline) {
+        if (!inline.dataset.a11yInit) {
+            inline.setAttribute('role', 'status');
+            inline.setAttribute('aria-live', 'polite');
+            inline.dataset.a11yInit = '1';
+        }
+        inline.classList.toggle('error', kind === 'error');
+        inline.classList.toggle('ok', kind === 'ok');
+        inline.classList.toggle('pending', kind !== 'error' && kind !== 'ok' && text);
+        inline.textContent = text;
     }
-    el.classList.toggle('error', kind === 'error');
-    el.classList.toggle('ok', kind === 'ok');
-    el.classList.toggle('pending', kind !== 'error' && kind !== 'ok');
-    el.textContent = noticeText(data);
+    // Non-empty with kind = show fixed toast (for task actions feedback)
+    if (text && (kind === 'ok' || kind === 'error')) {
+        showToast(text, kind);
+    }
+}
+function showToast(text, kind = 'ok') {
+    let toast = qs('#globalToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'globalToast';
+        toast.className = 'global-toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = text;
+    toast.className = 'global-toast ' + kind;
+    toast.classList.add('show');
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => toast.classList.remove('show'), 2500);
 }
 function noticeText(data) {
     if (typeof data === 'string') return data;
