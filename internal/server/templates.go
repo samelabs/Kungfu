@@ -496,14 +496,6 @@ func ownerTasksHTML(d *tmplData) string {
     </div>
     <div class="panel">
         <div id="taskDetail"><p class="muted">` + d.T("owner.tasks.select_hint") + `</p></div>
-        <form id="budgetForm" class="detail-box" hidden>
-            <h3>` + d.T("owner.tasks.add_budget") + `</h3>
-            <label>` + d.T("owner.tasks.amount") + `</label>
-            <input name="amount" type="number" step="0.0001" min="0" required>
-            <div class="actions">
-                <button class="btn primary" type="submit">` + d.T("owner.tasks.add_budget_submit") + `</button>
-            </div>
-        </form>
         <div id="taskNotice" class="notice">` + d.T("owner.tasks.notice") + `</div>
     </div>
 </section>`
