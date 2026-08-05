@@ -473,7 +473,7 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      grid-template-columns: minmax(0, 1fr) auto;
      gap: 10px;
      align-items: center;
-     margin: 10px 0 12px;
+     margin: 16px 0;
      padding: 12px;
      border: 1px solid var(--line);
      border-radius: var(--radius-md);
@@ -522,9 +522,23 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
  .detail-box {
      border: 1px solid var(--line);
      border-radius: var(--radius-md);
-     padding: 13px;
+     padding: 14px 16px;
      background: rgba(255, 252, 247, .88);
      margin-top: 12px;
+ }
+ .detail-box + .detail-box { margin-top: 10px; }
+ .detail-box h3 {
+     margin: 0 0 6px;
+     font-size: 12px;
+     font-weight: 700;
+     text-transform: uppercase;
+     letter-spacing: .04em;
+     color: var(--muted);
+ }
+ .detail-box p {
+     margin: 0;
+     line-height: 1.55;
+     overflow-wrap: anywhere;
  }
 .logs-filters {
     margin-top: 10px;
@@ -651,15 +665,17 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin: 0 0 16px;
-    padding-bottom: 14px;
+    margin: 0 0 4px;
+    padding-bottom: 16px;
     border-bottom: 1px solid var(--line);
 }
+#taskDetail > .detail-box:last-child { margin-bottom: 0; }
+#taskNotice { margin-top: 14px; }
 .task-detail-stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
-    margin: 12px 0;
+    margin: 16px 0;
 }
 .task-stat {
     text-align: center;

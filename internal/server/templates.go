@@ -241,8 +241,8 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="stylesheet" href="/assets/site.css">
-    <link rel="stylesheet" href="/assets/owner.css">
+    <link rel="stylesheet" href="/assets/site.css?v=2">
+    <link rel="stylesheet" href="/assets/owner.css?v=2">
 </head>
 <body class="booting guest" data-section="` + data.Section + `" data-locale="` + data.Locale + `">
 <div class="shell">
