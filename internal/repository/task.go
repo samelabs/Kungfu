@@ -152,10 +152,7 @@ func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]
 	var out []TaskWithStats
 	for rows.Next() {
 		var tw TaskWithStats
-		if err := scanTask(&tw.Task, rows); err != nil {
-			return nil, err
-		}
-		if err := rows.Scan(&tw.LogCount, &tw.SuccessCount, &tw.FailureCount); err != nil {
+		if err := scanTaskWithStats(&tw, rows); err != nil {
 			return nil, err
 		}
 		out = append(out, tw)
@@ -425,6 +422,54 @@ func GenerateUniqueTaskCode(ctx context.Context, q pg.Querier) (string, error) {
 // rowScanner is satisfied by both pgx.Row and pgx.Rows.
 type rowScanner interface {
 	Scan(dest ...any) error
+}
+
+// scanTaskWithStats scans all 19 columns (16 task + 3 stats) in a single call.
+// pgx Rows.Scan can only be called once per row, so this replaces the broken
+// two-step scan (scanTask + rows.Scan) that caused "Error listing tasks".
+func scanTaskWithStats(tw *TaskWithStats, s rowScanner) error {
+	var (
+		botID      int32
+		budget     pgtype.Numeric
+		price      pgtype.Numeric
+		createdAt  time.Time
+		updatedAt  time.Time
+		reviewedAt *time.Time
+		openedAt   *time.Time
+		closedAt   *time.Time
+	)
+	if err := s.Scan(
+		&tw.ID, &tw.Code, &botID, &tw.Title, &tw.Requirements, &tw.PostAPI,
+		&budget, &price, &tw.Pinned, &tw.Status, &tw.ReviewNote,
+		&createdAt, &updatedAt, &reviewedAt, &openedAt, &closedAt,
+		&tw.LogCount, &tw.SuccessCount, &tw.FailureCount,
+	); err != nil {
+		return err
+	}
+
+	tw.BotID = int64(botID)
+	if bf, err := budget.Float64Value(); err == nil {
+		tw.Budget = bf.Float64
+	}
+	if pf, err := price.Float64Value(); err == nil {
+		tw.Price = pf.Float64
+	}
+	tw.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
+	tw.UpdatedAt = updatedAt.Format("2006-01-02 15:04:05")
+	if closedAt != nil {
+		s := closedAt.Format("2006-01-02 15:04:05")
+		tw.ClosedAt = &s
+	}
+	if reviewedAt != nil {
+		s := reviewedAt.Format("2006-01-02 15:04:05")
+		tw.ReviewedAt = &s
+	}
+	if openedAt != nil {
+		s := openedAt.Format("2006-01-02 15:04:05")
+		tw.OpenedAt = &s
+	}
+
+	return nil
 }
 
 // scanTask scans all 16 columns of tb_tasks into *model.Task.

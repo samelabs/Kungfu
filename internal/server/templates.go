@@ -485,7 +485,7 @@ func ownerTasksHTML(d *tmplData) string {
             <p>` + d.T("owner.tasks.summary") + `</p>
         </div>
         <div class="section-head-actions">
-            <a class="btn primary" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks/new") + `">` + d.T("owner.tasks.new_task") + `</a>
+            <button class="btn primary" type="button" id="newTaskBtn">` + d.T("owner.tasks.new_task") + `</button>
         </div>
     </div>
 </section>

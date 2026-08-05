@@ -632,4 +632,74 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      .section-head-actions > a.btn {
          width: 100%;
      }
- }
+}
+
+/* ── Task detail (refactored) ─────────────────────────────── */
+.task-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+.task-detail-head h2 {
+    margin: 0;
+    font-size: 19px;
+    overflow-wrap: anywhere;
+}
+.task-detail-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+}
+.task-stat {
+    text-align: center;
+    padding: 10px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 252, 247, .6);
+}
+.task-stat b {
+    display: block;
+    font-size: 16px;
+    color: #334a45;
+}
+.task-stat span {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.task-detail-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 14px 0 6px;
+}
+
+/* ── Modal (inline create) ────────────────────────────────── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: rgba(23, 21, 18, .45);
+    padding: 40px 16px;
+    overflow-y: auto;
+}
+.modal-panel {
+    width: 100%;
+    max-width: 560px;
+    background: #fffcf7;
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 24px 60px rgba(23, 21, 18, .22);
+}
+.modal-panel h2 {
+    margin: 0 0 16px;
+    font-size: 20px;
+    color: #334a45;
+}
