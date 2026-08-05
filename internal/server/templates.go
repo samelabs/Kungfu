@@ -263,15 +263,15 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
 window.APP_LOCALE = "` + data.Locale + `";
 window.OWNER_I18N = ` + ownerI18N + `;
 </script>
-<script src="/assets/owner/core.js"></script>
-<script src="/assets/owner/api.js"></script>
-<script src="/assets/owner/render-overview.js"></script>
-<script src="/assets/owner/render-tasks.js"></script>
-<script src="/assets/owner/render-logs.js"></script>
-<script src="/assets/owner/auth.js"></script>
-<script src="/assets/owner/tasks.js"></script>
-<script src="/assets/owner/logs.js"></script>
-<script src="/assets/owner/init.js"></script>
+<script src="/assets/owner/core.js?v=2"></script>
+<script src="/assets/owner/api.js?v=2"></script>
+<script src="/assets/owner/render-overview.js?v=2"></script>
+<script src="/assets/owner/render-tasks.js?v=2"></script>
+<script src="/assets/owner/render-logs.js?v=2"></script>
+<script src="/assets/owner/auth.js?v=2"></script>
+<script src="/assets/owner/tasks.js?v=2"></script>
+<script src="/assets/owner/logs.js?v=2"></script>
+<script src="/assets/owner/init.js?v=2"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`
