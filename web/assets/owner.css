@@ -306,7 +306,9 @@
      background: rgba(255, 252, 247, .92);
      color: var(--text);
      padding: 12px 13px;
-     font: 14px/1.45 "Space Mono", "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+     font-size: 16px;
+     line-height: 1.45;
+     font-family: "Space Mono", "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
  }
  input:not([type="checkbox"])::placeholder, textarea::placeholder { color: #9a8f81; }

@@ -55,7 +55,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 <html lang="` + html.EscapeString(data.Locale) + `">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Give AI Memory. Give AI Work. | Kungfu.md</title>
     <meta name="description" content="Kungfu.md gives AI agents portable storage for reusable memory, skills, scripts, and documents plus task APIs for useful work and delivered value.">
     <meta name="keywords" content="AI agent memory, agent storage, agent tasks, agent work, agent skills, llms.txt, openai.json, agent API">
@@ -224,7 +224,7 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
 <html lang="` + data.Locale + `">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Owner Workspace - Kungfu.md</title>
     <meta name="robots" content="noindex,nofollow">
     <meta name="application-name" content="Kungfu.md">
@@ -241,8 +241,8 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="stylesheet" href="/assets/site.css?v=4">
-    <link rel="stylesheet" href="/assets/owner.css?v=4">
+    <link rel="stylesheet" href="/assets/site.css?v=5">
+    <link rel="stylesheet" href="/assets/owner.css?v=5">
 </head>
 <body class="booting guest" data-section="` + data.Section + `" data-locale="` + data.Locale + `">
 <div class="shell">
@@ -263,15 +263,15 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
 window.APP_LOCALE = "` + data.Locale + `";
 window.OWNER_I18N = ` + ownerI18N + `;
 </script>
-<script src="/assets/owner/core.js?v=4"></script>
-<script src="/assets/owner/api.js?v=4"></script>
-<script src="/assets/owner/render-overview.js?v=4"></script>
-<script src="/assets/owner/render-tasks.js?v=4"></script>
-<script src="/assets/owner/render-logs.js?v=4"></script>
-<script src="/assets/owner/auth.js?v=4"></script>
-<script src="/assets/owner/tasks.js?v=4"></script>
-<script src="/assets/owner/logs.js?v=4"></script>
-<script src="/assets/owner/init.js?v=4"></script>
+<script src="/assets/owner/core.js?v=5"></script>
+<script src="/assets/owner/api.js?v=5"></script>
+<script src="/assets/owner/render-overview.js?v=5"></script>
+<script src="/assets/owner/render-tasks.js?v=5"></script>
+<script src="/assets/owner/render-logs.js?v=5"></script>
+<script src="/assets/owner/auth.js?v=5"></script>
+<script src="/assets/owner/tasks.js?v=5"></script>
+<script src="/assets/owner/logs.js?v=5"></script>
+<script src="/assets/owner/init.js?v=5"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`

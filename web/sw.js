@@ -1,10 +1,13 @@
-const SW_VERSION = 'kungfu-pwa-v2';
+const SW_VERSION = 'kungfu-pwa-v3';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
 
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
+  '/assets/site.css',
+  '/assets/home.css',
+  '/assets/owner.css',
   '/assets/icons/app-icon.svg',
   '/assets/icons/app-icon-192.png',
   '/assets/icons/app-icon-512.png',

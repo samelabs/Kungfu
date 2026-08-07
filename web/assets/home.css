@@ -24,10 +24,11 @@
     --shadow: 0 24px 80px rgba(46, 79, 73, .12);
     --shadow-soft: 0 14px 34px rgba(46, 79, 73, .07);
 }
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overscroll-behavior-y: contain; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
     min-height: 100vh;
+    overflow-x: clip;
     font-family: "Space Grotesk", "Avenir Next", "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
     background:
         radial-gradient(circle at 8% -12%, rgba(47, 124, 115, .15), transparent 32rem),
