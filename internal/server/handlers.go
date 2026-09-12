@@ -339,12 +339,13 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleOwnerSessionLogout(w http.ResponseWriter, r *http.Request) {
-	bot, err := s.requireOwnerAuth(r)
-	if err != nil {
-		handleAppError(w, err)
-		return
+	// Logout must always succeed and clear the cookie, regardless of session
+	// validity — a stale/expired session must not block the client from
+	// removing its local login cookie. Audit owner_logout only when a valid
+	// owner identity can be resolved from the session.
+	if bot, err := s.requireOwnerAuth(r); err == nil && bot != nil {
+		service.OwnerLogout(r.Context(), s.Pool, bot.ID)
 	}
-	service.OwnerLogout(r.Context(), s.Pool, bot.ID)
 	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	clearOwnerCookie(w, isHTTPS)
 	SuccessResponse(w, map[string]interface{}{}, "Owner logout successful")
