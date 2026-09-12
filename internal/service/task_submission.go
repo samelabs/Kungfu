@@ -23,39 +23,60 @@ type TaskSubmitResult struct {
 }
 
 // Submit processes an agent task submission.
-
+//
+// The service owns the task business authority: it loads the task by code,
+// enforces the initial open-state gate, and only then runs the delivery flow.
+//
 // Flow:
-// 1. TaskCheck: validate postapi/price/budget
-// 2. POST to owner's API (10s timeout, no redirect following)
-// 3. If POST failed → log + return 424
-// 4. If POST succeeded → settle: decrement budget + award credit (in transaction)
-// 5. Log task event + operation log
-func Submit(ctx context.Context, pool *pg.Pool, task map[string]interface{}, botID int64, input map[string]interface{}) (*TaskSubmitResult, error) {
-	// Extract task fields
-	postapi := strings.TrimSpace(getString(task, "postapi"))
-	price := getFloat(task, "price")
-	taskCode := getString(task, "code")
+//  0. Load Task by code: DB error -> 500 INTERNAL_ERROR; missing -> 404 NOT_FOUND;
+//     not open -> 409 TASK_NOT_OPEN
+//  1. TaskCheck: validate postapi/price/budget
+//  2. POST to owner's API (10s timeout, no redirect following)
+//  3. If POST failed → log + return 424
+//  4. If POST succeeded → settle: decrement budget + award credit (in transaction)
+//  5. Log task event + operation log
+func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, input map[string]interface{}) (*TaskSubmitResult, error) {
+	// 0. Load Task — the service is the business authority for submit.
+	task, err := repository.FindTaskByCode(ctx, pool, taskCode)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if task == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Task not found")
+	}
+	if task.Status != "open" {
+		return nil, errors.New(409, "TASK_NOT_OPEN", "Task is not open for submissions")
+	}
+
+	// Task fields from the freshly queried row.
+	postapi := ""
+	if task.PostAPI != nil {
+		postapi = *task.PostAPI
+	}
+	postapi = strings.TrimSpace(postapi)
+	price := task.Price
+	code := task.Code
 
 	// 1. TaskCheck
 	checkErr := RunTaskCheck(postapi, price, func() *TaskCheckError {
-		return ensureBudgetAvailable(ctx, pool, taskCode, price)
+		return ensureBudgetAvailable(ctx, pool, code, price)
 	})
 
 	if checkErr != nil {
 		// Log the check failure
-		insertTaskEventLog(ctx, pool, taskCode, botID, "kfcheck", nil, false, nil, nil, checkErr.Rule.Code, checkErr.Rule.LogMsg)
+		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, checkErr.Rule.Code, checkErr.Rule.LogMsg)
 		return nil, checkErr.ToAppError()
 	}
 
 	// 2. POST to owner's API
-	payload := delivery.BuildPayload(taskCode, input)
+	payload := delivery.BuildPayload(code, input)
 	payloadBytes, _ := json.Marshal(payload)
 
 	postResult := delivery.PostJSON(postapi, payloadBytes, delivery.AgentSubmitErrorConfig())
 
 	if !postResult.Success {
 		// Log failure
-		insertTaskEventLog(ctx, pool, taskCode, botID, "post_failed", nil, false,
+		insertTaskEventLog(ctx, pool, code, botID, "post_failed", nil, false,
 			postResult.ResponseCode, nil, postResult.ErrorCode, "")
 
 		return nil, errors.NewWithDetails(424,
@@ -70,7 +91,7 @@ func Submit(ctx context.Context, pool *pg.Pool, task map[string]interface{}, bot
 	}
 
 	// 4. Settle: decrement budget + award credit
-	balance, settleErr := settleDeliveredSubmission(ctx, pool, taskCode, botID, price)
+	balance, settleErr := settleDeliveredSubmission(ctx, pool, code, botID, price)
 	if settleErr != nil {
 		return nil, settleErr
 	}
@@ -81,7 +102,7 @@ func Submit(ctx context.Context, pool *pg.Pool, task map[string]interface{}, bot
 		truncated := truncateForLog(*postResult.ResponseBody)
 		respBodyForLog = &truncated
 	}
-	insertTaskEventLog(ctx, pool, taskCode, botID, "post_succeeded", nil, true,
+	insertTaskEventLog(ctx, pool, code, botID, "post_succeeded", nil, true,
 		postResult.ResponseCode, respBodyForLog, "", "")
 
 	// Operation log
@@ -89,14 +110,14 @@ func Submit(ctx context.Context, pool *pg.Pool, task map[string]interface{}, bot
 	if postResult.ResponseCode != nil {
 		respCodeVal = *postResult.ResponseCode
 	}
-	logOperation(ctx, pool, &botID, "task_submit", strPtr("task"), &taskCode,
+	logOperation(ctx, pool, &botID, "task_submit", strPtr("task"), &code,
 		map[string]interface{}{
 			"reward":        price,
 			"response_code": respCodeVal,
 		}, true)
 
 	return &TaskSubmitResult{
-		TaskCode: taskCode,
+		TaskCode: code,
 		Post: map[string]interface{}{
 			"delivered":     true,
 			"response_code": derefInt(postResult.ResponseCode),

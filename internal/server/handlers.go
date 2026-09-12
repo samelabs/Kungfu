@@ -9,8 +9,6 @@ import (
 	authImpl "kungfu.md/internal/auth"
 	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
-	"kungfu.md/internal/model"
-	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 )
 
@@ -246,18 +244,7 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := repository.FindTaskByCode(r.Context(), s.Pool, code)
-	if err != nil || task == nil {
-		ErrorResponse(w, 404, "NOT_FOUND", "Task not found", nil)
-		return
-	}
-
-	if task.Status != "open" {
-		ErrorResponse(w, 409, "TASK_NOT_OPEN", "Task is not open for submissions", nil)
-		return
-	}
-
-	result, err := service.Submit(r.Context(), s.Pool, taskToMap(task), bot.ID, input)
+	result, err := service.Submit(r.Context(), s.Pool, code, bot.ID, input)
 	if err != nil {
 		handleAppError(w, err)
 		return
@@ -713,42 +700,6 @@ func (s *Server) handleOwnerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	SuccessResponse(w, result, "")
-}
-
-// Helper: taskToMap converts model.Task to map for service.Submit
-func taskToMap(t *model.Task) map[string]interface{} {
-	if t == nil {
-		return make(map[string]interface{})
-	}
-	m := map[string]interface{}{
-		"id":           t.ID,
-		"code":         t.Code,
-		"bot_id":       t.BotID,
-		"title":        t.Title,
-		"requirements": t.Requirements,
-		"budget":       t.Budget,
-		"price":        t.Price,
-		"pinned":       t.Pinned,
-		"status":       t.Status,
-		"created_at":   t.CreatedAt,
-		"updated_at":   t.UpdatedAt,
-	}
-	// PostAPI is *string — dereference so getString works
-	if t.PostAPI != nil {
-		m["postapi"] = *t.PostAPI
-	} else {
-		m["postapi"] = ""
-	}
-	if t.ReviewNote != nil {
-		m["review_note"] = *t.ReviewNote
-	}
-	if t.OpenedAt != nil {
-		m["opened_at"] = *t.OpenedAt
-	}
-	if t.ClosedAt != nil {
-		m["closed_at"] = *t.ClosedAt
-	}
-	return m
 }
 
 // handleAppError sends the appropriate error response for an AppError.
