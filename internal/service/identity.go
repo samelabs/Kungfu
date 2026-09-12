@@ -91,23 +91,6 @@ func OwnerLogin(ctx context.Context, q pg.Querier, name, password string) (*Owne
 	}, nil
 }
 
-// OwnerCurrent returns the current owner session for a given botID.
-// In Go, the botID is resolved by the session middleware before calling this.
-func OwnerCurrent(ctx context.Context, pool *pg.Pool, botID int64) (*OwnerSessionResult, error) {
-	bot, err := repository.FindOwnerSessionBotByID(ctx, pool, botID)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving session")
-	}
-	if bot == nil {
-		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
-	}
-	return &OwnerSessionResult{
-		BotID:   bot.ID,
-		BotName: bot.BotName,
-		Status:  bot.Status,
-	}, nil
-}
-
 // OwnerLogout invalidates the owner session.
 // In Go, session invalidation is handled at the HTTP layer (clear cookie/token).
 // This is a no-op placeholder for service-layer symmetry.
@@ -122,8 +105,10 @@ func OwnerLogout(ctx context.Context, q pg.Querier, botID int64) map[string]inte
 
 // AccountOverview formats log entries for the owner dashboard.
 // Returns the owner's account summary with kungfu/task stats.
-func AccountOverview(ctx context.Context, pool *pg.Pool, botID int64) (map[string]interface{}, error) {
-	bot, err := repository.FindActiveBotAccountByID(ctx, pool, botID)
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability; any stats
+// query failure fails the whole overview (500) instead of reporting fake 0s.
+func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string]interface{}, error) {
+	bot, err := repository.FindActiveBotAccountByID(ctx, q, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
 	}
@@ -131,8 +116,14 @@ func AccountOverview(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 		return nil, errors.New(404, "NOT_FOUND", "Bot not found")
 	}
 
-	stats, _ := repository.KungfuStatsByBotID(ctx, pool, botID)
-	platformTaskCount, _ := repository.PlatformTaskCountByBotID(ctx, pool, botID)
+	stats, err := repository.KungfuStatsByBotID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	platformTaskCount, err := repository.PlatformTaskCountByBotID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
 
 	return map[string]interface{}{
 		"bot_id":   botID,

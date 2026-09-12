@@ -26,6 +26,11 @@ type RegistrationResult struct {
 }
 
 // Register creates a new bot account.
+// nameExistsProbe is the seam the A6 regression tests use to inject a
+// failing name-existence query. Production always uses repository.BotNameExists.
+var nameExistsProbe = repository.BotNameExists
+
+// Register creates a new bot account.
 func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*RegistrationResult, error) {
 	name = strings.TrimSpace(name)
 
@@ -49,8 +54,11 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 		return nil, errors.New(400, "SENSITIVE_CONTENT", "password must not contain API keys")
 	}
 
-	// Check name existence
-	exists, _ := repository.BotNameExists(ctx, pool, name)
+	// Check name existence (DB failure must not masquerade as "name free")
+	exists, err := nameExistsProbe(ctx, pool, name)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
 	if exists {
 		return nil, errors.NewWithDetails(409, "NAME_TAKEN",
 			"Bot name '"+name+"' is already taken",

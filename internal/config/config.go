@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -100,8 +98,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DB_PASS environment variable is required")
 	}
 	if cfg.SessionSecret == "" {
-		// Generate a random one at startup if not set
-		cfg.SessionSecret = generateRandomHex(32)
+		return nil, fmt.Errorf("SESSION_SECRET environment variable is required")
 	}
 
 	return cfg, nil
@@ -140,12 +137,6 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
-}
-
-func generateRandomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func parseCIDRList(s string) []string {
