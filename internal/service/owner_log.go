@@ -35,7 +35,10 @@ func GetOwnerLogs(ctx context.Context, pool *pg.Pool, botID int64, logType strin
 
 // getCreditLogs returns credit transaction logs.
 func getCreditLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int) (map[string]interface{}, error) {
-	total, _ := repository.CountCreditLogs(ctx, pool, botID)
+	total, err := repository.CountCreditLogs(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing credit logs")
+	}
 	balance, balErr := credits.Balance(ctx, pool, botID)
 	if balErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing credit logs")
@@ -60,7 +63,10 @@ func getCreditLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSi
 
 // getAgentLogs returns operation (agent) logs.
 func getAgentLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int) (map[string]interface{}, error) {
-	total, _ := repository.CountAgentLogs(ctx, pool, botID)
+	total, err := repository.CountAgentLogs(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing agent logs")
+	}
 	rows, err := repository.ListAgentLogs(ctx, pool, botID, pageSize, offset)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing agent logs")
@@ -80,9 +86,15 @@ func getAgentLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSiz
 
 // getTaskLogs returns task delivery logs with optional task_code filter.
 func getTaskLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int, taskCode string) (map[string]interface{}, error) {
-	total, _ := repository.CountTaskLogs(ctx, pool, botID, taskCode)
+	total, err := repository.CountTaskLogs(ctx, pool, botID, taskCode)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing task logs")
+	}
 
-	tasks, _ := repository.ListOwnerTasksForFilter(ctx, pool, botID)
+	tasks, err := repository.ListOwnerTasksForFilter(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing task logs")
+	}
 	taskFilters := make([]map[string]interface{}, 0, len(tasks))
 	for i := range tasks {
 		taskFilters = append(taskFilters, map[string]interface{}{

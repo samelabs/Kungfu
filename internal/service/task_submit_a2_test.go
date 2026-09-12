@@ -44,9 +44,18 @@ func a2TestBot(t *testing.T, pool *pg.Pool) int64 {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id = $1`, botID)
+		a2CleanupBotArtifacts(pool, botID)
 	})
 	return botID
+}
+
+// a2CleanupBotArtifacts removes the bot and its operation logs (tb_logs rows
+// where bot_id is us; tb_logs.bot_id is ON DELETE SET NULL so bot deletion
+// alone leaves them behind).
+func a2CleanupBotArtifacts(pool *pg.Pool, botID int64) {
+	ctx := context.Background()
+	_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE bot_id = $1`, botID)
+	_, _ = pool.Exec(ctx, `DELETE FROM tb_bots WHERE id = $1`, botID)
 }
 
 // a2TestTask inserts a task and cleans it up.
@@ -61,7 +70,10 @@ func a2TestTask(t *testing.T, pool *pg.Pool, botID int64, status string, postapi
 		t.Fatalf("seed task: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_tasks WHERE code = $1`, code)
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)
 	})
 	return code
 }

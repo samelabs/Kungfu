@@ -12,6 +12,13 @@ import (
 	"kungfu.md/internal/service"
 )
 
+// Kungfu list pagination defaults — server-owned (no global config coupling).
+const (
+	defaultKungfuListLimit = 50
+	maxKungfuListLimit     = 100
+	maxKungfuListOffset    = 10000
+)
+
 // -- Kungfu Handlers --
 
 func (s *Server) handleKungfuList(w http.ResponseWriter, r *http.Request) {
@@ -19,8 +26,8 @@ func (s *Server) handleKungfuList(w http.ResponseWriter, r *http.Request) {
 		MethodNotAllowed(w)
 		return
 	}
-	limit := clampInt(getQueryInt(r, "limit", 50), 1, 100)
-	offset := clampInt(getQueryInt(r, "offset", 0), 0, 10000)
+	limit := clampInt(getQueryInt(r, "limit", defaultKungfuListLimit), 1, maxKungfuListLimit)
+	offset := clampInt(getQueryInt(r, "offset", 0), 0, maxKungfuListOffset)
 
 	bot, err := s.requireBotAuth(r)
 	if err != nil {

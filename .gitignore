@@ -1,6 +1,6 @@
-# Binary
+# Binary (build output at repo root only; must not match internal/server/)
 kungfu-server
-server
+/server
 *.exe
 
 # Environment / secrets

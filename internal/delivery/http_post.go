@@ -37,15 +37,24 @@ type ErrorConfig struct {
 	RejectedMessage      string
 }
 
+// PostAPI outbound timeouts — this package is the single owner of these
+// values (10s total request, 5s connect).
+const (
+	// postAPIRequestTimeout bounds a whole outbound PostAPI request.
+	postAPIRequestTimeout = 10 * time.Second
+	// postAPIConnectTimeout bounds establishing the TCP connection.
+	postAPIConnectTimeout = 5 * time.Second
+)
+
 // HTTPClient is a shared client with proper timeouts and no redirect following.
 var sharedClient *http.Client
 
 func init() {
 	sharedClient = &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: postAPIRequestTimeout,
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
-				Timeout: 5 * time.Second,
+				Timeout: postAPIConnectTimeout,
 			}).DialContext,
 			MaxIdleConns:    100,
 			IdleConnTimeout: 90 * time.Second,

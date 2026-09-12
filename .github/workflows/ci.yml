@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kungfu_ci
+          POSTGRES_PASSWORD: ci_pw
+          POSTGRES_DB: kungfu_md
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kungfu_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      KF_TEST_DATABASE_URL: postgres://kungfu_ci:ci_pw@127.0.0.1:5432/kungfu_md
+      DB_PASS: ci_pw
+      SESSION_SECRET: ci-session-secret-not-for-production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Initialize test database from migrations
+        run: |
+          psql "$KF_TEST_DATABASE_URL" -f migrations/001_schema.sql
+          psql "$KF_TEST_DATABASE_URL" -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO kungfu_ci; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO kungfu_ci;"
+
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (with real PostgreSQL integration)
+        run: go test ./... -v 2>&1 | tee /tmp/test-output.log
+
+      - name: Guard integration tests must not skip
+        run: |
+          if grep -q "KF_TEST_DATABASE_URL not set" /tmp/test-output.log; then
+            echo "Integration tests skipped - KF_TEST_DATABASE_URL must be set in CI."
+            exit 1
+          fi
+
+      - name: go build
+        run: go build ./...

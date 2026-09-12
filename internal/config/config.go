@@ -33,10 +33,7 @@ type Config struct {
 	MaxTags              int
 	MaxTagLength         int
 
-	// Pagination
-	DefaultLimit int
-	MaxLimit     int
-	MaxOffset    int
+	MaxOffset int
 
 	// Rate limiting
 	RateLimits map[string]RateLimitConfig
@@ -46,8 +43,6 @@ type Config struct {
 	SessionSecret string
 
 	// PostAPI HTTP client timeouts
-	PostAPITimeout        int // seconds (total request timeout)
-	PostAPIConnectTimeout int // seconds (connect timeout)
 
 	// Trusted proxy CIDRs for client IP extraction (comma-separated env var)
 	// When set, X-Forwarded-For is only honored from these IPs.
@@ -79,15 +74,10 @@ func Load() (*Config, error) {
 		MaxTags:              10,
 		MaxTagLength:         32,
 
-		DefaultLimit: 10,
-		MaxLimit:     50,
-		MaxOffset:    10000,
+		MaxOffset: 10000,
 
 		ListenAddr:    envStr("LISTEN_ADDR", "127.0.0.1:8090"),
 		SessionSecret: envStr("SESSION_SECRET", ""),
-
-		PostAPITimeout:        10,
-		PostAPIConnectTimeout: 5,
 
 		TrustedProxyCIDRs: parseCIDRList(envStr("TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")),
 

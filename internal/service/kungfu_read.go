@@ -19,7 +19,10 @@ const MinOpenBudget = 1000.0
 // ListKungfusForBot lists a bot's kungfu entries with the balance composed
 // from the credits domain. Accepts pg.Querier (satisfied by *pg.Pool).
 func ListKungfusForBot(ctx context.Context, q pg.Querier, botID int64, limit, offset int) (map[string]interface{}, error) {
-	total, _ := repository.CountActiveKungfusByBotID(ctx, q, botID)
+	total, err := repository.CountActiveKungfusByBotID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing kungfus")
+	}
 	rows, err := repository.ListActiveKungfusByBotID(ctx, q, botID, limit, offset)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing kungfus")

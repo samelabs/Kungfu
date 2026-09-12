@@ -24,7 +24,7 @@ type LogInsertData struct {
 
 // InsertOperationLog inserts an operation log entry into tb_logs.
 // It masks sensitive data (API keys) and truncates long fields to 1000 chars.
-func InsertOperationLog(ctx context.Context, q pg.Querier, data LogInsertData) {
+func InsertOperationLog(ctx context.Context, q pg.Querier, data LogInsertData) error {
 	var requestDataJSON *string
 	if data.RequestData != nil {
 		masked := maskSensitiveData(data.RequestData)
@@ -35,12 +35,13 @@ func InsertOperationLog(ctx context.Context, q pg.Querier, data LogInsertData) {
 		}
 	}
 
-	_, _ = q.Exec(ctx, `
+	_, err := q.Exec(ctx, `
 		INSERT INTO tb_logs (bot_id, action, target_type, target_id, ip_address, user_agent, request_data, success, error_code, error_msg, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
 		data.BotID, data.Action, data.TargetType, data.TargetID,
 		data.IPAddress, data.UserAgent, requestDataJSON,
 		data.Success, data.ErrorCode, data.ErrorMsg)
+	return err
 }
 
 // maskSensitiveData masks API keys and truncates long fields.

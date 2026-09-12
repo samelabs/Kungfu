@@ -24,7 +24,10 @@ func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, 
 		tasks = append(tasks, agentTaskDetail(&rows[i]))
 	}
 
-	total, _ := repository.CountOpenTasks(ctx, pool)
+	total, err := repository.CountOpenTasks(ctx, pool)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing tasks")
+	}
 
 	return map[string]interface{}{
 		"tasks": tasks,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 
 	"kungfu.md/internal/delivery"
@@ -156,7 +157,13 @@ func testSettleBudget(ctx context.Context, pool *pg.Pool, taskCode string, price
 		nextStatus = "closed"
 	}
 
-	_ = repository.UpdateTaskBudgetAndStatus(ctx, tx, task.ID, nextBudget, nextStatus, nextStatus == "closed")
+	if err := repository.UpdateTaskBudgetAndStatus(ctx, tx, task.ID, nextBudget, nextStatus, nextStatus == "closed"); err != nil {
+		return map[string]interface{}{
+			"cost":   price,
+			"budget": task.Budget,
+			"status": "error",
+		}
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return map[string]interface{}{
@@ -221,7 +228,7 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 		errMsgForLog = &truncated
 	}
 
-	_ = repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
+	if err := repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
 		TaskCode:     taskCode,
 		BotID:        &botID,
 		Action:       action,
@@ -231,10 +238,11 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 		Success:      success,
 		ErrorCode:    strPtrOrNil(errorCode),
 		ErrorMessage: errMsgForLog,
-	})
+	}); err != nil {
+		log.Printf("task log write failed: task=%s action=%s err=%v", taskCode, action, err)
+	}
 }
 
-// testTruncateResponse truncates the response for API output.
 func testTruncateResponse(value string) string {
 	if len(value) <= testMaxResponseBytes {
 		return value

@@ -137,7 +137,12 @@ func a3TestBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id = $1`, botID)
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code IN (SELECT code FROM tb_tasks WHERE bot_id = $1)`, botID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id IN (SELECT code FROM tb_tasks WHERE bot_id = $1)`, botID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE bot_id = $1`, botID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE bot_id = $1`, botID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_bots WHERE id = $1`, botID)
 	})
 	return botID
 }

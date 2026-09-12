@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"kungfu.md/internal/credits"
+	"log"
 	"strings"
 
 	"kungfu.md/internal/delivery"
@@ -189,7 +190,8 @@ func settleDeliveredSubmission(ctx context.Context, pool *pg.Pool, taskCode stri
 	return balance, nil
 }
 
-// insertTaskEventLog writes a task delivery log entry.
+// insertTaskEventLog writes a task delivery log entry (best-effort: the
+// business flow is never failed by a log write, but failures are logged).
 func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, botID int64,
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
@@ -203,7 +205,7 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 		}
 	}
 
-	_ = repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
+	if err := repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
 		TaskCode:     taskCode,
 		BotID:        &botID,
 		Action:       action,
@@ -213,7 +215,9 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 		Success:      success,
 		ErrorCode:    strPtrOrNil(errorCode),
 		ErrorMessage: strPtrOrNil(errorMessage),
-	})
+	}); err != nil {
+		log.Printf("task log write failed: task=%s action=%s err=%v", taskCode, action, err)
+	}
 }
 
 func truncateForLog(value string) string {
@@ -225,17 +229,22 @@ func truncateForLog(value string) string {
 
 // Keeping for reference during migration.
 
-// logOperation is a convenience wrapper for repository.InsertOperationLog.
+// logOperation is a best-effort audit wrapper: the main business flow is
+// never failed by an audit write, but a failed audit write is logged as a
+// warning (never silent). Payloads are masked by the repository layer before
+// persistence; only non-sensitive context (action, error) reaches the log.
 func logOperation(ctx context.Context, q pg.Querier, botID *int64, action string,
 	targetType, targetID *string, requestData map[string]interface{}, success bool) {
-	repository.InsertOperationLog(ctx, q, repository.LogInsertData{
+	if err := repository.InsertOperationLog(ctx, q, repository.LogInsertData{
 		BotID:       botID,
 		Action:      action,
 		TargetType:  targetType,
 		TargetID:    targetID,
 		RequestData: requestData,
 		Success:     success,
-	})
+	}); err != nil {
+		log.Printf("audit log write failed: action=%s target=%v err=%v", action, targetID, err)
+	}
 }
 
 // Helper functions
