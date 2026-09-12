@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -127,37 +126,21 @@ func TestSubmitTaskNotOpen(t *testing.T) {
 }
 
 // TestSubmitTaskDBLookupFailure: the initial FindTaskByCode fails -> 500
-// INTERNAL_ERROR, NOT disguised as NOT_FOUND. Failure is injected by dropping
-// the table privilege-free way: a prepared BAD SQL via a broken pool wrapper
-// is not possible (Submit takes *pg.Pool), so we point the pool at a closed
-// database connection target using an invalid task code length is not enough —
-// instead we close the pool's underlying connections by connecting to a
-// database that doesn't exist is overkill; simplest reliable failure: rename
-// the table for the duration of the call.
+// INTERNAL_ERROR, NOT disguised as NOT_FOUND. Failure is injected with an
+// already-cancelled context: the first repository query returns a context
+// error without touching shared schema (no ALTER/DROP/LOCK; parallel-safe).
 func TestSubmitTaskDBLookupFailure(t *testing.T) {
 	pool := a2TestPool(t)
 	botID := a2TestBot(t, pool)
 	pr := newPostRecorder()
 	t.Cleanup(pr.server.Close)
 
-	code := a2TestTask(t, pool, botID, "open", pr.server.URL, 1.0, 10.0)
+	code := a2TestTask(t, pool, botID, "open", pr.server.URL, 2.0, 1000.0)
 
-	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `ALTER TABLE tb_tasks RENAME TO tb_tasks_a2broken`); err != nil {
-		t.Fatalf("rename table: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `ALTER TABLE tb_tasks_a2broken RENAME TO tb_tasks`)
-		// restore original name cleanup ordering: a2TestTask cleanup deletes by code,
-		// which requires the original table name.
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	_, err := Submit(ctx, pool, code, botID, map[string]interface{}{"a": 1})
-
-	// restore before asserting so cleanup works
-	if _, rerr := pool.Exec(ctx, `ALTER TABLE tb_tasks_a2broken RENAME TO tb_tasks`); rerr != nil {
-		t.Fatalf("restore table: %v", rerr)
-	}
 
 	ae, ok := errors.IsAppError(err)
 	if !ok {
@@ -206,6 +189,3 @@ func TestSubmitOpenTaskDeliversWithDBTaskFields(t *testing.T) {
 		t.Fatalf("budget = %v, want 998.0 (1000 - 2)", budget)
 	}
 }
-
-// compile guard: stderrors kept for symmetry with sibling test files.
-var _ = stderrors.New
