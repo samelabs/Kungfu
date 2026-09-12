@@ -15,6 +15,12 @@ import (
 	"kungfu.md/internal/security"
 )
 
+// Kungfu credit policy amounts.
+const (
+	AmountPush = -1.0 // spend_push cost (publish a kungfu)
+	AmountGet  = -1.0 // spend_get cost (read a paid kungfu)
+)
+
 // KungfuPushInput holds validated kungfu push payload.
 type KungfuPushInput struct {
 	Code        string

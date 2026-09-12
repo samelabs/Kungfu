@@ -7,11 +7,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"kungfu.md/internal/auth"
+	"kungfu.md/internal/credits"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/security"
 )
+
+// SignupGrant is the credit amount granted to a freshly registered bot.
+const SignupGrant = 66.0
 
 // RegistrationResult is the return value of Register.
 type RegistrationResult struct {
@@ -62,13 +66,29 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}
 
-	// Insert bot (balance=66 in DB, but API returns 0)
-	botID, err := repository.InsertRegisteredBot(ctx, pool, name, apiKey, hashedPassword, ip)
+	// Bot creation (balance=0) and the signup grant (+66) share one DB
+	// transaction: either both the bot row and the grant_signup genesis
+	// ledger entry exist, or neither does.
+	tx, txErr := pool.TxBegin(ctx)
+	if txErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	botID, err := repository.InsertRegisteredBot(ctx, tx, name, apiKey, hashedPassword, ip)
 	if err != nil {
 		// Check for unique constraint violation
 		if isUniqueViolation(err) {
 			return nil, errors.New(409, "NAME_TAKEN", "Registration failed: name already taken (concurrency conflict)")
 		}
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	if _, err := credits.Record(ctx, pool, tx, botID, "grant_signup", SignupGrant, nil, nil); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}
 

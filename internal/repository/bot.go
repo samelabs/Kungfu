@@ -235,15 +235,16 @@ func UpdateLastActiveAt(ctx context.Context, q pg.Querier, botID int64) error {
 }
 
 // -- 13. insertRegisteredBot --
-// InsertRegisteredBot inserts a freshly registered bot. New accounts are seeded
-// with balance=66 (a registration bonus) and status='active'.
+// InsertRegisteredBot inserts a freshly registered bot inside an open
+// transaction with balance=0; the signup grant (+66, grant_signup) is applied
+// afterwards via the credits domain so the ledger always has a genesis entry.
 func InsertRegisteredBot(ctx context.Context, q pg.Querier, name, apiKey, passwordHash, ip string) (int64, error) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	var id int32
 	err := q.QueryRow(ctx, `
 		INSERT INTO tb_bots
 		    (bot_name, api_key, password_hash, key_issued_at, balance, register_ip, status, last_active_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 66, $5, 'active', $6, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, 0, $5, 'active', $6, NOW(), NOW())
 		RETURNING id`,
 		name, apiKey, passwordHash, now, ip, now).Scan(&id)
 	if err != nil {
