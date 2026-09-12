@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kungfu.md/internal/credits"
 	"strings"
 
 	"kungfu.md/internal/delivery"
@@ -174,7 +175,7 @@ func settleDeliveredSubmission(ctx context.Context, pool *pg.Pool, taskCode stri
 	repository.DecrementTaskBudgetForDelivery(ctx, tx, task.ID, price)
 
 	// Award credit (nested in same transaction)
-	balance, err := Record(ctx, pool, tx, botID, "earn_task", price, strPtr("task"), &taskCode)
+	balance, err := credits.Record(ctx, pool, tx, botID, "earn_task", price, strPtr("task"), &taskCode)
 	if err != nil {
 		return 0, err
 	}

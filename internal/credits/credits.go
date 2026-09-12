@@ -86,15 +86,16 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	return newBalance, nil
 }
 
-// Balance returns the current balance without modifying it (0 on error,
-// matching the historical service.GetBalance behavior).
-func Balance(ctx context.Context, pool *pg.Pool, botID int64) float64 {
+// Balance returns the current balance without modifying it. Errors propagate:
+// a DB failure or a missing bot returns an error (never a fake 0). A genuine
+// zero balance returns (0, nil).
+func Balance(ctx context.Context, q pg.Querier, botID int64) (float64, error) {
 	var balance float64
-	err := pool.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&balance)
+	err := q.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&balance)
 	if err != nil {
-		return 0.0
+		return 0, err
 	}
-	return balance
+	return balance, nil
 }
 
 func absFloat(f float64) float64 {

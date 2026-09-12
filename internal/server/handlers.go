@@ -35,7 +35,7 @@ func (s *Server) handleKungfuList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := service.ListKungfusForBot(r.Context(), s.Pool, bot.ID, bot.Balance, limit, offset)
+	result, err := service.ListKungfusForBot(r.Context(), s.Pool, bot.ID, limit, offset)
 	if err != nil {
 		handleAppError(w, err)
 		return
@@ -99,7 +99,7 @@ func (s *Server) handleKungfuGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := chi.URLParam(r, "code")
-	result, err := service.GetKungfuForBot(r.Context(), s.Pool, bot.ID, bot.Balance, code)
+	result, err := service.GetKungfuForBot(r.Context(), s.Pool, bot.ID, code)
 	if err != nil {
 		handleAppError(w, err)
 		return

@@ -12,8 +12,6 @@ import (
 	"kungfu.md/internal/pg"
 )
 
-// scanBotBalance scans a numeric balance into float64.
-
 // numericToFloat converts pgtype.Numeric to float64 safely.
 func numericToFloat(n pgtype.Numeric) float64 {
 	if f, err := n.Float64Value(); err == nil {
@@ -40,19 +38,17 @@ func timePtrToStr(t *time.Time) *string {
 // FindActiveBotAccountByID returns the active bot matching the id, or nil if not found.
 func FindActiveBotAccountByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT bot_name, status, balance
+		SELECT bot_name, status
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var b model.Bot
-	var balance pgtype.Numeric
-	if err := row.Scan(&b.BotName, &b.Status, &balance); err != nil {
+	if err := row.Scan(&b.BotName, &b.Status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	b.ID = botID
-	b.Balance = numericToFloat(balance)
 	return &b, nil
 }
 
@@ -60,23 +56,21 @@ func FindActiveBotAccountByID(ctx context.Context, q pg.Querier, botID int64) (*
 // FindActiveBotKeyByID returns the active bot with key fields, or nil if not found.
 func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, api_key, balance, status, key_issued_at
+		SELECT id, bot_name, api_key, status, key_issued_at
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
 		b           model.Bot
 		dbID        int32
-		balance     pgtype.Numeric
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&dbID, &b.BotName, &b.APIKey, &balance, &b.Status, &keyIssuedAt); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.APIKey, &b.Status, &keyIssuedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	b.ID = int64(dbID)
-	b.Balance = numericToFloat(balance)
 	b.KeyIssuedAt = timePtrToStr(keyIssuedAt)
 	return &b, nil
 }
@@ -85,22 +79,20 @@ func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*mode
 // FindActiveBotByAPIKey looks up an active bot by its API key, or nil if not found.
 func FindActiveBotByAPIKey(ctx context.Context, q pg.Querier, key string) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, balance, status
+		SELECT id, bot_name, status
 		FROM tb_bots
 		WHERE api_key = $1 AND status = 'active'`, key)
 	var (
-		b       model.Bot
-		dbID    int32
-		balance pgtype.Numeric
+		b    model.Bot
+		dbID int32
 	)
-	if err := row.Scan(&dbID, &b.BotName, &balance, &b.Status); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.Status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	b.ID = int64(dbID)
-	b.Balance = numericToFloat(balance)
 	return &b, nil
 }
 
@@ -108,22 +100,20 @@ func FindActiveBotByAPIKey(ctx context.Context, q pg.Querier, key string) (*mode
 // FindActiveBotSummaryByID returns a trimmed active bot summary, or nil if not found.
 func FindActiveBotSummaryByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, balance, status
+		SELECT id, bot_name, status
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
-		b       model.Bot
-		dbID    int32
-		balance pgtype.Numeric
+		b    model.Bot
+		dbID int32
 	)
-	if err := row.Scan(&dbID, &b.BotName, &balance, &b.Status); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.Status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	b.ID = int64(dbID)
-	b.Balance = numericToFloat(balance)
 	return &b, nil
 }
 
@@ -160,23 +150,21 @@ func FindActiveBotCredentialsByName(ctx context.Context, q pg.Querier, name stri
 // FindOwnerSessionBotByID returns the active bot with fields needed for owner-session views.
 func FindOwnerSessionBotByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, balance, status, key_issued_at
+		SELECT id, bot_name, status, key_issued_at
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
 		b           model.Bot
 		dbID        int32
-		balance     pgtype.Numeric
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&dbID, &b.BotName, &balance, &b.Status, &keyIssuedAt); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.Status, &keyIssuedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	b.ID = int64(dbID)
-	b.Balance = numericToFloat(balance)
 	b.KeyIssuedAt = timePtrToStr(keyIssuedAt)
 	return &b, nil
 }

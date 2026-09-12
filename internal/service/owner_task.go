@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"kungfu.md/internal/credits"
 	"math"
 	"strings"
 	"time"
@@ -144,7 +145,7 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 
 	// Lock task budget (deduct credits)
 	if budget > 0 {
-		if _, err := Record(ctx, pool, tx, botID, "lock_task", -budget, strPtr("task"), &taskCode); err != nil {
+		if _, err := credits.Record(ctx, pool, tx, botID, "lock_task", -budget, strPtr("task"), &taskCode); err != nil {
 			if isInsufficientCredits(err) {
 				return nil, errors.New(402, "INSUFFICIENT_CREDITS",
 					"Not enough credits to fund this task budget. Complete platform tasks to earn credits.")
@@ -250,7 +251,7 @@ func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string,
 	}
 
 	// Lock budget
-	if _, err := Record(ctx, pool, tx, botID, "lock_task", -amount, strPtr("task"), &code); err != nil {
+	if _, err := credits.Record(ctx, pool, tx, botID, "lock_task", -amount, strPtr("task"), &code); err != nil {
 		if isInsufficientCredits(err) {
 			return nil, errors.New(402, "INSUFFICIENT_CREDITS",
 				"Not enough credits to add this task budget. Complete platform tasks to earn credits.")
@@ -382,7 +383,7 @@ func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	}
 
 	// Refund credits
-	if _, err := Record(ctx, pool, tx, botID, "refund_task", budget, strPtr("task"), &code); err != nil {
+	if _, err := credits.Record(ctx, pool, tx, botID, "refund_task", budget, strPtr("task"), &code); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error refunding budget")
 	}
 

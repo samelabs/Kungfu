@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"kungfu.md/internal/credits"
 	"math"
 
 	"kungfu.md/internal/errors"
@@ -35,7 +36,10 @@ func GetOwnerLogs(ctx context.Context, pool *pg.Pool, botID int64, logType strin
 // getCreditLogs returns credit transaction logs.
 func getCreditLogs(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize, offset int) (map[string]interface{}, error) {
 	total, _ := repository.CountCreditLogs(ctx, pool, botID)
-	balance, _ := repository.FindBalanceByBotID(ctx, pool, botID)
+	balance, balErr := credits.Balance(ctx, pool, botID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing credit logs")
+	}
 	rows, err := repository.ListCreditLogs(ctx, pool, botID, pageSize, offset)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing credit logs")

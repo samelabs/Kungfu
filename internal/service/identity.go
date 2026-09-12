@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"kungfu.md/internal/credits"
 	"regexp"
 	"strings"
 
@@ -116,6 +117,11 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 		return nil, errors.New(404, "NOT_FOUND", "Bot not found")
 	}
 
+	balance, balErr := credits.Balance(ctx, q, botID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+
 	stats, err := repository.KungfuStatsByBotID(ctx, q, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
@@ -129,7 +135,7 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 		"bot_id":   botID,
 		"bot_name": bot.BotName,
 		"status":   bot.Status,
-		"balance":  bot.Balance,
+		"balance":  balance,
 		"stats": map[string]interface{}{
 			"kungfu_count":        stats.Total,
 			"public_kungfu_count": stats.PublicTotal,
@@ -140,10 +146,10 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 
 // -- Key --
 
-// CurrentOwnerKey formats log entries for the owner dashboard.
-// Returns the owner's current API key.
-func CurrentOwnerKey(ctx context.Context, pool *pg.Pool, botID int64) (map[string]interface{}, error) {
-	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)
+// CurrentOwnerKey returns the owner's current API key.
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability.
+func CurrentOwnerKey(ctx context.Context, q pg.Querier, botID int64) (map[string]interface{}, error) {
+	bot, err := repository.FindActiveBotKeyByID(ctx, q, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving key")
 	}
@@ -151,7 +157,13 @@ func CurrentOwnerKey(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
 	}
 
-	logOperation(ctx, pool, &botID, "key_get", nil, nil,
+	// Balance composed from the credits domain (identity no longer carries it).
+	balance, balErr := credits.Balance(ctx, q, botID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving key")
+	}
+
+	logOperation(ctx, q, &botID, "key_get", nil, nil,
 		map[string]interface{}{
 			"bot_name": bot.BotName,
 			"source":   "owner_session",
@@ -160,7 +172,7 @@ func CurrentOwnerKey(ctx context.Context, pool *pg.Pool, botID int64) (map[strin
 	return map[string]interface{}{
 		"bot_name":      bot.BotName,
 		"key":           bot.APIKey,
-		"balance":       bot.Balance,
+		"balance":       balance,
 		"status":        bot.Status,
 		"key_issued_at": bot.KeyIssuedAt,
 	}, nil

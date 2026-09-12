@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"kungfu.md/internal/credits"
 	"strings"
 	"unicode/utf8"
 
@@ -77,7 +78,11 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
 
-		balance := GetBalance(ctx, pool, botID)
+		// Balance composed from the credits domain (identity no longer carries it).
+		balance, balErr := credits.Balance(ctx, pool, botID)
+		if balErr != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving balance")
+		}
 
 		logOperation(ctx, pool, &botID, "push", strPtr("kungfu"), &existing.Code,
 			map[string]interface{}{"title": payload.Title, "action": "updated"}, true)
@@ -95,7 +100,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	balance, recErr := Record(ctx, pool, tx, botID, "spend_push", AmountPush, strPtr("kungfu"), nil)
+	balance, recErr := credits.Record(ctx, pool, tx, botID, "spend_push", AmountPush, strPtr("kungfu"), nil)
 	if recErr != nil {
 		return nil, errors.New(402, "INSUFFICIENT_CREDITS", "Need 1 credit to publish kungfu. Complete platform tasks to earn credits.")
 	}

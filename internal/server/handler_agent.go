@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"kungfu.md/internal/credits"
 	"net/http"
 	"strings"
 
@@ -82,17 +83,27 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-fetch fresh bot data after authentication.
+	// Re-fetch fresh identity after authentication; balance is composed
+	// separately from the credits domain.
 	freshBot, err := repository.FindActiveBotSummaryByID(r.Context(), s.Pool, bot.ID)
-	if err != nil || freshBot == nil {
+	if err != nil {
+		handleAppError(w, apperrors.New(500, "INTERNAL_ERROR", "Error retrieving account"))
+		return
+	}
+	if freshBot == nil {
 		handleAppError(w, apperrors.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header"))
+		return
+	}
+	balance, balErr := credits.Balance(r.Context(), s.Pool, freshBot.ID)
+	if balErr != nil {
+		handleAppError(w, apperrors.New(500, "INTERNAL_ERROR", "Error retrieving account"))
 		return
 	}
 
 	SuccessResponse(w, map[string]interface{}{
 		"bot_id":   freshBot.ID,
 		"bot_name": freshBot.BotName,
-		"balance":  freshBot.Balance,
+		"balance":  balance,
 		"status":   freshBot.Status,
 	}, "Key is valid")
 }

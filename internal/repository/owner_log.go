@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,18 +23,6 @@ func OwnerLogTableExists(ctx context.Context, q pg.Querier, table string) (bool,
 }
 
 // -- 2. findBalanceByBotId --
-func FindBalanceByBotID(ctx context.Context, q pg.Querier, botID int64) (float64, error) {
-	var balance pgtype.Numeric
-	err := q.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&balance)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return numericToFloat(balance), nil
-}
-
 // -- 3. countCreditLogs --
 func CountCreditLogs(ctx context.Context, q pg.Querier, botID int64) (int64, error) {
 	var count int64
