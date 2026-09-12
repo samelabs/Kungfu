@@ -457,15 +457,26 @@ func validateBudget(budget float64) error {
 	return nil
 }
 
-// validatePostapiField formats log entries for the owner dashboard.
+// validatePostapiField validates the owner-supplied postapi, translating the
+// shared structural classification into the Owner API's 400 contract.
+// EMPTY keeps the required-field wording; every other structural failure is
+// a single stable INVALID_POSTAPI error with a message distinguishing
+// invalid URL vs non-http(s) scheme vs over-length.
 func validatePostapiField(postapi string) error {
-	if postapi == "" {
+	class, _ := classifyPostAPI(postapi, maxPostapiLen)
+	switch class {
+	case "":
+		return nil
+	case postAPIClassEmpty:
 		return errors.New(400, "MISSING_FIELD", "Missing required field: postapi")
+	case postAPIClassTooLong:
+		return errors.New(400, "INVALID_POSTAPI", "Postapi exceeds the maximum length of 2048 characters")
+	case postAPIClassInvalidURL:
+		return errors.New(400, "INVALID_POSTAPI", "Postapi is not a valid URL")
+	case postAPIClassInvalidScheme:
+		return errors.New(400, "INVALID_POSTAPI", "Postapi must use http or https")
 	}
-	if len(postapi) > maxPostapiLen {
-		return errors.New(400, "POSTAPI_TOO_LONG", "Postapi maximum 2048 characters")
-	}
-	return nil
+	return errors.New(400, "INVALID_POSTAPI", "Postapi is invalid")
 }
 
 // assertOpenable formats log entries for the owner dashboard.

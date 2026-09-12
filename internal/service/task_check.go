@@ -2,8 +2,6 @@ package service
 
 import (
 	"fmt"
-	"net/url"
-	"strings"
 
 	"kungfu.md/internal/errors"
 )
@@ -79,26 +77,22 @@ func RunTaskCheck(postapi string, price float64, budgetChecker func() *TaskCheck
 	return nil
 }
 
-// ValidatePostapi validates the postapi URL.
+// ValidatePostapi validates the postapi URL for the agent-facing TaskCheck,
+// translating the shared structural classification into the existing
+// TaskCheck rules. External semantics (HTTP code / error code / messages)
+// are unchanged.
 func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
-	if postapi == "" {
+	class, _ := classifyPostAPI(postapi, maxLength)
+	switch class {
+	case postAPIClassEmpty:
 		return RaiseRule("POSTAPI_EMPTY")
-	}
-	if len(postapi) > maxLength {
+	case postAPIClassTooLong:
 		return RaiseRule("POSTAPI_TOO_LONG")
-	}
-
-	// Use Go's url.Parse to validate the URL and require a host component.
-	parsed, err := url.Parse(postapi)
-	if err != nil || parsed.Host == "" {
+	case postAPIClassInvalidURL:
 		return RaiseRule("POSTAPI_INVALID_URL")
-	}
-
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
+	case postAPIClassInvalidScheme:
 		return RaiseRule("POSTAPI_INVALID_SCHEME")
 	}
-
 	return nil
 }
 
