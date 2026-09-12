@@ -51,13 +51,24 @@ func ListTasks(ctx context.Context, pool *pg.Pool, botID int64) (map[string]inte
 }
 
 // GetTask returns a single task with its recent logs.
-func GetTask(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
-	task, err := ownerTask(ctx, pool, botID, code)
+// Task stats (log_count/success_count/failure_count) come from the same
+// repository aggregation as ListTasks, and log query failures propagate as
+// 500 INTERNAL_ERROR instead of being silently dropped.
+// Accepts pg.Querier (satisfied by *pg.Pool) so tests can inject a failing
+// log query; no behavior change.
+func GetTask(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error) {
+	tw, err := repository.FindOwnerTaskWithStatsByCode(ctx, q, botID, code)
 	if err != nil {
-		return nil, err
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if tw == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
-	logs, _ := repository.FindRecentLogsByTaskCode(ctx, pool, code, 50)
+	logs, err := repository.FindRecentLogsByTaskCode(ctx, q, code, 50)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task logs")
+	}
 
 	logItems := make([]map[string]interface{}, 0, len(logs))
 	for i := range logs {
@@ -65,7 +76,7 @@ func GetTask(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[
 	}
 
 	return map[string]interface{}{
-		"task": ownerTaskDetail(task),
+		"task": ownerTaskDetailWithStats(tw),
 		"logs": logItems,
 	}, nil
 }
@@ -532,7 +543,8 @@ func ownerTaskSummary(t *model.Task, logCount, successCount, failureCount int64)
 }
 
 // ownerTaskDetail formats log entries for the owner dashboard.
-// summary + postapi + review_note + reviewed_at
+// summary + postapi + review_note + reviewed_at (stats unknown -> 0; use
+// ownerTaskDetailWithStats when real counts are available).
 func ownerTaskDetail(t *model.Task) map[string]interface{} {
 	m := ownerTaskSummary(t, 0, 0, 0)
 	m["postapi"] = ""
@@ -541,6 +553,18 @@ func ownerTaskDetail(t *model.Task) map[string]interface{} {
 	}
 	m["review_note"] = t.ReviewNote
 	m["reviewed_at"] = t.ReviewedAt
+	return m
+}
+
+// ownerTaskDetailWithStats is ownerTaskDetail with real log stats.
+func ownerTaskDetailWithStats(tw *repository.TaskWithStats) map[string]interface{} {
+	m := ownerTaskSummary(&tw.Task, tw.LogCount, tw.SuccessCount, tw.FailureCount)
+	m["postapi"] = ""
+	if tw.PostAPI != nil {
+		m["postapi"] = *tw.PostAPI
+	}
+	m["review_note"] = tw.ReviewNote
+	m["reviewed_at"] = tw.ReviewedAt
 	return m
 }
 

@@ -181,6 +181,49 @@ func FindOwnerTaskByCode(ctx context.Context, q pg.Querier, botID int64, code st
 	return &t, nil
 }
 
+// FindOwnerTaskWithStatsByCode returns the owner's task joined with its
+// aggregated log counts (same aggregation as ListOwnerTasksWithStats), or nil
+// if not found. Used by the task detail read model so detail stats match list
+// stats exactly without loading all of the owner's tasks.
+func FindOwnerTaskWithStatsByCode(ctx context.Context, q pg.Querier, botID int64, code string) (*TaskWithStats, error) {
+	rows, err := q.Query(ctx, `
+		SELECT t.id, t.code, t.bot_id, t.title, t.requirements, t.postapi, t.budget, t.price,
+		       t.pinned, t.status, t.review_note, t.created_at, t.updated_at, t.reviewed_at,
+		       t.opened_at, t.closed_at,
+		       COALESCE(ls.log_count, 0) AS log_count,
+		       COALESCE(ls.success_count, 0) AS success_count,
+		       COALESCE(ls.failure_count, 0) AS failure_count
+		FROM tb_tasks t
+		LEFT JOIN (
+			SELECT task_code,
+			       COUNT(*) AS log_count,
+			       SUM(CASE WHEN action = 'post_succeeded' THEN 1 ELSE 0 END) AS success_count,
+			       SUM(CASE WHEN success = FALSE THEN 1 ELSE 0 END) AS failure_count
+			FROM tb_task_logs
+			GROUP BY task_code
+		) ls ON ls.task_code = t.code
+		WHERE t.code = $1 AND t.bot_id = $2`, code, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	var tw TaskWithStats
+	if err := scanTaskWithStats(&tw, rows); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &tw, nil
+}
+
 // -- 8. findTaskByCode --
 // FindTaskByCode returns the task with the given code regardless of owner/status, or nil.
 func FindTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.Task, error) {
@@ -292,10 +335,12 @@ func FindRecentLogsByTaskCode(ctx context.Context, q pg.Querier, code string, li
 	var out []TaskLogEntry
 	for rows.Next() {
 		var e TaskLogEntry
+		var createdAt time.Time
 		if err := rows.Scan(&e.ID, &e.BotID, &e.Action, &e.ResponseCode, &e.Success,
-			&e.ErrorCode, &e.ErrorMessage, &e.CreatedAt); err != nil {
+			&e.ErrorCode, &e.ErrorMessage, &createdAt); err != nil {
 			return nil, err
 		}
+		e.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
