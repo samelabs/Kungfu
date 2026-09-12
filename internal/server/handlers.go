@@ -321,34 +321,30 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Look up bot by name
-	bot, err := repository.FindActiveBotCredentialsByName(r.Context(), s.Pool, name)
-
-	// Verify password (always run bcrypt even if bot is nil to prevent timing oracle)
-	const dummyHash = "$2a$10$00000000000000000000000000000000000000000000000000000001"
-	if err != nil || bot == nil {
-		_ = authImpl.VerifyPassword(password, dummyHash)
-		ErrorResponse(w, 401, "INVALID_CREDENTIALS", "Bot name or password is incorrect", nil)
-		return
-	}
-
-	if !authImpl.VerifyPassword(password, bot.PasswordHash) {
-		ErrorResponse(w, 401, "INVALID_CREDENTIALS", "Bot name or password is incorrect", nil)
+	result, err := service.OwnerLogin(r.Context(), s.Pool, name, password)
+	if err != nil {
+		handleAppError(w, err)
 		return
 	}
 
 	// Set session cookie
 	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	setOwnerCookie(w, bot.ID, s.Config.SessionSecret, isHTTPS)
+	setOwnerCookie(w, result.BotID, s.Config.SessionSecret, isHTTPS)
 
 	SuccessResponse(w, map[string]interface{}{
-		"bot_id":   bot.ID,
-		"bot_name": bot.BotName,
-		"status":   bot.Status,
+		"bot_id":   result.BotID,
+		"bot_name": result.BotName,
+		"status":   result.Status,
 	}, "Owner login successful")
 }
 
 func (s *Server) handleOwnerSessionLogout(w http.ResponseWriter, r *http.Request) {
+	bot, err := s.requireOwnerAuth(r)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
+	service.OwnerLogout(r.Context(), s.Pool, bot.ID)
 	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	clearOwnerCookie(w, isHTTPS)
 	SuccessResponse(w, map[string]interface{}{}, "Owner logout successful")

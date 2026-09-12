@@ -47,18 +47,29 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	if payload.Code != "" {
 		// Update existing
 		existing, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, botID, payload.Code)
-		if err != nil || existing == nil {
+		if err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+		if existing == nil {
 			// Check if it exists but owned by someone else
-			any, _ := repository.FindActiveKungfuByCode(ctx, pool, payload.Code)
+			any, err := repository.FindActiveKungfuByCode(ctx, pool, payload.Code)
+			if err != nil {
+				return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+			}
 			if any == nil {
 				return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
 			}
 			return nil, errors.New(403, "NOT_OWNER", "Only the creator can update this Kungfu")
 		}
 
-		tagsJSONBytes, _ := json.Marshal(payload.Tags)
-		repository.UpdateKungfuContentByID(ctx, pool, existing.ID,
-			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum)
+		tagsJSONBytes, err := json.Marshal(payload.Tags)
+		if err != nil {
+			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
+		}
+		if err := repository.UpdateKungfuContentByID(ctx, pool, existing.ID,
+			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
 
 		balance := GetBalance(ctx, pool, botID)
 
@@ -88,9 +99,14 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
 	}
 
-	tagsJSONBytes, _ := json.Marshal(payload.Tags)
-	repository.InsertNewKungfu(ctx, tx, code, botID,
-		payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum)
+	tagsJSONBytes, err := json.Marshal(payload.Tags)
+	if err != nil {
+		return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
+	}
+	if err := repository.InsertNewKungfu(ctx, tx, code, botID,
+		payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
@@ -106,8 +122,9 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 }
 
 // Share makes a kungfu public.
-func Share(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
-	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can change sharing status")
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability.
+func Share(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error) {
+	k, err := requireOwnedKungfu(ctx, q, botID, code, "Only the creator can change sharing status")
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +136,10 @@ func Share(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[st
 		}, nil
 	}
 
-	repository.UpdateKungfuVisibilityByID(ctx, pool, k.ID, "public")
-	logOperation(ctx, pool, &botID, "share", strPtr("kungfu"), &code,
+	if err := repository.UpdateKungfuVisibilityByID(ctx, q, k.ID, "public"); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred while sharing")
+	}
+	logOperation(ctx, q, &botID, "share", strPtr("kungfu"), &code,
 		map[string]interface{}{"title": k.Title}, true)
 
 	return map[string]interface{}{
@@ -130,8 +149,9 @@ func Share(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[st
 }
 
 // Unshare makes a kungfu private.
-func Unshare(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
-	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can change sharing status")
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability.
+func Unshare(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error) {
+	k, err := requireOwnedKungfu(ctx, q, botID, code, "Only the creator can change sharing status")
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +163,10 @@ func Unshare(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[
 		}, nil
 	}
 
-	repository.UpdateKungfuVisibilityByID(ctx, pool, k.ID, "private")
-	logOperation(ctx, pool, &botID, "unshare", strPtr("kungfu"), &code,
+	if err := repository.UpdateKungfuVisibilityByID(ctx, q, k.ID, "private"); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred while unsharing")
+	}
+	logOperation(ctx, q, &botID, "unshare", strPtr("kungfu"), &code,
 		map[string]interface{}{"title": k.Title}, true)
 
 	return map[string]interface{}{
@@ -154,14 +176,17 @@ func Unshare(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[
 }
 
 // Delete soft-deletes a kungfu.
-func Delete(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error) {
-	k, err := requireOwnedKungfu(ctx, pool, botID, code, "Only the creator can delete this Kungfu")
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability.
+func Delete(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error) {
+	k, err := requireOwnedKungfu(ctx, q, botID, code, "Only the creator can delete this Kungfu")
 	if err != nil {
 		return nil, err
 	}
 
-	repository.SoftDeleteKungfuByID(ctx, pool, k.ID)
-	logOperation(ctx, pool, &botID, "delete", strPtr("kungfu"), &code,
+	if err := repository.SoftDeleteKungfuByID(ctx, q, k.ID); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during deletion")
+	}
+	logOperation(ctx, q, &botID, "delete", strPtr("kungfu"), &code,
 		map[string]interface{}{"title": k.Title}, true)
 
 	return map[string]interface{}{
@@ -171,13 +196,19 @@ func Delete(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[s
 }
 
 // requireOwnedKungfu finds an owned kungfu or returns appropriate errors.
-func requireOwnedKungfu(ctx context.Context, pool *pg.Pool, botID int64, code, ownerError string) (*model.Kungfu, error) {
-	k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, botID, code)
-	if err == nil && k != nil {
+func requireOwnedKungfu(ctx context.Context, q pg.Querier, botID int64, code, ownerError string) (*model.Kungfu, error) {
+	k, err := repository.FindOwnedActiveKungfuByCode(ctx, q, botID, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+	}
+	if k != nil {
 		return k, nil
 	}
 	// Check if it exists but owned by someone else
-	any, _ := repository.FindActiveKungfuByCode(ctx, pool, code)
+	any, err := repository.FindActiveKungfuByCode(ctx, q, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+	}
 	if any == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
 	}

@@ -23,6 +23,12 @@ import (
 
 // -- OwnerSession --
 
+// dummyBcryptHash is a valid cost-10 bcrypt hash of an unguessable random
+// secret. It is verified when the login name does not resolve to an active
+// bot, so that missing users burn the same bcrypt work factor as real ones
+// (anti username-enumeration timing measure).
+const dummyBcryptHash = "$2a$10$Y32i7tXf1eM73f06uFMlMulohgIXrlbeYW.9HWWd4q5zbwJ957vKO"
+
 // OwnerSessionResult formats log entries for the owner dashboard.
 type OwnerSessionResult struct {
 	BotID   int64  `json:"bot_id"`
@@ -31,7 +37,9 @@ type OwnerSessionResult struct {
 }
 
 // OwnerLogin authenticates an owner by name+password.
-func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*OwnerSessionResult, error) {
+// Accepts pg.Querier (satisfied by *pg.Pool) so the credentials lookup and the
+// audit-log write can be exercised in tests with a fake querier.
+func OwnerLogin(ctx context.Context, q pg.Querier, name, password string) (*OwnerSessionResult, error) {
 	name = strings.TrimSpace(name)
 
 	// Validate name
@@ -50,11 +58,22 @@ func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*Own
 	}
 
 	// Find bot by name
-	bot, err := repository.FindActiveBotCredentialsByName(ctx, pool, name)
+	bot, err := repository.FindActiveBotCredentialsByName(ctx, q, name)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error during login")
 	}
-	if bot == nil || bot.PasswordHash == "" || !auth.VerifyPassword(password, bot.PasswordHash) {
+	if bot == nil {
+		// Run a real bcrypt comparison against a constant cost-10 hash even when
+		// the user does not exist, so that response timing does not reveal
+		// whether the name exists (username-enumeration timing oracle).
+		_ = auth.VerifyPassword(password, dummyBcryptHash)
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+	if bot.PasswordHash == "" {
+		_ = auth.VerifyPassword(password, dummyBcryptHash)
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+	if !auth.VerifyPassword(password, bot.PasswordHash) {
 		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
 	}
 
@@ -62,7 +81,7 @@ func OwnerLogin(ctx context.Context, pool *pg.Pool, name, password string) (*Own
 	// In Go, session management is handled at the HTTP layer (JWT/cookie middleware).
 	// The service layer returns the identity; the handler issues the session token.
 
-	logOperation(ctx, pool, &bot.ID, "owner_login", nil, nil,
+	logOperation(ctx, q, &bot.ID, "owner_login", nil, nil,
 		map[string]interface{}{"bot_name": bot.BotName}, true)
 
 	return &OwnerSessionResult{
@@ -92,9 +111,9 @@ func OwnerCurrent(ctx context.Context, pool *pg.Pool, botID int64) (*OwnerSessio
 // OwnerLogout invalidates the owner session.
 // In Go, session invalidation is handled at the HTTP layer (clear cookie/token).
 // This is a no-op placeholder for service-layer symmetry.
-func OwnerLogout(ctx context.Context, pool *pg.Pool, botID int64) map[string]interface{} {
+func OwnerLogout(ctx context.Context, q pg.Querier, botID int64) map[string]interface{} {
 	if botID > 0 {
-		logOperation(ctx, pool, &botID, "owner_logout", nil, nil, nil, true)
+		logOperation(ctx, q, &botID, "owner_logout", nil, nil, nil, true)
 	}
 	return map[string]interface{}{}
 }
