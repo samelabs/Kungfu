@@ -67,10 +67,20 @@ func a4SeedTask(t *testing.T, pool *pg.Pool, botID int64) string {
 	}
 	code := res["task"].(map[string]interface{})["code"].(string)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_tasks WHERE code = $1`, code)
+		a4CleanupTask(pool, code)
 	})
 	return code
+}
+
+// a4CleanupTask removes every row a seeded test task produced, in FK-safe
+// order: task event logs, then the owner operation logs referencing the task
+// code (tb_logs.bot_id is ON DELETE SET NULL, so bot cleanup alone leaves
+// them behind), then the task row itself.
+func a4CleanupTask(pool *pg.Pool, code string) {
+	ctx := context.Background()
+	_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
+	_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code)
+	_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)
 }
 
 func a4InsertLog(t *testing.T, pool *pg.Pool, code string, action string, success bool, ageSecs int) {
@@ -244,5 +254,38 @@ func TestGetTaskTaskQueryFailureIsInternal(t *testing.T) {
 	}
 	if ae.HTTPCode != 500 || ae.Code != "INTERNAL_ERROR" {
 		t.Fatalf("want 500 INTERNAL_ERROR, got %d %s", ae.HTTPCode, ae.Code)
+	}
+}
+
+// TestA4CleanupHelperRemovesAllTaskArtifacts: after a4CleanupTask runs, no
+// tb_task_logs rows and no tb_logs operation rows remain for the task code.
+func TestA4CleanupHelperRemovesAllTaskArtifacts(t *testing.T) {
+	pool := a4TestPool(t)
+	botID := a4TestBot(t, pool)
+	code := a4SeedTask(t, pool, botID)
+	a4InsertLog(t, pool, code, "post_succeeded", true, 1)
+
+	// Seed state exists.
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code).
+		Scan(&n); err != nil || n == 0 {
+		t.Fatalf("expected operation log rows before cleanup: n=%d err=%v", n, err)
+	}
+
+	a4CleanupTask(pool, code)
+
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_task_logs WHERE task_code = $1`, code).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tb_task_logs残留 after cleanup: n=%d err=%v", n, err)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code).
+		Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tb_logs 残留 after cleanup: n=%d err=%v", n, err)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_tasks WHERE code = $1`, code).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tb_tasks 残留 after cleanup: n=%d err=%v", n, err)
 	}
 }
