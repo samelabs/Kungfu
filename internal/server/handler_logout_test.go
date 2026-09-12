@@ -28,16 +28,18 @@ func testConfig() *config.Config {
 	return cfg
 }
 
-func testDatabaseURL() string {
-	if u := os.Getenv("KF_TEST_DATABASE_URL"); u != "" {
-		return u
+func testDatabaseURL(t *testing.T) string {
+	t.Helper()
+	url := strings.TrimSpace(os.Getenv("KF_TEST_DATABASE_URL"))
+	if url == "" {
+		t.Skip("KF_TEST_DATABASE_URL not set")
 	}
-	return "postgres://kungfu_app:kungfu_dev_pw@127.0.0.1:15432/kungfu_md"
+	return url
 }
 
 func newLogoutTestServer(t *testing.T) *Server {
 	t.Helper()
-	pool, err := pg.NewPool(testDatabaseURL())
+	pool, err := pg.NewPool(testDatabaseURL(t))
 	if err != nil {
 		t.Skipf("local postgres unavailable: %v", err)
 	}

@@ -19,9 +19,9 @@ import (
 
 func pushTestPool(t *testing.T) *pg.Pool {
 	t.Helper()
-	url := os.Getenv("KF_TEST_DATABASE_URL")
+	url := strings.TrimSpace(os.Getenv("KF_TEST_DATABASE_URL"))
 	if url == "" {
-		url = "postgres://kungfu_app:kungfu_dev_pw@127.0.0.1:15432/kungfu_md"
+		t.Skip("KF_TEST_DATABASE_URL not set")
 	}
 	pool, err := pg.NewPool(url)
 	if err != nil {
