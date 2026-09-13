@@ -349,11 +349,22 @@ func TestCreditsFailureKeepsPaymentPending(t *testing.T) {
 	botID := seedBot(t, pool, 0)
 	code := seedPayment(t, pool, botID, 66)
 
-	// Make the credits INSERT fail: negative amounts are impossible for
-	// grant_payment, so instead poison the balance_after write by forbidding
-	// the exact granted amount on tb_transactions.amount.
+	// Make the credits INSERT fail — scoped to THIS bot only: any other
+	// bot's grant_payment of any amount stays untouched (parallel-package
+	// isolation is structural, not based on magic amounts).
 	withConstraint(t, pool, "tb_transactions", "pc_pay_grant_chk",
-		fmt.Sprintf("type <> 'grant_payment' OR amount <> %g", 66.0))
+		fmt.Sprintf("bot_id <> %d OR type <> 'grant_payment' OR amount <> %g", botID, 66.0))
+
+	// Isolation proof: while the constraint is mounted, ANOTHER bot
+	// receiving a normal grant_payment of the same +66 must succeed.
+	otherBot := seedBot(t, pool, 0)
+	otherCode := seedPayment(t, pool, otherBot, 66)
+	if _, tr, err := CompletePayment(context.Background(), pool, *otherCode); err != nil || !tr {
+		t.Fatalf("other bot's +66 grant_payment must succeed during mounted constraint: tr=%v err=%v", tr, err)
+	}
+	if got := balanceOf(t, pool, otherBot); got != 66 {
+		t.Fatalf("other bot balance = %v, want 66 (constraint must not leak)", got)
+	}
 
 	if _, _, err := CompletePayment(context.Background(), pool, *code); err == nil {
 		t.Fatal("complete must fail when the ledger insert fails")

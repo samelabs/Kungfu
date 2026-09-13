@@ -255,9 +255,22 @@ func TestDebitFailureRollsBackRedemption(t *testing.T) {
 	botID := seedBot(t, pool, 100)
 	product := seedProduct(t, pool, 30)
 
-	// Poison the spend insert: reject exactly this spend amount.
+	// Poison the spend insert — scoped to THIS bot only: any other bot's
+	// spend_redemption of any amount stays untouched (parallel-package
+	// isolation is structural, not based on magic amounts).
 	withConstraint(t, pool, "tb_transactions", "sr_spend_chk",
-		fmt.Sprintf("type <> 'spend_redemption' OR amount <> %g", -30.0))
+		fmt.Sprintf("bot_id <> %d OR type <> 'spend_redemption' OR amount <> %g", botID, -30.0))
+
+	// Isolation proof: while the constraint is mounted, ANOTHER bot doing
+	// a normal spend_redemption of the same -30 amount must succeed.
+	otherBot := seedBot(t, pool, 100)
+	otherProduct := seedProduct(t, pool, 30)
+	if res := redeem(t, pool, otherBot, otherProduct, "rk_debitfail_iso_other"); !res.Created {
+		t.Fatal("other bot's -30 spend_redemption must succeed during mounted constraint")
+	}
+	if got := balanceOf(t, pool, otherBot); got != 70 {
+		t.Fatalf("other bot balance = %v, want 70 (constraint must not leak)", got)
+	}
 
 	_, err := Redeem(context.Background(), pool, botID, product, "rk_debitfail_1")
 	if err == nil {
