@@ -10,6 +10,7 @@ import (
 
 	"kungfu.md/internal/i18n"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/service"
 	"kungfu.md/web"
 )
 
@@ -145,7 +146,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 
 // buildTaskBoardHTML queries the DB and renders the homepage task board.
 func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
-	tasks, err := repository.QueryHomepageTasks(ctx, s.Pool)
+	tasks, err := repository.QueryHomepageTasks(ctx, s.Pool, service.MinOpenBudget)
 	if err != nil || len(tasks) == 0 {
 		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
 	}

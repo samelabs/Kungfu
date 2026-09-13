@@ -11,9 +11,6 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// MinOpenBudget is the minimum budget required to open a task
-const MinOpenBudget = 1000.0
-
 // -- Kungfu read operations --
 
 // ListKungfusForBot lists a bot's kungfu entries. The list is a pure

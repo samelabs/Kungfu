@@ -253,7 +253,7 @@ func TestOwnerEditClosedTaskInvalidPostAPIRejected(t *testing.T) {
 
 	// Move the task to closed (insert as pending, then close via repository-level SQL
 	// is forbidden; use SetTaskStatus close which requires pending/closed transition).
-	if _, err := SetTaskStatus(ctx, pool, botID, code, "close"); err != nil {
+	if _, err := SetTaskStatus(ctx, pool, botID, code, "closed"); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 

@@ -14,7 +14,7 @@ import (
 
 // ListOpenTasks returns all currently-open tasks for agents.
 func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, error) {
-	rows, err := repository.ListOpenTasks(ctx, pool)
+	rows, err := repository.ListOpenTasks(ctx, pool, MinOpenBudget)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing open tasks")
 	}
@@ -24,7 +24,7 @@ func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, 
 		tasks = append(tasks, agentTaskDetail(&rows[i]))
 	}
 
-	total, err := repository.CountOpenTasks(ctx, pool)
+	total, err := repository.CountOpenTasks(ctx, pool, MinOpenBudget)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing tasks")
 	}
@@ -40,7 +40,7 @@ func ListOpenTasks(ctx context.Context, pool *pg.Pool) (map[string]interface{}, 
 
 // GetOpenTask returns a single open task by code.
 func GetOpenTask(ctx context.Context, pool *pg.Pool, code string) (map[string]interface{}, error) {
-	t, err := repository.FindOpenTaskByCode(ctx, pool, code)
+	t, err := repository.FindOpenTaskByCode(ctx, pool, code, MinOpenBudget)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
 	}

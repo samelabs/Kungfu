@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"kungfu.md/internal/credits"
 	"log"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/errors"
@@ -26,61 +27,62 @@ type TaskSubmitResult struct {
 
 // Submit processes an agent task submission.
 //
-// The service owns the task business authority: it loads the task by code,
-// enforces the initial open-state gate, and only then runs the delivery flow.
+// The task row is locked BEFORE the owner POST and stays locked through
+// settlement — no more "POST first, lock later":
 //
-// Flow:
-//  0. Load Task by code: DB error -> 500 INTERNAL_ERROR; missing -> 404 NOT_FOUND;
-//     not open -> 409 TASK_NOT_OPEN
-//  1. TaskCheck: validate postapi/price/budget
-//  2. POST to owner's API (10s timeout, no redirect following)
-//  3. If POST failed → log + return 424
-//  4. If POST succeeded → settle: decrement budget + award credit (in transaction)
-//  5. Log task event + operation log
+//	BEGIN
+//	SELECT task FOR UPDATE
+//	  agentAcceptable (status=open AND fundable) else 404/409
+//	POST owner API (still holding the row lock)
+//	  non-2xx / delivery failure -> ROLLBACK, log, 424
+//	2xx:
+//	  budget -= price (auto-close when the next delivery is unfundable)
+//	  credits.Record(earn_task, +price)   [same tx]
+//	COMMIT
+//
+// Concurrency: parallel submissions serialize on the row lock; each one
+// re-checks fundability under the lock, so no submission POSTs against a
+// budget that cannot pay it, and the budget can never be over-delivered.
 func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, input map[string]interface{}) (*TaskSubmitResult, error) {
-	// 0. Load Task — the service is the business authority for submit.
-	task, err := repository.FindTaskByCode(ctx, pool, taskCode)
+	tx, txErr := pool.TxBegin(ctx)
+	if txErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+
+	// 1. Lock the task row — the serialization point for the whole flow.
+	task, err := repository.FindTaskByCodeForUpdate(ctx, tx, taskCode)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
 	}
 	if task == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
-	if task.Status != "open" {
-		return nil, errors.New(409, "TASK_NOT_OPEN", "Task is not open for submissions")
-	}
 
-	// Task fields from the freshly queried row.
 	postapi := ""
 	if task.PostAPI != nil {
-		postapi = *task.PostAPI
+		postapi = strings.TrimSpace(*task.PostAPI)
 	}
-	postapi = strings.TrimSpace(postapi)
 	price := task.Price
 	code := task.Code
 
-	// 1. TaskCheck
-	checkErr := RunTaskCheck(postapi, price, func() *TaskCheckError {
-		return ensureBudgetAvailable(ctx, pool, code, price)
-	})
-
-	if checkErr != nil {
-		// Log the check failure
-		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, checkErr.Rule.Code, checkErr.Rule.LogMsg)
-		return nil, checkErr.ToAppError()
+	// 2. Unified acceptability gate (status + fundability), under the lock.
+	if !agentAcceptable(task.Status, task.Budget, price) {
+		rule := taskNotAcceptableRule(task, price)
+		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
 	}
 
-	// 2. POST to owner's API
+	// 3. POST to owner's API while holding the task row lock.
 	payload := delivery.BuildPayload(code, input)
 	payloadBytes, _ := json.Marshal(payload)
 
 	postResult := delivery.PostJSON(postapi, payloadBytes, delivery.AgentSubmitErrorConfig())
 
 	if !postResult.Success {
-		// Log failure
+		_ = tx.Rollback(ctx)
 		insertTaskEventLog(ctx, pool, code, botID, "post_failed", nil, false,
 			postResult.ResponseCode, nil, postResult.ErrorCode, "")
-
 		return nil, errors.NewWithDetails(424,
 			ifEmpty(postResult.ErrorCode, "TASK_POST_FAILED"),
 			"Task delivery failed. Please retry later.",
@@ -92,13 +94,19 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 			})
 	}
 
-	// 4. Settle: decrement budget + award credit
-	balance, settleErr := settleDeliveredSubmission(ctx, pool, code, botID, price)
+	// 4. Settle under the same lock and transaction: budget decrement +
+	//    earn_task credit. Any budget write failure rolls everything back —
+	//    the agent is never paid for a budget the task does not have.
+	balance, settleErr := settleLockedTask(ctx, pool, tx, task, botID, price)
 	if settleErr != nil {
 		return nil, settleErr
 	}
 
-	// 5. Log success
+	if err := tx.Commit(ctx); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error settling task")
+	}
+
+	// 5. Log success (post-commit, best-effort).
 	var respBodyForLog *string
 	if postResult.ResponseBody != nil {
 		truncated := truncateForLog(*postResult.ResponseBody)
@@ -107,7 +115,6 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	insertTaskEventLog(ctx, pool, code, botID, "post_succeeded", nil, true,
 		postResult.ResponseCode, respBodyForLog, "", "")
 
-	// Operation log
 	var respCodeVal interface{}
 	if postResult.ResponseCode != nil {
 		respCodeVal = *postResult.ResponseCode
@@ -131,62 +138,37 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	}, nil
 }
 
-// ensureBudgetAvailable checks task budget/status without locking.
-func ensureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode string, price float64) *TaskCheckError {
-	task, err := repository.FindTaskBudgetStatusByCode(ctx, pool, taskCode)
-	if err != nil || task == nil {
-		return RaiseRule("TASK_NOT_OPEN")
-	}
-	if task.Status != "open" {
+// taskNotAcceptableRule maps a failed acceptability check to the existing
+// agent-facing TaskCheck contract (409 TASK_NOT_OPEN / TASK_BUDGET_EXHAUSTED).
+func taskNotAcceptableRule(task *repository.TaskForUpdate, price float64) *TaskCheckError {
+	if task.Status != taskStatusOpen {
 		return RaiseRule("TASK_NOT_OPEN")
 	}
 	if task.Budget < price || task.Budget < MinOpenBudget {
 		return RaiseRule("TASK_BUDGET_EXHAUSTED")
 	}
-	return nil
+	return RaiseRule("TASK_NOT_OPEN")
 }
 
-// settleDeliveredSubmission decrements task budget and awards credit in one transaction.
-func settleDeliveredSubmission(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, price float64) (float64, error) {
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback(ctx)
-		}
-	}()
+// settleLockedTask decrements the budget (with unified auto-close) and
+// awards the agent credit inside the caller's transaction. The task row
+// is already locked by the caller. A budget write failure returns an
+// error — earn_task can never land without the budget write succeeding.
+func settleLockedTask(ctx context.Context, pool *pg.Pool, tx pgx.Tx,
+	task *repository.TaskForUpdate, botID int64, price float64) (float64, error) {
 
-	// SELECT FOR UPDATE on task
-	task, err := repository.FindTaskBudgetStatusByCodeForUpdate(ctx, tx, taskCode)
-	if err != nil || task == nil {
-		return 0, errors.New(409, "TASK_NOT_OPEN", "Task is not open for submissions")
+	// Decrement budget with conditional auto-close (repository takes the
+	// minimum threshold explicitly; the unified rule also closes when the
+	// remainder can no longer pay one more delivery).
+	if err := repository.DecrementTaskBudgetForDelivery(ctx, tx, task.ID, price, MinOpenBudget); err != nil {
+		return 0, errors.New(500, "INTERNAL_ERROR", "Error settling task budget")
 	}
 
-	if task.Status != "open" {
-		return 0, errors.New(409, "TASK_NOT_OPEN", "Task is not open for submissions")
-	}
-
-	if task.Budget < price || task.Budget < MinOpenBudget {
-		return 0, errors.New(409, "TASK_BUDGET_EXHAUSTED", "Task budget is not enough for this submission")
-	}
-
-	// Decrement budget (atomic SQL with conditional close)
-	repository.DecrementTaskBudgetForDelivery(ctx, tx, task.ID, price)
-
-	// Award credit (nested in same transaction)
-	balance, err := credits.Record(ctx, pool, tx, botID, "earn_task", price, strPtr("task"), &taskCode)
+	// Award credit in the same transaction.
+	balance, err := credits.Record(ctx, pool, tx, botID, "earn_task", price, strPtr("task"), &task.Code)
 	if err != nil {
 		return 0, err
 	}
-
-	// Commit
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit: %w", err)
-	}
-	tx = nil // prevent deferred rollback
-
 	return balance, nil
 }
 
@@ -204,6 +186,8 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 			payloadJSON = &s
 		}
 	}
+
+	_ = payloadJSON
 
 	if err := repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
 		TaskCode:     taskCode,
@@ -226,8 +210,6 @@ func truncateForLog(value string) string {
 	}
 	return value[:maxTaskResponseLogBytes] + "... [truncated]"
 }
-
-// Keeping for reference during migration.
 
 // logOperation is a best-effort audit wrapper: the main business flow is
 // never failed by an audit write, but a failed audit write is logged as a

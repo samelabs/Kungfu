@@ -109,7 +109,7 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 		return nil, err
 	}
 	if openNow {
-		if err := assertOpenable(postapi, budget, price); err != nil {
+		if err := assertFundable(postapi, budget, price); err != nil {
 			return nil, err
 		}
 	}
@@ -184,8 +184,14 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 	return map[string]interface{}{"task": ownerTaskDetail(task)}, nil
 }
 
-// SetTaskStatus opens or closes a task.
+// SetTaskStatus opens or closes a task. The target status is validated
+// explicitly: only "open" and "closed" are legal — an unknown string is a
+// 400, never silently treated as close.
 func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status string) (map[string]interface{}, error) {
+	if status != taskStatusOpen && status != taskStatusClosed {
+		return nil, errors.New(400, "INVALID_STATUS", "Task status must be open or closed")
+	}
+
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating task status")
@@ -193,17 +199,20 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
-	if err != nil || task == nil {
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if task == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
-	if status == "open" {
-		// Assert openable: postapi, budget, price
-		var postapi string
+	if status == taskStatusOpen {
+		// Unified fundable rule (task_rules.go): postapi, budget, price.
+		postapi := ""
 		if task.PostAPI != nil {
 			postapi = *task.PostAPI
 		}
-		if err := assertOpenable(postapi, task.Budget, task.Price); err != nil {
+		if err := assertFundable(postapi, task.Budget, task.Price); err != nil {
 			return nil, err
 		}
 		if err := repository.OpenOwnerTask(ctx, tx, botID, code); err != nil {
@@ -220,7 +229,7 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 	}
 
 	action := "owner_task_close"
-	if status == "open" {
+	if status == taskStatusOpen {
 		action = "owner_task_open"
 	}
 	logOperation(ctx, pool, &botID, action, strPtr("task"), &code, nil, true)
@@ -246,7 +255,10 @@ func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
-	if err != nil || task == nil {
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if task == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
@@ -295,7 +307,10 @@ func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
-	if err != nil || task == nil {
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if task == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
@@ -361,7 +376,10 @@ func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
-	if err != nil || task == nil {
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	if task == nil {
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
@@ -491,19 +509,7 @@ func validatePostapiField(postapi string) error {
 	return errors.New(400, "INVALID_POSTAPI", "Postapi is invalid")
 }
 
-// assertOpenable formats log entries for the owner dashboard.
-func assertOpenable(postapi string, budget, price float64) error {
-	if err := validatePostapiField(postapi); err != nil {
-		return err
-	}
-	if price <= 0 {
-		return errors.New(400, "INVALID_PRICE", "Price must be greater than zero")
-	}
-	if budget < MinOpenBudget || budget < price {
-		return errors.New(400, "TASK_BUDGET_TOO_LOW", "Open tasks require enough budget")
-	}
-	return nil
-}
+// assertFundable lives in task_rules.go (single rule source).
 
 // roundMoney)
 func roundMoney(v float64) float64 {

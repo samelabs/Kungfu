@@ -6,19 +6,30 @@ import (
 	"log"
 	"strings"
 
-	"kungfu.md/internal/delivery"
+	"github.com/jackc/pgx/v5"
+
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
+
+	"kungfu.md/internal/delivery"
 )
 
-// TestTaskService provides task delivery testing for owners.
+// pgQuerier is satisfied by pgx.Tx (and *pg.Pool) — the settlement helper
+// runs inside the caller's transaction.
+type pgQuerier = pgx.Tx
 
-// Same flow as agent task submission but:
-//   - Owner-only (checks task.bot_id == botID)
-//   - No credit reward to the owner (Transaction::record is only for budget settlement)
-//   - Returns response_body to the owner
-//   - Different truncation limits
+// TestTaskService provides task delivery testing for owners.
+//
+// Documented flow: create pending -> owner test -> open. The owner test:
+//   - allowed on pending AND open tasks (closed is not testable);
+//   - locks the task row, validates postapi/price/budget (unified rules),
+//     POSTs to the owner API while holding the lock;
+//   - on 2xx the budget settles (budget -= price) with NO earn_task;
+//   - a pending task stays pending after a successful test;
+//   - an open task auto-closes when the remainder is unfundable;
+//   - any settlement failure is an API error — never a success response
+//     with "status":"error" hidden in the billing map.
 
 const (
 	testMaxResponseBytes  = 16000 // MAX_RESPONSE_BYTES
@@ -35,9 +46,25 @@ type TestTaskResult struct {
 }
 
 // TestTaskDeliver lets an owner test their own task's postapi.
+//
+//	BEGIN
+//	SELECT task FOR UPDATE (owner check: bot_id)
+//	  closed -> 409; pending/open continue
+//	unified gate: postapi/price valid + fundable
+//	POST owner API (row lock held)
+//	  failure -> ROLLBACK, log, 424 (budget untouched)
+//	2xx:
+//	  budget -= price (auto-close only for open tasks that became unfundable)
+//	COMMIT
 func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code string, input map[string]interface{}) (*TestTaskResult, error) {
-	// 1. Find task and verify ownership
-	task, err := repository.FindTaskByCode(ctx, pool, code)
+	tx, txErr := pool.TxBegin(ctx)
+	if txErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+
+	// 1. Lock the task row.
+	task, err := repository.FindTaskByCodeForUpdate(ctx, tx, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
 	}
@@ -48,30 +75,34 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 		return nil, errors.New(403, "NOT_OWNER", "Only the task owner can test this task")
 	}
 
+	// pending -> test -> open is the documented flow; open stays testable
+	// for compatibility; closed is not testable.
+	if task.Status == taskStatusClosed {
+		return nil, errors.New(409, "TASK_NOT_OPEN", "Closed tasks cannot be tested")
+	}
+
 	postapi := ""
 	if task.PostAPI != nil {
 		postapi = strings.TrimSpace(*task.PostAPI)
 	}
 	price := task.Price
 
-	// 2. TaskCheck
-	checkErr := RunTaskCheck(postapi, price, func() *TaskCheckError {
-		return testEnsureBudgetAvailable(ctx, pool, code, price)
-	})
-
-	if checkErr != nil {
+	// 2. Unified gate: postapi/price/fundability (same rules as submit).
+	if !fundable(task.Budget, price) || postapi == "" {
+		rule := testGateRule(task, price)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
-			checkErr.Rule.Code, checkErr.Rule.LogMsg)
-		return nil, checkErr.ToAppError()
+			rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
 	}
 
-	// 3. POST to owner's API
+	// 3. POST to owner's API while holding the row lock.
 	payload := delivery.BuildPayload(code, input)
 	payloadBytes, _ := json.Marshal(payload)
 
 	postResult := delivery.PostJSON(postapi, payloadBytes, delivery.TestTaskErrorConfig())
 
 	if !postResult.Success {
+		_ = tx.Rollback(ctx)
 		testLogEvent(ctx, pool, code, botID, "post_failed", payload, false,
 			postResult.ResponseCode, postResult.ResponseBody,
 			postResult.ErrorCode, postResult.ErrorMessage)
@@ -88,13 +119,25 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 			})
 	}
 
-	// 4. Log success
+	// 4. Settle: budget -= price, no earn_task. Settlement failure is an
+	// API error (never a success response with an error status inside).
+	nextBudget, mustClose, settleErr := testSettleLockedTask(ctx, tx, task, price)
+	if settleErr != nil {
+		return nil, settleErr
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error settling task test")
+	}
+
+	// 5. Log success (post-commit, best-effort).
 	testLogEvent(ctx, pool, code, botID, "post_succeeded", payload, true,
 		postResult.ResponseCode, postResult.ResponseBody, "", "")
 
-	// 5. Settle budget (no credit reward for test)
-	billing := testSettleBudget(ctx, pool, code, price)
-
+	finalStatus := task.Status
+	if mustClose {
+		finalStatus = taskStatusClosed
+	}
 	return &TestTaskResult{
 		TaskCode: code,
 		Post: map[string]interface{}{
@@ -102,82 +145,43 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 			"response_code": postResult.ResponseCode,
 			"response_body": testTruncateResponse(derefStr(postResult.ResponseBody)),
 		},
-		Billing: billing,
+		Billing: map[string]interface{}{
+			"cost":   price,
+			"budget": nextBudget,
+			"status": finalStatus,
+		},
 	}, nil
 }
 
-// testEnsureBudgetAvailable checks task budget/status without locking.
-func testEnsureBudgetAvailable(ctx context.Context, pool *pg.Pool, taskCode string, price float64) *TaskCheckError {
-	task, err := repository.FindTaskBudgetStatusByCode(ctx, pool, taskCode)
-	if err != nil || task == nil {
-		return RaiseRule("TASK_NOT_OPEN")
+// testGateRule maps a failed owner-test gate to the TaskCheck contract.
+func testGateRule(task *repository.TaskForUpdate, price float64) *TaskCheckError {
+	if task.PostAPI == nil || strings.TrimSpace(*task.PostAPI) == "" {
+		return RaiseRule("POSTAPI_EMPTY")
 	}
-	if task.Status != "open" {
-		return RaiseRule("TASK_NOT_OPEN")
+	if price <= 0 {
+		return RaiseRule("PRICE_INVALID")
 	}
-	if task.Budget < price || task.Budget < MinOpenBudget {
-		return RaiseRule("TASK_BUDGET_EXHAUSTED")
-	}
-	return nil
+	return RaiseRule("TASK_BUDGET_EXHAUSTED")
 }
 
-// testSettleBudget decrements the task budget without awarding credits.
-// Returns billing map: {cost, budget, status}
-func testSettleBudget(ctx context.Context, pool *pg.Pool, taskCode string, price float64) map[string]interface{} {
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return map[string]interface{}{
-			"cost":   price,
-			"budget": 0,
-			"status": "error",
-		}
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	task, err := repository.FindTaskBudgetStatusByCodeForUpdate(ctx, tx, taskCode)
-	if err != nil || task == nil || task.Status != "open" {
-		return map[string]interface{}{
-			"cost":   price,
-			"budget": 0,
-			"status": "TASK_NOT_OPEN",
-		}
-	}
-
-	if task.Budget < price || task.Budget < MinOpenBudget {
-		return map[string]interface{}{
-			"cost":   price,
-			"budget": task.Budget,
-			"status": "TASK_BUDGET_EXHAUSTED",
-		}
-	}
-
+// testSettleLockedTask decrements the budget for a successful owner test,
+// with no credit award. pending stays pending; open auto-closes when the
+// remainder can no longer fund one more delivery.
+func testSettleLockedTask(ctx context.Context, tx pgQuerier, task *repository.TaskForUpdate, price float64) (float64, bool, error) {
 	nextBudget := task.Budget - price
+	mustClose := false
 	nextStatus := task.Status
-	if nextBudget < MinOpenBudget {
-		nextStatus = "closed"
-	}
-
-	if err := repository.UpdateTaskBudgetAndStatus(ctx, tx, task.ID, nextBudget, nextStatus, nextStatus == "closed"); err != nil {
-		return map[string]interface{}{
-			"cost":   price,
-			"budget": task.Budget,
-			"status": "error",
+	if task.Status == taskStatusOpen {
+		if _, closeIt := nextBudgetAfterDelivery(task.Budget, price); closeIt {
+			mustClose = true
+			nextStatus = taskStatusClosed
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return map[string]interface{}{
-			"cost":   price,
-			"budget": nextBudget,
-			"status": "error",
-		}
+	if err := repository.UpdateTaskBudgetAndStatus(ctx, tx, task.ID, nextBudget, nextStatus, mustClose); err != nil {
+		return 0, false, errors.New(500, "INTERNAL_ERROR", "Error settling task test budget")
 	}
-
-	return map[string]interface{}{
-		"cost":   price,
-		"budget": nextBudget,
-		"status": nextStatus,
-	}
+	return nextBudget, mustClose, nil
 }
 
 // testLogEvent writes a task delivery log entry .

@@ -16,40 +16,49 @@ import (
 // TaskRepository persists task rows.
 // Every method accepts a pg.Querier so it works with both *pgxpool.Pool and pgx.Tx.
 
-// minOpenBudget is the minimum budget required for a task to be considered "open" on the board.
-const minOpenBudget = 1000.0
-
 // openBudgetWhereClause returns the SQL fragment that defines an "open, fundable" task:
 // open status, positive price, and budget >= both the minimum and the per-unit price.
+// minBudget is passed explicitly by the task service (single rule source);
+// the repository holds no business constant of its own.
 // When alias is empty the columns are unqualified; otherwise they are prefixed with "alias.".
-func openBudgetWhereClause(alias string) string {
+func openBudgetWhereClause(alias string, minBudget float64) string {
 	if alias == "" {
-		return "status = 'open' AND price > 0 AND budget >= 1000.0 AND budget >= price"
+		return "status = 'open' AND price > 0 AND budget >= $1 AND budget >= price"
 	}
 	return alias + ".status = 'open' AND " + alias + ".price > 0 AND " +
-		alias + ".budget >= 1000.0 AND " + alias + ".budget >= " + alias + ".price"
+		alias + ".budget >= $1 AND " + alias + ".budget >= " + alias + ".price"
+}
+
+// openBudgetWhereClauseWithParam is openBudgetWhereClause with an explicit
+// placeholder token for the min budget parameter.
+func openBudgetWhereClauseWithParam(alias, param string) string {
+	if alias == "" {
+		return "status = 'open' AND price > 0 AND budget >= " + param + " AND budget >= price"
+	}
+	return alias + ".status = 'open' AND " + alias + ".price > 0 AND " +
+		alias + ".budget >= " + param + " AND " + alias + ".budget >= " + alias + ".price"
 }
 
 // -- 1. countOpenTasks --
 // CountOpenTasks returns the number of tasks currently visible on the open board.
-func CountOpenTasks(ctx context.Context, q pg.Querier) (int64, error) {
+func CountOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) (int64, error) {
 	var count int64
 	err := q.QueryRow(ctx, `
 		SELECT COUNT(*) AS count
 		FROM tb_tasks t
-		WHERE `+openBudgetWhereClause("t")).Scan(&count)
+		WHERE `+openBudgetWhereClause("t", minBudget), minBudget).Scan(&count)
 	return count, err
 }
 
 // -- 2. listOpenTasks --
 // ListOpenTasks returns all open, fundable tasks, pinned first then newest.
-func ListOpenTasks(ctx context.Context, q pg.Querier) ([]model.Task, error) {
+func ListOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) ([]model.Task, error) {
 	rows, err := q.Query(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
 		       review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
 		FROM tb_tasks t
-		WHERE `+openBudgetWhereClause("t")+`
-		ORDER BY t.pinned DESC, t.created_at DESC`)
+		WHERE `+openBudgetWhereClause("t", minBudget)+`
+		ORDER BY t.pinned DESC, t.created_at DESC`, minBudget)
 	if err != nil {
 		return nil, err
 	}
@@ -71,12 +80,12 @@ func ListOpenTasks(ctx context.Context, q pg.Querier) ([]model.Task, error) {
 
 // -- 3. findOpenTaskByCode --
 // FindOpenTaskByCode returns the open, fundable task with the given code, or nil.
-func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.Task, error) {
+func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string, minBudget float64) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
 		       review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
 		FROM tb_tasks t
-		WHERE t.code = $1 AND `+openBudgetWhereClause("t"), code)
+		WHERE t.code = $2 AND `+openBudgetWhereClauseWithParam("t", "$1"), minBudget, code)
 	var t model.Task
 	if err := scanTask(&t, row); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -247,6 +256,38 @@ type TaskBudgetStatus struct {
 	ID     int64
 	Budget float64
 	Status string
+}
+
+// TaskForUpdate is the locked-task projection used by the submit/test
+// delivery flows: identity plus everything the delivery gate needs.
+type TaskForUpdate struct {
+	ID      int64
+	Code    string
+	BotID   int64
+	PostAPI *string
+	Budget  float64
+	Price   float64
+	Status  string
+}
+
+// FindTaskByCodeForUpdate loads a task by code with all delivery-gate
+// fields and locks the row (FOR UPDATE) inside the caller's transaction —
+// the serialization point of the submit/test delivery flows.
+// Returns nil (no error) when the code does not exist.
+func FindTaskByCodeForUpdate(ctx context.Context, q pg.Querier, code string) (*TaskForUpdate, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, postapi, budget, price, status
+		FROM tb_tasks
+		WHERE code = $1
+		FOR UPDATE`, code)
+	var t TaskForUpdate
+	if err := row.Scan(&t.ID, &t.Code, &t.BotID, &t.PostAPI, &t.Budget, &t.Price, &t.Status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &t, nil
 }
 
 // -- 9. findTaskBudgetStatusByCode --
@@ -440,17 +481,19 @@ func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budg
 
 // -- 18c. decrementTaskBudgetForDelivery --
 // DecrementTaskBudgetForDelivery debits price from a task's budget and auto-closes the
-// task if the resulting budget drops below minOpenBudget. PostgreSQL evaluates the RHS
-// expression (budget - $1) once per reference, so it is safe to repeat in the CASE.
-func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64, price float64) error {
+// task if the resulting budget can no longer fund one more delivery (below minBudget
+// or below price). minBudget is passed explicitly by the task service. PostgreSQL
+// evaluates the RHS expression (budget - $1) once per reference, so it is safe to
+// repeat in the CASE.
+func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64, price, minBudget float64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
 		SET budget = budget - $1,
-		    status = CASE WHEN budget - $1 < $2 THEN 'closed' ELSE status END,
-		    closed_at = CASE WHEN budget - $1 < $2 THEN NOW() ELSE closed_at END,
+		    status = CASE WHEN budget - $1 < $2 OR budget - $1 < tb_tasks.price THEN 'closed' ELSE status END,
+		    closed_at = CASE WHEN budget - $1 < $2 OR budget - $1 < tb_tasks.price THEN NOW() ELSE closed_at END,
 		    updated_at = NOW()
 		WHERE id = $3`,
-		price, minOpenBudget, id)
+		price, minBudget, id)
 	return err
 }
 
@@ -575,7 +618,8 @@ type HomepageTask struct {
 }
 
 // QueryHomepageTasks returns up to 8 open tasks for the homepage board.
-func QueryHomepageTasks(ctx context.Context, q pg.Querier) ([]HomepageTask, error) {
+// minBudget is passed explicitly by the caller (task rule source).
+func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget float64) ([]HomepageTask, error) {
 	rows, err := q.Query(ctx, `
 		SELECT t.code, t.title, t.pinned, t.requirements, t.price, t.budget,
 		       COALESCE(ls.success_count, 0) AS success_count
@@ -586,9 +630,9 @@ func QueryHomepageTasks(ctx context.Context, q pg.Querier) ([]HomepageTask, erro
 		    GROUP BY task_code
 		) ls ON ls.task_code = t.code
 		WHERE t.status = 'open' AND t.price > 0
-		  AND t.budget >= 1000.0 AND t.budget >= t.price
+		  AND t.budget >= $1 AND t.budget >= t.price
 		ORDER BY t.pinned DESC, t.created_at DESC
-		LIMIT 8`)
+		LIMIT 8`, minBudget)
 	if err != nil {
 		return nil, err
 	}
