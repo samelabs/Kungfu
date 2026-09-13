@@ -75,10 +75,11 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 		return nil, errors.New(403, "NOT_OWNER", "Only the task owner can test this task")
 	}
 
-	// pending -> test -> open is the documented flow; open stays testable
-	// for compatibility; closed is not testable.
-	if task.Status == taskStatusClosed {
-		return nil, errors.New(409, "TASK_NOT_OPEN", "Closed tasks cannot be tested")
+	// Explicit legal set: only pending and open are testable (the
+	// documented pending -> test -> open flow plus open compatibility).
+	// Any other status — closed or anything abnormal — is 409.
+	if task.Status != taskStatusPending && task.Status != taskStatusOpen {
+		return nil, errors.New(409, "TASK_NOT_OPEN", "Only pending or open tasks can be tested")
 	}
 
 	postapi := ""
@@ -87,9 +88,20 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	}
 	price := task.Price
 
-	// 2. Unified gate: postapi/price/fundability (same rules as submit).
-	if !fundable(task.Budget, price) || postapi == "" {
-		rule := testGateRule(task, price)
+	// 2. Full existing validation under the lock: postapi structure,
+	//    price, fundability — the same TaskCheck contract as submit.
+	if rule := ValidatePostapi(postapi, 2048); rule != nil {
+		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
+			rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
+	}
+	if rule := ValidatePrice(price); rule != nil {
+		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
+			rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
+	}
+	if !fundable(task.Budget, price) {
+		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
@@ -151,17 +163,6 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 			"status": finalStatus,
 		},
 	}, nil
-}
-
-// testGateRule maps a failed owner-test gate to the TaskCheck contract.
-func testGateRule(task *repository.TaskForUpdate, price float64) *TaskCheckError {
-	if task.PostAPI == nil || strings.TrimSpace(*task.PostAPI) == "" {
-		return RaiseRule("POSTAPI_EMPTY")
-	}
-	if price <= 0 {
-		return RaiseRule("PRICE_INVALID")
-	}
-	return RaiseRule("TASK_BUDGET_EXHAUSTED")
 }
 
 // testSettleLockedTask decrements the budget for a successful owner test,

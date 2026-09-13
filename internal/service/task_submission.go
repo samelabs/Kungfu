@@ -66,9 +66,24 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	price := task.Price
 	code := task.Code
 
-	// 2. Unified acceptability gate (status + fundability), under the lock.
-	if !agentAcceptable(task.Status, task.Budget, price) {
-		rule := taskNotAcceptableRule(task, price)
+	// 2. Full TaskCheck contract under the lock, in the documented order:
+	//    status, then postapi structure, then price, then fundability.
+	//    Every failure logs + rejects with zero POST hits and no settlement.
+	if task.Status != taskStatusOpen {
+		rule := RaiseRule("TASK_NOT_OPEN")
+		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
+	}
+	if rule := ValidatePostapi(postapi, 2048); rule != nil {
+		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
+	}
+	if rule := ValidatePrice(price); rule != nil {
+		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
+		return nil, rule.ToAppError()
+	}
+	if !fundable(task.Budget, price) {
+		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
@@ -136,18 +151,6 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 			"balance": balance,
 		},
 	}, nil
-}
-
-// taskNotAcceptableRule maps a failed acceptability check to the existing
-// agent-facing TaskCheck contract (409 TASK_NOT_OPEN / TASK_BUDGET_EXHAUSTED).
-func taskNotAcceptableRule(task *repository.TaskForUpdate, price float64) *TaskCheckError {
-	if task.Status != taskStatusOpen {
-		return RaiseRule("TASK_NOT_OPEN")
-	}
-	if task.Budget < price || task.Budget < MinOpenBudget {
-		return RaiseRule("TASK_BUDGET_EXHAUSTED")
-	}
-	return RaiseRule("TASK_NOT_OPEN")
 }
 
 // settleLockedTask decrements the budget (with unified auto-close) and
