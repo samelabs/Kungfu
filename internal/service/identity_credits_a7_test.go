@@ -163,14 +163,14 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_kungfus WHERE code=$1`, pushed.Code)
 	})
 
-	// Push consumed 1 credit via consumption despite no balance in result.
+	// Push is free: balance unchanged.
 	var balance float64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 4.0 {
-		t.Fatalf("balance = %v, want 4 (5 - 1 storage.create)", balance)
+	if balance != 5.0 {
+		t.Fatalf("balance = %v, want 5 (create is free)", balance)
 	}
 
 	list, err := ListKungfusForBot(context.Background(), pool, botID, 10, 0)
@@ -189,8 +189,8 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 	if _, has := detail["balance"]; has {
 		t.Fatal("owner get response carries balance — storage contract must not")
 	}
-	if balance != 4.0 {
-		t.Fatalf("owner get charged: balance = %v, want 4", balance)
+	if balance != 5.0 {
+		t.Fatalf("owner get charged: balance = %v, want 5", balance)
 	}
 
 	// List survives a total balance-read failure (credits outage does not
@@ -200,12 +200,12 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 	}
 }
 
-// TestPublicKungfuGetCharges: non-owner get spends 1 credit via
-// consumption, returns the kungfu without a balance key.
-func TestPublicKungfuGetCharges(t *testing.T) {
+// TestPublicKungfuGetIsFree: non-owner public get is currently free —
+// succeeds even at balance 0, books no spend_get, no balance key.
+func TestPublicKungfuGetIsFree(t *testing.T) {
 	pool := a7TestPool(t)
 	ownerID, _, _ := a7TestBot(t, pool, 5)
-	readerID, _, _ := a7TestBot(t, pool, 3)
+	readerID, _, _ := a7TestBot(t, pool, 0)
 
 	pushed, err := Push(context.Background(), pool, ownerID, map[string]interface{}{
 		"title": "A7 Public Get", "tags": []interface{}{"t"},
@@ -224,7 +224,7 @@ func TestPublicKungfuGetCharges(t *testing.T) {
 
 	detail, err := GetKungfuForBot(context.Background(), pool, readerID, pushed.Code)
 	if err != nil {
-		t.Fatalf("public get: %v", err)
+		t.Fatalf("public get at balance 0 must succeed (free): %v", err)
 	}
 	if _, has := detail["balance"]; has {
 		t.Fatal("public get response carries balance — storage contract must not")
@@ -235,16 +235,16 @@ func TestPublicKungfuGetCharges(t *testing.T) {
 		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 2.0 {
-		t.Fatalf("reader balance = %v, want 2 (3 - 1 spend_get)", balance)
+	if balance != 0 {
+		t.Fatalf("reader balance = %v, want 0 (get is free)", balance)
 	}
 	var n int
 	if err := pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_get' AND amount=-1 AND ref_type='kungfu' AND ref_id=$2`,
-		readerID, pushed.Code).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_get'`,
+		readerID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("spend_get rows = %d, want 1", n)
+	if n != 0 {
+		t.Fatalf("spend_get rows = %d, want 0 (free)", n)
 	}
 }

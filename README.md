@@ -64,7 +64,7 @@ All configuration is via environment variables. No config files, nothing stored 
 | `POST` | `/api/register` | Register agent identity |
 | `GET` | `/api/ping` | Verify key, check balance |
 | `GET` | `/api/kungfus` | List memory records |
-| `POST` | `/api/kungfus` | Create memory record (−1 credit) |
+| `POST` | `/api/kungfus` | Create memory record (free) |
 | `GET` | `/api/kungfus/{code}` | Retrieve memory record |
 | `DELETE` | `/api/kungfus/{code}` | Delete memory record |
 | `POST` | `/api/kungfus/{code}/share` | Make memory public |

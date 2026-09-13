@@ -87,20 +87,19 @@ func TestRegistrationGenesisLedger(t *testing.T) {
 	}
 }
 
-// TestKungfuCreateStillChargesCredit: the kungfu publish path still spends
-// 1 credit and produces a spend_push ledger row — now routed through the
-// consumption layer (storage no longer calls credits directly).
-func TestKungfuCreateStillChargesCredit(t *testing.T) {
+// TestKungfuCreateIsFree: storage is currently free — create books no
+// spend_push, balance is unchanged, even at balance 0.
+func TestKungfuCreateIsFree(t *testing.T) {
 	pool := a5TestPool(t)
-	botID := a5TestBotWithBalance(t, pool, 10)
+	botID := a5TestBotWithBalance(t, pool, 0)
 
 	res, err := Push(context.Background(), pool, botID, map[string]interface{}{
-		"title":   "A5 Kungfu Credit Test",
+		"title":   "A5 Kungfu Free Test",
 		"tags":    []interface{}{"test"},
 		"content": strings.Repeat("x", 60),
 	}, 128, 10, 24, 500, 102400)
 	if err != nil {
-		t.Fatalf("Push: %v", err)
+		t.Fatalf("Push at balance 0 must succeed (storage free): %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_logs WHERE target_type='kungfu' AND target_id=$1`, res.Code)
@@ -113,57 +112,17 @@ func TestKungfuCreateStillChargesCredit(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 9.0 {
-		t.Fatalf("balance = %v, want 9 (10 - 1)", balance)
+	if balance != 0 {
+		t.Fatalf("balance = %v, want 0 (create is free)", balance)
 	}
 	var n int
-	var refID *string
 	if err := pool.QueryRow(ctx,
-		`SELECT COUNT(*), MIN(ref_id) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push' AND amount=-1 AND balance_after=9 AND ref_type='kungfu'`,
-		botID).Scan(&n, &refID); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Fatalf("spend_push ledger rows = %d, want 1", n)
-	}
-	if refID == nil || *refID != res.Code {
-		t.Fatalf("spend_push ref_id = %v, want created code %s", refID, res.Code)
-	}
-}
-
-// TestInsufficientCreditsRejectsWithoutHalfWrite: a kungfu push with balance 0
-// fails with 402 INSUFFICIENT_CREDITS, no ledger row, no kungfu row.
-func TestInsufficientCreditsRejectsWithoutHalfWrite(t *testing.T) {
-	pool := a5TestPool(t)
-	botID := a5TestBotWithBalance(t, pool, 0)
-	t.Cleanup(func() { a5CleanupBot(t, pool, botID) })
-
-	ctx := context.Background()
-	_, err := Push(ctx, pool, botID, map[string]interface{}{
-		"title":   "A5 Insufficient Test",
-		"tags":    []interface{}{"test"},
-		"content": strings.Repeat("x", 60),
-	}, 128, 10, 24, 500, 102400)
-
-	ae, ok := apperrIs(err)
-	if !ok {
-		t.Fatalf("want AppError, got %v", err)
-	}
-	if ae.HTTPCode != 402 || ae.Code != "INSUFFICIENT_CREDITS" {
-		t.Fatalf("want 402 INSUFFICIENT_CREDITS, got %d %s", ae.HTTPCode, ae.Code)
-	}
-	var n int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push'`,
+		botID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
-		t.Fatalf("ledger rows after rejection = %d, want 0", n)
-	}
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_kungfus WHERE bot_id=$1`, botID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Fatalf("kungfu rows after rejection = %d, want 0", n)
+		t.Fatalf("spend_push ledger rows = %d, want 0 (free)", n)
 	}
 }
 

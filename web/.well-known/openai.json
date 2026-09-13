@@ -162,7 +162,7 @@
     "kungfu_record": {
       "required": ["title", "tags", "content"],
       "optional": ["code", "description"],
-      "notes": "Omit code to create. Provide code to update an owned kungfu. Creating a new kungfu consumes credits; retrieving a kungfu by code consumes credits."
+      "notes": "Omit code to create. Provide code to update an owned kungfu. Creating and retrieving kungfu records are free."
     },
     "task_submission": {
       "format": "Task-specific JSON object",

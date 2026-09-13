@@ -1,19 +1,18 @@
 package service
 
-// Consumption-core integration tests: the storage paths charge through
-// internal/consumption, atomically with the storage write, and the storage
-// responses carry no balance. Local PG via KF_TEST_DATABASE_URL.
+// Storage-free integration tests: all storage operations are currently
+// free (consumption policy amount 0) — no 402s, no ledger rows, balance
+// untouched. Private non-owner still 403. Local PG via KF_TEST_DATABASE_URL.
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 )
 
-// TestPublicGetBalanceZeroIs402: public non-owner get with zero balance
-// fails 402 and books nothing.
-func TestPublicGetBalanceZeroIs402(t *testing.T) {
+// TestPublicGetBalanceZeroSucceeds: public non-owner get with zero balance
+// succeeds and books nothing.
+func TestPublicGetBalanceZeroSucceeds(t *testing.T) {
 	pool := a7TestPool(t)
 	ownerID, _, _ := a7TestBot(t, pool, 5)
 	readerID, _, _ := a7TestBot(t, pool, 0)
@@ -33,10 +32,12 @@ func TestPublicGetBalanceZeroIs402(t *testing.T) {
 		t.Fatalf("share: %v", err)
 	}
 
-	_, err = GetKungfuForBot(context.Background(), pool, readerID, pushed.Code)
-	ae, ok := apperrIs(err)
-	if !ok || ae.HTTPCode != 402 || ae.Code != "INSUFFICIENT_CREDITS" {
-		t.Fatalf("want 402 INSUFFICIENT_CREDITS, got %v", err)
+	detail, err := GetKungfuForBot(context.Background(), pool, readerID, pushed.Code)
+	if err != nil {
+		t.Fatalf("public get at balance 0 must succeed (free): %v", err)
+	}
+	if _, has := detail["balance"]; has {
+		t.Fatal("response carries balance — storage contract must not")
 	}
 
 	var n int
@@ -47,11 +48,19 @@ func TestPublicGetBalanceZeroIs402(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("reader ledger rows = %d, want 0", n)
 	}
+	var balance float64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if balance != 0 {
+		t.Fatalf("reader balance = %v, want 0 (free)", balance)
+	}
 }
 
-// TestPrivateGetConsumesNothing: private non-owner get is rejected 403
-// before any consumption — zero ledger rows.
-func TestPrivateGetConsumesNothing(t *testing.T) {
+// TestPrivateGetStillRejected: private non-owner get is rejected 403
+// before any consumption — access control is independent of pricing.
+func TestPrivateGetStillRejected(t *testing.T) {
 	pool := a7TestPool(t)
 	ownerID, _, _ := a7TestBot(t, pool, 5)
 	readerID, _, _ := a7TestBot(t, pool, 3)
@@ -85,15 +94,15 @@ func TestPrivateGetConsumesNothing(t *testing.T) {
 	}
 }
 
-// TestUpdateExistingDoesNotConsume: pushing to an existing code is an
-// update — no charge, no ledger row.
-func TestUpdateExistingDoesNotConsume(t *testing.T) {
+// TestUpdateListOwnerGetNoRegressions: update / list / owner get all still
+// work and stay free; no ledger rows at all for the bot.
+func TestUpdateListOwnerGetNoRegressions(t *testing.T) {
 	pool := a7TestPool(t)
 	botID := a5TestBotWithBalance(t, pool, 10)
 	t.Cleanup(func() { a5CleanupBot(t, pool, botID) })
 
 	created, err := Push(context.Background(), pool, botID, map[string]interface{}{
-		"title": "CC update 1", "tags": []interface{}{"t"},
+		"title": "CC free ops 1", "tags": []interface{}{"t"},
 		"content": strings.Repeat("c", 60),
 	}, 128, 10, 24, 500, 102400)
 	if err != nil {
@@ -106,75 +115,72 @@ func TestUpdateExistingDoesNotConsume(t *testing.T) {
 
 	updated, err := Push(context.Background(), pool, botID, map[string]interface{}{
 		"code":    created.Code,
-		"title":   "CC update 2",
+		"title":   "CC free ops 2",
 		"tags":    []interface{}{"t"},
 		"content": strings.Repeat("d", 70),
 	}, 128, 10, 24, 500, 102400)
-	if err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	if updated.Action != "updated" {
-		t.Fatalf("action = %s, want updated", updated.Action)
+	if err != nil || updated.Action != "updated" {
+		t.Fatalf("update: %v action=%s", err, updated.Action)
 	}
 
+	list, err := ListKungfusForBot(context.Background(), pool, botID, 10, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if _, has := list["balance"]; has {
+		t.Fatal("list carries balance — storage contract must not")
+	}
+
+	detail, err := GetKungfuForBot(context.Background(), pool, botID, created.Code)
+	if err != nil {
+		t.Fatalf("owner get: %v", err)
+	}
+	if _, has := detail["balance"]; has {
+		t.Fatal("owner get carries balance — storage contract must not")
+	}
+
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("ledger rows = %d, want 0 (all storage ops free)", n)
+	}
 	var balance float64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 9.0 {
-		t.Fatalf("balance = %v, want 9 (only the create charged)", balance)
-	}
-	var n int
-	if err := pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push'`, botID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Fatalf("spend_push rows = %d, want 1 (update free)", n)
+	if balance != 10.0 {
+		t.Fatalf("balance = %v, want 10 (untouched)", balance)
 	}
 }
 
-// TestCreateChargeRollsBackWithInsert: kungfu insert failure rolls the
-// consumption charge back — real CHECK constraint injection.
-func TestCreateChargeRollsBackWithInsert(t *testing.T) {
+// TestCreateFreeInsertFailureStillAtomic: even free, a failing kungfu
+// insert must not leave a half-written row (transaction discipline intact).
+func TestCreateFreeInsertFailureStillAtomic(t *testing.T) {
 	pool := a7TestPool(t)
 	botID := a5TestBotWithBalance(t, pool, 10)
 	t.Cleanup(func() { a5CleanupBot(t, pool, botID) })
 
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx,
-		`ALTER TABLE tb_kungfus ADD CONSTRAINT cc_ins_fail_chk CHECK (title <> 'CC-FAILINSERT')`); err != nil {
+		`ALTER TABLE tb_kungfus ADD CONSTRAINT cc_free_ins_fail_chk CHECK (title <> 'CC-FAILINSERT-FREE')`); err != nil {
 		t.Fatalf("add constraint: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `ALTER TABLE tb_kungfus DROP CONSTRAINT IF EXISTS cc_ins_fail_chk`)
+		_, _ = pool.Exec(ctx, `ALTER TABLE tb_kungfus DROP CONSTRAINT IF EXISTS cc_free_ins_fail_chk`)
 	})
 
 	_, err := Push(ctx, pool, botID, map[string]interface{}{
-		"title": "CC-FAILINSERT", "tags": []interface{}{"t"},
+		"title": "CC-FAILINSERT-FREE", "tags": []interface{}{"t"},
 		"content": strings.Repeat("e", 60),
 	}, 128, 10, 24, 500, 102400)
 	if err == nil {
 		t.Fatal("push must fail when the kungfu insert fails")
 	}
 
-	var balance float64
-	if err := pool.QueryRow(ctx,
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
-		t.Fatal(err)
-	}
-	if balance != 10.0 {
-		t.Fatalf("balance = %v, want 10 (charge rolled back with insert)", balance)
-	}
-	var n int
-	if err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push'`, botID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Fatalf("spend_push rows = %d, want 0 (rolled back)", n)
-	}
 	var k int
 	if err := pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM tb_kungfus WHERE bot_id=$1`, botID).Scan(&k); err != nil {
@@ -183,5 +189,4 @@ func TestCreateChargeRollsBackWithInsert(t *testing.T) {
 	if k != 0 {
 		t.Fatalf("kungfu rows = %d, want 0", k)
 	}
-	_ = fmt.Sprint()
 }

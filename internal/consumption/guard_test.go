@@ -1,6 +1,7 @@
 package consumption
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,8 +59,11 @@ func TestConsumptionBoundary(t *testing.T) {
 	}
 }
 
-// TestPolicyCoversActions: every declared Action has a policy — adding an
-// action without pricing fails here rather than at runtime.
+// TestPolicyCoversActions: every declared Action has a policy with a valid
+// price semantics — amount > 0 is illegal (a charge must be negative);
+// amount == 0 is a legal FREE policy (txnType retained for future
+// re-charging but must not book anything); amount < 0 is a legal charged
+// policy and must carry a txnType.
 func TestPolicyCoversActions(t *testing.T) {
 	actions := []Action{ActionStorageCreate, ActionStorageGetPublic}
 	for _, a := range actions {
@@ -67,18 +71,37 @@ func TestPolicyCoversActions(t *testing.T) {
 		if !ok {
 			t.Fatalf("action %s has no policy", a)
 		}
-		if p.amount >= 0 {
-			t.Fatalf("action %s policy amount %v must be negative (a charge)", a, p.amount)
+		if p.amount > 0 {
+			t.Fatalf("action %s policy amount %v is positive — illegal", a, p.amount)
 		}
-		if p.txnType == "" {
-			t.Fatalf("action %s policy missing ledger type", a)
+		if p.amount < 0 && p.txnType == "" {
+			t.Fatalf("action %s is charged but missing ledger type", a)
 		}
 	}
-	// Historical ledger types preserved (statement continuity).
+	// Historical ledger types preserved for the day charging returns.
 	if policies[ActionStorageCreate].txnType != "spend_push" {
-		t.Fatal("storage.create must book spend_push (historical continuity)")
+		t.Fatal("storage.create must keep txnType spend_push (future re-charging)")
 	}
 	if policies[ActionStorageGetPublic].txnType != "spend_get" {
-		t.Fatal("storage.get_public must book spend_get (historical continuity)")
+		t.Fatal("storage.get_public must keep txnType spend_get (future re-charging)")
+	}
+	// Current storage policy is FREE.
+	if policies[ActionStorageCreate].amount != 0 || policies[ActionStorageGetPublic].amount != 0 {
+		t.Fatal("storage actions must currently be free (amount 0)")
+	}
+}
+
+// TestFreeActionNeverTouchesCredits: a free action must short-circuit
+// before credits.Record — verified by pointing Apply at a nil pool: any
+// credits call would panic/fail, so a nil error proves the free path
+// never reached credits.
+func TestFreeActionNeverTouchesCredits(t *testing.T) {
+	if err := Apply(context.Background(), nil, nil, 1,
+		ActionStorageCreate, "kungfu", "deadbeef0000"); err != nil {
+		t.Fatalf("free storage.create must not touch credits: %v", err)
+	}
+	if err := Apply(context.Background(), nil, nil, 1,
+		ActionStorageGetPublic, "kungfu", "deadbeef0000"); err != nil {
+		t.Fatalf("free storage.get_public must not touch credits: %v", err)
 	}
 }

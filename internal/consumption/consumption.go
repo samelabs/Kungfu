@@ -47,14 +47,18 @@ type policy struct {
 }
 
 var policies = map[Action]policy{
+	// Storage actions are currently FREE (amount 0): no credits call, no
+	// balance check, no ledger row. Re-enabling charging means setting a
+	// negative amount (+ txnType) here only — the historical ledger types
+	// are kept in the policy for that future.
 	ActionStorageCreate: {
-		amount:  -1.0,
+		amount:  0,
 		txnType: "spend_push",
 		errCode: "INSUFFICIENT_CREDITS",
 		errMsg:  "Need 1 credit to publish kungfu. Complete platform tasks to earn credits.",
 	},
 	ActionStorageGetPublic: {
-		amount:  -1.0,
+		amount:  0,
 		txnType: "spend_get",
 		errCode: "INSUFFICIENT_CREDITS",
 		errMsg:  "Need 1 credit to retrieve. Complete platform tasks to earn credits.",
@@ -65,12 +69,20 @@ var policies = map[Action]policy{
 // ledger row, and joins the caller's transaction when tx != nil (caller
 // owns commit/rollback); otherwise it runs in its own transaction.
 // Insufficient funds surface as a 402 AppError; DB failures propagate.
+//
+// A FREE action (amount 0) short-circuits: credits.Record is never called,
+// no balance is read, nothing enters the ledger.
 func Apply(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	action Action, refType, refID string) error {
 
 	p, ok := policies[action]
 	if !ok {
 		return errors.New(500, "INTERNAL_ERROR", "Unknown consumption action: "+string(action))
+	}
+
+	// Free action: no charge, no balance check, no ledger.
+	if p.amount == 0 {
+		return nil
 	}
 
 	_, err := credits.Record(ctx, pool, tx, botID, p.txnType, p.amount, &refType, &refID)
