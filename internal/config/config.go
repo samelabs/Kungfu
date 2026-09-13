@@ -47,6 +47,33 @@ type Config struct {
 	// Trusted proxy CIDRs for client IP extraction (comma-separated env var)
 	// When set, X-Forwarded-For is only honored from these IPs.
 	TrustedProxyCIDRs []string
+
+	// Creem payment runtime. All-or-nothing: every key unset → disabled
+	// (server still boots); any subset set → Load fails closed.
+	CreemAPIKey         string
+	CreemWebhookSecret  string
+	CreemProductID      string
+	CreemCreditsPerUnit int64
+	CreemMode           string // "test" | "prod"
+	CreemSuccessURL     string
+}
+
+// CreemEnabled reports whether the Creem payment runtime is fully
+// configured. Never partial: Load() rejects partial configuration.
+func (c *Config) CreemEnabled() bool {
+	return c.CreemAPIKey != "" && c.CreemWebhookSecret != "" &&
+		c.CreemProductID != "" && c.CreemCreditsPerUnit > 0 &&
+		(c.CreemMode == "test" || c.CreemMode == "prod") && c.CreemSuccessURL != ""
+}
+
+// CreemAPIBase maps the configured mode to the official API host. The
+// client never accepts a base URL from outside (tests inject one via the
+// client constructor instead).
+func (c *Config) CreemAPIBase() string {
+	if c.CreemMode == "prod" {
+		return "https://api.creem.io"
+	}
+	return "https://test-api.creem.io"
 }
 
 type RateLimitConfig struct {
@@ -89,6 +116,39 @@ func Load() (*Config, error) {
 	}
 	if cfg.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET environment variable is required")
+	}
+
+	cfg.CreemAPIKey = envStr("CREEM_API_KEY", "")
+	cfg.CreemWebhookSecret = envStr("CREEM_WEBHOOK_SECRET", "")
+	cfg.CreemProductID = envStr("CREEM_PRODUCT_ID", "")
+	cfg.CreemCreditsPerUnit = int64(envInt("CREEM_CREDITS_PER_UNIT", 0))
+	cfg.CreemMode = envStr("CREEM_MODE", "")
+	cfg.CreemSuccessURL = strings.TrimSpace(envStr("CREEM_SUCCESS_URL", ""))
+
+	creemKeys := []string{
+		"CREEM_API_KEY", "CREEM_WEBHOOK_SECRET", "CREEM_PRODUCT_ID",
+		"CREEM_CREDITS_PER_UNIT", "CREEM_MODE", "CREEM_SUCCESS_URL",
+	}
+	setCount := 0
+	for _, k := range creemKeys {
+		if os.Getenv(k) != "" {
+			setCount++
+		}
+	}
+	if setCount > 0 && setCount < len(creemKeys) {
+		return nil, fmt.Errorf("Creem configuration is partial: set all of %s or none", strings.Join(creemKeys, ", "))
+	}
+	if setCount == len(creemKeys) {
+		if cfg.CreemMode != "test" && cfg.CreemMode != "prod" {
+			return nil, fmt.Errorf("CREEM_MODE must be test or prod")
+		}
+		if cfg.CreemCreditsPerUnit <= 0 {
+			return nil, fmt.Errorf("CREEM_CREDITS_PER_UNIT must be a positive integer")
+		}
+		u, err := url.Parse(cfg.CreemSuccessURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("CREEM_SUCCESS_URL must be a valid http/https URL")
+		}
 	}
 
 	return cfg, nil

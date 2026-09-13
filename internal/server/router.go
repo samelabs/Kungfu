@@ -22,6 +22,10 @@ type Server struct {
 	RateLimiter    *ratelimit.Limiter
 	Router         http.Handler
 	TrustedProxies []*net.IPNet
+
+	// creemBaseOverride redirects the Creem client at a test fake.
+	// Empty in production; never settable from requests or env.
+	creemBaseOverride string
 }
 
 // New creates a new server with all routes configured.
@@ -119,6 +123,9 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
 	// Owner store entry points (session -> bot_id; the only subject)
+	r.Post("/api/owner/payments/checkout", s.handleOwnerPaymentCheckout)
+	r.Get("/api/owner/payments/{code}", s.handleOwnerPaymentGet)
+	r.Post("/api/webhooks/creem", s.handleCreemWebhook)
 	r.Get("/api/owner/store/products", s.handleOwnerStoreProducts)
 	r.Post("/api/owner/store/redemptions", s.handleOwnerStoreRedeem)
 	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)

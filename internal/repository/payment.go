@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
@@ -93,6 +94,85 @@ func SetPaymentStatus(ctx context.Context, q pg.Querier, code, status string) (b
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// BindProviderOrder atomically associates a provider order with a payment,
+// BEFORE any grant. Rules (row-locked):
+//   - payment.provider must match the expected provider
+//   - NULL provider_order_id  -> bind (first and only binding)
+//   - same value              -> idempotent success
+//   - different value         -> conflict (no grant)
+//   - the (provider, provider_order_id) UNIQUE constraint additionally
+//     guards against the same provider order funding two payments.
+type BindProviderOrderResult int
+
+const (
+	BindProviderOrderBound BindProviderOrderResult = iota
+	BindProviderOrderAlreadyBound
+	BindProviderOrderConflict
+)
+
+// BindProviderOrderByCode locks the payment row and applies the binding
+// rules above. Returns the outcome; error only for DB failures.
+func BindProviderOrderByCode(ctx context.Context, tx pgx.Tx, code, provider, providerOrderID string) (BindProviderOrderResult, error) {
+	var p model.Payment
+	row := tx.QueryRow(ctx, `
+		SELECT id, code, bot_id, provider, provider_order_id, amount_minor,
+		       currency, credits, status, created_at, updated_at, paid_at
+		FROM tb_payments
+		WHERE code = $1
+		FOR UPDATE`, code)
+	if err := row.Scan(&p.ID, &p.Code, &p.BotID, &p.Provider, &p.ProviderOrderID,
+		&p.AmountMinor, &p.Currency, &p.Credits, &p.Status,
+		&p.CreatedAt, &p.UpdatedAt, &p.PaidAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return BindProviderOrderConflict, fmt.Errorf("payment %s not found", code)
+		}
+		return BindProviderOrderConflict, err
+	}
+	if p.Provider != provider {
+		return BindProviderOrderConflict, fmt.Errorf("payment provider %q, want %q", p.Provider, provider)
+	}
+	if p.ProviderOrderID != nil {
+		if *p.ProviderOrderID == providerOrderID {
+			return BindProviderOrderAlreadyBound, nil
+		}
+		return BindProviderOrderConflict, fmt.Errorf("payment %s already bound to provider order %s", code, *p.ProviderOrderID)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE tb_payments SET provider_order_id = $2, updated_at = NOW()
+		WHERE id = $1`, p.ID, providerOrderID); err != nil {
+		return BindProviderOrderConflict, err
+	}
+	return BindProviderOrderBound, nil
+}
+
+// ProviderOrderBelongsToAnotherPayment reports whether the (provider,
+// provider_order_id) pair is already used by a DIFFERENT payment code.
+// Called inside the same transaction before binding.
+func ProviderOrderBelongsToAnotherPayment(ctx context.Context, tx pgx.Tx, provider, providerOrderID, exceptCode string) (bool, error) {
+	var n int
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM tb_payments
+		WHERE provider = $1 AND provider_order_id = $2 AND code <> $3`,
+		provider, providerOrderID, exceptCode).Scan(&n)
+	return n > 0, err
+}
+
+// FindPaymentByCodeForBot returns the payment with the given code ONLY
+// when it belongs to botID — ownership scoped inside the query, never
+// post-filtered in Go. Returns nil when absent or owned by another bot.
+func FindPaymentByCodeForBot(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Payment, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, provider, provider_order_id, amount_minor,
+		       currency, credits, status, created_at, updated_at, paid_at
+		FROM tb_payments
+		WHERE code = $1 AND bot_id = $2`, code, botID)
+	p, err := scanPayment(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
 }
 
 // PaymentCodeExists reports whether a code is already used (for unique-code
