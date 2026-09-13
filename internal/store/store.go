@@ -475,3 +475,17 @@ func GetRedemption(ctx context.Context, pool *pg.Pool, code string) (*model.Rede
 	}
 	return r, nil
 }
+
+// GetRedemptionForBot is the ownership-scoped read for owner-facing
+// surfaces: the query itself is filtered by bot_id, so a code owned by
+// another bot is indistinguishable from a missing one (404).
+func GetRedemptionForBot(ctx context.Context, pool *pg.Pool, botID int64, code string) (*model.Redemption, error) {
+	r, err := repository.FindRedemptionByCodeForBot(ctx, pool, botID, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load redemption")
+	}
+	if r == nil {
+		return nil, errors.New(404, "REDEMPTION_NOT_FOUND", "Redemption not found")
+	}
+	return r, nil
+}

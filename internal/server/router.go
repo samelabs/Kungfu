@@ -118,6 +118,11 @@ func (s *Server) buildRouter() http.Handler {
 
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
+	// Owner store entry points (session -> bot_id; the only subject)
+	r.Get("/api/owner/store/products", s.handleOwnerStoreProducts)
+	r.Post("/api/owner/store/redemptions", s.handleOwnerStoreRedeem)
+	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)
+
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
 	r.Get("/credits", s.handleCredits)

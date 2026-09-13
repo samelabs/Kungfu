@@ -175,6 +175,24 @@ func FindRedemptionByCode(ctx context.Context, q pg.Querier, code string) (*mode
 	return r, err
 }
 
+// FindRedemptionByCodeForBot returns the redemption with the given code
+// ONLY when it belongs to botID — ownership is scoped inside the query
+// itself, never by post-filtering in Go. Returns nil when absent or owned
+// by another bot.
+func FindRedemptionByCodeForBot(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Redemption, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, product_id, product_title, credits_cost,
+		       request_key, status, review_note, fulfillment_note,
+		       created_at, updated_at, reviewed_at, fulfilled_at, cancelled_at
+		FROM tb_redemptions
+		WHERE code = $1 AND bot_id = $2`, code, botID)
+	r, err := scanRedemption(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
+}
+
 // LockRedemptionByCode locks the redemption row (FOR UPDATE) inside the
 // caller's transaction — the serialization point of every state
 // transition (approve / reject / cancel / fulfill). Returns nil when the
