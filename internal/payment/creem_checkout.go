@@ -61,6 +61,10 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 // are server-computed; the client cannot influence price, currency,
 // credits, product, or success URL.
 //
+// request_id is the Kungfu payment code — the provider
+// correlation/reference key that ties a Creem checkout to its local
+// payment row.
+//
 // Order of operations:
 //  1. live GetProduct → validate (price authority + mode/status checks)
 //  2. entitlement: amount_minor = product.price × units,
@@ -68,13 +72,17 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 //  3. CreatePendingPayment (provider=creem, snapshot) — the payment row
 //     exists BEFORE any provider call, so a webhook for it can never
 //     reference a missing payment
-//  4. Creem CreateCheckout with request_id = payment.code
+//  4. one Creem POST /v1/checkouts (one attempt = one POST; no automatic
+//     retry — see below)
 //  5. verify the response facts, return checkout_url
 //
 // Failure handling:
 //   - definitive Creem rejection (400/401/403/404): FailPayment, provider error
-//   - ambiguous failure (network/429/5xx after bounded retries): payment
-//     stays pending (same request_id can recover), 502 returned
+//   - ambiguous failure (network/429/5xx): payment stays pending, 502
+//     returned. If Creem actually created the checkout, the later
+//     webhook still finds the local payment by request_id and completes
+//     it. If it did not, the row remains pending — a known runtime gap
+//     (no recovery job in this round).
 func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, botID int64, units int64) (*CheckoutResult, error) {
 	if units <= 0 || units > 1000 {
 		return nil, errors.New(400, "INVALID_UNITS", "units must be a positive integer")
@@ -103,7 +111,7 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 
 	checkout, err := rt.Client.CreateCheckout(ctx, CreateCheckoutInput{
 		ProductID:  rt.ProductID,
-		RequestID:  p.Code, // correlation + idempotency key
+		RequestID:  p.Code, // provider correlation/reference key
 		Units:      units,
 		SuccessURL: rt.SuccessURL,
 		Metadata: map[string]string{
@@ -123,20 +131,31 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 			"Payment provider result is uncertain; the payment stays pending and can be retried")
 	}
 
-	// Response fact checks.
+	// Response fact checks — official schema fields are mandatory facts:
+	// a missing/zero/wrong value is an invalid provider response, not a
+	// tolerated gap. Even a `completed` status here grants nothing: the
+	// only economic trigger remains the signature-valid
+	// checkout.completed webhook reconciled through Payment Core.
 	if checkout.ID == "" || checkout.CheckoutURL == "" {
 		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned an incomplete checkout")
 	}
-	if checkout.RequestID != "" && checkout.RequestID != p.Code {
+	if checkout.RequestID != p.Code {
 		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned a mismatched request id")
 	}
-	if checkout.Status != "" {
-		switch checkout.Status {
-		case "pending", "active", "expired":
-			// valid checkout states
-		default:
-			return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned an invalid checkout state")
-		}
+	if checkout.Mode != rt.Mode {
+		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned a mismatched mode")
+	}
+	if checkout.ProductID != rt.ProductID {
+		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned a mismatched product")
+	}
+	if checkout.Units != units {
+		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned mismatched units")
+	}
+	switch checkout.Status {
+	case "pending", "processing", "completed", "expired":
+		// official checkout status enum
+	default:
+		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Payment provider returned an invalid checkout state")
 	}
 
 	return &CheckoutResult{Payment: p, CheckoutURL: checkout.CheckoutURL}, nil

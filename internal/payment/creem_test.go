@@ -34,21 +34,30 @@ type fakeCreem struct {
 	checkoutStatus int // HTTP status for POST /v1/checkouts
 	checkoutBody   string
 	checkouts      []CreateCheckoutInput // recorded requests
+	productPathHit *bool                 // official path endpoint was used
 }
 
 func newFakeCreem(t *testing.T, product CreemProduct) *fakeCreem {
 	t.Helper()
 	fc := &fakeCreem{product: product, checkoutStatus: 200}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/products", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("product_id") != fc.product.ID {
+	// Official endpoint: GET /v1/products/{id}. The query-string form is
+	// deliberately NOT implemented so a regression to the old endpoint
+	// fails loudly (404).
+	productPathHit := false
+	mux.HandleFunc("/v1/products/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/v1/products/")
+		if id == "" || id != fc.product.ID || r.URL.RawQuery != "" {
 			w.WriteHeader(404)
 			_, _ = w.Write([]byte(`{"error":"not found"}`))
 			return
 		}
+		productPathHit = true
+		// Official direct object shape.
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"product": fc.product})
+		_ = json.NewEncoder(w).Encode(fc.product)
 	})
+	fc.productPathHit = &productPathHit
 	mux.HandleFunc("/v1/checkouts", func(w http.ResponseWriter, r *http.Request) {
 		var in CreateCheckoutInput
 		_ = json.NewDecoder(r.Body).Decode(&in)
@@ -60,7 +69,9 @@ func newFakeCreem(t *testing.T, product CreemProduct) *fakeCreem {
 			status = 200
 		}
 		if body == "" {
-			body = fmt.Sprintf(`{"checkout":{"id":"ch_test_%s","request_id":%q,"checkout_url":"https://checkout.fake.io/%s","status":"pending","mode":"test"}}`, in.RequestID, in.RequestID, in.RequestID)
+			// Official direct object shape with the full fact set.
+			body = fmt.Sprintf(`{"id":"ch_test_%s","request_id":%q,"checkout_url":"https://checkout.fake.io/%s","status":"pending","mode":"test","units":%d,"product":%q}`,
+				in.RequestID, in.RequestID, in.RequestID, in.Units, fc.product.ID)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -511,5 +522,178 @@ func TestGetPaymentForBotOwnership(t *testing.T) {
 	}
 	if _, err := GetPaymentForBot(context.Background(), pool, botA, "nonexistent0"); err == nil {
 		t.Fatal("missing payment must 404")
+	}
+}
+
+// -- official-shape contract tests --
+
+// TestGetProductUsesOfficialPathEndpoint: the client must call
+// GET /v1/products/{id} (path form); the fake only implements that route
+// and 404s anything else, so a passing fetch proves the path form.
+// The direct object shape is the primary fixture.
+func TestGetProductUsesOfficialPathEndpoint(t *testing.T) {
+	fc := newFakeCreem(t, goodProduct())
+	rt := fc.runtime()
+
+	p, err := rt.Client.GetProduct(context.Background(), rt.ProductID)
+	if err != nil {
+		t.Fatalf("GetProduct: %v", err)
+	}
+	if p.ID != "prod_test123" || p.Price != 1000 {
+		t.Fatalf("product = %+v", p)
+	}
+	if !*fc.productPathHit {
+		t.Fatal("official path endpoint /v1/products/{id} was not used")
+	}
+}
+
+// TestGetProductWrappedShapeStillParses: compatibility with the wrapped
+// envelope remains, but the direct shape is the tested main path above.
+func TestGetProductWrappedShapeStillParses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"product":{"id":"prod_test123","billing_type":"onetime","status":"active","mode":"test","currency":"USD","price":1000}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewCreemClient(CreemConfig{APIBase: srv.URL, APIKey: "k"})
+	p, err := c.GetProduct(context.Background(), "prod_test123")
+	if err != nil || p.ID != "prod_test123" {
+		t.Fatalf("wrapped shape: %v %+v", err, p)
+	}
+}
+
+// TestCheckoutResponseOfficialContract: every official fact field is
+// mandatory — wrong/missing values reject; the four official statuses
+// pass; the retired "active" rejects.
+func TestCheckoutResponseOfficialContract(t *testing.T) {
+	pool := crTestPool(t)
+
+	// happy path per status (direct object shape)
+	for _, status := range []string{"pending", "processing", "completed", "expired"} {
+		botID := crSeedBot(t, pool)
+		fc := newFakeCreem(t, goodProduct())
+		fc.checkoutBody = fmt.Sprintf(`{"id":"ch_x","request_id":"REPLACE","checkout_url":"https://checkout.fake.io/x","status":%q,"mode":"test","units":1,"product":"prod_test123"}`, status)
+		fc.checkoutBody = strings.Replace(fc.checkoutBody, "REPLACE", "%s", 1)
+		// rebuild per-payment: use a custom handler expectation via mutation below
+		res := runCheckoutWithBody(t, pool, fc, botID, fc.checkoutBody)
+		if res == nil {
+			t.Fatalf("status %q must be accepted", status)
+		}
+	}
+
+	// rejections (each mutates one official fact)
+	rejects := []struct {
+		name string
+		body string
+	}{
+		{"retired status active", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"active","mode":"test","units":1,"product":"prod_test123"}`},
+		{"wrong mode", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"prod","units":1,"product":"prod_test123"}`},
+		{"missing mode", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","units":1,"product":"prod_test123"}`},
+		{"wrong product", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product":"prod_other"}`},
+		{"missing product", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1}`},
+		{"wrong units", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":2,"product":"prod_test123"}`},
+		{"zero units", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":0,"product":"prod_test123"}`},
+		{"missing units", `{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","product":"prod_test123"}`},
+		{"wrong request_id", `{"id":"ch_x","request_id":"other","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product":"prod_test123"}`},
+		{"missing request_id", `{"id":"ch_x","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product":"prod_test123"}`},
+	}
+	for _, tc := range rejects {
+		botID := crSeedBot(t, pool)
+		fc := newFakeCreem(t, goodProduct())
+		if res := runCheckoutWithBody(t, pool, fc, botID, tc.body); res != nil {
+			t.Fatalf("%s: must reject", tc.name)
+		}
+	}
+}
+
+// runCheckoutWithBody runs StartCreemCheckout with the fake returning the
+// given body template (%s substituted with the actual payment code).
+func runCheckoutWithBody(t *testing.T, pool *pg.Pool, fc *fakeCreem, botID int64, bodyTemplate string) *CheckoutResult {
+	t.Helper()
+	fc.mu.Lock()
+	fc.checkoutStatus = 200
+	fc.mu.Unlock()
+
+	// wrap the fake's default body logic: intercept via a wrapped server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/products/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(fc.product)
+			return
+		}
+		if r.URL.Path == "/v1/checkouts" {
+			var in CreateCheckoutInput
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			fc.mu.Lock()
+			fc.checkouts = append(fc.checkouts, in)
+			fc.mu.Unlock()
+			body := bodyTemplate
+			if strings.Contains(body, "%s") {
+				body = fmt.Sprintf(body, in.RequestID)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt := &CreemRuntime{
+		Client:         NewCreemClient(CreemConfig{APIBase: srv.URL, APIKey: "k"}),
+		ProductID:      fc.product.ID,
+		CreditsPerUnit: 100,
+		Mode:           "test",
+		SuccessURL:     "https://kungfu.md/owner?payment=success",
+	}
+	res, err := StartCreemCheckout(context.Background(), pool, rt, botID, 1)
+	if err != nil {
+		return nil
+	}
+	return res
+}
+
+// TestCheckoutProductShapeVariants: the product identity normalizes from
+// string / object / product_id forms.
+func TestCheckoutProductShapeVariants(t *testing.T) {
+	variants := []string{
+		`{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product":"prod_test123"}`,
+		`{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product":{"id":"prod_test123","name":"Kungfu Credits"}}`,
+		`{"id":"ch_x","request_id":"%s","checkout_url":"https://c.io/x","status":"pending","mode":"test","units":1,"product_id":"prod_test123"}`,
+	}
+	for i, body := range variants {
+		var co CreemCheckout
+		filled := fmt.Sprintf(body, "code000000001")
+		if err := json.Unmarshal([]byte(filled), &co); err != nil {
+			t.Fatalf("variant %d: %v", i, err)
+		}
+		if co.ProductID != "prod_test123" {
+			t.Fatalf("variant %d: ProductID = %q", i, co.ProductID)
+		}
+	}
+}
+
+// TestCompletedStatusOnCreateGrantsNothing: even when checkout creation
+// returns status=completed, no grant happens on the HTTP path — only the
+// webhook reconciles and grants.
+func TestCompletedStatusOnCreateGrantsNothing(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, goodProduct())
+
+	res := runCheckoutWithBody(t, pool, fc, botID,
+		`{"id":"ch_c","request_id":"%s","checkout_url":"https://c.io/x","status":"completed","mode":"test","units":1,"product":"prod_test123"}`)
+	if res == nil {
+		t.Fatal("completed-on-create should still return the checkout URL")
+	}
+	if n, _ := crGrants(t, pool, res.Payment.Code); n != 0 {
+		t.Fatalf("grant on create-response: %d", n)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("balance = %v, want 0", b)
+	}
+	p, _ := GetPayment(context.Background(), pool, res.Payment.Code)
+	if p.Status != "pending" {
+		t.Fatalf("status = %s, want pending until webhook", p.Status)
 	}
 }

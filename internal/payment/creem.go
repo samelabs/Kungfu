@@ -55,13 +55,61 @@ type CreemProduct struct {
 	Price int64 `json:"price"`
 }
 
-// CreemCheckout is the created checkout session.
+// CreemCheckout is the created checkout session. Official fact fields:
+// id, status, mode, request_id, units, checkout_url, and the product
+// identity (documented both as `product` and `product_id`; `product`
+// itself may be a string or an object). ProductID below is the
+// normalized provider product id after parsing.
 type CreemCheckout struct {
 	ID          string `json:"id"`
 	RequestID   string `json:"request_id"`
 	CheckoutURL string `json:"checkout_url"`
 	Status      string `json:"status"`
 	Mode        string `json:"mode"`
+	Units       int64  `json:"units"`
+	ProductID   string `json:"-"` // normalized from product / product_id
+}
+
+// UnmarshalJSON normalizes the product identity shapes into ProductID:
+// product: "prod_x" OR product: {"id": "prod_x"} OR product_id: "prod_x".
+func (co *CreemCheckout) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		ID          string          `json:"id"`
+		RequestID   string          `json:"request_id"`
+		CheckoutURL string          `json:"checkout_url"`
+		Status      string          `json:"status"`
+		Mode        string          `json:"mode"`
+		Units       int64           `json:"units"`
+		Product     json.RawMessage `json:"product"`
+		ProductID   string          `json:"product_id"`
+	}
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	co.ID, co.RequestID, co.CheckoutURL = a.ID, a.RequestID, a.CheckoutURL
+	co.Status, co.Mode, co.Units = a.Status, a.Mode, a.Units
+	// product as string
+	var ps string
+	if err := json.Unmarshal(a.Product, &ps); err == nil && ps != "" {
+		co.ProductID = ps
+		return nil
+	}
+	// product as object with id
+	if len(a.Product) > 0 {
+		var po struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(a.Product, &po); err == nil && po.ID != "" {
+			co.ProductID = po.ID
+			return nil
+		}
+	}
+	// product_id fallback
+	if a.ProductID != "" {
+		co.ProductID = a.ProductID
+	}
+	return nil
 }
 
 // ErrCreemDefinitive marks a provider response that definitively failed
@@ -154,12 +202,13 @@ func (c *CreemClient) do(ctx context.Context, method, path string, body interfac
 	return fmt.Errorf("creem ambiguous failure (HTTP %d): %s", resp.StatusCode, truncate(string(raw), 200))
 }
 
-// GetProduct fetches the configured product live. The caller validates it
-// against expectations (id, onetime, active, mode, price, currency).
-// GET is safe to call twice; a single request is issued and the response
-// is parsed tolerating both envelope shapes (wrapped / direct object).
+// GetProduct fetches the configured product live via the official
+// GET /v1/products/{id} endpoint (path-escaped id). The caller validates
+// it against expectations (id, onetime, active, mode, price, currency).
+// A single request is issued; the response parses tolerating both
+// envelope shapes (wrapped / direct object).
 func (c *CreemClient) GetProduct(ctx context.Context, productID string) (*CreemProduct, error) {
-	raw, err := c.doRaw(ctx, http.MethodGet, "/v1/products?product_id="+url.QueryEscape(productID), nil)
+	raw, err := c.doRaw(ctx, http.MethodGet, "/v1/products/"+url.PathEscape(productID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +226,8 @@ func (c *CreemClient) GetProduct(ctx context.Context, productID string) (*CreemP
 }
 
 // CreateCheckoutInput is the server-owned checkout request payload.
-// request_id is the Kungfu payment code — the correlation/idempotency key.
+// request_id is the Kungfu payment code — the provider
+// correlation/reference key tying a checkout to its local payment.
 type CreateCheckoutInput struct {
 	ProductID  string            `json:"product_id"`
 	RequestID  string            `json:"request_id"`
@@ -187,8 +237,8 @@ type CreateCheckoutInput struct {
 }
 
 // CreateCheckout creates a hosted checkout. Exactly ONE POST per call —
-// retries with the SAME RequestID are the caller's idempotency strategy
-// (provider-side request_id tracking), never a duplicated request here.
+// Exactly one POST per call — one checkout attempt = one provider
+// request; there is no automatic retry.
 func (c *CreemClient) CreateCheckout(ctx context.Context, in CreateCheckoutInput) (*CreemCheckout, error) {
 	raw, err := c.doRaw(ctx, http.MethodPost, "/v1/checkouts", in)
 	if err != nil {

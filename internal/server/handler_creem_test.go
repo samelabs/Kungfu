@@ -360,27 +360,31 @@ func TestCreemE2EWebhookGrants(t *testing.T) {
 func newFakeCreemHTTP(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/products", func(w http.ResponseWriter, r *http.Request) {
+	// Official endpoints: GET /v1/products/{id} (direct object shape).
+	mux.HandleFunc("/v1/products/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimPrefix(r.URL.Path, "/v1/products/") != "prod_test123" {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"product": map[string]interface{}{
-				"id": "prod_test123", "name": "Kungfu Credits", "billing_type": "onetime",
-				"status": "active", "mode": "test", "currency": "USD", "price": 1000,
-			},
+			"id": "prod_test123", "name": "Kungfu Credits", "billing_type": "onetime",
+			"status": "active", "mode": "test", "currency": "USD", "price": 1000,
 		})
 	})
 	mux.HandleFunc("/v1/checkouts", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			RequestID string `json:"request_id"`
+			Units     int64  `json:"units"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"checkout": map[string]interface{}{
-				"id": "ch_http_" + in.RequestID, "request_id": in.RequestID,
-				"checkout_url": "https://checkout.fake.io/" + in.RequestID,
-				"status":       "pending", "mode": "test",
-			},
+			"id": "ch_http_" + in.RequestID, "request_id": in.RequestID,
+			"checkout_url": "https://checkout.fake.io/" + in.RequestID,
+			"status":       "pending", "mode": "test", "units": in.Units,
+			"product": "prod_test123",
 		})
 	})
 	srv := httptest.NewServer(mux)
