@@ -10,6 +10,8 @@ package service
 // settlement trigger.
 
 import (
+	"math"
+
 	"kungfu.md/internal/errors"
 )
 
@@ -25,8 +27,12 @@ const (
 
 // fundable reports whether a budget/price pair can pay for one more
 // delivery: positive price, budget at least MinOpenBudget, budget at
-// least the price.
+// least the price. Non-finite values are never fundable.
 func fundable(budget, price float64) bool {
+	if math.IsNaN(budget) || math.IsInf(budget, 0) ||
+		math.IsNaN(price) || math.IsInf(price, 0) {
+		return false
+	}
 	return price > 0 && budget >= MinOpenBudget && budget >= price
 }
 
@@ -53,8 +59,14 @@ func assertFundable(postapi string, budget, price float64) error {
 	if err := validatePostapiField(postapi); err != nil {
 		return err
 	}
+	if math.IsNaN(price) || math.IsInf(price, 0) {
+		return errors.New(400, "INVALID_PRICE", "Price must be a finite number")
+	}
 	if price <= 0 {
 		return errors.New(400, "INVALID_PRICE", "Price must be greater than zero")
+	}
+	if math.IsNaN(budget) || math.IsInf(budget, 0) {
+		return errors.New(400, "INVALID_BUDGET", "Budget must be a finite number")
 	}
 	if budget < MinOpenBudget || budget < price {
 		return errors.New(400, "TASK_BUDGET_TOO_LOW", "Open tasks require enough budget")

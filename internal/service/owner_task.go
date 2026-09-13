@@ -244,6 +244,9 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 // AddTaskBudget adds budget to a task, locking additional credits.
 func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string, amount float64) (map[string]interface{}, error) {
 	amount = roundMoney(amount)
+	if math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return nil, errors.New(400, "INVALID_AMOUNT", "Budget amount must be a finite number")
+	}
 	if amount <= 0 {
 		return nil, errors.New(400, "INVALID_AMOUNT", "Budget amount must be greater than zero")
 	}
@@ -470,6 +473,9 @@ func validateTaskBasics(title, requirements, postapi string, price float64, cfg 
 	if err := validatePostapiField(postapi); err != nil {
 		return err
 	}
+	if math.IsNaN(price) || math.IsInf(price, 0) {
+		return errors.New(400, "INVALID_PRICE", "Price must be a finite number")
+	}
 	if price <= 0 {
 		return errors.New(400, "INVALID_PRICE", "Price must be greater than zero")
 	}
@@ -478,6 +484,9 @@ func validateTaskBasics(title, requirements, postapi string, price float64, cfg 
 
 // validateBudget
 func validateBudget(budget float64) error {
+	if math.IsNaN(budget) || math.IsInf(budget, 0) {
+		return errors.New(400, "INVALID_BUDGET", "Budget must be a finite number")
+	}
 	if budget <= 0 {
 		return errors.New(400, "INVALID_BUDGET", "Budget must be greater than zero")
 	}

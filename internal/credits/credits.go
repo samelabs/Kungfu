@@ -17,12 +17,17 @@ package credits
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/jackc/pgx/v5"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 )
+
+// ErrNonFinite is returned when a credit amount or balance is NaN/±Inf —
+// the final hard gate before any balance mutation or ledger insert.
+var ErrNonFinite = fmt.Errorf("non-finite credit value")
 
 // Record records a credit transaction and updates the bot's balance — the
 // single balance-mutation primitive.
@@ -35,6 +40,12 @@ import (
 // the 402 INSUFFICIENT_CREDITS contract.
 func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	txnType string, amount float64, refType, refID *string) (float64, error) {
+
+	// Finite invariant — the final hard gate: NaN/±Inf never reaches a
+	// balance UPDATE or a ledger INSERT.
+	if math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return 0, ErrNonFinite
+	}
 
 	useTx, startedNew, err := pool.BeginOrUse(ctx, tx)
 	if err != nil {
@@ -55,8 +66,14 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	if err != nil {
 		return 0, fmt.Errorf("bot not found")
 	}
+	if math.IsNaN(currentBalance) || math.IsInf(currentBalance, 0) {
+		return 0, ErrNonFinite
+	}
 
 	newBalance := currentBalance + amount
+	if math.IsNaN(newBalance) || math.IsInf(newBalance, 0) {
+		return 0, ErrNonFinite
+	}
 
 	if newBalance < 0 {
 		return 0, errors.New(402, "INSUFFICIENT_CREDITS",
@@ -94,6 +111,9 @@ func Balance(ctx context.Context, q pg.Querier, botID int64) (float64, error) {
 	err := q.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&balance)
 	if err != nil {
 		return 0, err
+	}
+	if math.IsNaN(balance) || math.IsInf(balance, 0) {
+		return 0, ErrNonFinite
 	}
 	return balance, nil
 }

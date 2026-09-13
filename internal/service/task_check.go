@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 
 	"kungfu.md/internal/errors"
 )
@@ -96,9 +97,10 @@ func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
 	return nil
 }
 
-// ValidatePrice validates that price is > 0.
+// ValidatePrice validates that price is a finite positive number.
+// A non-finite persisted price lands on the existing PRICE_INVALID rule.
 func ValidatePrice(price float64) *TaskCheckError {
-	if price <= 0 {
+	if math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 {
 		return RaiseRule("PRICE_INVALID")
 	}
 	return nil
