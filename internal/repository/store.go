@@ -217,11 +217,15 @@ func UpdateRedemptionStatus(ctx context.Context, tx pgx.Tx, id int64,
 			WHERE id = $1 AND status = $4`,
 			id, toStatus, note, fromStatus)
 	case model.RedemptionStatusCancelled:
+		// Cancellation must NOT touch review_note / reviewed_at: the
+		// review fact is history and survives the cancel (an approved
+		// redemption keeps its approval note). Only status/cancelled_at/
+		// updated_at change; the note argument is deliberately unused.
 		tag, err = tx.Exec(ctx, `
 			UPDATE tb_redemptions
-			SET status = $2, review_note = $3, cancelled_at = NOW(), updated_at = NOW()
-			WHERE id = $1 AND status = $4`,
-			id, toStatus, note, fromStatus)
+			SET status = $2, cancelled_at = NOW(), updated_at = NOW()
+			WHERE id = $1 AND status = $3`,
+			id, toStatus, fromStatus)
 	default:
 		return false, stderrors.New("unsupported redemption target status: " + toStatus)
 	}
