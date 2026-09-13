@@ -119,7 +119,7 @@ func TestStoreProductsActiveOnly(t *testing.T) {
 	router := s.buildRouter()
 	_, cookie := seedStoreBot(t, s, 10)
 
-	active := storeSeedProduct(t, s, 30)
+	active := storeSeedProduct(t, s, 40)
 	inactive := storeSeedProduct(t, s, 50)
 	if ok, err := store.SetProductInactive(context.Background(), s.Pool, inactive); err != nil || !ok {
 		t.Fatalf("deactivate: %v %v", ok, err)
@@ -181,7 +181,7 @@ func TestStoreRedeemCreatesPendingAndSpends(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 
 	rec, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_redeem_1"})
@@ -196,16 +196,16 @@ func TestStoreRedeemCreatesPendingAndSpends(t *testing.T) {
 	if created, ok := r["created"].(bool); !ok || !created {
 		t.Fatalf("created = %v", r["created"])
 	}
-	if r["credits_cost"] != float64(30) {
+	if r["credits_cost"] != float64(40) {
 		t.Fatalf("credits_cost = %v", r["credits_cost"])
 	}
-	if got := storeBotBalance(t, s, botID); got != 70 {
-		t.Fatalf("balance = %v, want 70", got)
+	if got := storeBotBalance(t, s, botID); got != 60 {
+		t.Fatalf("balance = %v, want 60", got)
 	}
 	code := r["code"].(string)
 	n, sum := storeSpendCount(t, s, botID, code)
-	if n != 1 || sum != -30 {
-		t.Fatalf("spend rows = %d/%v, want 1/-30", n, sum)
+	if n != 1 || sum != -40 {
+		t.Fatalf("spend rows = %d/%v, want 1/-40", n, sum)
 	}
 
 	// 6. snapshot fields present
@@ -220,7 +220,7 @@ func TestStoreRedeemIdempotentReplay(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 
 	_, b1 := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_replay_1"})
@@ -238,8 +238,8 @@ func TestStoreRedeemIdempotentReplay(t *testing.T) {
 	if r2["code"] != code {
 		t.Fatalf("replay returned different redemption: %v vs %v", r2["code"], code)
 	}
-	if got := storeBotBalance(t, s, botID); got != 70 {
-		t.Fatalf("balance after replay = %v, want 70", got)
+	if got := storeBotBalance(t, s, botID); got != 60 {
+		t.Fatalf("balance after replay = %v, want 60", got)
 	}
 	if n, _ := storeSpendCount(t, s, botID, code); n != 1 {
 		t.Fatalf("spend rows after replay = %d", n)
@@ -252,7 +252,7 @@ func TestStoreRedeemConcurrentSameKey(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 
 	const workers = 6
 	var wg sync.WaitGroup
@@ -282,8 +282,8 @@ func TestStoreRedeemConcurrentSameKey(t *testing.T) {
 	if len(seen) != 1 {
 		t.Fatalf("concurrent redeem produced %d distinct redemptions", len(seen))
 	}
-	if got := storeBotBalance(t, s, botID); got != 70 {
-		t.Fatalf("balance after concurrent redeem = %v, want 70", got)
+	if got := storeBotBalance(t, s, botID); got != 60 {
+		t.Fatalf("balance after concurrent redeem = %v, want 60", got)
 	}
 	var n int
 	if err := s.Pool.QueryRow(context.Background(),
@@ -302,7 +302,7 @@ func TestStoreRedeemSameKeyDifferentProduct(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
-	p1 := storeSeedProduct(t, s, 30)
+	p1 := storeSeedProduct(t, s, 40)
 	p2 := storeSeedProduct(t, s, 50)
 
 	storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
@@ -312,7 +312,7 @@ func TestStoreRedeemSameKeyDifferentProduct(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d body = %v", rec.Code, body)
 	}
-	if got := storeBotBalance(t, s, botID); got != 70 {
+	if got := storeBotBalance(t, s, botID); got != 60 {
 		t.Fatalf("balance = %v, want 70 (no second debit)", got)
 	}
 }
@@ -323,7 +323,7 @@ func TestStoreRedeemInsufficient(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 5)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 
 	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_insuf_1"})
@@ -347,7 +347,7 @@ func TestStoreRedeemInactive(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 	if ok, _ := store.SetProductInactive(context.Background(), s.Pool, product); !ok {
 		t.Fatal("deactivate failed")
 	}
@@ -375,7 +375,7 @@ func TestStoreRedemptionGetOwnership(t *testing.T) {
 	router := s.buildRouter()
 	botA, cookieA := seedStoreBot(t, s, 100)
 	_, cookieB := seedStoreBot(t, s, 100)
-	product := storeSeedProduct(t, s, 30)
+	product := storeSeedProduct(t, s, 40)
 
 	_, b1 := storeDo(t, router, cookieA, http.MethodPost, "/api/owner/store/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_get_1"})
