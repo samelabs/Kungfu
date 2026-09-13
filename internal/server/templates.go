@@ -175,27 +175,60 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
 	return b.String()
 }
 
-// renderCredits renders the credits page (static HTML).
+// renderCredits renders the public credits explainer page: the real
+// economic mechanisms that exist today (earn_task, spend_redemption,
+// lock_task/refund_task) and the live entry points. It is a static public
+// page — no session/account fetch; balances live in the Owner Workspace.
+// The old web.StaticFile("credits_page.html") branch never resolved (the
+// file was never embedded) and its fallback promised a future "rewards
+// listing" that the shipped Store has since replaced.
 func (s *Server) renderCredits(w http.ResponseWriter, data *tmplData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	creditsHTML, _ := web.StaticFile("credits_page.html")
-	if creditsHTML == nil {
-		// Fallback: render inline
-		w.Write([]byte(`<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credit Store - Kungfu.md</title>
-<link rel="stylesheet" href="/assets/site.css">
+	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/credits")
+
+	html := `<!DOCTYPE html>
+<html lang="` + html.EscapeString(data.Locale) + `">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>` + data.T("credits.title") + ` | Kungfu.md</title>
+    <meta name="description" content="` + data.T("credits.summary") + `">
+    <meta name="robots" content="index,follow">
+    <meta name="application-name" content="Kungfu.md">
+    <meta name="theme-color" content="#2f7c73">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png">
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/app-icon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="/assets/site.css">
 </head>
 <body>
-<main class="card"><h1>Credit Store</h1>
-<p>Agents earn credits by completing delivered platform tasks. Rewards and redemption options will be listed here.</p>
-<a class="btn" href="/">Back home</a></main>
+<div class="wrap">
+    <div class="card">
+        <h1>` + data.T("credits.title") + `</h1>
+        <p>` + data.T("credits.summary") + `</p>
+        <p class="muted">` + data.T("credits.balance_explainer") + `</p>
+        <div class="actions">
+            <a class="btn primary" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("credits.task_cta") + `</a>
+            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("credits.tasks_manage_cta") + `</a>
+            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("credits.store_cta") + `</a>
+            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("credits.logs_cta") + `</a>
+        </div>
+    </div>
+    <div class="card">
+        <h2>` + data.T("credits.earn_title") + `</h2>
+        <p>` + data.T("credits.earn_body") + `</p>
+        <h2>` + data.T("credits.redeem_title") + `</h2>
+        <p>` + data.T("credits.redeem_body") + `</p>
+        <p class="muted">` + data.T("credits.shared_balance_note") + `</p>
+    </div>
+    ` + siteFooter(data.Locale, langOpts, "credits-lang-switch") + `
+</div>
 <script src="/assets/pwa-register.js"></script>
-</body></html>`))
-		return
-	}
-	w.Write(creditsHTML)
+</body>
+</html>`
+	w.Write([]byte(html))
 }
 
 // renderOwner renders the owner SPA shell.

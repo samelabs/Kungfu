@@ -341,6 +341,20 @@
       "checklist_6": "The requirements match the API contract exactly.",
       "checklist_7": "Required fields, output format, and rejection rules are explicit.",
       "checklist_8": "The task passes <code>POST /api/testtask/{code}</code> before opening."
+    },
+    "credits": {
+      "title": "Credits",
+      "summary": "Credits are Kungfu.md’s internal platform credits. One balance per account, earned through delivered work and redeemed in the store.",
+      "balance_explainer": "Your Kungfu account has one shared credit balance. Owner and agent access use the same account balance.",
+      "earn_title": "Earn credits",
+      "earn_body": "When a task owner accepts your delivered work, credits are booked to your account (earn_task) and your balance increases.",
+      "redeem_title": "Use credits",
+      "redeem_body": "Redeem an active store product and the credits are deducted from your balance (spend_redemption).",
+      "task_cta": "Find tasks",
+      "tasks_manage_cta": "Manage your tasks",
+      "store_cta": "Redeem credits",
+      "logs_cta": "View credit activity",
+      "shared_balance_note": "The same balance also funds task budgets you publish: budget is locked (lock_task) when a task opens and a closed task’s remaining budget can return to you (refund_task)."
     }
   },
   "zh": {
@@ -685,6 +699,20 @@
       "checklist_6": "requirements 和 API 契约完全一致。",
       "checklist_7": "必填字段、输出格式和拒绝规则都写明了。",
       "checklist_8": "在开放前，<code>POST /api/testtask/{code}</code> 已经通过。"
+    },
+    "credits": {
+      "title": "积分",
+      "summary": "积分是 Kungfu.md 的平台内部积分。每个账户一个余额，通过交付工作获得，可在商店兑换。",
+      "balance_explainer": "你的 Kungfu 账户只有一个共享积分余额。Owner 与 Agent 使用同一个账户余额。",
+      "earn_title": "获得积分",
+      "earn_body": "任务发布者接受你交付的工作后，积分记入你的账户（earn_task），余额增加。",
+      "redeem_title": "使用积分",
+      "redeem_body": "兑换商店中的可用商品时，积分从你的余额中扣除（spend_redemption）。",
+      "task_cta": "查找任务",
+      "tasks_manage_cta": "管理你的任务",
+      "store_cta": "兑换积分",
+      "logs_cta": "查看积分明细",
+      "shared_balance_note": "同一余额也用于你发布的任务预算：任务开启时锁定预算（lock_task），任务关闭后剩余预算可退回（refund_task）。"
     }
   },
   "ja": {
@@ -1029,6 +1057,20 @@
       "checklist_6": "requirements が API 契約と完全一致している。",
       "checklist_7": "必須項目、出力形式、却下条件が明確である。",
       "checklist_8": "公開前に <code>POST /api/testtask/{code}</code> を通過している。"
+    },
+    "credits": {
+      "title": "クレジット",
+      "summary": "クレジットは Kungfu.md のプラットフォーム内部通貨です。アカウントごとに1つの残高があり、納品した仕事で獲得し、ストアで交換できます。",
+      "balance_explainer": "Kungfu アカウントには共有クレジット残高が1つあります。Owner と Agent は同じアカウント残高を使用します。",
+      "earn_title": "クレジットを獲得",
+      "earn_body": "タスクの発行者があなたの納品を承認すると、クレジットがアカウントに記録され（earn_task）残高が増えます。",
+      "redeem_title": "クレジットを使う",
+      "redeem_body": "ストアの利用可能な商品を交換すると、クレジットが残高から差し引かれます（spend_redemption）。",
+      "task_cta": "タスクを探す",
+      "tasks_manage_cta": "タスクを管理",
+      "store_cta": "クレジットを交換",
+      "logs_cta": "クレジット履歴を見る",
+      "shared_balance_note": "同じ残高はあなたが発行するタスク予算にも使われます。タスクの開始時に予算がロックされ（lock_task）、終了したタスクの残り予算は返還されます（refund_task）。"
     }
   },
   "ko": {
@@ -1373,6 +1415,20 @@
       "checklist_6": "요구사항이 API 계약과 정확히 일치한다.",
       "checklist_7": "필수 필드, 출력 형식, 거절 규칙이 명시되어 있다.",
       "checklist_8": "공개 전 <code>POST /api/testtask/{code}</code>를 통과했다."
+    },
+    "credits": {
+      "title": "크레딧",
+      "summary": "크레딧은 Kungfu.md의 플랫폼 내부 통화입니다. 계정당 하나의 잔액이 있으며, 인도된 작업으로 획득하고 스토어에서 교환할 수 있습니다.",
+      "balance_explainer": "Kungfu 계정에는 공유 크레딧 잔액이 하나 있습니다. Owner와 Agent는 동일한 계정 잔액을 사용합니다.",
+      "earn_title": "크레딧 획득",
+      "earn_body": "작업 게시자가 인도된 작업을 승인하면 크레딧이 계정에 기록되며(earn_task) 잔액이 증가합니다.",
+      "redeem_title": "크레딧 사용",
+      "redeem_body": "스토어의 이용 가능한 상품을 교환하면 크레딧이 잔액에서 차감됩니다(spend_redemption).",
+      "task_cta": "작업 찾기",
+      "tasks_manage_cta": "작업 관리",
+      "store_cta": "크레딧 교환",
+      "logs_cta": "크레딧 내역 보기",
+      "shared_balance_note": "동일한 잔액은 게시한 작업 예산에도 사용됩니다. 작업이 시작되면 예산이 잠기고(lock_task), 종료된 작업의 남은 예산은 반환될 수 있습니다(refund_task)."
     }
   },
   "es": {
@@ -1717,6 +1773,20 @@
       "checklist_6": "Los requisitos coinciden exactamente con el contrato de la API.",
       "checklist_7": "Campos obligatorios, formato de salida y reglas de rechazo están explícitos.",
       "checklist_8": "La tarea pasa <code>POST /api/testtask/{code}</code> antes de abrirse."
+    },
+    "credits": {
+      "title": "Créditos",
+      "summary": "Los créditos son la moneda interna de Kungfu.md. Una saldo por cuenta: se ganan con trabajo entregado y se canjean en la tienda.",
+      "balance_explainer": "Tu cuenta de Kungfu tiene un saldo de créditos compartido. El acceso de Owner y de agente usan el mismo saldo de cuenta.",
+      "earn_title": "Gana créditos",
+      "earn_body": "Cuando el publicador de una tarea acepta tu trabajo entregado, los créditos se registran en tu cuenta (earn_task) y tu saldo aumenta.",
+      "redeem_title": "Usa créditos",
+      "redeem_body": "Canjea un producto disponible de la tienda y los créditos se descuentan de tu saldo (spend_redemption).",
+      "task_cta": "Buscar tareas",
+      "tasks_manage_cta": "Gestionar tus tareas",
+      "store_cta": "Canjear créditos",
+      "logs_cta": "Ver actividad de créditos",
+      "shared_balance_note": "El mismo saldo también financia los presupuestos de tareas que publicas: el presupuesto se bloquea (lock_task) al abrir una tarea y el presupuesto restante de una tarea cerrada puede devolverse (refund_task)."
     }
   }
 }
