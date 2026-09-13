@@ -270,7 +270,7 @@ func TestStartCheckoutUnitsAndPaymentFacts(t *testing.T) {
 	}
 }
 
-// -- 4. invalid units --
+// -- 4. invalid units / no invented cap / overflow --
 
 func TestStartCheckoutInvalidUnits(t *testing.T) {
 	pool := crTestPool(t)
@@ -278,10 +278,45 @@ func TestStartCheckoutInvalidUnits(t *testing.T) {
 	fc := newFakeCreem(t, goodProduct())
 	rt := fc.runtime()
 
-	for _, units := range []int64{0, -1, 1001} {
+	// Only non-positive units are invalid — there is no Kungfu-side
+	// purchase cap (provider limits are Creem's to enforce).
+	for _, units := range []int64{0, -1} {
 		if _, err := StartCreemCheckout(context.Background(), pool, rt, botID, units); err == nil {
 			t.Fatalf("units %d accepted", units)
 		}
+	}
+
+	// units above any old fixed cap must be accepted (here: 5000 units
+	// of a 1000-minor product computes safely).
+	res, err := StartCreemCheckout(context.Background(), pool, rt, botID, 5000)
+	if err != nil {
+		t.Fatalf("units 5000 must be accepted: %v", err)
+	}
+	if res.Payment.AmountMinor != 5000000 || res.Payment.Credits != 500000 {
+		t.Fatalf("5000-unit facts = %d/%v", res.Payment.AmountMinor, res.Payment.Credits)
+	}
+}
+
+func TestStartCheckoutOverflowRejected(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	// A product priced near int64 max makes moderate units overflow.
+	big := goodProduct()
+	big.Price = (1 << 62)
+	fc := newFakeCreem(t, big)
+	rt := fc.runtime()
+
+	// amount overflow
+	if _, err := StartCreemCheckout(context.Background(), pool, rt, botID, 8); err == nil {
+		t.Fatal("amount overflow accepted")
+	}
+
+	// credits overflow: normal price, huge per-unit credits
+	normal := newFakeCreem(t, goodProduct())
+	rt2 := normal.runtime()
+	rt2.CreditsPerUnit = (1 << 62)
+	if _, err := StartCreemCheckout(context.Background(), pool, rt2, botID, 8); err == nil {
+		t.Fatal("credits overflow accepted")
 	}
 }
 
@@ -307,7 +342,8 @@ func TestCheckoutProviderFailureStates(t *testing.T) {
 		}
 	}
 
-	// ambiguous 500 → payment stays pending
+	// ambiguous 500 → payment stays pending, message carries no retry
+	// semantics, zero grant
 	{
 		botID := crSeedBot(t, pool)
 		fc := newFakeCreem(t, goodProduct())
@@ -316,11 +352,23 @@ func TestCheckoutProviderFailureStates(t *testing.T) {
 		if err == nil {
 			t.Fatal("ambiguous failure must error")
 		}
+		msg := err.Error()
+		for _, banned := range []string{"retried", "retry"} {
+			if strings.Contains(strings.ToLower(msg), strings.ToLower(banned)) {
+				t.Fatalf("ambiguous message implies retry: %s", msg)
+			}
+		}
 		var n int
 		_ = pool.QueryRow(context.Background(),
 			`SELECT COUNT(*) FROM tb_payments WHERE bot_id=$1 AND status='pending'`, botID).Scan(&n)
 		if n != 1 {
 			t.Fatalf("pending payments = %d, want 1 (ambiguous stays pending)", n)
+		}
+		var txN int
+		_ = pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='grant_payment'`, botID).Scan(&txN)
+		if txN != 0 {
+			t.Fatalf("ambiguous failure granted: %d", txN)
 		}
 	}
 }

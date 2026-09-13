@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 
 	"kungfu.md/internal/errors"
@@ -72,8 +73,8 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 //  3. CreatePendingPayment (provider=creem, snapshot) — the payment row
 //     exists BEFORE any provider call, so a webhook for it can never
 //     reference a missing payment
-//  4. one Creem POST /v1/checkouts (one attempt = one POST; no automatic
-//     retry — see below)
+//  4. one Creem POST /v1/checkouts (one attempt = one POST; no
+//     automatic resubmission — see below)
 //  5. verify the response facts, return checkout_url
 //
 // Failure handling:
@@ -82,9 +83,10 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 //     returned. If Creem actually created the checkout, the later
 //     webhook still finds the local payment by request_id and completes
 //     it. If it did not, the row remains pending — a known runtime gap
-//     (no recovery job in this round).
+//     (no recovery job in this round). A new checkout call creates a NEW
+//     payment; the same code is never resubmitted.
 func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, botID int64, units int64) (*CheckoutResult, error) {
-	if units <= 0 || units > 1000 {
+	if units <= 0 {
 		return nil, errors.New(400, "INVALID_UNITS", "units must be a positive integer")
 	}
 
@@ -96,8 +98,18 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 		return nil, errors.New(502, "PAYMENT_PRODUCT_INVALID", "Payment product configuration is invalid")
 	}
 
-	amountMinor := product.Price * units
-	credits := float64(rt.CreditsPerUnit * units)
+	// Checked multiplication — an implementation safety boundary, not a
+	// product purchase cap. Any positive integer that computes safely
+	// goes to Creem; provider-side limits are the provider's to enforce.
+	amountMinor, err := mulInt64(product.Price, units)
+	if err != nil {
+		return nil, errors.New(400, "INVALID_UNITS", "units overflow the payable amount")
+	}
+	creditsUnits, err := mulInt64(rt.CreditsPerUnit, units)
+	if err != nil {
+		return nil, errors.New(400, "INVALID_UNITS", "units overflow the credits entitlement")
+	}
+	credits := float64(creditsUnits)
 
 	p, err := CreatePendingPayment(ctx, pool, botID, PaymentSpec{
 		Provider:    "creem",
@@ -126,9 +138,14 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 			return nil, errors.New(502, "PAYMENT_PROVIDER_REJECTED", "Payment provider rejected the checkout")
 		}
 		// Ambiguous: the checkout may exist upstream with our request_id.
-		// Keep pending; recovery retries the same request_id.
+		// The local payment stays pending; if Creem actually created and
+		// completed the checkout, the checkout.completed webhook finds the
+		// payment by request_id and completes it. If it was never created,
+		// the pending row remains — a recorded runtime gap (no recovery
+		// job). No retry of the same payment code is offered: a new
+		// checkout call creates a NEW payment.
 		return nil, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE",
-			"Payment provider result is uncertain; the payment stays pending and can be retried")
+			"Payment provider result is uncertain; the payment remains pending.")
 	}
 
 	// Response fact checks — official schema fields are mandatory facts:
@@ -299,4 +316,17 @@ func ReconcileCreemCompletion(ctx context.Context, pool *pg.Pool, rt *CreemRunti
 	// The only grant path: Payment Core → Credits.
 	_, _, err = CompletePayment(ctx, pool, p.Code)
 	return err
+}
+
+// mulInt64 multiplies two non-negative int64s, returning an error when
+// the product would overflow — an implementation safety boundary for
+// units × price / units × credits-per-unit arithmetic.
+func mulInt64(a, b int64) (int64, error) {
+	if a <= 0 || b <= 0 {
+		return 0, fmt.Errorf("non-positive operand: %d x %d", a, b)
+	}
+	if a > math.MaxInt64/b {
+		return 0, fmt.Errorf("overflow: %d x %d exceeds int64", a, b)
+	}
+	return a * b, nil
 }
