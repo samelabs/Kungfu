@@ -37,7 +37,12 @@ jobs:
 
       - name: Initialize test database from migrations
         run: |
-          psql "$KF_TEST_DATABASE_URL" -f migrations/001_schema.sql
+          # Run the full migration chain in filename order; a fresh
+          # PostgreSQL must reach the latest schema from zero.
+          for f in migrations/*.sql; do
+            echo "applying $f"
+            psql "$KF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
           psql "$KF_TEST_DATABASE_URL" -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO kungfu_ci; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO kungfu_ci;"
 
       - name: gofmt check
