@@ -66,6 +66,12 @@ func init() {
 	}
 }
 
+// maxExistingResponseBytes is the largest byte budget any existing
+// consumer stores or displays (the 65535-byte TestTask DB log column).
+// Transport reads at most this + 1 byte — bounded I/O, existing
+// truncation contracts unchanged.
+const maxExistingResponseBytes = 65535
+
 // PostJSON sends a POST request with a JSON body, classifying failures via errCfg.
 func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
@@ -99,13 +105,24 @@ func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	respBodyBytes, readErr := io.ReadAll(resp.Body)
+	// Bounded read: the largest downstream consumer of a response body is
+	// the TestTask DB log column (65535 bytes); reading one byte past that
+	// cap detects "over-long" while never buffering an arbitrarily large
+	// remote response (100MB response != 100MB memory). A bounded read
+	// error (e.g. ErrUnexpectedEOF on a truncated stream) still yields
+	// whatever was read; HTTP 2xx/non-2xx semantics are unchanged and the
+	// existing upper-layer truncation contracts (16000/65535/4000) stay
+	// authoritative for display/logging.
+	maxBody := maxExistingResponseBytes
+	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxBody)+1))
+	if len(respBodyBytes) > maxBody {
+		respBodyBytes = respBodyBytes[:maxBody]
+	}
 	var respBody *string
-	if readErr == nil && len(respBodyBytes) > 0 {
+	if len(respBodyBytes) > 0 {
 		s := string(respBodyBytes)
 		respBody = &s
-	} else if readErr == nil && len(respBodyBytes) == 0 {
+	} else {
 		empty := ""
 		respBody = &empty
 	}

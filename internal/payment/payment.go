@@ -17,6 +17,7 @@ package payment
 
 import (
 	"context"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -194,6 +195,9 @@ func validateSpec(spec PaymentSpec) error {
 	}
 	if spec.AmountMinor <= 0 {
 		return errors.New(400, "INVALID_AMOUNT", "Amount must be greater than zero")
+	}
+	if math.IsNaN(spec.Credits) || math.IsInf(spec.Credits, 0) {
+		return errors.New(400, "INVALID_CREDITS", "Credits must be a finite number")
 	}
 	if spec.Credits <= 0 {
 		return errors.New(400, "INVALID_CREDITS", "Credits must be greater than zero")

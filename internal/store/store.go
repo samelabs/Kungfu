@@ -16,6 +16,7 @@ package store
 import (
 	"context"
 	stderrors "errors"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -57,6 +58,9 @@ func CreateProduct(ctx context.Context, pool *pg.Pool, in ProductInput) (*model.
 	}
 	if utf8.RuneCountInString(in.Description) > 500 {
 		return nil, errors.New(400, "INVALID_DESCRIPTION", "Description must be at most 500 chars")
+	}
+	if math.IsNaN(in.CreditsPrice) || math.IsInf(in.CreditsPrice, 0) {
+		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a finite number")
 	}
 	if in.CreditsPrice <= 0 {
 		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be greater than zero")
