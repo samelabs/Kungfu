@@ -6,6 +6,10 @@ const state = {
     name: '',
     ownerKey: '',
     account: null,
+    store: {
+        products: [],
+        lastRedemption: null
+    },
     tasks: [],
     selectedTask: null,
     logs: {

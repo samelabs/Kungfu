@@ -792,3 +792,16 @@ body.modal-open { overflow: hidden; }
 }
 .global-toast.error { background: #c0392b; }
 
+
+/* ── Store section ───────────────────────────────── */
+.store-products { display: grid; gap: 10px; margin: 12px 0; }
+.store-product { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border: 1px solid var(--line, #d7dee6); border-radius: 10px; padding: 14px 16px; background: var(--panel-bg, #fff); }
+.store-product-body { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
+.store-product-title { font-weight: 600; }
+.store-product-desc { font-size: 13px; }
+.store-product-price { font-size: 14px; color: var(--accent, #2f7c73); font-weight: 600; }
+.store-result-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin-top: 8px; word-break: break-all; }
+@media (max-width: 640px) {
+    .store-product { flex-direction: column; align-items: stretch; }
+    .store-product .btn { width: 100%; }
+}

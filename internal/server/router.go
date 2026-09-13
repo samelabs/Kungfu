@@ -134,6 +134,7 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/owner/tasks", s.handleOwnerPage("tasks"))
 	r.Get("/owner/tasks/new", s.handleOwnerPage("task_new"))
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
+	r.Get("/owner/store", s.handleOwnerPage("store"))
 	r.Get("/owner/task-guide", s.handleTaskGuide)
 
 	// 404 for everything else

@@ -20,6 +20,15 @@ async function renderPage() {
             setNotice('logsNotice', String(error), 'error');
         }
     }
+    if (SECTION === 'store') {
+        renderStore();
+        try {
+            await loadStoreProducts();
+        } catch (error) {
+            setNotice('storeNotice', error, 'error');
+        }
+        renderStore();
+    }
 }
 
 async function activateSession() {
@@ -92,6 +101,7 @@ function bindOwnerPage() {
     bindAuthHandlers();
     bindTaskHandlers();
     bindLogsHandlers();
+    bindStoreHandlers();
 }
 
 decorateRenderPage();
