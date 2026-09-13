@@ -88,7 +88,8 @@ func TestRegistrationGenesisLedger(t *testing.T) {
 }
 
 // TestKungfuCreateStillChargesCredit: the kungfu publish path still spends
-// 1 credit and produces a spend_push ledger row through credits.Record.
+// 1 credit and produces a spend_push ledger row — now routed through the
+// consumption layer (storage no longer calls credits directly).
 func TestKungfuCreateStillChargesCredit(t *testing.T) {
 	pool := a5TestPool(t)
 	botID := a5TestBotWithBalance(t, pool, 10)
@@ -116,13 +117,17 @@ func TestKungfuCreateStillChargesCredit(t *testing.T) {
 		t.Fatalf("balance = %v, want 9 (10 - 1)", balance)
 	}
 	var n int
+	var refID *string
 	if err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push' AND amount=-1 AND balance_after=9`,
-		botID).Scan(&n); err != nil {
+		`SELECT COUNT(*), MIN(ref_id) FROM tb_transactions WHERE bot_id=$1 AND type='spend_push' AND amount=-1 AND balance_after=9 AND ref_type='kungfu'`,
+		botID).Scan(&n, &refID); err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {
 		t.Fatalf("spend_push ledger rows = %d, want 1", n)
+	}
+	if refID == nil || *refID != res.Code {
+		t.Fatalf("spend_push ref_id = %v, want created code %s", refID, res.Code)
 	}
 }
 

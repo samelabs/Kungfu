@@ -144,9 +144,10 @@ func TestCurrentOwnerKeyComposesCreditsBalance(t *testing.T) {
 	}
 }
 
-// TestKungfuListAndGetComposeBalance: list and owner-get return the real
-// current balance from credits.
-func TestKungfuListAndGetComposeBalance(t *testing.T) {
+// TestKungfuListAndGetCarryNoBalance: the storage contract no longer
+// carries balance — push/list/get responses have no balance key, and list
+// works even when balance reads fail entirely (pure storage projection).
+func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 	pool := a7TestPool(t)
 	botID, _, _ := a7TestBot(t, pool, 5)
 
@@ -161,31 +162,47 @@ func TestKungfuListAndGetComposeBalance(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_logs WHERE target_type='kungfu' AND target_id=$1`, pushed.Code)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_kungfus WHERE code=$1`, pushed.Code)
 	})
-	if pushed.Balance != 4.0 {
-		t.Fatalf("push balance = %v, want 4 (credits.Record return)", pushed.Balance)
+
+	// Push consumed 1 credit via consumption despite no balance in result.
+	var balance float64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if balance != 4.0 {
+		t.Fatalf("balance = %v, want 4 (5 - 1 storage.create)", balance)
 	}
 
 	list, err := ListKungfusForBot(context.Background(), pool, botID, 10, 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if list["balance"] != 4.0 {
-		t.Fatalf("list balance = %v, want 4", list["balance"])
+	if _, has := list["balance"]; has {
+		t.Fatal("list response carries balance — storage contract must not")
 	}
 
-	// owner reads own kungfu: no charge, balance from credits.Balance
+	// Owner reads own kungfu: no charge, no balance key.
 	detail, err := GetKungfuForBot(context.Background(), pool, botID, pushed.Code)
 	if err != nil {
 		t.Fatalf("owner get: %v", err)
 	}
-	if detail["balance"] != 4.0 {
-		t.Fatalf("owner get balance = %v, want 4", detail["balance"])
+	if _, has := detail["balance"]; has {
+		t.Fatal("owner get response carries balance — storage contract must not")
+	}
+	if balance != 4.0 {
+		t.Fatalf("owner get charged: balance = %v, want 4", balance)
+	}
+
+	// List survives a total balance-read failure (credits outage does not
+	// take storage down).
+	if _, err := ListKungfusForBot(context.Background(), failBalanceQuerier{Querier: pool}, botID, 10, 0); err != nil {
+		t.Fatalf("list must not depend on credits: %v", err)
 	}
 }
 
-// TestPublicKungfuGetChargesAndReturnsNewBalance: non-owner get spends 1
-// credit and the response balance is the new balance from credits.Record.
-func TestPublicKungfuGetChargesAndReturnsNewBalance(t *testing.T) {
+// TestPublicKungfuGetCharges: non-owner get spends 1 credit via
+// consumption, returns the kungfu without a balance key.
+func TestPublicKungfuGetCharges(t *testing.T) {
 	pool := a7TestPool(t)
 	ownerID, _, _ := a7TestBot(t, pool, 5)
 	readerID, _, _ := a7TestBot(t, pool, 3)
@@ -209,19 +226,25 @@ func TestPublicKungfuGetChargesAndReturnsNewBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("public get: %v", err)
 	}
-	if detail["balance"] != 2.0 {
-		t.Fatalf("public get balance = %v, want 2 (3 - 1 spend_get)", detail["balance"])
+	if _, has := detail["balance"]; has {
+		t.Fatal("public get response carries balance — storage contract must not")
 	}
-}
 
-// TestKungfuListBalanceFailureIs500.
-func TestKungfuListBalanceFailureIs500(t *testing.T) {
-	pool := a7TestPool(t)
-	botID, _, _ := a7TestBot(t, pool, 5)
-
-	_, err := ListKungfusForBot(context.Background(), failBalanceQuerier{Querier: pool}, botID, 10, 0)
-	ae, ok := errors.IsAppError(err)
-	if !ok || ae.HTTPCode != 500 || ae.Code != "INTERNAL_ERROR" {
-		t.Fatalf("want 500 INTERNAL_ERROR on balance failure, got %v", err)
+	var balance float64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if balance != 2.0 {
+		t.Fatalf("reader balance = %v, want 2 (3 - 1 spend_get)", balance)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='spend_get' AND amount=-1 AND ref_type='kungfu' AND ref_id=$2`,
+		readerID, pushed.Code).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("spend_get rows = %d, want 1", n)
 	}
 }

@@ -5,21 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"kungfu.md/internal/credits"
 	"strings"
 	"unicode/utf8"
 
+	"kungfu.md/internal/consumption"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/security"
-)
-
-// Kungfu credit policy amounts.
-const (
-	AmountPush = -1.0 // spend_push cost (publish a kungfu)
-	AmountGet  = -1.0 // spend_get cost (read a paid kungfu)
 )
 
 // KungfuPushInput holds validated kungfu push payload.
@@ -34,12 +28,11 @@ type KungfuPushInput struct {
 
 // KungfuPushResult is the return value of Push.
 type KungfuPushResult struct {
-	Code       string  `json:"code"`
-	Title      string  `json:"title"`
-	Action     string  `json:"action"`
-	Checksum   string  `json:"checksum"`
-	Visibility string  `json:"visibility"`
-	Balance    float64 `json:"balance"`
+	Code       string `json:"code"`
+	Title      string `json:"title"`
+	Action     string `json:"action"`
+	Checksum   string `json:"checksum"`
+	Visibility string `json:"visibility"`
 }
 
 // Push creates or updates a kungfu.
@@ -78,36 +71,31 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
 
-		// Balance composed from the credits domain (identity no longer carries it).
-		balance, balErr := credits.Balance(ctx, pool, botID)
-		if balErr != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving balance")
-		}
-
 		logOperation(ctx, pool, &botID, "push", strPtr("kungfu"), &existing.Code,
 			map[string]interface{}{"title": payload.Title, "action": "updated"}, true)
 
 		return &KungfuPushResult{
 			Code: existing.Code, Title: payload.Title, Action: "updated",
-			Checksum: payload.Checksum, Visibility: existing.Visibility, Balance: balance,
+			Checksum: payload.Checksum, Visibility: existing.Visibility,
 		}, nil
 	}
 
-	// Create new (charge 1 credit)
+	// Create new (charged via the consumption layer; amount and ledger
+	// type are consumption policy, not storage knowledge)
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	balance, recErr := credits.Record(ctx, pool, tx, botID, "spend_push", AmountPush, strPtr("kungfu"), nil)
-	if recErr != nil {
-		return nil, errors.New(402, "INSUFFICIENT_CREDITS", "Need 1 credit to publish kungfu. Complete platform tasks to earn credits.")
-	}
-
 	code, codeErr := repository.GenerateUniqueKungfuCode(ctx, tx)
 	if codeErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
+	}
+
+	if err := consumption.Apply(ctx, pool, tx, botID,
+		consumption.ActionStorageCreate, "kungfu", code); err != nil {
+		return nil, err
 	}
 
 	tagsJSONBytes, err := json.Marshal(payload.Tags)
@@ -128,7 +116,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 
 	return &KungfuPushResult{
 		Code: code, Title: payload.Title, Action: "created",
-		Checksum: payload.Checksum, Visibility: "private", Balance: balance,
+		Checksum: payload.Checksum, Visibility: "private",
 	}, nil
 }
 

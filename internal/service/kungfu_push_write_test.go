@@ -100,8 +100,9 @@ func TestPushUpdateRepositoryWriteFailure(t *testing.T) {
 }
 
 // TestPushCreateRepositoryWriteFailure: the INSERT INTO tb_kungfus statement
-// fails inside the create transaction -> Push returns 500 INTERNAL_ERROR and
-// nothing commits: no kungfu row, no spend_push transaction, balance unchanged.
+// fails inside the create transaction (the consumption charge rides the
+// same tx) -> Push returns 500 INTERNAL_ERROR and nothing commits: no
+// kungfu row, no spend_push transaction, balance unchanged.
 func TestPushCreateRepositoryWriteFailure(t *testing.T) {
 	pool := pushTestPool(t)
 	botID := pushTestBot(t, pool)
