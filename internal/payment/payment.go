@@ -17,6 +17,7 @@ package payment
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"regexp"
 	"strings"
@@ -44,11 +45,12 @@ var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 // buys how many credits. It is produced by server-side product/pricing
 // decisions (and tests), never accepted raw from clients.
 type PaymentSpec struct {
-	Provider        string
-	ProviderOrderID *string // optional at creation; set by the provider adapter
-	AmountMinor     int64   // fiat, integer minor units (e.g. cents)
-	Currency        string  // ISO 4217, uppercase
-	Credits         float64 // credits granted on paid
+	Provider          string
+	ProviderProductID *string // creation-time provider product snapshot (fixed packages)
+	ProviderOrderID   *string // optional at creation; set by the provider adapter
+	AmountMinor       int64   // fiat, integer minor units (e.g. cents)
+	Currency          string  // ISO 4217, uppercase
+	Credits           float64 // credits granted on paid
 }
 
 // CreatePendingPayment records a pending payment fact for a bot.
@@ -74,12 +76,13 @@ func CreatePendingPayment(ctx context.Context, pool *pg.Pool, botID int64, spec 
 	}
 
 	p, err := repository.CreatePendingPayment(ctx, pool, code, repository.PaymentSpec{
-		BotID:           botID,
-		Provider:        spec.Provider,
-		ProviderOrderID: spec.ProviderOrderID,
-		AmountMinor:     spec.AmountMinor,
-		Currency:        spec.Currency,
-		Credits:         spec.Credits,
+		BotID:             botID,
+		Provider:          spec.Provider,
+		ProviderProductID: spec.ProviderProductID,
+		ProviderOrderID:   spec.ProviderOrderID,
+		AmountMinor:       spec.AmountMinor,
+		Currency:          spec.Currency,
+		Credits:           spec.Credits,
 	})
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not create payment")
@@ -221,6 +224,52 @@ func requireBot(ctx context.Context, q pg.Querier, botID int64) error {
 	}
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Could not verify bot")
+	}
+	return nil
+}
+
+// GetPaymentForBot is the ownership-scoped read for owner-facing
+// surfaces: the query itself filters by bot_id.
+func GetPaymentForBot(ctx context.Context, pool *pg.Pool, botID int64, code string) (*model.Payment, error) {
+	p, err := repository.FindPaymentByCodeForBot(ctx, pool, botID, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load payment")
+	}
+	if p == nil {
+		return nil, errors.New(404, "PAYMENT_NOT_FOUND", "Payment not found")
+	}
+	return p, nil
+}
+
+// BindProviderOrder atomically records which provider order backs a
+// payment, before any grant. Idempotent when already bound to the same
+// order; conflict (no grant) when bound to a different one or when the
+// provider order already belongs to another payment.
+func BindProviderOrder(ctx context.Context, pool *pg.Pool, provider, code, providerOrderID string) error {
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin bind tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	other, err := repository.ProviderOrderBelongsToAnotherPayment(ctx, tx, provider, providerOrderID, code)
+	if err != nil {
+		return fmt.Errorf("provider order lookup: %w", err)
+	}
+	if other {
+		return fmt.Errorf("provider order %s already belongs to another payment", providerOrderID)
+	}
+
+	res, err := repository.BindProviderOrderByCode(ctx, tx, code, provider, providerOrderID)
+	if err != nil {
+		return err
+	}
+	if res == repository.BindProviderOrderConflict {
+		return fmt.Errorf("payment %s provider order binding conflict", code)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit bind tx: %w", err)
 	}
 	return nil
 }
