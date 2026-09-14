@@ -11,6 +11,7 @@ import (
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/security"
 
 	"kungfu.md/internal/delivery"
 )
@@ -90,18 +91,23 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 
 	// 2. Full existing validation under the lock: postapi structure,
 	//    price, fundability — the same TaskCheck contract as submit.
+	//    Gate failures roll back FIRST (releasing the tx/connection) and
+	//    only then write the best-effort log on the pool.
 	if rule := ValidatePostapi(postapi, 2048); rule != nil {
+		_ = tx.Rollback(ctx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePrice(price); rule != nil {
+		_ = tx.Rollback(ctx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if !fundable(task.Budget, price) {
 		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
+		_ = tx.Rollback(ctx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
@@ -190,6 +196,17 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
 
+	// Log-sink hardening: persisted copies pass the existing Kungfu
+	// API-key redaction; the actual PostAPI payload is untouched.
+	if payload != nil {
+		payload = security.RedactSecrets(payload).(map[string]interface{})
+	}
+	if responseBody != nil {
+		rb := security.RedactSecrets(*responseBody).(string)
+		responseBody = &rb
+	}
+	errorMessage = security.RedactSecrets(errorMessage).(string)
+
 	var payloadJSON *string
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -203,7 +220,7 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 				if previewLen < 0 {
 					previewLen = 0
 				}
-				preview := truncateByBytes(s, previewLen)
+				preview := truncateUTF8ForLog(s, previewLen)
 				wrapper := map[string]interface{}{
 					"_truncated": true,
 					"bytes":      len(s),
@@ -223,13 +240,13 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 
 	var respBodyForLog *string
 	if responseBody != nil {
-		truncated := truncateByBytes(*responseBody, testDBResponseBodyMax)
+		truncated := truncateUTF8ForLog(*responseBody, testDBResponseBodyMax)
 		respBodyForLog = &truncated
 	}
 
 	var errMsgForLog *string
 	if errorMessage != "" {
-		truncated := truncateByBytes(errorMessage, testDBErrorMessageMax)
+		truncated := truncateUTF8ForLog(errorMessage, testDBErrorMessageMax)
 		errMsgForLog = &truncated
 	}
 
@@ -249,21 +266,7 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 }
 
 func testTruncateResponse(value string) string {
-	if len(value) <= testMaxResponseBytes {
-		return value
-	}
-	return value[:testMaxResponseBytes] + "... [truncated]"
-}
-
-// truncateByBytes truncates a string to at most maxBytes.
-func truncateByBytes(value string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if len(value) <= maxBytes {
-		return value
-	}
-	return value[:maxBytes]
+	return truncateUTF8ForLog(value, testMaxResponseBytes)
 }
 
 // derefStr safely dereferences a *string.

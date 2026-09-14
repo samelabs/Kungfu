@@ -50,6 +50,29 @@ func (p *Pool) Close() {
 	p.Pool.Close()
 }
 
+// NewPoolMaxConns creates a pool with an explicit maximum connection
+// count. Tests use it to build a single-connection pool for
+// deterministic concurrency/deadlock proofs; production code uses
+// NewPool (fixed settings) and is unaffected.
+func NewPoolMaxConns(databaseURL string, maxConns int32) (*Pool, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database URL: %w", err)
+	}
+	cfg.MaxConns = maxConns
+	cfg.MinConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create connection pool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return &Pool{pool}, nil
+}
+
 // TxBegin starts a new transaction.
 
 func (p *Pool) TxBegin(ctx context.Context) (pgx.Tx, error) {

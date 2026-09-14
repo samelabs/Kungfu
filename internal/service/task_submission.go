@@ -6,6 +6,7 @@ import (
 	"kungfu.md/internal/credits"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -13,6 +14,7 @@ import (
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/security"
 )
 
 // maxTaskResponseLogBytes caps how much of a task response body is persisted to the log.
@@ -68,22 +70,29 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 
 	// 2. Full TaskCheck contract under the lock, in the documented order:
 	//    status, then postapi structure, then price, then fundability.
-	//    Every failure logs + rejects with zero POST hits and no settlement.
+	//    Every failure rolls back FIRST (releasing the transaction and row
+	//    lock) and only then writes the best-effort log on the pool — a
+	//    log write while the tx still holds the pool's only connection
+	//    deadlocks a MaxConns=1 pool. Zero POST hits, no settlement.
 	if task.Status != taskStatusOpen {
 		rule := RaiseRule("TASK_NOT_OPEN")
+		_ = tx.Rollback(ctx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePostapi(postapi, 2048); rule != nil {
+		_ = tx.Rollback(ctx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePrice(price); rule != nil {
+		_ = tx.Rollback(ctx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if !fundable(task.Budget, price) {
 		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
+		_ = tx.Rollback(ctx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
@@ -181,6 +190,18 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
 
+	// Log-sink hardening: the persisted copies of payload / response /
+	// error text pass through the existing Kungfu API-key redaction. The
+	// actual PostAPI delivery payload is never touched.
+	if payload != nil {
+		payload = security.RedactSecrets(payload).(map[string]interface{})
+	}
+	if responseBody != nil {
+		rb := security.RedactSecrets(*responseBody).(string)
+		responseBody = &rb
+	}
+	errorMessage = security.RedactSecrets(errorMessage).(string)
+
 	var payloadJSON *string
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -189,8 +210,6 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 			payloadJSON = &s
 		}
 	}
-
-	_ = payloadJSON
 
 	if err := repository.InsertTaskLog(ctx, pool, repository.NewTaskLogInput{
 		TaskCode:     taskCode,
@@ -208,10 +227,25 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 }
 
 func truncateForLog(value string) string {
-	if len(value) <= maxTaskResponseLogBytes {
+	return truncateUTF8ForLog(value, maxTaskResponseLogBytes)
+}
+
+// truncateUTF8ForLog normalizes invalid UTF-8, then truncates to the byte
+// budget without cutting inside a rune, appending the existing
+// "... [truncated]" marker when truncation happens. Used for every
+// remotely-sourced string before it reaches a task log or API preview.
+func truncateUTF8ForLog(value string, maxBytes int) string {
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "")
+	}
+	if len(value) <= maxBytes {
 		return value
 	}
-	return value[:maxTaskResponseLogBytes] + "... [truncated]"
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut] + "... [truncated]"
 }
 
 // logOperation is a best-effort audit wrapper: the main business flow is
