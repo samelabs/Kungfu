@@ -307,6 +307,8 @@ window.OWNER_I18N = ` + ownerI18N + `;
 <script src="/assets/owner/logs.js?v=5"></script>
 <script src="/assets/owner/render-store.js?v=5"></script>
 <script src="/assets/owner/store.js?v=5"></script>
+<script src="/assets/owner/render-credits.js?v=5"></script>
+<script src="/assets/owner/credits.js?v=5"></script>
 <script src="/assets/owner/init.js?v=5"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
@@ -386,6 +388,7 @@ func ownerNavHTML(data *tmplData) string {
     <a class="btn` + isActive("key") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/key") + `">` + data.T("owner.nav.key") + `</a>
     <a class="btn` + isActiveMulti("tasks", "task_new") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
+    <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("store") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("owner.nav.store") + `</a>
     <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/task-guide") + `">` + data.T("owner.nav.task_guide") + `</a>
     <button class="btn danger" id="logoutBtn" type="button">` + data.T("owner.nav.logout") + `</button>
@@ -408,6 +411,8 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerLogsHTML(data)
 	case "store":
 		return ownerStoreHTML(data)
+	case "owner_credits":
+		return ownerCreditsHTML(data)
 	default:
 		return ownerOverviewHTML(data)
 	}
@@ -574,6 +579,20 @@ func ownerStoreHTML(d *tmplData) string {
     <h3>` + d.T("owner.store.products") + `</h3>
     <div id="storeProducts" class="store-products"><div class="muted">` + d.T("owner.store.loading") + `</div></div>
     <div id="storeResult" class="detail-box" hidden></div>
+</section>`
+}
+
+func ownerCreditsHTML(d *tmplData) string {
+	return `<section class="panel">
+    <h2>` + d.T("owner.credits.title") + `</h2>
+    <p>` + d.T("owner.credits.summary") + `</p>
+    <div class="stats">
+        <div class="stat"><span class="stat-label">` + d.T("owner.credits.balance") + `</span><span class="stat-value" id="creditsBalance">&mdash;</span></div>
+    </div>
+    <div id="creditsNotice" class="notice" hidden></div>
+    <div id="creditsPaymentResult" class="detail-box" hidden></div>
+    <h3>` + d.T("owner.credits.packages") + `</h3>
+    <div id="creditsPackages" class="store-products"><div class="muted">` + d.T("owner.credits.loading") + `</div></div>
 </section>`
 }
 

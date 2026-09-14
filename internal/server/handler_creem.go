@@ -209,3 +209,31 @@ func (s *Server) handleOwnerPaymentGet(w http.ResponseWriter, r *http.Request) {
 		},
 	}, "")
 }
+
+// handleOwnerPaymentPackages: GET /api/owner/payments/packages — the
+// read-only fixed-package catalog for the Owner Credits page. Owner
+// session required; disabled runtime → 503 PAYMENT_NOT_CONFIGURED; any
+// invalid provider product → whole-request failure (fail closed).
+// DTO never includes product_id or any provider secret.
+func (s *Server) handleOwnerPaymentPackages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+	if _, err := s.requireOwnerAuth(r); err != nil {
+		handleAppError(w, err)
+		return
+	}
+	rt := s.creemRuntime()
+	if rt == nil {
+		handleAppError(w, errors.New(503, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server"))
+		return
+	}
+	pkgs, err := payment.ListCreemPackages(r.Context(), rt)
+	if err != nil {
+		log.Printf("owner payment packages failed: %v", err)
+		handleAppError(w, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Could not load the payment catalog"))
+		return
+	}
+	SuccessResponse(w, map[string]interface{}{"packages": pkgs}, "")
+}

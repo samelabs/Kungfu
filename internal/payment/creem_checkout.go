@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"kungfu.md/internal/errors"
@@ -274,4 +275,49 @@ func ReconcileCreemCompletion(ctx context.Context, pool *pg.Pool, rt *CreemRunti
 	// creation-time snapshot — exactly what gets granted.
 	_, _, err = CompletePayment(ctx, pool, p.Code)
 	return err
+}
+
+// OwnerCreditsPackage is the UI-facing projection of one configured
+// package. It carries NO provider identifiers or secrets: the client
+// never sees product_id, keys, or success_url — only what the owner
+// needs to choose a package.
+type OwnerCreditsPackage struct {
+	Code        string  `json:"code"`
+	Name        string  `json:"name"`         // live Creem product name
+	AmountMinor int64   `json:"amount_minor"` // live Creem product price
+	Currency    string  `json:"currency"`     // live Creem product currency
+	Credits     float64 `json:"credits"`      // server package config
+}
+
+// ListCreemPackages resolves the full read-only catalog: for every
+// configured package the LIVE Creem product is fetched and validated
+// with the same validateCreemProduct used at checkout. Any unreadable
+// or invalid product fails the WHOLE request — no half catalogs. No
+// caching, no DB tables. Deterministic display order:
+// amount_minor ASC, then code ASC.
+func ListCreemPackages(ctx context.Context, rt *CreemRuntime) ([]OwnerCreditsPackage, error) {
+	pkgs := make([]OwnerCreditsPackage, 0, len(rt.Packages))
+	for _, pkg := range rt.Packages {
+		product, err := rt.Client.GetProduct(ctx, pkg.ProductID)
+		if err != nil {
+			return nil, fmt.Errorf("package %q product %s unreadable: %w", pkg.Code, pkg.ProductID, err)
+		}
+		if verr := validateCreemProduct(product, pkg.ProductID, rt.Mode); verr != nil {
+			return nil, fmt.Errorf("package %q product invalid: %w", pkg.Code, verr)
+		}
+		pkgs = append(pkgs, OwnerCreditsPackage{
+			Code:        pkg.Code,
+			Name:        product.Name,
+			AmountMinor: product.Price,
+			Currency:    product.Currency,
+			Credits:     pkg.Credits,
+		})
+	}
+	sort.Slice(pkgs, func(i, j int) bool {
+		if pkgs[i].AmountMinor != pkgs[j].AmountMinor {
+			return pkgs[i].AmountMinor < pkgs[j].AmountMinor
+		}
+		return pkgs[i].Code < pkgs[j].Code
+	})
+	return pkgs, nil
 }

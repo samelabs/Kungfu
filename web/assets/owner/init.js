@@ -29,6 +29,17 @@ async function renderPage() {
         }
         renderStore();
     }
+    if (SECTION === 'owner_credits') {
+        renderCredits();
+        await initCreditsReturnStatus();
+        try {
+            await loadCreditsPackages();
+        } catch (error) {
+            setNotice('creditsNotice', String(error), 'error');
+        }
+        renderCredits();
+        renderCreditsPaymentResult();
+    }
 }
 
 async function activateSession() {
@@ -102,6 +113,7 @@ function bindOwnerPage() {
     bindTaskHandlers();
     bindLogsHandlers();
     bindStoreHandlers();
+    bindCreditsEvents();
 }
 
 decorateRenderPage();

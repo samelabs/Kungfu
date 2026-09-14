@@ -123,6 +123,7 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
 	// Owner store entry points (session -> bot_id; the only subject)
+	r.Get("/api/owner/payments/packages", s.handleOwnerPaymentPackages)
 	r.Post("/api/owner/payments/checkout", s.handleOwnerPaymentCheckout)
 	r.Get("/api/owner/payments/{code}", s.handleOwnerPaymentGet)
 	r.Post("/api/webhooks/creem", s.handleCreemWebhook)
@@ -139,6 +140,7 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/owner/account", s.handleOwnerPage("account"))
 	r.Get("/owner/key", s.handleOwnerPage("key"))
 	r.Get("/owner/tasks", s.handleOwnerPage("tasks"))
+	r.Get("/owner/credits", s.handleOwnerPage("owner_credits"))
 	r.Get("/owner/tasks/new", s.handleOwnerPage("task_new"))
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
 	r.Get("/owner/store", s.handleOwnerPage("store"))

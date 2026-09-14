@@ -10,6 +10,12 @@ const state = {
         products: [],
         lastRedemption: null
     },
+    credits: {
+        packages: [],
+        loaded: false,
+        buying: null,
+        lastPayment: null
+    },
     tasks: [],
     selectedTask: null,
     logs: {
