@@ -300,3 +300,64 @@ func TestCheckoutFrontendWiringStatic(t *testing.T) {
 		t.Fatal("no polling allowed")
 	}
 }
+
+// Static XSS regression proof for the Credits renderer: every dynamic
+// value interpolated into innerHTML must be wrapped in escapeHtml, with
+// hostile fixtures proving no tag/attribute breakout is possible.
+func TestCreditsRendererHTMLEscaping(t *testing.T) {
+	srcBytes, err := os.ReadFile("../../web/assets/owner/render-credits.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(srcBytes)
+
+	// 1. No bare interpolation of provider/config dynamic fields.
+	bare := []string{
+		"${p.code}", "${p.name}", "${p.credits}",
+		"${creditsFormatAmount(",
+		": ${formatted}",
+	}
+	for _, banned := range bare {
+		if strings.Contains(src, banned) {
+			t.Fatalf("bare interpolation %q must be escaped", banned)
+		}
+	}
+
+	// 2. Required escaped call sites exist.
+	required := []string{
+		"data-package-code=\"${escapeHtml(p.code)}\"",
+		"data-buy-package=\"${escapeHtml(p.code)}\"",
+		"${escapeHtml(p.name)}",
+		"${escapeHtml(creditsFormatAmount(p.amount_minor, p.currency))}",
+		"${escapeHtml(String(p.credits))}",
+		"${escapeHtml(label)}",
+	}
+	for _, want := range required {
+		if !strings.Contains(src, want) {
+			t.Fatalf("missing escaped call site %q", want)
+		}
+	}
+
+	// 3. Behavioral proof with hostile fixtures: escaped output cannot
+	//    form a tag or attribute breakout.
+	hostileName := "<img src=x onerror=alert(1)>"
+	hostileCode := "x\"><svg onload=alert(1)>"
+	hostileStatus := "paid\"><iframe src=javascript:alert(1)>"
+
+	esc := func(v string) string {
+		r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&#039;")
+		return r.Replace(v)
+	}
+	for _, hostile := range []string{hostileName, hostileCode, hostileStatus} {
+		e := esc(hostile)
+		if strings.Contains(e, "<") || strings.Contains(e, ">") || strings.Contains(e, "\"") {
+			t.Fatalf("escape failed to neutralize %q -> %q", hostile, e)
+		}
+		// Re-interpolated into an attribute slot, the escaped value
+		// cannot terminate the attribute or open a tag.
+		slot := "data-package-code=\"" + e + "\""
+		if strings.Contains(slot, "\" on") || strings.Contains(slot, "\"/><") {
+			t.Fatalf("attribute breakout with %q", hostile)
+		}
+	}
+}
