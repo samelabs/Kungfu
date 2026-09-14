@@ -227,24 +227,24 @@ func TestPostJSONBoundedReadLargeNon2xx(t *testing.T) {
 	}
 }
 
-// The reader does not consume the whole oversized stream: the server
-// observes a client-side disconnect well before the full body.
-func TestPostJSONReaderDoesNotDrainHugeStream(t *testing.T) {
+// Integration smoke over a real socket: an oversized streamed response
+// is handled without error and the captured body stays within the
+// transport cap. This is NOT a drain proof — the deterministic
+// byte-count proof lives in internal/delivery/http_post_test.go
+// (counting RoundTripper body). Server-side byte counting over
+// localhost is timing-dependent and proves nothing here.
+func TestPostJSONHugeStreamSmoke(t *testing.T) {
 	const totalChunks = 4000 // 4000 x 64KB = ~256MB if fully read
-	served := make(chan int64, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var n int64
+		chunk := strings.Repeat("z", 64*1024)
 		for i := 0; i < totalChunks; i++ {
-			c, err := w.Write([]byte(strings.Repeat("z", 64*1024)))
-			n += int64(c)
-			if err != nil {
-				break // client stopped reading
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return // client stopped reading — expected under a bounded read
 			}
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
 		}
-		served <- n
 	}))
 	t.Cleanup(srv.Close)
 
@@ -254,11 +254,5 @@ func TestPostJSONReaderDoesNotDrainHugeStream(t *testing.T) {
 	}
 	if res.ResponseBody != nil && len(*res.ResponseBody) > 65535 {
 		t.Fatalf("body beyond transport cap: %d", len(*res.ResponseBody))
-	}
-	// The transport cannot have read the full stream (bounded read) —
-	// the server either saw a disconnect or served far less than total.
-	n := <-served
-	if n > int64(totalChunks*64*1024) {
-		t.Fatalf("served %d bytes, more than the body", n)
 	}
 }
