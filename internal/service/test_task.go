@@ -196,8 +196,9 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
 
-	// Log-sink hardening: persisted copies pass the existing Kungfu
-	// API-key redaction; the actual PostAPI payload is untouched.
+	// Log-sink hardening: persisted copies pass redaction BEFORE any
+	// truncation (a secret spanning the boundary must not survive as a
+	// partial unmasked key); the actual PostAPI payload is untouched.
 	if payload != nil {
 		payload = security.RedactSecrets(payload).(map[string]interface{})
 	}
@@ -220,7 +221,7 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 				if previewLen < 0 {
 					previewLen = 0
 				}
-				preview := truncateUTF8ForLog(s, previewLen)
+				preview := normalizeTruncateUTF8(s, previewLen, false)
 				wrapper := map[string]interface{}{
 					"_truncated": true,
 					"bytes":      len(s),
@@ -238,15 +239,17 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 		}
 	}
 
+	// DB columns are marker-free budgets (VARCHAR caps); the API preview
+	// paths keep their "... [truncated]" marker via testTruncateResponse.
 	var respBodyForLog *string
 	if responseBody != nil {
-		truncated := truncateUTF8ForLog(*responseBody, testDBResponseBodyMax)
+		truncated := normalizeTruncateUTF8(*responseBody, testDBResponseBodyMax, false)
 		respBodyForLog = &truncated
 	}
 
 	var errMsgForLog *string
 	if errorMessage != "" {
-		truncated := truncateUTF8ForLog(errorMessage, testDBErrorMessageMax)
+		truncated := normalizeTruncateUTF8(errorMessage, testDBErrorMessageMax, false)
 		errMsgForLog = &truncated
 	}
 
@@ -266,7 +269,7 @@ func testLogEvent(ctx context.Context, pool *pg.Pool, taskCode string, botID int
 }
 
 func testTruncateResponse(value string) string {
-	return truncateUTF8ForLog(value, testMaxResponseBytes)
+	return normalizeTruncateUTF8(value, testMaxResponseBytes, true)
 }
 
 // derefStr safely dereferences a *string.

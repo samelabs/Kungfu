@@ -131,13 +131,10 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	}
 
 	// 5. Log success (post-commit, best-effort).
-	var respBodyForLog *string
-	if postResult.ResponseBody != nil {
-		truncated := truncateForLog(*postResult.ResponseBody)
-		respBodyForLog = &truncated
-	}
+	// Full response goes to the sink; it redacts BEFORE truncating so a
+	// secret spanning the 4000-byte boundary cannot leak partially.
 	insertTaskEventLog(ctx, pool, code, botID, "post_succeeded", nil, true,
-		postResult.ResponseCode, respBodyForLog, "", "")
+		postResult.ResponseCode, postResult.ResponseBody, "", "")
 
 	var respCodeVal interface{}
 	if postResult.ResponseCode != nil {
@@ -190,17 +187,18 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 	action string, payload map[string]interface{}, success bool,
 	responseCode *int, responseBody *string, errorCode, errorMessage string) {
 
-	// Log-sink hardening: the persisted copies of payload / response /
-	// error text pass through the existing Kungfu API-key redaction. The
-	// actual PostAPI delivery payload is never touched.
+	// Log-sink hardening: the persisted copies pass redaction BEFORE any
+	// truncation — a secret spanning the truncation boundary would
+	// otherwise survive as a partial unmasked key. The actual PostAPI
+	// delivery payload/response is never touched.
 	if payload != nil {
 		payload = security.RedactSecrets(payload).(map[string]interface{})
 	}
 	if responseBody != nil {
-		rb := security.RedactSecrets(*responseBody).(string)
+		rb := normalizeTruncateUTF8(security.RedactSecrets(*responseBody).(string), maxTaskResponseLogBytes, true)
 		responseBody = &rb
 	}
-	errorMessage = security.RedactSecrets(errorMessage).(string)
+	errorMessage = normalizeTruncateUTF8(security.RedactSecrets(errorMessage).(string), maxTaskResponseLogBytes, true)
 
 	var payloadJSON *string
 	if payload != nil {
@@ -226,15 +224,14 @@ func insertTaskEventLog(ctx context.Context, pool *pg.Pool, taskCode string, bot
 	}
 }
 
-func truncateForLog(value string) string {
-	return truncateUTF8ForLog(value, maxTaskResponseLogBytes)
-}
-
-// truncateUTF8ForLog normalizes invalid UTF-8, then truncates to the byte
-// budget without cutting inside a rune, appending the existing
-// "... [truncated]" marker when truncation happens. Used for every
-// remotely-sourced string before it reaches a task log or API preview.
-func truncateUTF8ForLog(value string, maxBytes int) string {
+// normalizeTruncateUTF8 normalizes invalid UTF-8, then truncates to the
+// byte budget without cutting inside a rune. withMarker controls whether
+// the "... [truncated]" suffix is appended — the marker policy per path:
+// Submit DB response preview 4000 → marker; TestTask API preview 16000 →
+// marker; TestTask DB response_body 65535 → NO marker; TestTask DB
+// error_message 256 → NO marker; oversized payload preview → NO marker
+// (the wrapper's "_truncated": true expresses truncation).
+func normalizeTruncateUTF8(value string, maxBytes int, withMarker bool) string {
 	if !utf8.ValidString(value) {
 		value = strings.ToValidUTF8(value, "")
 	}
@@ -245,7 +242,10 @@ func truncateUTF8ForLog(value string, maxBytes int) string {
 	for cut > 0 && !utf8.RuneStart(value[cut]) {
 		cut--
 	}
-	return value[:cut] + "... [truncated]"
+	if withMarker {
+		return value[:cut] + "... [truncated]"
+	}
+	return value[:cut]
 }
 
 // logOperation is a best-effort audit wrapper: the main business flow is

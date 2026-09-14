@@ -206,25 +206,48 @@ func TestTaskLogRedactionResponseBody(t *testing.T) {
 
 // -- F. UTF-8 safety --
 
-// Multi-byte rune straddling each existing byte budget: the stored string
-// stays valid UTF-8 and the truncation marker survives.
+// Multi-byte rune straddling each byte budget: the stored string stays
+// valid UTF-8, and the marker policy per path is asserted explicitly.
 func TestUTF8TruncationBoundaries(t *testing.T) {
-	for _, budget := range []int{4000, 16000, 65535} {
-		// Oversized fixture engineered so the byte cut at `budget`
-		// lands strictly inside a 3-byte rune: ASCII fill to budget-2,
-		// then "世" (bytes budget-2..budget+1) straddles the cut.
-		s2 := strings.Repeat("a", budget-2) + "世界"
-		out := truncateUTF8ForLog(s2, budget)
+	// budget → withMarker policy (the original contracts)
+	policies := []struct {
+		budget     int
+		withMarker bool
+	}{
+		{4000, true},   // Submit DB response preview
+		{16000, true},  // TestTask API response preview
+		{65535, false}, // TestTask DB response_body
+		{256, false},   // TestTask DB error_message
+	}
+	for _, tc := range policies {
+		// ASCII fill to budget-2, then "世" (3 bytes) straddles the cut.
+		in := strings.Repeat("a", tc.budget-2) + "世界"
+		out := normalizeTruncateUTF8(in, tc.budget, tc.withMarker)
 		if !utf8.ValidString(out) {
-			t.Fatalf("budget %d: invalid UTF-8 after truncation", budget)
+			t.Fatalf("budget %d: invalid UTF-8 after truncation", tc.budget)
 		}
-		if !strings.HasSuffix(out, "... [truncated]") {
-			t.Fatalf("budget %d: truncation marker lost", budget)
+		if tc.withMarker && !strings.HasSuffix(out, "... [truncated]") {
+			t.Fatalf("budget %d: marker required but missing", tc.budget)
 		}
+		if !tc.withMarker && strings.Contains(out, "[truncated]") {
+			t.Fatalf("budget %d: marker forbidden but present", tc.budget)
+		}
+		if !tc.withMarker && len(out) > tc.budget {
+			t.Fatalf("budget %d: marker-free output exceeds budget: %d", tc.budget, len(out))
+		}
+	}
+	// payload wrapper preview carries no marker (wrapper's _truncated
+	// expresses truncation instead)
+	preview := normalizeTruncateUTF8(strings.Repeat("世", 40000), testDBPayloadJSONMax-120, false)
+	if strings.Contains(preview, "[truncated]") {
+		t.Fatal("payload wrapper preview must not carry a marker")
+	}
+	if !utf8.ValidString(preview) {
+		t.Fatal("payload preview invalid UTF-8")
 	}
 	// invalid input normalizes instead of corrupting
 	bad := "ok\xff\xfe" + strings.Repeat("a", 5000)
-	out := truncateUTF8ForLog(bad, 4000)
+	out := normalizeTruncateUTF8(bad, 4000, true)
 	if !utf8.ValidString(out) {
 		t.Fatal("invalid UTF-8 not normalized")
 	}
@@ -232,7 +255,7 @@ func TestUTF8TruncationBoundaries(t *testing.T) {
 		t.Fatal("normalization dropped valid prefix")
 	}
 	// short values pass through untouched
-	if got := truncateUTF8ForLog("hello", 4000); got != "hello" {
+	if got := normalizeTruncateUTF8("hello", 4000, true); got != "hello" {
 		t.Fatalf("short value altered: %q", got)
 	}
 }
@@ -306,5 +329,107 @@ func TestInvalidUTF8ResponsePersistsValidLog(t *testing.T) {
 	}
 	if !strings.Contains(bodyLog, "good") || !strings.Contains(bodyLog, "bad") {
 		t.Fatalf("valid content lost: %q", bodyLog)
+	}
+}
+
+// -- A. redaction BEFORE truncation across the Submit 4000 boundary --
+
+// TestSubmitLogRedactionAcrossTruncationBoundary: a raw API key placed so
+// it straddles the 4000-byte preview boundary must be masked BEFORE the
+// cut — asserting merely "the full key is absent" would pass the old bug
+// (which left a partial unmasked key); here the key's hex prefix must not
+// appear at all and the masked form must.
+func TestSubmitLogRedactionAcrossTruncationBoundary(t *testing.T) {
+	pool := tcTestPool(t)
+	owner := tcSeedBot(t, pool, 5000)
+	agent := tcSeedBot(t, pool, 0)
+
+	key := rawAPIKey()
+	keyPrefix := key[:20] // unique-enough hex fragment of the raw key
+
+	// 3960 ASCII bytes + key (73) + tail: the key crosses byte 4000.
+	body := strings.Repeat("a", 3960) + key + strings.Repeat("b", 2000)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1500)
+	res, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	if err != nil {
+		t.Fatalf("delivery must succeed: %v", err)
+	}
+	if !res.Post["delivered"].(bool) {
+		t.Fatal("delivery not accepted")
+	}
+
+	var stored string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(response_body, '') FROM tb_task_logs WHERE task_code=$1 AND action='post_succeeded' ORDER BY id DESC LIMIT 1`,
+		code).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	// the raw key's hex prefix must not survive anywhere
+	if strings.Contains(stored, keyPrefix) {
+		t.Fatal("partial raw key survived truncation (redaction ran after truncation)")
+	}
+	if strings.Contains(stored, key) {
+		t.Fatal("full raw key persisted")
+	}
+	// masked form present
+	if !strings.Contains(stored, "kf_live_****") {
+		t.Fatal("masked representation missing")
+	}
+	// budget + marker preserved
+	if !strings.HasSuffix(stored, "... [truncated]") {
+		t.Fatal("4000-boundary marker lost")
+	}
+	if len(stored) > 4000+len("... [truncated]") {
+		t.Fatalf("stored body beyond budget: %d", len(stored))
+	}
+	if !utf8.ValidString(stored) {
+		t.Fatal("stored body invalid UTF-8")
+	}
+}
+
+// TestTaskLogLongErrorMessagePersistsWithinColumn: an error message over
+// the VARCHAR(256) column size persists, stored <= 256, valid UTF-8, and
+// carries no marker that could overflow the column.
+func TestTaskLogLongErrorMessagePersistsWithinColumn(t *testing.T) {
+	pool := tcTestPool(t)
+	owner := tcSeedBot(t, pool, 5000)
+
+	// network-failure path carries the provider error message
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	t.Cleanup(srv.Close)
+
+	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1500)
+
+	// drive testLogEvent with an oversized message via the failure path:
+	// the handler sets errorMessage from the provider config; instead of
+	// coupling to that, call the sink directly with a >256 message.
+	longMsg := strings.Repeat("é", 300) // 2-byte runes, 600 bytes
+	testLogEvent(context.Background(), pool, code, owner, "post_failed",
+		map[string]interface{}{"a": 1}, false, nil, nil, "POSTAPI_TEST", longMsg)
+
+	var stored string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(error_message, '') FROM tb_task_logs WHERE task_code=$1 AND action='post_failed' ORDER BY id DESC LIMIT 1`,
+		code).Scan(&stored); err != nil {
+		t.Fatalf("log INSERT failed (column overflow?): %v", err)
+	}
+	if len(stored) > 256 {
+		t.Fatalf("stored error_message = %d bytes, exceeds VARCHAR(256)", len(stored))
+	}
+	if strings.Contains(stored, "[truncated]") {
+		t.Fatal("marker appended to a VARCHAR(256) column")
+	}
+	if !utf8.ValidString(stored) {
+		t.Fatal("stored error_message invalid UTF-8")
 	}
 }
