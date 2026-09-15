@@ -269,28 +269,33 @@ func TestAdjustmentReconciliationGates(t *testing.T) {
 		txn  *CreemTransactionFact
 		obj  func(*CreemTransactionFact) interface{}
 	}{
-		{"wrong order", func() *CreemTransactionFact { t := good(); t.Order = "ord_other"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject("ref_g1", t) }},
-		{"wrong amount", func() *CreemTransactionFact { t := good(); t.Amount = 999; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject("ref_g2", t) }},
-		{"wrong currency", func() *CreemTransactionFact { t := good(); t.Currency = "EUR"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject("ref_g3", t) }},
-		{"amount_paid zero", func() *CreemTransactionFact { t := good(); t.AmountPaid = 0; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject("ref_g4", t) }},
+		{"wrong order", func() *CreemTransactionFact { t := good(); t.Order = "ord_other"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
+		{"wrong amount", func() *CreemTransactionFact { t := good(); t.Amount = 999; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
+		{"wrong currency", func() *CreemTransactionFact { t := good(); t.Currency = "EUR"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
+		{"amount_paid zero", func() *CreemTransactionFact { t := good(); t.AmountPaid = 0; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
 		{"refund not succeeded", good(), func(t *CreemTransactionFact) interface{} {
-			o := adjRefundObject("ref_g5", t)
+			o := adjRefundObject(adjUnique("ref"), t)
 			o.Status = "pending"
 			return o
 		}},
 		{"refund exceeds paid", good(), func(t *CreemTransactionFact) interface{} {
-			o := adjRefundObject("ref_g6", t)
+			o := adjRefundObject(adjUnique("ref"), t)
 			o.RefundAmount = t.AmountPaid + 1
 			return o
 		}},
 		{"refunded missing", good(), func(t *CreemTransactionFact) interface{} {
 			t.RefundedAmount = nil
-			return adjRefundObject("ref_g7", t)
+			return adjRefundObject(adjUnique("ref"), t)
 		}},
 		{"refunded below refund", good(), func(t *CreemTransactionFact) interface{} {
 			r := int64(1)
 			t.RefundedAmount = &r
-			return adjRefundObject("ref_g8", t)
+			return adjRefundObject(adjUnique("ref"), t)
+		}},
+		{"refunded exceeds amount_paid", good(), func(t *CreemTransactionFact) interface{} {
+			r := t.AmountPaid + 1
+			t.RefundedAmount = &r
+			return adjRefundObject(adjUnique("ref"), t)
 		}},
 	}
 	for _, tc := range cases {
@@ -334,5 +339,69 @@ func TestAdjustmentRequiresPaidPayment(t *testing.T) {
 	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
 		adjEvent(adjUnique("evt_pp"), "refund.created", adjRefundObject(adjUnique("ref_pp"), txn))); err == nil {
 		t.Fatal("pending payment must not accept adjustments")
+	}
+}
+
+// Work-order fixture: amount_paid 1210 (tax) vs payment.amount_minor
+// 1000 must NOT be an error; refund 605/605 records exactly.
+func TestRefundFactTaxDifference1210(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, pkgProducts()...)
+	code := adjSeedPaidPayment(t, pool, fc, botID)
+	p, _ := GetPayment(context.Background(), pool, code)
+
+	refunded := int64(605)
+	txn := &CreemTransactionFact{
+		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1210, Currency: "USD",
+		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+	}
+	obj := adjRefundObject(adjUnique("ref"), txn)
+	obj.RefundAmount = 605
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+		adjEvent(adjUnique("evt_refund_1210"), "refund.created", obj)); err != nil {
+		t.Fatalf("1210/605/605 must record: %v", err)
+	}
+	var amountMinor, amountPaid int64
+	if err := pool.QueryRow(context.Background(), `
+		SELECT a.amount_minor, a.amount_paid_minor FROM tb_payment_adjustments a
+		JOIN tb_payments p ON p.id=a.payment_id WHERE p.code=$1 AND a.kind='refund'`, code).Scan(&amountMinor, &amountPaid); err != nil {
+		t.Fatal(err)
+	}
+	if amountMinor != 605 || amountPaid != 1210 {
+		t.Fatalf("amounts = %d/%d", amountMinor, amountPaid)
+	}
+	_, txN, bal := adjCounts(t, pool, code)
+	if txN != 1 || bal != 1000 {
+		t.Fatalf("tx=%d bal=%v", txN, bal)
+	}
+}
+
+// Standalone valid dispute: durable row, balance unchanged, ledger unchanged.
+func TestDisputeFactRecordedStandalone(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, pkgProducts()...)
+	code := adjSeedPaidPayment(t, pool, fc, botID)
+	p, _ := GetPayment(context.Background(), pool, code)
+
+	refunded := int64(0)
+	dispute := &CreemDisputeObject{
+		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
+		Transaction: &CreemTransactionFact{
+			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+			Status: "needs_response", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+		},
+	}
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+		adjEvent(adjUnique("evt_dispute"), "dispute.created", dispute)); err != nil {
+		t.Fatalf("dispute: %v", err)
+	}
+	adjN, txN, bal := adjCounts(t, pool, code)
+	if adjN != 1 {
+		t.Fatalf("dispute rows = %d", adjN)
+	}
+	if txN != 1 || bal != 1000 {
+		t.Fatalf("dispute mutated money: tx=%d bal=%v", txN, bal)
 	}
 }

@@ -321,6 +321,34 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 		t.Fatalf("tb_transactions rows = %d, want 1 (grant only)", txN)
 	}
 
+	// missing signature on a refund event → 401, zero adjustment rows
+	noSigPayload, _ := json.Marshal(map[string]interface{}{
+		"id": fmt.Sprintf("evt_nosig_%d", time.Now().UnixNano()), "eventType": "refund.created", "created_at": time.Now().Unix(),
+		"object": map[string]interface{}{"id": "ref_nosig"},
+	})
+	recN := httptest.NewRecorder()
+	reqN := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(noSigPayload))
+	router.ServeHTTP(recN, reqN)
+	if recN.Code != http.StatusUnauthorized {
+		t.Fatalf("missing signature = %d, want 401", recN.Code)
+	}
+
+	// invalid signature → 401, zero adjustment rows
+	recI := httptest.NewRecorder()
+	reqI := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(noSigPayload))
+	reqI.Header.Set("creem-signature", strings.Repeat("ab", 32))
+	router.ServeHTTP(recI, reqI)
+	if recI.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid signature = %d, want 401", recI.Code)
+	}
+	var sigAdjN int
+	_ = s.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id
+		WHERE p.bot_id=$1`, botID).Scan(&sigAdjN)
+	if sigAdjN != 1 {
+		t.Fatalf("signature-gated events leaked adjustment rows: %d", sigAdjN)
+	}
+
 	// mismatched fact → 400, no new rows
 	badPayload, _ := json.Marshal(map[string]interface{}{
 		"id": fmt.Sprintf("evt_http_bad_%d", time.Now().UnixNano()), "eventType": "dispute.created", "created_at": time.Now().Unix(),
