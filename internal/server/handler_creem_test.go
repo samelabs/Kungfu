@@ -223,30 +223,122 @@ func TestWebhookBadSignature401(t *testing.T) {
 	}
 }
 
-// refund/dispute → 200, zero mutation
+// refund/dispute over the real router: full flow — paid payment first,
+// then a signed refund.created → durable adjustment fact, ZERO Credits
+// mutation; mismatched facts (unknown order) → 400 RECONCILIATION_FAILED.
 func TestWebhookRefundDisputeFrozen(t *testing.T) {
 	s := cfpServer(t, newCfpFake(t).URL)
 	router := s.buildRouter()
 	botID := cfpBot(t, s)
+	cookie := storeOwnerCookie(t, s, botID)
 
-	for _, et := range []string{"refund.created", "dispute.created"} {
-		payload, _ := json.Marshal(map[string]interface{}{
-			"id": "evt_" + et, "eventType": et, "created_at": time.Now().Unix(),
-			"object": map[string]interface{}{"id": "ord_1"},
-		})
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(payload))
-		req.Header.Set("creem-signature", cfpSign(payload))
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status = %d", et, rec.Code)
-		}
+	// paid payment via real checkout + webhook
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checkout = %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Data struct {
+			Payment struct {
+				Code string `json:"code"`
+			} `json:"payment"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	pc := out.Data.Payment.Code
+
+	// complete the payment via signed webhook (the only grant path)
+	completionPayload, _ := json.Marshal(map[string]interface{}{
+		"id": fmt.Sprintf("evt_adj_complete_%d", time.Now().UnixNano()), "eventType": "checkout.completed", "created_at": time.Now().Unix(),
+		"object": map[string]interface{}{
+			"id": "ch_" + pc, "request_id": pc, "status": "completed",
+			"order_id": "ord_" + pc, "mode": "test",
+			"metadata": map[string]string{"payment_code": pc, "bot_id": fmt.Sprintf("%d", botID), "source": "kungfu_owner"},
+			"order": map[string]interface{}{
+				"id": "ord_" + pc, "status": "paid", "product": "prod_a",
+				"currency": "USD", "amount": 1000, "units": 1,
+			},
+		},
+	})
+	recC := httptest.NewRecorder()
+	reqC := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(completionPayload))
+	reqC.Header.Set("creem-signature", cfpSign(completionPayload))
+	router.ServeHTTP(recC, reqC)
+	if recC.Code != http.StatusOK {
+		t.Fatalf("completion = %d %s", recC.Code, recC.Body.String())
+	}
+
+	var balBefore float64
+	_ = s.Pool.QueryRow(context.Background(),
+		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balBefore)
+	if balBefore != 1000 {
+		t.Fatalf("seed balance = %v, want 1000", balBefore)
+	}
+
+	// signed refund.created matching the payment snapshot (amount_paid
+	// deliberately 1080 > 1000: tax must be accepted)
+	refunded := 540
+	payload, _ := json.Marshal(map[string]interface{}{
+		"id": fmt.Sprintf("evt_http_refund_%d", time.Now().UnixNano()), "eventType": "refund.created", "created_at": time.Now().Unix(),
+		"object": map[string]interface{}{
+			"id": fmt.Sprintf("ref_http_%d", time.Now().UnixNano()), "status": "succeeded",
+			"refund_amount": 540, "refund_currency": "USD", "reason": "customer request",
+			"transaction": map[string]interface{}{
+				"id": fmt.Sprintf("txn_http_%d", time.Now().UnixNano()), "amount": 1000, "amount_paid": 1080, "currency": "USD",
+				"status": "succeeded", "refunded_amount": refunded, "order": "ord_" + pc,
+			},
+		},
+	})
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(payload))
+	req2.Header.Set("creem-signature", cfpSign(payload))
+	router.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("refund status = %d body = %s", rec2.Code, rec2.Body.String())
+	}
+
+	// durable fact exists; credits untouched
+	var adjN int
+	_ = s.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id
+		WHERE p.code=$1 AND a.kind='refund'`, pc).Scan(&adjN)
+	if adjN != 1 {
+		t.Fatalf("adjustment rows = %d, want 1", adjN)
+	}
+	var balAfter float64
+	_ = s.Pool.QueryRow(context.Background(),
+		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balAfter)
+	if balAfter != balBefore {
+		t.Fatalf("balance moved: %v -> %v", balBefore, balAfter)
 	}
 	var txN int
 	_ = s.Pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&txN)
-	if txN != 0 {
-		t.Fatalf("refund/dispute mutated credits: %d", txN)
+	if txN != 1 {
+		t.Fatalf("tb_transactions rows = %d, want 1 (grant only)", txN)
+	}
+
+	// mismatched fact → 400, no new rows
+	badPayload, _ := json.Marshal(map[string]interface{}{
+		"id": fmt.Sprintf("evt_http_bad_%d", time.Now().UnixNano()), "eventType": "dispute.created", "created_at": time.Now().Unix(),
+		"object": map[string]interface{}{"id": "dis_bad"},
+	})
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/api/webhooks/creem", bytes.NewReader(badPayload))
+	req3.Header.Set("creem-signature", cfpSign(badPayload))
+	router.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusBadRequest || !strings.Contains(rec3.Body.String(), "RECONCILIATION_FAILED") {
+		t.Fatalf("mismatched fact = %d %s", rec3.Code, rec3.Body.String())
+	}
+	var adjN2 int
+	_ = s.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id
+		WHERE p.code=$1`, pc).Scan(&adjN2)
+	if adjN2 != 1 {
+		t.Fatalf("mismatched fact leaked rows: %d", adjN2)
 	}
 }
 

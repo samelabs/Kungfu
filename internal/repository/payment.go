@@ -188,3 +188,59 @@ func ProviderOrderBelongsToAnotherPayment(ctx context.Context, tx pgx.Tx, provid
 		provider, providerOrderID, exceptCode).Scan(&n)
 	return n > 0, err
 }
+
+// LockPaymentByID row-locks one payment by primary key inside a tx.
+func LockPaymentByID(ctx context.Context, tx pgx.Tx, id int64) (*model.Payment, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, code, bot_id, provider, provider_product_id, provider_order_id, amount_minor,
+		       currency, credits, status, created_at, updated_at, paid_at
+		FROM tb_payments
+		WHERE id = $1
+		FOR UPDATE`, id)
+	p, err := scanPayment(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
+}
+
+// FindPaymentByProviderOrder resolves a payment by its provider order
+// binding. Returns nil when absent.
+func FindPaymentByProviderOrder(ctx context.Context, q pg.Querier, provider, providerOrderID string) (*model.Payment, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, provider, provider_product_id, provider_order_id, amount_minor,
+		       currency, credits, status, created_at, updated_at, paid_at
+		FROM tb_payments
+		WHERE provider = $1 AND provider_order_id = $2`, provider, providerOrderID)
+	p, err := scanPayment(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
+}
+
+// InsertPaymentAdjustment persists one tb_payment_adjustments row
+// idempotently: duplicate (provider, provider_event_id) or
+// (provider, kind, provider_object_id) → inserted=false, zero rows.
+func InsertPaymentAdjustment(ctx context.Context, tx pgx.Tx, f *model.PaymentAdjustmentFact) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO tb_payment_adjustments (
+			payment_id, provider, provider_event_id, provider_object_id, kind,
+			provider_transaction_id, provider_order_id,
+			amount_minor, currency,
+			transaction_amount_minor, amount_paid_minor, refunded_amount_minor,
+			object_status, transaction_status, reason,
+			provider_created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		ON CONFLICT DO NOTHING`,
+		f.PaymentID, f.Provider, f.ProviderEventID, f.ProviderObjectID, f.Kind,
+		f.ProviderTransactionID, f.ProviderOrderID,
+		f.AmountMinor, f.Currency,
+		f.TransactionAmountMinor, f.AmountPaidMinor, f.RefundedAmountMinor,
+		f.ObjectStatus, f.TransactionStatus, f.Reason,
+		f.ProviderCreatedAt)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}

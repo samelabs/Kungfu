@@ -159,11 +159,18 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"success":true}`))
 
 	case ev.EventType == "refund.created" || ev.EventType == "dispute.created":
-		// PRODUCTION_GO_LIVE_BLOCKER: refund/dispute economic policy is
-		// not decided. Acknowledge, log loudly, mutate nothing.
-		log.Printf("WARNING creem webhook %s acknowledged without action (refund/dispute economic policy undecided): event=%s", ev.EventType, ev.ID)
+		// Adjustment FACTS only: reconcile against the paid payment and
+		// persist a durable, idempotent tb_payment_adjustments row.
+		// ZERO Credits mutation — the reversal economic policy stays
+		// undecided and lands in a later round on top of these facts.
+		if err := payment.HandleCreemAdjustmentEvent(r.Context(), s.Pool, &ev); err != nil {
+			log.Printf("creem webhook %s reconciliation failed: event=%s err=%v", ev.EventType, ev.ID, err)
+			ErrorResponse(w, http.StatusBadRequest, "RECONCILIATION_FAILED", "Adjustment facts did not reconcile", nil)
+			return
+		}
+		log.Printf("WARNING creem webhook %s recorded as payment adjustment fact (credits reversal policy undecided): event=%s", ev.EventType, ev.ID)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"success":true,"ignored":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 
 	default:
 		log.Printf("creem webhook ignored eventType=%s event=%s", ev.EventType, ev.ID)
