@@ -46,6 +46,13 @@ func (l *Limiter) CheckOwnerLogin(ip string) Result {
 	return l.check("owner_login:"+ip, "owner_login")
 }
 
+// CheckAdminLogin checks IP-level admin login rate limit. Independent
+// key namespace from owner_login: one plane's budget never drains the
+// other's.
+func (l *Limiter) CheckAdminLogin(ip string) Result {
+	return l.check("admin_login:"+ip, "admin_login")
+}
+
 // CheckAPI checks bot-level API rate limit.
 func (l *Limiter) CheckAPI(botID int64, action string) bool {
 	cfg, exists := l.configs[action]

@@ -219,6 +219,7 @@ func defaultRateLimits() map[string]RateLimitConfig {
 	return map[string]RateLimitConfig{
 		"register":    {Window: 3600, Limit: 5, Enabled: &t},
 		"owner_login": {Window: 900, Limit: 20, Enabled: &t},
+		"admin_login": {Window: 900, Limit: 10, Enabled: &t},
 		"reset_key":   {Window: 86400, Limit: 50, Enabled: &t},
 		"list":        {Window: 60, Limit: 120, Enabled: &t},
 		"get":         {Window: 60, Limit: 300, Enabled: &t},

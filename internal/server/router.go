@@ -131,6 +131,14 @@ func (s *Server) buildRouter() http.Handler {
 	r.Post("/api/owner/store/redemptions", s.handleOwnerStoreRedeem)
 	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)
 
+	// -- API routes: Admin (kf_admin server-side session) --
+	// B1.1: identity foundation only. Mutation gate: DELETE requires
+	// X-CSRF-Token; POST (login) is the credential entry point and is
+	// rate-limited instead.
+	r.Post("/api/admin/session", s.handleAdminSessionCreate)
+	r.Get("/api/admin/session", s.handleAdminSessionGet)
+	r.Delete("/api/admin/session", s.handleAdminSessionDelete)
+
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
 	r.Get("/credits", s.handleCredits)

@@ -1,0 +1,267 @@
+package admin
+
+import (
+	"context"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"net/http"
+	"time"
+
+	"kungfu.md/internal/errors"
+	"kungfu.md/internal/model"
+	"kungfu.md/internal/pg"
+	"kungfu.md/internal/repository"
+)
+
+// Admin cookie and session lifecycle constants. The admin cookie is
+// COMPLETELY independent of the owner cookie (kf_owner): different
+// name, different mechanism (server-side session vs stateless HMAC).
+const (
+	AdminCookieName = "kf_admin"
+
+	// SessionAbsoluteTTL bounds a session from creation regardless of
+	// activity.
+	SessionAbsoluteTTL = 12 * time.Hour
+
+	// SessionIdleTimeout invalidates a session after inactivity.
+	SessionIdleTimeout = 30 * time.Minute
+
+	// TouchThrottle: last_seen_at is only rewritten when the previous
+	// touch is at least this old — avoids a DB write per request.
+	TouchThrottle = 5 * time.Minute
+)
+
+// timeNow is swappable in tests.
+var timeNow = time.Now
+
+func now() time.Time { return timeNow() }
+
+// GenerateSessionToken mints a 32-byte crypto/random token.
+// Returns (rawToken, sha256hex(rawToken)). The raw token only ever
+// travels inside the HttpOnly cookie; only the hash is persisted.
+func GenerateSessionToken() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := cryptorand.Read(b); err != nil {
+		return "", "", err
+	}
+	raw := base64.RawURLEncoding.EncodeToString(b)
+	sum := sha256.Sum256([]byte(raw))
+	return raw, toHex(sum[:]), nil
+}
+
+// HashSessionToken computes the stored form of a raw session token.
+func HashSessionToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return toHex(sum[:])
+}
+
+func toHex(b []byte) string {
+	const hexdigits = "0123456789abcdef"
+	out := make([]byte, 0, len(b)*2)
+	for _, v := range b {
+		out = append(out, hexdigits[v>>4], hexdigits[v&0x0f])
+	}
+	return string(out)
+}
+
+// SetAdminCookie writes the raw session token into the kf_admin
+// HttpOnly cookie.
+func SetAdminCookie(w http.ResponseWriter, rawToken string, isHTTPS bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     AdminCookieName,
+		Value:    rawToken,
+		Path:     "/",
+		MaxAge:   int(SessionAbsoluteTTL.Seconds()),
+		Secure:   isHTTPS,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// ClearAdminCookie clears kf_admin. Always safe — even with a stale
+// cookie the client must be able to remove its local login state.
+func ClearAdminCookie(w http.ResponseWriter, isHTTPS bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     AdminCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Now().Add(-time.Hour),
+		Secure:   isHTTPS,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// Principal is the resolved admin identity for a request: the admin,
+// its active roles, and the live permission set. Permissions are
+// resolved from the database on every request — never cached in the
+// session — so role changes apply to existing sessions immediately.
+type Principal struct {
+	Admin       *model.Admin
+	Roles       []string
+	Permissions []string
+	Session     *model.AdminSession
+}
+
+// HasPermission: "*" allows any permission; otherwise exact code match.
+func (p *Principal) HasPermission(code string) bool {
+	for _, perm := range p.Permissions {
+		if perm == WildcardPermission || perm == code {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveSession validates the kf_admin cookie against the server-side
+// session store on EVERY request:
+//   - session exists for the token hash
+//   - revoked_at IS NULL
+//   - expires_at > now (absolute TTL)
+//   - last_seen_at + idle timeout > now
+//   - admin.status == active
+//   - session.auth_version == admin.auth_version
+//
+// On success it throttled-touches last_seen_at (only when >= 5 min
+// stale) and resolves roles + permissions live.
+func ResolveSession(ctx context.Context, pool *pg.Pool, rawToken string) (*Principal, error) {
+	if rawToken == "" {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	session, adminRec, err := repository.FindAdminSessionByTokenHash(ctx, pool, HashSessionToken(rawToken))
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	if session == nil {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	n := now()
+	if session.RevokedAt != nil {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	if !session.ExpiresAt.After(n) {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	if session.LastSeenAt.Add(SessionIdleTimeout).Before(n) {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	if adminRec.Status != "active" {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+	if session.AuthVersion != adminRec.AuthVersion {
+		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
+	}
+
+	// Throttled touch: only rewrite when the stored value is stale.
+	if session.LastSeenAt.Add(TouchThrottle).Before(n) {
+		if err := repository.TouchAdminSession(ctx, pool, session.ID, n); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
+		session.LastSeenAt = n
+	}
+
+	roles, err := repository.ListAdminRolesByAdminID(ctx, pool, adminRec.ID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	roleCodes := make([]string, 0, len(roles))
+	for _, r := range roles {
+		roleCodes = append(roleCodes, r.Code)
+	}
+	perms, err := repository.ListAdminPermissionCodesByAdminID(ctx, pool, adminRec.ID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+
+	return &Principal{
+		Admin:       adminRec,
+		Roles:       roleCodes,
+		Permissions: perms,
+		Session:     session,
+	}, nil
+}
+
+// RevokeSession revokes the current session and audits the logout.
+// Revocation + logout audit share one transaction (privileged-ish
+// mutation on the session plane).
+func RevokeSession(ctx context.Context, pool *pg.Pool, principal *Principal) error {
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	defer tx.Rollback(ctx)
+
+	if err := repository.RevokeAdminSessionByID(ctx, tx, principal.Session.ID); err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	if err := repository.InsertAdminAuditLog(ctx, tx, &model.AdminAuditLog{
+		ActorAdminID:  &principal.Admin.ID,
+		ActorUsername: principal.Admin.Username,
+		Action:        "admin.logout",
+		TargetType:    strPtr("admin_session"),
+		TargetID:      strPtr(idToString(principal.Session.ID)),
+		Success:       true,
+		IPAddress:     principal.Session.IPAddress,
+		UserAgent:     principal.Session.UserAgent,
+	}); err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Failed to write logout audit")
+	}
+	return tx.Commit(ctx)
+}
+
+// BumpAuthVersion invalidates ALL sessions of an admin atomically:
+// auth_version += 1 AND revoke every active session in ONE
+// transaction. Service primitive for password change/reset, admin
+// disable, and force-logout-all.
+func BumpAuthVersion(ctx context.Context, pool *pg.Pool, adminID int64) error {
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE tb_admins SET auth_version = auth_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+		adminID); err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	if err := repository.RevokeAllAdminSessions(ctx, tx, adminID); err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	return tx.Commit(ctx)
+}
+
+func nullableString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func strPtr(s string) *string { return &s }
+
+func idToString(id int64) string {
+	// small deterministic int→string without importing strconv at
+	// several call sites
+	if id == 0 {
+		return "0"
+	}
+	neg := id < 0
+	if neg {
+		id = -id
+	}
+	var buf [24]byte
+	i := len(buf)
+	for id > 0 {
+		i--
+		buf[i] = byte('0' + id%10)
+		id /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
