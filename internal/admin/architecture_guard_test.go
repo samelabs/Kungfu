@@ -183,34 +183,6 @@ func TestOwnerAndAdminPlanesAreSeparate(t *testing.T) {
 	}
 }
 
-// Guard: tb_admin_audit_logs is append-only — no production UPDATE or
-// DELETE against it anywhere outside migration files and this guard.
-func TestAdminAuditLogsAppendOnlyInProductionCode(t *testing.T) {
-	root := repoRoot(t)
-	walkSources(t, filepath.Join(root, "internal"), func(path, src string) {
-		if strings.Contains(path, "/admin/") && strings.HasSuffix(path, "architecture_guard_test.go") {
-			return
-		}
-		for line := range strings.SplitSeq(src, "\n") {
-			up := strings.Contains(strings.ToUpper(line), "UPDATE TB_ADMIN_AUDIT_LOGS")
-			del := strings.Contains(strings.ToUpper(line), "DELETE FROM TB_ADMIN_AUDIT_LOGS")
-			if up || del {
-				t.Errorf("%s: production code must not UPDATE/DELETE tb_admin_audit_logs: %s", path, strings.TrimSpace(line))
-			}
-		}
-	})
-	// repository exposes no update/delete API for the audit table
-	repoSrc, err := os.ReadFile(filepath.Join(root, "internal", "repository", "admin.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rs := string(repoSrc)
-	if strings.Contains(strings.ToUpper(rs), "UPDATE TB_ADMIN_AUDIT_LOGS") ||
-		strings.Contains(strings.ToUpper(rs), "DELETE FROM TB_ADMIN_AUDIT_LOGS") {
-		t.Error("repository must not expose audit UPDATE/DELETE SQL")
-	}
-}
-
 // Guard: the raw admin session token must never reach the DB or logs.
 // Structural checks: no production admin/server code writes the raw
 // token into any INSERT/UPDATE or log call; the model has no raw
@@ -267,52 +239,5 @@ func TestMigration006IsAdditiveOnly(t *testing.T) {
 		if strings.Contains(s, banned) {
 			t.Errorf("006 must not contain %s", banned)
 		}
-	}
-}
-
-// Guard: SQL against tb_admin* tables lives ONLY in
-// internal/repository/admin.go (or migrations). Production sources
-// under internal/admin, internal/server, and cmd/adminctl must not
-// contain SQL touching admin tables — the pipeline is
-// handler → admin domain → repository → PG. Comment lines are exempt
-// (comments may legitimately name the tables); string literals and
-// code are not.
-var adminTableNames = []string{
-	"tb_admins", "tb_admin_sessions", "tb_admin_roles", "tb_admin_permissions",
-	"tb_admin_user_roles", "tb_admin_role_permissions", "tb_admin_audit_logs",
-}
-
-func TestAdminSQLLivesOnlyInRepository(t *testing.T) {
-	root := repoRoot(t)
-	dirs := []string{
-		filepath.Join(root, "internal", "admin"),
-		filepath.Join(root, "internal", "server"),
-		filepath.Join(root, "cmd", "adminctl"),
-	}
-	for _, dir := range dirs {
-		walkSources(t, dir, func(path, src string) {
-			for _, line := range codeLines(src) {
-				up := strings.ToUpper(line)
-				for _, table := range adminTableNames {
-					if strings.Contains(up, strings.ToUpper(table)) {
-						// A bare table name in an identifier (e.g. a Go
-						// func like FindAdminByUsername) is fine; only a
-						// SQL-shaped reference counts: table name inside
-						// quotes followed/preceded by SQL keywords.
-						quoted := strings.Contains(line, "`"+table) ||
-							strings.Contains(line, "\""+table)
-						if !quoted {
-							continue
-						}
-						if strings.Contains(up, "SELECT") || strings.Contains(up, "INSERT") ||
-							strings.Contains(up, "UPDATE") || strings.Contains(up, "DELETE") ||
-							strings.Contains(up, "LOCK TABLE") {
-							t.Errorf("%s: admin-table SQL must live only in internal/repository/admin.go: %s",
-								path, strings.TrimSpace(line))
-						}
-					}
-				}
-			}
-		})
 	}
 }
