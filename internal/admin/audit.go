@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
@@ -53,15 +54,26 @@ func WithAuditTx(ctx context.Context, pool *pg.Pool, e *AuditEntry, fn func(ctx 
 		return err
 	}
 
-	if err := repository.InsertAdminAuditLog(ctx, tx, auditModel(e)); err != nil {
+	// Strict marshaling happens FIRST: an unmarshalable audit fact
+	// aborts before any SQL, and WithAuditTx returns the error with
+	// the mutation rolled back.
+	logRow, err := auditModel(e)
+	if err != nil {
+		return errors.New(500, "AUDIT_MARSHAL_FAILED",
+			"Audit record could not be serialized — mutation rolled back")
+	}
+	if err := repository.InsertAdminAuditLog(ctx, tx, logRow); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Failed to write admin audit — mutation rolled back")
 	}
 	return tx.Commit(ctx)
 }
 
 // auditModel converts an AuditEntry to the persistence model. It
-// never carries a raw session token (fields are structured facts only).
-func auditModel(e *AuditEntry) *model.AdminAuditLog {
+// never carries a raw session token (fields are structured facts
+// only). Marshaling Before/After/Metadata is STRICT: an unsupported
+// value is an error so WithAuditTx rolls the mutation back — an
+// audit row must never silently lose its facts.
+func auditModel(e *AuditEntry) (*model.AdminAuditLog, error) {
 	l := &model.AdminAuditLog{
 		Action:        e.Action,
 		ActorUsername: "(system)",
@@ -87,19 +99,28 @@ func auditModel(e *AuditEntry) *model.AdminAuditLog {
 	if e.UserAgent != "" {
 		l.UserAgent = &e.UserAgent
 	}
-	l.BeforeJSON = marshalOrNull(e.Before)
-	l.AfterJSON = marshalOrNull(e.After)
-	l.MetadataJSON = marshalOrNull(e.Metadata)
-	return l
+	var err error
+	if l.BeforeJSON, err = marshalOrNull(e.Before); err != nil {
+		return nil, fmt.Errorf("audit before_json: %w", err)
+	}
+	if l.AfterJSON, err = marshalOrNull(e.After); err != nil {
+		return nil, fmt.Errorf("audit after_json: %w", err)
+	}
+	if l.MetadataJSON, err = marshalOrNull(e.Metadata); err != nil {
+		return nil, fmt.Errorf("audit metadata_json: %w", err)
+	}
+	return l, nil
 }
 
-func marshalOrNull(v interface{}) []byte {
+// marshalOrNull marshals structured audit facts; nil stays nil, and
+// an unmarshalable value is an ERROR (never silently dropped).
+func marshalOrNull(v interface{}) ([]byte, error) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return b
+	return b, nil
 }

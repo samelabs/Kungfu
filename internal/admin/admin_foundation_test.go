@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -311,10 +312,22 @@ func TestAuthVersionMismatchInvalidatesSession(t *testing.T) {
 	bootstrapForTest(t, dbPool)
 	res := loginForTest(t, dbPool, "root", "password-123")
 
-	// service primitive: bump + revoke-all in one tx
+	// B1.2 composition shape: business mutation + bump + revoke-all +
+	// audit in ONE WithAuditTx transaction.
 	adminRow, _ := repository.FindAdminByUsername(context.Background(), dbPool, "root")
-	if err := BumpAuthVersion(context.Background(), dbPool, adminRow.ID); err != nil {
-		t.Fatalf("bump: %v", err)
+	err := WithAuditTx(context.Background(), dbPool, &AuditEntry{
+		Action:  "admin.disable",
+		Actor:   adminRow,
+		Success: true,
+		After:   map[string]string{"status": "disabled"},
+	}, func(ctx context.Context, tx pg.Querier) error {
+		if _, err := tx.Exec(ctx, `UPDATE tb_admins SET status='disabled' WHERE id=$1`, adminRow.ID); err != nil {
+			return err
+		}
+		return bumpAuthVersionAndRevokeSessions(ctx, tx, adminRow.ID)
+	})
+	if err != nil {
+		t.Fatalf("disable+bump tx: %v", err)
 	}
 	// auth_version on the row moved
 	fresh, _ := repository.FindAdminByUsername(context.Background(), dbPool, "root")
@@ -324,6 +337,87 @@ func TestAuthVersionMismatchInvalidatesSession(t *testing.T) {
 	// session revoked
 	if p, err := ResolveSession(context.Background(), dbPool, res.RawToken); err == nil || p != nil {
 		t.Fatal("auth_version bump must invalidate existing session")
+	}
+	// audit row landed with the mutation
+	var n int
+	_ = dbPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='admin.disable' AND success`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("admin.disable audit rows = %d, want 1", n)
+	}
+}
+
+// Concurrent bootstrap: two goroutines, two different usernames, both
+// fire Bootstrap() simultaneously on an empty admin table. The
+// LOCK TABLE serialization must yield exactly one winner regardless
+// of goroutine scheduling order.
+func TestConcurrentBootstrapExactlyOneWinner(t *testing.T) {
+	dbPool := createPrivateDB(t)
+
+	const racers = 2
+	type outcome struct {
+		success bool
+		refused bool
+		err     error
+	}
+	outcomes := make(chan outcome, racers)
+	start := make(chan struct{})
+
+	for i := 0; i < racers; i++ {
+		go func(i int) {
+			username := ""
+			if i == 0 {
+				username = "racer.alpha"
+			} else {
+				username = "racer.beta"
+			}
+			<-start // release both goroutines together
+			_, err := Bootstrap(context.Background(), dbPool, username, "Racer "+username, "racer-pass-123")
+			oc := outcome{err: err}
+			if err == nil {
+				oc.success = true
+			} else if ae, ok := errors.IsAppError(err); ok && ae.Code == "BOOTSTRAP_REFUSED" {
+				oc.refused = true
+			}
+			outcomes <- oc
+		}(i)
+	}
+	close(start)
+
+	successes, refusals, other := 0, 0, 0
+	for i := 0; i < racers; i++ {
+		oc := <-outcomes
+		switch {
+		case oc.success:
+			successes++
+		case oc.refused:
+			refusals++
+		default:
+			other++
+			t.Errorf("unexpected bootstrap error: %v", oc.err)
+		}
+	}
+	if successes != 1 || refusals != 1 || other != 0 {
+		t.Fatalf("outcomes: successes=%d refusals=%d other=%d — want 1/1/0", successes, refusals, other)
+	}
+
+	ctx := context.Background()
+	var admins, superAssign, bootstrapAudits int
+	_ = dbPool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_admins`).Scan(&admins)
+	_ = dbPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM tb_admin_user_roles ur
+		JOIN tb_admin_roles r ON r.id = ur.role_id
+		WHERE r.code = 'superadmin'`).Scan(&superAssign)
+	_ = dbPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='admin.bootstrap' AND success`).Scan(&bootstrapAudits)
+	if admins != 1 {
+		t.Fatalf("tb_admins = %d, want 1", admins)
+	}
+	if superAssign != 1 {
+		t.Fatalf("superadmin assignments = %d, want 1", superAssign)
+	}
+	if bootstrapAudits != 1 {
+		t.Fatalf("successful admin.bootstrap audit rows = %d, want 1", bootstrapAudits)
 	}
 }
 
@@ -569,5 +663,127 @@ func TestAdminDeletionPreservesAuditTrail(t *testing.T) {
 	}
 	if nullActor != kept {
 		t.Fatalf("FK must SET NULL: %d of %d rows still reference the deleted admin", kept-nullActor, kept)
+	}
+}
+
+// Audit JSON marshaling must never silently drop facts: an
+// unmarshalable Before/After value aborts WithAuditTx, the mutation
+// rolls back, and no audit row is written.
+func TestAuditMarshalFailureRollsBackMutation(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	bootstrapForTest(t, dbPool)
+	ctx := context.Background()
+
+	err := WithAuditTx(ctx, dbPool, &AuditEntry{
+		Action:  "probe.marshal_fail",
+		Success: true,
+		Before: map[string]interface{}{
+			"unsupported": make(chan int), // json.Marshal cannot handle channels
+		},
+	}, func(ctx context.Context, tx pg.Querier) error {
+		_, err := tx.Exec(ctx, `UPDATE tb_admins SET display_name='PWNED2' WHERE username='root'`)
+		return err
+	})
+	if err == nil {
+		t.Fatal("WithAuditTx must fail on unmarshalable audit facts")
+	}
+	ae, ok := errors.IsAppError(err)
+	if !ok || ae.Code != "AUDIT_MARSHAL_FAILED" {
+		t.Fatalf("expected AUDIT_MARSHAL_FAILED, got %v", err)
+	}
+
+	// mutation rolled back
+	var dn string
+	_ = dbPool.QueryRow(ctx, `SELECT display_name FROM tb_admins WHERE username='root'`).Scan(&dn)
+	if dn == "PWNED2" {
+		t.Fatal("mutation survived audit marshal failure")
+	}
+	// audit row = 0
+	var n int
+	_ = dbPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='probe.marshal_fail'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("audit rows for failed marshal = %d, want 0", n)
+	}
+}
+
+// Idle boundary: exactly 30 minutes since last_seen_at → expired
+// (now >= last_seen_at + 30m). One second earlier → still valid.
+func TestSessionIdleExactly30MinutesIsExpired(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	bootstrapForTest(t, dbPool)
+	res := loginForTest(t, dbPool, "root", "password-123")
+
+	setLastSeen := func(offset time.Duration) {
+		t.Helper()
+		_, err := dbPool.Exec(context.Background(),
+			`UPDATE tb_admin_sessions
+			 SET last_seen_at = CURRENT_TIMESTAMP - $1::interval,
+			     expires_at = CURRENT_TIMESTAMP + interval '11 hours'
+			 WHERE id = $2`,
+			fmt.Sprintf("%.0f seconds", offset.Seconds()), res.Session.ID)
+		if err != nil {
+			t.Fatalf("set last_seen: %v", err)
+		}
+	}
+
+	// 29m59s → alive
+	setLastSeen(29*time.Minute + 59*time.Second)
+	if _, err := ResolveSession(context.Background(), dbPool, res.RawToken); err != nil {
+		t.Fatalf("29m59s idle must still resolve: %v", err)
+	}
+	// exactly 30m → expired
+	setLastSeen(30 * time.Minute)
+	if p, err := ResolveSession(context.Background(), dbPool, res.RawToken); err == nil || p != nil {
+		t.Fatal("exactly 30m idle must be expired (>= boundary)")
+	}
+}
+
+// Touch boundary: exactly 5 minutes since last_seen_at → touch fires
+// (now >= last_seen_at + 5m). One second earlier → no write.
+func TestSessionTouchAtExactly5Minutes(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	bootstrapForTest(t, dbPool)
+	res := loginForTest(t, dbPool, "root", "password-123")
+
+	lastSeen := func() time.Time {
+		t.Helper()
+		var ts time.Time
+		if err := dbPool.QueryRow(context.Background(),
+			`SELECT last_seen_at FROM tb_admin_sessions WHERE id = $1`, res.Session.ID).Scan(&ts); err != nil {
+			t.Fatalf("read last_seen: %v", err)
+		}
+		return ts
+	}
+	setLastSeen := func(offset time.Duration) {
+		t.Helper()
+		_, err := dbPool.Exec(context.Background(),
+			`UPDATE tb_admin_sessions
+			 SET last_seen_at = CURRENT_TIMESTAMP - $1::interval
+			 WHERE id = $2`,
+			fmt.Sprintf("%.0f seconds", offset.Seconds()), res.Session.ID)
+		if err != nil {
+			t.Fatalf("set last_seen: %v", err)
+		}
+	}
+
+	// 4m59s stale → resolve does NOT touch
+	setLastSeen(4*time.Minute + 59*time.Second)
+	before := lastSeen()
+	if _, err := ResolveSession(context.Background(), dbPool, res.RawToken); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if after := lastSeen(); !after.Equal(before) {
+		t.Fatal("touch must not fire before the 5m boundary")
+	}
+
+	// exactly 5m stale → resolve MUST touch
+	setLastSeen(5 * time.Minute)
+	before = lastSeen()
+	if _, err := ResolveSession(context.Background(), dbPool, res.RawToken); err != nil {
+		t.Fatalf("resolve at boundary: %v", err)
+	}
+	if after := lastSeen(); !after.After(before) {
+		t.Fatal("touch must fire at exactly 5m (>= boundary)")
 	}
 }

@@ -88,12 +88,6 @@ CREATE TABLE IF NOT EXISTS tb_admin_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON tb_admin_sessions (admin_id);
 
--- -- Append-only admin audit trail --
--- Platform governance facts. Completely independent from the
--- bot-scoped tb_logs (Owner/Agent world). Production code must
--- never UPDATE or DELETE rows here (enforced by an architecture
--- guard test); a DB rule adds a second layer of protection.
-
 CREATE TABLE IF NOT EXISTS tb_admin_audit_logs (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     actor_admin_id BIGINT      NULL REFERENCES tb_admins(id) ON DELETE SET NULL,
@@ -114,11 +108,11 @@ CREATE TABLE IF NOT EXISTS tb_admin_audit_logs (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_actor ON tb_admin_audit_logs (actor_admin_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_action ON tb_admin_audit_logs (action, created_at DESC);
 
--- Append-only is enforced by the architecture guard test (production
--- code contains no UPDATE/DELETE against this table). A DB RULE is
--- deliberately NOT used: a table rule would also intercept the
--- FK's internal ON DELETE SET NULL update, breaking the mandated
--- "admin deletion must not damage the audit trail" semantics.
+-- Append-only: currently enforced by the architecture guard test
+-- (production code contains no UPDATE/DELETE against this table).
+-- No DB RULE is used, because the FK's ON DELETE SET NULL requires
+-- an internal UPDATE that a rule would intercept, breaking the
+-- mandated "admin deletion must not damage the audit trail" semantics.
 
 -- -- Seed: system role, permissions, wildcard binding --
 

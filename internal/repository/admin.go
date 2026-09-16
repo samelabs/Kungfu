@@ -21,6 +21,28 @@ func CountAdmins(ctx context.Context, q pg.Querier) (int64, error) {
 	return n, err
 }
 
+// LockAdminsTableExclusive is the bootstrap serialization primitive:
+// inside the caller's transaction it takes a session-level EXCLUSIVE
+// lock on tb_admins, so two concurrent first-bootstraps serialize —
+// the second only observes COUNT>0 after the first commits (its lock
+// wait ends post-commit). Must be the FIRST statement of the
+// bootstrap transaction.
+func LockAdminsTableExclusive(ctx context.Context, q pg.Querier) error {
+	_, err := q.Exec(ctx, `LOCK TABLE tb_admins IN EXCLUSIVE MODE`)
+	return err
+}
+
+// IncrementAdminAuthVersion bumps auth_version by one. Tx-aware:
+// the caller owns BEGIN/COMMIT (typically via WithAuditTx so the
+// bump, the revocations, the business mutation, and the audit row
+// all commit atomically).
+func IncrementAdminAuthVersion(ctx context.Context, q pg.Querier, adminID int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE tb_admins SET auth_version = auth_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+		adminID)
+	return err
+}
+
 // InsertAdmin creates an admin; username must already be normalized
 // lowercase. Returns the full row.
 func InsertAdmin(ctx context.Context, q pg.Querier, a *model.Admin) (*model.Admin, error) {

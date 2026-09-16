@@ -269,3 +269,50 @@ func TestMigration006IsAdditiveOnly(t *testing.T) {
 		}
 	}
 }
+
+// Guard: SQL against tb_admin* tables lives ONLY in
+// internal/repository/admin.go (or migrations). Production sources
+// under internal/admin, internal/server, and cmd/adminctl must not
+// contain SQL touching admin tables — the pipeline is
+// handler → admin domain → repository → PG. Comment lines are exempt
+// (comments may legitimately name the tables); string literals and
+// code are not.
+var adminTableNames = []string{
+	"tb_admins", "tb_admin_sessions", "tb_admin_roles", "tb_admin_permissions",
+	"tb_admin_user_roles", "tb_admin_role_permissions", "tb_admin_audit_logs",
+}
+
+func TestAdminSQLLivesOnlyInRepository(t *testing.T) {
+	root := repoRoot(t)
+	dirs := []string{
+		filepath.Join(root, "internal", "admin"),
+		filepath.Join(root, "internal", "server"),
+		filepath.Join(root, "cmd", "adminctl"),
+	}
+	for _, dir := range dirs {
+		walkSources(t, dir, func(path, src string) {
+			for _, line := range codeLines(src) {
+				up := strings.ToUpper(line)
+				for _, table := range adminTableNames {
+					if strings.Contains(up, strings.ToUpper(table)) {
+						// A bare table name in an identifier (e.g. a Go
+						// func like FindAdminByUsername) is fine; only a
+						// SQL-shaped reference counts: table name inside
+						// quotes followed/preceded by SQL keywords.
+						quoted := strings.Contains(line, "`"+table) ||
+							strings.Contains(line, "\""+table)
+						if !quoted {
+							continue
+						}
+						if strings.Contains(up, "SELECT") || strings.Contains(up, "INSERT") ||
+							strings.Contains(up, "UPDATE") || strings.Contains(up, "DELETE") ||
+							strings.Contains(up, "LOCK TABLE") {
+							t.Errorf("%s: admin-table SQL must live only in internal/repository/admin.go: %s",
+								path, strings.TrimSpace(line))
+						}
+					}
+				}
+			}
+		})
+	}
+}

@@ -75,7 +75,14 @@ func Bootstrap(ctx context.Context, pool *pg.Pool, username, displayName, passwo
 	}
 	defer tx.Rollback(ctx)
 
-	// Fail-closed gate inside the transaction.
+	// Serialize concurrent first-bootstraps: the EXCLUSIVE lock makes
+	// the second transaction's COUNT wait until the first commits, so
+	// exactly one winner is possible regardless of goroutine ordering.
+	if err := repository.LockAdminsTableExclusive(ctx, tx); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+
+	// Fail-closed gate inside the transaction (post-lock).
 	count, err := repository.CountAdmins(ctx, tx)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")

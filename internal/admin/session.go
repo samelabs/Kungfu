@@ -144,7 +144,9 @@ func ResolveSession(ctx context.Context, pool *pg.Pool, rawToken string) (*Princ
 	if !session.ExpiresAt.After(n) {
 		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
 	}
-	if session.LastSeenAt.Add(SessionIdleTimeout).Before(n) {
+	// Idle expiry: expired when now >= last_seen_at + 30m (boundary
+	// inclusive — exactly 30 minutes idle is expired).
+	if !n.Before(session.LastSeenAt.Add(SessionIdleTimeout)) {
 		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
 	}
 	if adminRec.Status != "active" {
@@ -154,8 +156,9 @@ func ResolveSession(ctx context.Context, pool *pg.Pool, rawToken string) (*Princ
 		return nil, errors.New(401, "ADMIN_LOGIN_REQUIRED", "Admin login required")
 	}
 
-	// Throttled touch: only rewrite when the stored value is stale.
-	if session.LastSeenAt.Add(TouchThrottle).Before(n) {
+	// Throttled touch: rewrite when now >= last_seen_at + 5m (boundary
+	// inclusive — exactly 5 minutes stale triggers a touch).
+	if !n.Before(session.LastSeenAt.Add(TouchThrottle)) {
 		if err := repository.TouchAdminSession(ctx, pool, session.ID, n); err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -211,26 +214,26 @@ func RevokeSession(ctx context.Context, pool *pg.Pool, principal *Principal) err
 	return tx.Commit(ctx)
 }
 
-// BumpAuthVersion invalidates ALL sessions of an admin atomically:
-// auth_version += 1 AND revoke every active session in ONE
-// transaction. Service primitive for password change/reset, admin
-// disable, and force-logout-all.
-func BumpAuthVersion(ctx context.Context, pool *pg.Pool, adminID int64) error {
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
+// bumpAuthVersionAndRevokeSessions is the tx-aware primitive B1.2's
+// privileged operations compose inside WithAuditTx:
+//
+//	admin.WithAuditTx(ctx, pool, entry, func(ctx, tx) error {
+//	    disable / reset password / force logout (business mutation)
+//	    return admin.bumpAuthVersionAndRevokeSessions(ctx, tx, adminID)
+//	})
+//
+// It deliberately does NOT begin/commit its own transaction and does
+// NOT write audit — the caller's single transaction owns atomicity.
+// There is intentionally no exported mutation API that could bypass
+// the audit invariant.
+func bumpAuthVersionAndRevokeSessions(ctx context.Context, q pg.Querier, adminID int64) error {
+	if err := repository.IncrementAdminAuthVersion(ctx, q, adminID); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx,
-		`UPDATE tb_admins SET auth_version = auth_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-		adminID); err != nil {
+	if err := repository.RevokeAllAdminSessions(ctx, q, adminID); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	if err := repository.RevokeAllAdminSessions(ctx, tx, adminID); err != nil {
-		return errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func nullableString(s string) *string {
