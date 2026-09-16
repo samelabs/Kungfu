@@ -405,3 +405,101 @@ func TestDisputeFactRecordedStandalone(t *testing.T) {
 		t.Fatalf("dispute mutated money: tx=%d bal=%v", txN, bal)
 	}
 }
+
+// Dispute with empty transaction.status → reconciliation failure, zero rows.
+func TestDisputeEmptyStatusRejected(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, pkgProducts()...)
+	code := adjSeedPaidPayment(t, pool, fc, botID)
+	p, _ := GetPayment(context.Background(), pool, code)
+
+	refunded := int64(0)
+	dispute := &CreemDisputeObject{
+		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
+		Transaction: &CreemTransactionFact{
+			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+			Status: "", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+		},
+	}
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+		adjEvent(adjUnique("evt_dispute_empty"), "dispute.created", dispute)); err == nil {
+		t.Fatal("empty dispute transaction.status must fail")
+	}
+	adjN, _, _ := adjCounts(t, pool, code)
+	if adjN != 0 {
+		t.Fatalf("empty-status dispute leaked rows: %d", adjN)
+	}
+}
+
+// Missing/zero created_at → reconciliation failure, zero rows (no local
+// time substitution for a provider fact). Covers refund and dispute.
+func TestAdjustmentMissingCreatedAtRejected(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, pkgProducts()...)
+	code := adjSeedPaidPayment(t, pool, fc, botID)
+	p, _ := GetPayment(context.Background(), pool, code)
+
+	refunded := int64(540)
+	txn := &CreemTransactionFact{
+		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+	}
+
+	// refund with zero created_at
+	ev0 := adjEvent(adjUnique("evt_ca0"), "refund.created", adjRefundObject(adjUnique("ref"), txn))
+	ev0.CreatedAt = 0
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev0); err == nil {
+		t.Fatal("zero created_at refund must fail")
+	}
+	// dispute with negative created_at
+	dispute := &CreemDisputeObject{
+		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
+		Transaction: &CreemTransactionFact{
+			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+			Status: "under_review", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+		},
+	}
+	evN := adjEvent(adjUnique("evt_can"), "dispute.created", dispute)
+	evN.CreatedAt = -5
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, evN); err == nil {
+		t.Fatal("negative created_at dispute must fail")
+	}
+	adjN, _, _ := adjCounts(t, pool, code)
+	if adjN != 0 {
+		t.Fatalf("missing-created_at events leaked rows: %d", adjN)
+	}
+}
+
+// Residue proof: after a full adjustment test run, nothing this test
+// created survives — bot, payments, and adjustment facts are all gone.
+func TestAdjustmentCleanupLeavesNoResidue(t *testing.T) {
+	pool := crTestPool(t)
+	botID := crSeedBot(t, pool)
+	fc := newFakeCreem(t, pkgProducts()...)
+	code := adjSeedPaidPayment(t, pool, fc, botID)
+	p, _ := GetPayment(context.Background(), pool, code)
+
+	refunded := int64(540)
+	txn := &CreemTransactionFact{
+		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
+	}
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+		adjEvent(adjUnique("evt_residue"), "refund.created", adjRefundObject(adjUnique("ref"), txn))); err != nil {
+		t.Fatal(err)
+	}
+
+	// force cleanup NOW (t.Cleanup order is LIFO; run the same helper)
+	cleanupBotRows(t, pool, botID)
+
+	var bots, payments, adjustments, txs int
+	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_bots WHERE id=$1`, botID).Scan(&bots)
+	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_payments WHERE bot_id=$1`, botID).Scan(&payments)
+	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_payment_adjustments WHERE payment_id=$1`, p.ID).Scan(&adjustments)
+	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&txs)
+	if bots != 0 || payments != 0 || adjustments != 0 || txs != 0 {
+		t.Fatalf("residue: bots=%d payments=%d adjustments=%d txs=%d", bots, payments, adjustments, txs)
+	}
+}

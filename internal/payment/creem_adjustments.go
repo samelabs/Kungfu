@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
@@ -124,6 +123,10 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, p *model.Pay
 	if *obj.Transaction.RefundedAmount > obj.Transaction.AmountPaid {
 		return nil, fmt.Errorf("refunded_amount %d exceeds amount_paid %d", *obj.Transaction.RefundedAmount, obj.Transaction.AmountPaid)
 	}
+	pc, err := providerCreatedAt(ev)
+	if err != nil {
+		return nil, err
+	}
 	status := obj.Status
 	reason := trimTo(obj.Reason, 64)
 	return &PaymentAdjustmentFact{
@@ -141,7 +144,7 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, p *model.Pay
 		ObjectStatus:           &status,
 		TransactionStatus:      &obj.Transaction.Status,
 		Reason:                 reason,
-		ProviderCreatedAt:      providerCreatedAt(ev),
+		ProviderCreatedAt:      pc,
 	}, nil
 }
 
@@ -161,6 +164,13 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, p *model.P
 	if obj.Currency != obj.Transaction.Currency {
 		return nil, fmt.Errorf("dispute.currency %q != transaction currency %q", obj.Currency, obj.Transaction.Currency)
 	}
+	if obj.Transaction.Status == "" {
+		return nil, fmt.Errorf("dispute transaction.status empty")
+	}
+	pc, err := providerCreatedAt(ev)
+	if err != nil {
+		return nil, err
+	}
 	var nilStatus *string
 	return &PaymentAdjustmentFact{
 		ProviderEventID:        ev.ID,
@@ -177,15 +187,18 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, p *model.P
 		ObjectStatus:           nilStatus,
 		TransactionStatus:      &obj.Transaction.Status,
 		Reason:                 nil,
-		ProviderCreatedAt:      providerCreatedAt(ev),
+		ProviderCreatedAt:      pc,
 	}, nil
 }
 
-func providerCreatedAt(ev *CreemWebhookEvent) int64 {
-	if ev.CreatedAt > 0 {
-		return ev.CreatedAt
+// providerCreatedAt returns the provider's own creation timestamp.
+// A missing or non-positive created_at is a reconciliation failure —
+// we never substitute local time for a provider fact.
+func providerCreatedAt(ev *CreemWebhookEvent) (int64, error) {
+	if ev.CreatedAt <= 0 {
+		return 0, fmt.Errorf("event created_at %d not positive (provider fact missing)", ev.CreatedAt)
 	}
-	return time.Now().Unix()
+	return ev.CreatedAt, nil
 }
 
 func trimTo(s string, n int) *string {

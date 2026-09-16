@@ -86,8 +86,20 @@ func cfpBot(t *testing.T, s *Server) int64 {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_payments WHERE bot_id=$1`, botID)
-		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id=$1`, botID)
+		// FK-aware order: adjustment facts → payments → bot. Errors surfaced.
+		ctx := context.Background()
+		if _, err := s.Pool.Exec(ctx, `DELETE FROM tb_payment_adjustments WHERE payment_id IN (SELECT id FROM tb_payments WHERE bot_id = $1)`, botID); err != nil {
+			t.Errorf("cleanup tb_payment_adjustments(bot=%d): %v", botID, err)
+		}
+		if _, err := s.Pool.Exec(ctx, `DELETE FROM tb_transactions WHERE bot_id = $1`, botID); err != nil {
+			t.Errorf("cleanup tb_transactions(bot=%d): %v", botID, err)
+		}
+		if _, err := s.Pool.Exec(ctx, `DELETE FROM tb_payments WHERE bot_id = $1`, botID); err != nil {
+			t.Errorf("cleanup tb_payments(bot=%d): %v", botID, err)
+		}
+		if _, err := s.Pool.Exec(ctx, `DELETE FROM tb_bots WHERE id=$1`, botID); err != nil {
+			t.Errorf("cleanup tb_bots(%d): %v", botID, err)
+		}
 	})
 	return botID
 }

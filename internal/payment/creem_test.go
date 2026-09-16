@@ -122,10 +122,7 @@ func crSeedBot(t *testing.T, pool *pg.Pool) int64 {
 		"cfp_"+suffix, "kf_live_"+suffix).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_payments WHERE bot_id = $1`, botID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id = $1`, botID)
-	})
+	t.Cleanup(func() { cleanupBotRows(t, pool, botID) })
 	return botID
 }
 
@@ -459,5 +456,25 @@ func TestGetPaymentForBotOwnership(t *testing.T) {
 	}
 	if _, err := GetPaymentForBot(context.Background(), pool, botB, res.Payment.Code); err == nil {
 		t.Fatal("cross-bot read must 404")
+	}
+}
+
+// cleanupBotRows removes exactly this test bot's rows in FK-aware order:
+// adjustment facts → ledger rows → payments → bot. Scoped by bot_id;
+// no TRUNCATE, no table-wide deletes; errors surfaced via t.Errorf.
+func cleanupBotRows(t *testing.T, pool *pg.Pool, botID int64) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `DELETE FROM tb_payment_adjustments WHERE payment_id IN (SELECT id FROM tb_payments WHERE bot_id = $1)`, botID); err != nil {
+		t.Errorf("cleanup tb_payment_adjustments(bot=%d): %v", botID, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM tb_transactions WHERE bot_id = $1`, botID); err != nil {
+		t.Errorf("cleanup tb_transactions(bot=%d): %v", botID, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM tb_payments WHERE bot_id = $1`, botID); err != nil {
+		t.Errorf("cleanup tb_payments(bot=%d): %v", botID, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM tb_bots WHERE id = $1`, botID); err != nil {
+		t.Errorf("cleanup tb_bots(%d): %v", botID, err)
 	}
 }
