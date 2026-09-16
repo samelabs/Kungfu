@@ -94,15 +94,24 @@ async function bindAdminRolesEvents() {
             const act = btn.dataset.act;
             try {
                 if (act === 'disable' || act === 'enable') {
+                    // status-only PATCH: name/description preserved
                     const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {
-                        name: btn.dataset.name,
                         status: act === 'disable' ? 'disabled' : 'active'
                     });
                     if (!json.success) throw new Error(apiError(json));
                 } else if (act === 'rename') {
-                    const next = window.prompt('New role name:', btn.dataset.name || '');
+                    const role = state.roles.find(x => x.id === id);
+                    const next = window.prompt('New role name:', role ? role.name : '');
                     if (next === null) return;
+                    // name-only PATCH: status/description preserved
                     const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {name: next});
+                    if (!json.success) throw new Error(apiError(json));
+                } else if (act === 'editdesc') {
+                    const role = state.roles.find(x => x.id === id);
+                    const next = window.prompt('Role description (empty clears it):',
+                        role && role.description ? role.description : '');
+                    if (next === null) return;
+                    const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {description: next});
                     if (!json.success) throw new Error(apiError(json));
                 } else if (act === 'perms') {
                     const role = state.roles.find(r => r.id === id);
@@ -127,7 +136,8 @@ async function bindAdminRolesEvents() {
             try {
                 const json = await adminMutate('/api/admin/roles', 'POST', {
                     code: document.getElementById('adminNewRoleCode').value.trim(),
-                    name: document.getElementById('adminNewRoleName').value.trim()
+                    name: document.getElementById('adminNewRoleName').value.trim(),
+                    description: document.getElementById('adminNewRoleDesc').value.trim()
                 });
                 if (!json.success) throw new Error(apiError(json));
                 setNotice('adminRoleCreateNotice', 'Role created', 'ok');

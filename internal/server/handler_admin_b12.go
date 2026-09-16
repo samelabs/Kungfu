@@ -10,7 +10,6 @@ import (
 	"kungfu.md/internal/admin"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
-	"kungfu.md/internal/repository"
 )
 
 // B1.2 Admin Management HTTP surface. Discipline per work order:
@@ -112,21 +111,19 @@ func pathID(r *http.Request, name string) (int64, error) {
 // -- Admin users --
 
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
-	principal, err := s.requireAdminPermission(r, "admin.users.read")
+	principal, err := s.requireAdminAuth(r)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	_ = principal
-	admins, rolesByAdmin, err := repository.ListAdmins(r.Context(), s.Pool)
+	users, err := admin.ListUsers(r.Context(), s.Pool, principal)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
-	out := make([]map[string]interface{}, 0, len(admins))
-	for _, a := range admins {
-		a.PasswordHash = ""
-		out = append(out, adminUserDTO(a, rolesByAdmin[a.ID]))
+	out := make([]map[string]interface{}, 0, len(users))
+	for _, u := range users {
+		out = append(out, adminUserDTO(u.Admin, u.Roles))
 	}
 	SuccessResponse(w, map[string]interface{}{"users": out}, "")
 }
@@ -157,7 +154,8 @@ func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAdminUserGet(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.users.read"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
@@ -166,22 +164,12 @@ func (s *Server) handleAdminUserGet(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	a, err := repository.FindAdminByID(r.Context(), s.Pool, adminID)
+	u, err := admin.GetUser(r.Context(), s.Pool, principal, adminID)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
-	if a == nil {
-		handleAppError(w, errors.New(404, "ADMIN_NOT_FOUND", "Admin not found"))
-		return
-	}
-	roles, err := repository.ListAdminRoleCodesByAdminID(r.Context(), s.Pool, adminID)
-	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
-		return
-	}
-	a.PasswordHash = ""
-	SuccessResponse(w, adminUserDTO(a, roles), "")
+	SuccessResponse(w, adminUserDTO(u.Admin, u.Roles), "")
 }
 
 func (s *Server) handleAdminUserPatch(w http.ResponseWriter, r *http.Request) {
@@ -265,12 +253,27 @@ func (s *Server) handleAdminUserRoles(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	rawIDs, _ := input["role_ids"].([]interface{})
+	// Finding 3 (fail closed): role_ids must be PRESENT and a JSON
+	// array; every element must be a positive integer. Empty [] is a
+	// legal explicit clear. Malformed input = 400 with ZERO mutation.
+	rawIDs, present := input["role_ids"].([]interface{})
+	if !present {
+		if _, exists := input["role_ids"]; !exists {
+			MissingField(w, "role_ids")
+			return
+		}
+		// present but not an array
+		ErrorResponse(w, 400, "INVALID_ROLE_IDS", "role_ids must be a JSON array of positive integers", nil)
+		return
+	}
 	roleIDs := make([]int64, 0, len(rawIDs))
 	for _, v := range rawIDs {
-		if f, ok := v.(float64); ok && f > 0 && f == float64(int64(f)) {
-			roleIDs = append(roleIDs, int64(f))
+		f, ok := v.(float64)
+		if !ok || f <= 0 || f != float64(int64(f)) {
+			ErrorResponse(w, 400, "INVALID_ROLE_IDS", "role_ids must be a JSON array of positive integers", nil)
+			return
 		}
+		roleIDs = append(roleIDs, int64(f))
 	}
 	if err := admin.SetAdminRoles(r.Context(), s.Pool, principal, adminID, roleIDs); err != nil {
 		handleAppError(w, err)
@@ -359,18 +362,19 @@ func (s *Server) handleAdminMePassword(w http.ResponseWriter, r *http.Request) {
 // -- Roles --
 
 func (s *Server) handleAdminRolesList(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.roles.read"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	roles, permsByRole, err := repository.ListAdminRoles(r.Context(), s.Pool)
+	roles, err := admin.ListRoles(r.Context(), s.Pool, principal)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(roles))
-	for _, role := range roles {
-		out = append(out, adminRoleDTO(role, permsByRole[role.ID]))
+	for _, rv := range roles {
+		out = append(out, adminRoleDTO(rv.Role, rv.Permissions))
 	}
 	SuccessResponse(w, map[string]interface{}{"roles": out}, "")
 }
@@ -400,7 +404,8 @@ func (s *Server) handleAdminRolesCreate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAdminRoleGet(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.roles.read"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
@@ -409,23 +414,17 @@ func (s *Server) handleAdminRoleGet(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	role, err := repository.FindAdminRoleByID(r.Context(), s.Pool, roleID)
+	rv, err := admin.GetRole(r.Context(), s.Pool, principal, roleID)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
-	if role == nil {
-		handleAppError(w, errors.New(404, "ROLE_NOT_FOUND", "Role not found"))
-		return
-	}
-	perms, err := repository.ListAdminPermissionCodesByRole(r.Context(), s.Pool, roleID)
-	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
-		return
-	}
-	SuccessResponse(w, adminRoleDTO(role, perms), "")
+	SuccessResponse(w, adminRoleDTO(rv.Role, rv.Permissions), "")
 }
 
+// handleAdminRolePatch: PARTIAL update. Omitted fields preserve their
+// current values; at least one field must be present. Provided-but-
+// wrong-type fields are 400s (fail closed).
 func (s *Server) handleAdminRolePatch(w http.ResponseWriter, r *http.Request) {
 	input, err := parseAdminJSONBody(r)
 	if err != nil {
@@ -442,21 +441,50 @@ func (s *Server) handleAdminRolePatch(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	name, _ := input["name"].(string)
-	description, _ := input["description"].(string)
-	var status *string
-	if sv, ok := input["status"].(string); ok && sv != "" {
-		status = &sv
+	patch := admin.RolePatch{}
+	provided := 0
+	if v, exists := input["name"]; exists {
+		sv, ok := v.(string)
+		if !ok {
+			ErrorResponse(w, 400, "INVALID_ROLE_NAME", "name must be a string", nil)
+			return
+		}
+		patch.Name = &sv
+		provided++
 	}
-	updated, err := admin.UpdateRole(r.Context(), s.Pool, principal, roleID, name, description, status)
+	if v, exists := input["description"]; exists {
+		sv, ok := v.(string)
+		if !ok {
+			ErrorResponse(w, 400, "INVALID_ROLE_DESCRIPTION", "description must be a string", nil)
+			return
+		}
+		patch.Description = &sv
+		provided++
+	}
+	if v, exists := input["status"]; exists {
+		sv, ok := v.(string)
+		if !ok {
+			ErrorResponse(w, 400, "INVALID_ROLE_STATUS", "status must be a string", nil)
+			return
+		}
+		patch.Status = &sv
+		provided++
+	}
+	if provided == 0 {
+		ErrorResponse(w, 400, "EMPTY_PATCH", "PATCH must include at least one of name, description, status", nil)
+		return
+	}
+	updated, err := admin.UpdateRole(r.Context(), s.Pool, principal, roleID, patch)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	perms, _ := repository.ListAdminPermissionCodesByRole(r.Context(), s.Pool, roleID)
-	SuccessResponse(w, adminRoleDTO(updated, perms), "Role updated")
+	SuccessResponse(w, adminRoleDTO(updated, nil), "Role updated")
 }
 
+// handleAdminRolePermissions: complete replacement. permission_codes
+// must be PRESENT and a JSON array; every element must be a non-empty
+// string (after trim). Empty [] is a legal explicit clear.
 func (s *Server) handleAdminRolePermissions(w http.ResponseWriter, r *http.Request) {
 	input, err := parseAdminJSONBody(r)
 	if err != nil {
@@ -473,12 +501,23 @@ func (s *Server) handleAdminRolePermissions(w http.ResponseWriter, r *http.Reque
 		handleAppError(w, err)
 		return
 	}
-	rawCodes, _ := input["permission_codes"].([]interface{})
+	rawCodes, present := input["permission_codes"].([]interface{})
+	if !present {
+		if _, exists := input["permission_codes"]; !exists {
+			MissingField(w, "permission_codes")
+			return
+		}
+		ErrorResponse(w, 400, "INVALID_PERMISSION_CODES", "permission_codes must be a JSON array of strings", nil)
+		return
+	}
 	codes := make([]string, 0, len(rawCodes))
 	for _, v := range rawCodes {
-		if c, ok := v.(string); ok {
-			codes = append(codes, c)
+		c, ok := v.(string)
+		if !ok || strings.TrimSpace(c) == "" {
+			ErrorResponse(w, 400, "INVALID_PERMISSION_CODES", "permission_codes must be a JSON array of strings", nil)
+			return
 		}
+		codes = append(codes, c)
 	}
 	if err := admin.SetRolePermissions(r.Context(), s.Pool, principal, roleID, codes); err != nil {
 		handleAppError(w, err)
@@ -490,13 +529,14 @@ func (s *Server) handleAdminRolePermissions(w http.ResponseWriter, r *http.Reque
 // -- Permissions --
 
 func (s *Server) handleAdminPermissionsList(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.roles.read"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	perms, err := repository.ListAdminPermissions(r.Context(), s.Pool)
+	perms, err := admin.ListPermissions(r.Context(), s.Pool, principal)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(perms))
@@ -512,13 +552,14 @@ func (s *Server) handleAdminPermissionsList(w http.ResponseWriter, r *http.Reque
 // -- Sessions --
 
 func (s *Server) handleAdminSessionsList(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.sessions.manage"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	sessions, err := repository.ListAdminSessions(r.Context(), s.Pool)
+	sessions, err := admin.ListSessions(r.Context(), s.Pool, principal)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
 	adminIDFilter := strings.TrimSpace(r.URL.Query().Get("admin_id"))
@@ -560,7 +601,8 @@ func (s *Server) handleAdminSessionRevoke(w http.ResponseWriter, r *http.Request
 // -- Audit explorer --
 
 func (s *Server) handleAdminAuditList(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.requireAdminPermission(r, "admin.audit.read"); err != nil {
+	principal, err := s.requireAdminAuth(r)
+	if err != nil {
 		handleAppError(w, err)
 		return
 	}
@@ -575,7 +617,7 @@ func (s *Server) handleAdminAuditList(w http.ResponseWriter, r *http.Request) {
 			pageSize = 100
 		}
 	}
-	filter := repository.AdminAuditFilter{
+	filter := admin.AuditFilter{
 		ActorUsername: strings.TrimSpace(q.Get("actor_username")),
 		Action:        strings.TrimSpace(q.Get("action")),
 		TargetType:    strings.TrimSpace(q.Get("target_type")),
@@ -593,41 +635,29 @@ func (s *Server) handleAdminAuditList(w http.ResponseWriter, r *http.Request) {
 		filter.Success = &b
 	}
 
-	logs, total, err := repository.SelectAdminAuditLogs(r.Context(), s.Pool, filter)
+	result, err := admin.ExploreAudit(r.Context(), s.Pool, principal, filter)
 	if err != nil {
-		handleAppError(w, errors.New(500, "INTERNAL_ERROR", "Database error"))
+		handleAppError(w, err)
 		return
 	}
-	items := make([]map[string]interface{}, 0, len(logs))
-	for _, l := range logs {
+	items := make([]map[string]interface{}, 0, len(result.Items))
+	for _, l := range result.Items {
 		items = append(items, adminAuditDTO(l))
 	}
 	SuccessResponse(w, map[string]interface{}{
 		"items":     items,
-		"page":      page,
-		"page_size": pageSize,
-		"total":     total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
+		"total":     result.Total,
 	}, "")
 }
 
-func adminAuditDTO(l *model.AdminAuditLog) map[string]interface{} {
-	return map[string]interface{}{
-		"id":             l.ID,
-		"actor_admin_id": nullableInt64JSON(l.ActorAdminID),
-		"actor_username": l.ActorUsername,
-		"action":         l.Action,
-		"target_type":    nullableStringJSON(l.TargetType),
-		"target_id":      nullableStringJSON(l.TargetID),
-		"success":        l.Success,
-		"before_json":    jsonBytesOrNull(l.BeforeJSON),
-		"after_json":     jsonBytesOrNull(l.AfterJSON),
-		"metadata_json":  jsonBytesOrNull(l.MetadataJSON),
-		"ip_address":     nullableStringJSON(l.IPAddress),
-		"user_agent":     nullableStringJSON(l.UserAgent),
-		"error_code":     nullableStringJSON(l.ErrorCode),
-		"created_at":     l.CreatedAt,
-	}
+// parseAdminJSONBody reuses the shared JSON body parser.
+func parseAdminJSONBody(r *http.Request) (map[string]interface{}, error) {
+	return parseJSONBodyRequired(r, true, "Request body must be valid JSON")
 }
+
+// -- serialization allowlists (never json.Marshal a DB model) --
 
 func nullableInt64JSON(v *int64) interface{} {
 	if v == nil {
@@ -647,7 +677,21 @@ func jsonBytesOrNull(b []byte) interface{} {
 	return v
 }
 
-// parseAdminJSONBody reuses the shared JSON body parser.
-func parseAdminJSONBody(r *http.Request) (map[string]interface{}, error) {
-	return parseJSONBodyRequired(r, true, "Request body must be valid JSON")
+func adminAuditDTO(l *model.AdminAuditLog) map[string]interface{} {
+	return map[string]interface{}{
+		"id":             l.ID,
+		"actor_admin_id": nullableInt64JSON(l.ActorAdminID),
+		"actor_username": l.ActorUsername,
+		"action":         l.Action,
+		"target_type":    nullableStringJSON(l.TargetType),
+		"target_id":      nullableStringJSON(l.TargetID),
+		"success":        l.Success,
+		"before_json":    jsonBytesOrNull(l.BeforeJSON),
+		"after_json":     jsonBytesOrNull(l.AfterJSON),
+		"metadata_json":  jsonBytesOrNull(l.MetadataJSON),
+		"ip_address":     nullableStringJSON(l.IPAddress),
+		"user_agent":     nullableStringJSON(l.UserAgent),
+		"error_code":     nullableStringJSON(l.ErrorCode),
+		"created_at":     l.CreatedAt,
+	}
 }

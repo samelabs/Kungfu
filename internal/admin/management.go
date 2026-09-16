@@ -65,13 +65,13 @@ func CreateAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, in Cr
 	}
 
 	var created *model.Admin
-	err = WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.user.create",
 		TargetType: "admin",
 		Success:    true,
-		After:      map[string]interface{}{"username": username, "display_name": displayName, "status": "active"},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	err = WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		row, err := repository.InsertAdminWithRoles(ctx, tx, &model.Admin{
 			Username:     username,
 			DisplayName:  displayName,
@@ -85,8 +85,11 @@ func CreateAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, in Cr
 			return errors.New(500, "INTERNAL_ERROR", "Failed to create admin")
 		}
 		created = row
-		createdID := row.ID
-		_ = createdID
+		entry.TargetID = idToString(row.ID)
+		entry.After = map[string]interface{}{
+			"id": row.ID, "username": row.Username,
+			"display_name": row.DisplayName, "status": row.Status,
+		}
 		return nil
 	})
 	if err != nil {
@@ -107,14 +110,14 @@ func UpdateAdminDisplayName(ctx context.Context, pool *pg.Pool, principal *Princ
 	}
 
 	var updated *model.Admin
-	err := WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.user.update",
 		TargetType: "admin",
 		TargetID:   idToString(adminID),
 		Success:    true,
-		After:      map[string]interface{}{"display_name": displayName},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	err := WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		if err := lockAdminRowsOrdered(ctx, tx, principal.Admin.ID, adminID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -125,6 +128,8 @@ func UpdateAdminDisplayName(ctx context.Context, pool *pg.Pool, principal *Princ
 		if err := repository.UpdateAdminDisplayName(ctx, tx, adminID, displayName); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
+		entry.Before = map[string]interface{}{"display_name": before.DisplayName}
+		entry.After = map[string]interface{}{"display_name": displayName}
 		updated = before
 		updated.DisplayName = displayName
 		updated.PasswordHash = ""
@@ -144,14 +149,22 @@ func DisableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admi
 	if err := RequirePermission(ctx, pool, principal, "admin.users.manage"); err != nil {
 		return err
 	}
-	return WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.user.disable",
 		TargetType: "admin",
 		TargetID:   idToString(adminID),
 		Success:    true,
-		After:      map[string]interface{}{"status": "disabled"},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
+		// GLOBAL invariant serialization: lock the stable superadmin
+		// system role row FIRST, then the admin rows ascending. Two
+		// superadmins concurrently disabling themselves serialize on
+		// the role row; the second re-reads state and sees the count
+		// already at 1.
+		if err := repository.LockSuperadminInvariant(ctx, tx); err != nil {
+			return errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
 		if err := lockAdminRowsOrdered(ctx, tx, principal.Admin.ID, adminID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -160,11 +173,11 @@ func DisableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admi
 			return errors.New(404, "ADMIN_NOT_FOUND", "Admin not found")
 		}
 		if target.Status == "disabled" {
-			return nil // idempotent no-op, still audited
+			entry.Before = map[string]interface{}{"status": target.Status}
+			entry.After = map[string]interface{}{"status": target.Status}
+			return nil // idempotent no-op, still audited with real facts
 		}
-		// Last-active-superadmin invariant: if this admin is an active
-		// superadmin, there must remain at least one other after the
-		// disable. Count AFTER taking the row lock.
+		// Last-active-superadmin invariant, re-read UNDER the locks.
 		isSuper, err := repository.IsActiveSuperadmin(ctx, tx, adminID)
 		if err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -181,6 +194,8 @@ func DisableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admi
 		if err := repository.SetAdminStatus(ctx, tx, adminID, "disabled"); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
+		entry.Before = map[string]interface{}{"status": target.Status}
+		entry.After = map[string]interface{}{"status": "disabled"}
 		return bumpAuthVersionAndRevokeSessions(ctx, tx, adminID)
 	})
 }
@@ -190,14 +205,14 @@ func EnableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admin
 	if err := RequirePermission(ctx, pool, principal, "admin.users.manage"); err != nil {
 		return err
 	}
-	return WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.user.enable",
 		TargetType: "admin",
 		TargetID:   idToString(adminID),
 		Success:    true,
-		After:      map[string]interface{}{"status": "active"},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		if err := lockAdminRowsOrdered(ctx, tx, principal.Admin.ID, adminID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -206,9 +221,16 @@ func EnableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admin
 			return errors.New(404, "ADMIN_NOT_FOUND", "Admin not found")
 		}
 		if target.Status == "active" {
+			entry.Before = map[string]interface{}{"status": target.Status}
+			entry.After = map[string]interface{}{"status": target.Status}
 			return nil // idempotent no-op
 		}
-		return repository.SetAdminStatus(ctx, tx, adminID, "active")
+		if err := repository.SetAdminStatus(ctx, tx, adminID, "active"); err != nil {
+			return errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
+		entry.Before = map[string]interface{}{"status": target.Status}
+		entry.After = map[string]interface{}{"status": "active"}
+		return nil
 	})
 }
 
@@ -312,13 +334,13 @@ func CreateRole(ctx context.Context, pool *pg.Pool, principal *Principal, in Cre
 		return nil, errors.New(400, "INVALID_ROLE_NAME", "Role name must be 1-128 characters")
 	}
 	var created *model.AdminRole
-	err := WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.role.create",
 		TargetType: "admin_role",
 		Success:    true,
-		After:      map[string]interface{}{"code": code, "name": name, "status": "active"},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	err := WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		row, err := repository.InsertAdminRole(ctx, tx, code, name, in.Description)
 		if err == repository.ErrAdminRoleCodeExists {
 			return errors.New(409, "ADMIN_ROLE_CODE_EXISTS", "Role code already exists")
@@ -327,6 +349,14 @@ func CreateRole(ctx context.Context, pool *pg.Pool, principal *Principal, in Cre
 			return errors.New(500, "INTERNAL_ERROR", "Failed to create role")
 		}
 		created = row
+		entry.TargetID = idToString(row.ID)
+		afterFacts := map[string]interface{}{
+			"id": row.ID, "code": row.Code, "name": row.Name, "status": row.Status,
+		}
+		if row.Description != nil {
+			afterFacts["description"] = *row.Description
+		}
+		entry.After = afterFacts
 		return nil
 	})
 	if err != nil {
@@ -335,32 +365,49 @@ func CreateRole(ctx context.Context, pool *pg.Pool, principal *Principal, in Cre
 	return created, nil
 }
 
-// UpdateRole patches name/description/status of a CUSTOM role.
+// RolePatch carries OPTIONAL fields for a partial PATCH. nil means
+// "field not provided" (preserve the existing value); a non-nil
+// pointer means "set to this value" (including an explicit empty
+// description). Provided-vs-omitted is structurally distinguishable.
+type RolePatch struct {
+	Name        *string
+	Description *string
+	Status      *string
+}
+
+// UpdateRole applies a PARTIAL patch to a CUSTOM role: omitted fields
+// keep their current values. At least one field must be provided.
 // System roles are structurally immutable (repository guard).
-func UpdateRole(ctx context.Context, pool *pg.Pool, principal *Principal, roleID int64, name, description string, status *string) (*model.AdminRole, error) {
+func UpdateRole(ctx context.Context, pool *pg.Pool, principal *Principal, roleID int64, patch RolePatch) (*model.AdminRole, error) {
 	if err := RequirePermission(ctx, pool, principal, "admin.roles.manage"); err != nil {
 		return nil, err
 	}
-	if name = strings.TrimSpace(name); name == "" || len(name) > 128 {
-		return nil, errors.New(400, "INVALID_ROLE_NAME", "Role name must be 1-128 characters")
+	if patch.Name == nil && patch.Description == nil && patch.Status == nil {
+		return nil, errors.New(400, "EMPTY_PATCH", "PATCH must include at least one of name, description, status")
 	}
-	if status != nil && *status != "active" && *status != "disabled" {
+	if patch.Name != nil {
+		trimmed := strings.TrimSpace(*patch.Name)
+		if trimmed == "" || len(trimmed) > 128 {
+			return nil, errors.New(400, "INVALID_ROLE_NAME", "Role name must be 1-128 characters")
+		}
+		patch.Name = &trimmed
+	}
+	if patch.Description != nil && len(*patch.Description) > 500 {
+		return nil, errors.New(400, "INVALID_ROLE_DESCRIPTION", "Role description must be at most 500 characters")
+	}
+	if patch.Status != nil && *patch.Status != "active" && *patch.Status != "disabled" {
 		return nil, errors.New(400, "INVALID_ROLE_STATUS", "Role status must be active or disabled")
-	}
-	nextStatus := "active"
-	if status != nil {
-		nextStatus = *status
 	}
 
 	var updated *model.AdminRole
-	err := WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.role.update",
 		TargetType: "admin_role",
 		TargetID:   idToString(roleID),
 		Success:    true,
-		After:      map[string]interface{}{"name": name, "status": nextStatus},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	err := WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		if err := repository.LockAdminRoleRowForUpdate(ctx, tx, roleID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -371,13 +418,41 @@ func UpdateRole(ctx context.Context, pool *pg.Pool, principal *Principal, roleID
 		if role.IsSystem {
 			return errors.New(409, "ROLE_IS_SYSTEM", "System roles are immutable")
 		}
-		if err := repository.UpdateAdminRole(ctx, tx, roleID, name, description, nextStatus); err != nil {
+		// merge patch over current values (omitted = preserved)
+		nextName := role.Name
+		if patch.Name != nil {
+			nextName = *patch.Name
+		}
+		nextDesc := ""
+		if role.Description != nil {
+			nextDesc = *role.Description
+		}
+		if patch.Description != nil {
+			nextDesc = *patch.Description
+		}
+		nextStatus := role.Status
+		if patch.Status != nil {
+			nextStatus = *patch.Status
+		}
+		beforeFacts := map[string]interface{}{
+			"name": role.Name, "status": role.Status,
+		}
+		if role.Description != nil {
+			beforeFacts["description"] = *role.Description
+		}
+		if err := repository.UpdateAdminRole(ctx, tx, roleID, nextName, nextDesc, nextStatus); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
-		role.Name = name
-		role.Description = &description
+		role.Name = nextName
+		role.Description = &nextDesc
 		role.Status = nextStatus
 		updated = role
+		afterFacts := map[string]interface{}{"name": nextName, "status": nextStatus}
+		if patch.Description != nil {
+			afterFacts["description"] = nextDesc
+		}
+		entry.Before = beforeFacts
+		entry.After = afterFacts
 		return nil
 	})
 	if err != nil {
@@ -393,28 +468,32 @@ func SetRolePermissions(ctx context.Context, pool *pg.Pool, principal *Principal
 	if err := RequirePermission(ctx, pool, principal, "admin.roles.manage"); err != nil {
 		return err
 	}
-	// normalize + dedupe + sort for a canonical request shape
+	// validate EVERY element; blank-after-trim entries fail the whole
+	// request with zero mutation (fail closed).
 	seen := map[string]bool{}
 	normalized := make([]string, 0, len(permissionCodes))
 	for _, c := range permissionCodes {
 		c = strings.TrimSpace(c)
-		if c == "" || seen[c] {
-			continue
+		if c == "" {
+			return errors.New(400, "INVALID_PERMISSION_CODES",
+				"permission_codes entries must be non-empty strings")
+		}
+		if seen[c] {
+			continue // duplicates are collapsed, not an error
 		}
 		seen[c] = true
 		normalized = append(normalized, c)
 	}
 	sort.Strings(normalized)
 
-	return WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.role.permissions.set",
 		TargetType: "admin_role",
 		TargetID:   idToString(roleID),
 		Success:    true,
-		Before:     map[string]interface{}{"step": "pre-replacement"},
-		After:      map[string]interface{}{"permission_codes": normalized},
-	}, func(ctx context.Context, tx pg.Querier) error {
+	}
+	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
 		if err := repository.LockAdminRoleRowForUpdate(ctx, tx, roleID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -440,7 +519,16 @@ func SetRolePermissions(ctx context.Context, pool *pg.Pool, principal *Principal
 			return errors.New(400, "PERMISSION_NOT_FOUND",
 				"Unknown permission codes: "+strings.Join(missing, ", "))
 		}
-		return repository.ReplaceAdminRolePermissions(ctx, tx, roleID, normalized)
+		beforePerms, err := repository.ListAdminPermissionCodesByRole(ctx, tx, roleID)
+		if err != nil {
+			return errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
+		if err := repository.ReplaceAdminRolePermissions(ctx, tx, roleID, normalized); err != nil {
+			return errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
+		entry.Before = map[string]interface{}{"permission_codes": beforePerms}
+		entry.After = map[string]interface{}{"permission_codes": normalized}
+		return nil
 	})
 }
 
@@ -469,29 +557,38 @@ func SetAdminRoles(ctx context.Context, pool *pg.Pool, principal *Principal, adm
 	if err := RequirePermission(ctx, pool, principal, "admin.roles.manage"); err != nil {
 		return err
 	}
-	// dedupe + sort (canonical)
+	// validate EVERY element; any invalid entry fails the whole
+	// request with zero mutation (fail closed).
 	seen := map[int64]bool{}
 	ids := make([]int64, 0, len(roleIDs))
 	for _, id := range roleIDs {
-		if id <= 0 || seen[id] {
-			continue
+		if id <= 0 {
+			return errors.New(400, "INVALID_ROLE_IDS",
+				"role_ids entries must be positive integers")
+		}
+		if seen[id] {
+			continue // duplicates are collapsed, not an error
 		}
 		seen[id] = true
 		ids = append(ids, id)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
-	return WithAuditTx(ctx, pool, &AuditEntry{
+	entry := &AuditEntry{
 		Actor:      principal.Admin,
 		Action:     "admin.user.roles.set",
 		TargetType: "admin",
 		TargetID:   idToString(adminID),
 		Success:    true,
-		After:      map[string]interface{}{"role_ids": ids},
-	}, func(ctx context.Context, tx pg.Querier) error {
-		// fixed lock order: target admin row first, then all listed
-		// roles by id; concurrent management ops on the same admin
-		// serialize here.
+	}
+	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
+		// GLOBAL invariant serialization FIRST: this operation can
+		// drop superadmin membership (an active-superadmin count
+		// reducer), so it must hold the superadmin role-row lock
+		// before reading state.
+		if err := repository.LockSuperadminInvariant(ctx, tx); err != nil {
+			return errors.New(500, "INTERNAL_ERROR", "Database error")
+		}
 		if err := lockAdminRowsOrdered(ctx, tx, principal.Admin.ID, adminID); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
@@ -529,9 +626,9 @@ func SetAdminRoles(ctx context.Context, pool *pg.Pool, principal *Principal, adm
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 
-		// last-active-superadmin invariant: if the target was an
-		// active superadmin and the replacement drops it, at least one
-		// other active superadmin must remain.
+		// last-active-superadmin invariant, re-read UNDER the locks
+		// (the replacement already happened in this tx; the count
+		// reflects the post-replacement state, so >=1 must remain).
 		if beforeHasSuper && !afterHasSuper && target.Status == "active" {
 			n, err := repository.CountActiveSuperadmins(ctx, tx)
 			if err != nil {
@@ -541,6 +638,8 @@ func SetAdminRoles(ctx context.Context, pool *pg.Pool, principal *Principal, adm
 				return lastSuperadminError()
 			}
 		}
+		entry.Before = map[string]interface{}{"role_ids": beforeIDs}
+		entry.After = map[string]interface{}{"role_ids": ids}
 		return nil
 	})
 }

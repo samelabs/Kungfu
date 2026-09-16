@@ -306,6 +306,18 @@ func LockAdminRoleRowForUpdate(ctx context.Context, q pg.Querier, roleID int64) 
 
 // -- Active-superadmin invariant --
 
+// LockSuperadminInvariant takes FOR UPDATE on the unique, stable
+// system superadmin role row. This is the GLOBAL serialization
+// primitive for every transaction that can reduce the number of
+// active superadmins: with the role row locked first, two such
+// transactions cannot both pass the count check concurrently. The
+// role is seeded by migration 006 and can be neither deleted nor
+// renamed, so the lock target is stable forever.
+func LockSuperadminInvariant(ctx context.Context, q pg.Querier) error {
+	_, err := q.Exec(ctx, `SELECT id FROM tb_admin_roles WHERE code = 'superadmin' FOR UPDATE`)
+	return err
+}
+
 // CountActiveSuperadmins returns the number of admins with
 // status='active' bound to the active superadmin system role.
 // Must be called INSIDE the caller's transaction AFTER taking the

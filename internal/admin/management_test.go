@@ -285,19 +285,28 @@ func TestB12RoleLifecycle(t *testing.T) {
 		t.Fatalf("expected ADMIN_ROLE_CODE_EXISTS, got %v", err)
 	}
 
-	// update name + disable
+	// update name + disable (partial patches)
 	status := "disabled"
-	updated, err := UpdateRole(context.Background(), dbPool, root, created.ID, "Support Desk", "helpdesk v2", &status)
+	updated, err := UpdateRole(context.Background(), dbPool, root, created.ID, RolePatch{Status: &status})
 	if err != nil {
-		t.Fatalf("update role: %v", err)
+		t.Fatalf("disable role: %v", err)
+	}
+	if updated.Status != "disabled" {
+		t.Fatalf("status after disable: %+v", updated)
+	}
+	newName := "Support Desk"
+	updated, err = UpdateRole(context.Background(), dbPool, root, created.ID, RolePatch{Name: &newName})
+	if err != nil {
+		t.Fatalf("rename role: %v", err)
 	}
 	if updated.Status != "disabled" || updated.Name != "Support Desk" {
-		t.Fatalf("update result: %+v", updated)
+		t.Fatalf("name-only patch must preserve status: %+v", updated)
 	}
 
 	// system role immutable
 	super, _ := repository.FindAdminRoleByCode(context.Background(), dbPool, "superadmin")
-	_, err = UpdateRole(context.Background(), dbPool, root, super.ID, "Hacked", "", nil)
+	hack := "Hacked"
+	_, err = UpdateRole(context.Background(), dbPool, root, super.ID, RolePatch{Name: &hack})
 	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 409 {
 		t.Fatalf("system role update must 409, got %v", err)
 	}

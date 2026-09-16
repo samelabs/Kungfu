@@ -241,3 +241,22 @@ func TestMigration006IsAdditiveOnly(t *testing.T) {
 		}
 	}
 }
+
+// Guard (B1.2 repair): production admin handlers must NOT import the
+// repository — the dependency pipeline is server → internal/admin →
+// repository → PostgreSQL. Only non-Admin handlers and non-handler
+// server files are exempt.
+func TestAdminHandlersDoNotImportRepository(t *testing.T) {
+	root := repoRoot(t)
+	walkSources(t, filepath.Join(root, "internal", "server"), func(path, src string) {
+		base := filepath.Base(path)
+		if !strings.HasPrefix(base, "handler_admin") {
+			return // non-admin handlers unaffected
+		}
+		for _, line := range codeLines(src) {
+			if strings.Contains(strings.TrimSpace(line), "\"kungfu.md/internal/repository\"") {
+				t.Errorf("%s: admin handler must not import internal/repository (server → admin → repository pipeline)", path)
+			}
+		}
+	})
+}

@@ -169,6 +169,8 @@ func adminRolesHTML() string {
             <input id="adminNewRoleCode" type="text" required minlength="3" maxlength="64" pattern="[a-zA-Z0-9._-]{3,64}" autocomplete="off">
             <label for="adminNewRoleName">Name</label>
             <input id="adminNewRoleName" type="text" required maxlength="128" autocomplete="off">
+            <label for="adminNewRoleDesc">Description (optional)</label>
+            <input id="adminNewRoleDesc" type="text" maxlength="500" autocomplete="off">
             <button class="btn primary" type="submit">Create</button>
             <p class="notice" id="adminRoleCreateNotice" hidden></p>
         </form>

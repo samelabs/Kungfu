@@ -6,6 +6,13 @@ async function loadUsers() {
     const json = await adminGet('/api/admin/users');
     if (!json.success) throw new Error(apiError(json, 'Failed to load admins'));
     state.users = json.data.users || [];
+    // the role picker needs the code→id map; load roles when permitted
+    if (hasPermission('admin.roles.read') && !state.roles.length) {
+        try {
+            const rj = await adminGet('/api/admin/roles');
+            if (rj.success) state.roles = rj.data.roles || [];
+        } catch (e) { /* picker falls back to empty preselection */ }
+    }
 }
 
 function renderUsers() {
@@ -99,8 +106,16 @@ async function bindAdminUsersEvents() {
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'roles') {
                 const target = state.users.find(u => u.id === id);
-                rolePickerOverlay('Roles for ' + (target ? target.username : '#' + id),
-                    [], async (roleIds) => {
+                const t = state.users.find(u => u.id === id);
+                // map the target's CURRENT role codes to ids via the
+                // loaded roles list (code → id) so the picker prechecks
+                const codeToId = {};
+                state.roles.forEach(r => { codeToId[r.code] = r.id; });
+                const currentRoleIds = ((t && t.roles) || [])
+                    .map(code => codeToId[code])
+                    .filter(rid => typeof rid === 'number');
+                rolePickerOverlay('Roles for ' + (t ? t.username : '#' + id),
+                    currentRoleIds, async (roleIds) => {
                         const json = await adminMutate(`/api/admin/users/${id}/roles`, 'PUT', {role_ids: roleIds});
                         if (!json.success) window.alert(apiError(json));
                         await loadUsers(); renderUsers();
