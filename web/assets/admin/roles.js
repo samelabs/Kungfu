@@ -26,6 +26,7 @@ function renderRoles() {
         const actions = [];
         if (canManage && !r.is_system) {
             actions.push(`<button class="btn small" data-act="rename" data-id="${r.id}" data-name="${escapeHtml(r.name)}">Rename</button>`);
+            actions.push(`<button class="btn small" data-act="editdesc" data-id="${r.id}">Description</button>`);
             actions.push(r.status === 'active'
                 ? `<button class="btn small danger" data-act="disable" data-id="${r.id}">Disable</button>`
                 : `<button class="btn small" data-act="enable" data-id="${r.id}">Enable</button>`);

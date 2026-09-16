@@ -434,11 +434,13 @@ func UpdateRole(ctx context.Context, pool *pg.Pool, principal *Principal, roleID
 		if patch.Status != nil {
 			nextStatus = *patch.Status
 		}
+		// Full snapshots: before/after ALWAYS carry name, description
+		// (null when unset), and status — regardless of which fields
+		// the PATCH touched.
 		beforeFacts := map[string]interface{}{
-			"name": role.Name, "status": role.Status,
-		}
-		if role.Description != nil {
-			beforeFacts["description"] = *role.Description
+			"name":        role.Name,
+			"description": auditNullable(role.Description),
+			"status":      role.Status,
 		}
 		if err := repository.UpdateAdminRole(ctx, tx, roleID, nextName, nextDesc, nextStatus); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -447,12 +449,18 @@ func UpdateRole(ctx context.Context, pool *pg.Pool, principal *Principal, roleID
 		role.Description = &nextDesc
 		role.Status = nextStatus
 		updated = role
-		afterFacts := map[string]interface{}{"name": nextName, "status": nextStatus}
+		var afterDescPtr *string
 		if patch.Description != nil {
-			afterFacts["description"] = nextDesc
+			afterDescPtr = patch.Description
+		} else {
+			afterDescPtr = role.Description
 		}
 		entry.Before = beforeFacts
-		entry.After = afterFacts
+		entry.After = map[string]interface{}{
+			"name":        nextName,
+			"description": auditNullable(afterDescPtr),
+			"status":      nextStatus,
+		}
 		return nil
 	})
 	if err != nil {
@@ -530,6 +538,15 @@ func SetRolePermissions(ctx context.Context, pool *pg.Pool, principal *Principal
 		entry.After = map[string]interface{}{"permission_codes": normalized}
 		return nil
 	})
+}
+
+// auditNullable maps an unset/empty string to nil for audit snapshots
+// (project representation of "no value": JSON null).
+func auditNullable(s *string) interface{} {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return *s
 }
 
 func diffStrings(want, have []string) []string {

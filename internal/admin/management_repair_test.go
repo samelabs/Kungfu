@@ -341,3 +341,94 @@ func idsOf(v interface{}) []int64 {
 	}
 	return out
 }
+
+// admin.role.update audit must be a FULL real snapshot: before/after
+// always carry name, description (null when unset), and status —
+// regardless of which fields the PATCH touched.
+func TestRepairRoleUpdateAuditFullSnapshot(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	bootstrapForTest(t, dbPool)
+	_, root := b12Super(t, dbPool)
+
+	// existing: name=A description="ops" status=disabled
+	role, err := CreateRole(context.Background(), dbPool, root, CreateRoleInput{
+		Code: "snap.role", Name: "A", Description: "ops",
+	})
+	if err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	st := "disabled"
+	if _, err := UpdateRole(context.Background(), dbPool, root, role.ID, RolePatch{Status: &st}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	// PATCH {name: "B"} — description/status untouched
+	nb := "B"
+	if _, err := UpdateRole(context.Background(), dbPool, root, role.ID, RolePatch{Name: &nb}); err != nil {
+		t.Fatalf("name patch: %v", err)
+	}
+
+	var beforeJSON, afterJSON []byte
+	err = dbPool.QueryRow(context.Background(),
+		`SELECT before_json, after_json FROM tb_admin_audit_logs
+		 WHERE action='admin.role.update' AND success ORDER BY id DESC LIMIT 1`).
+		Scan(&beforeJSON, &afterJSON)
+	if err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	var before, after map[string]interface{}
+	_ = json.Unmarshal(beforeJSON, &before)
+	_ = json.Unmarshal(afterJSON, &after)
+
+	// before: A / ops / disabled
+	if before["name"] != "A" || before["description"] != "ops" || before["status"] != "disabled" {
+		t.Fatalf("before snapshot incomplete: %v", before)
+	}
+	// after: B / ops / disabled (description and status NOT omitted)
+	if after["name"] != "B" || after["description"] != "ops" || after["status"] != "disabled" {
+		t.Fatalf("after snapshot incomplete: %v", after)
+	}
+
+	// status-only PATCH: before B/ops/disabled → after B/ops/active,
+	// all three fields present both sides.
+	act := "active"
+	if _, err := UpdateRole(context.Background(), dbPool, root, role.ID, RolePatch{Status: &act}); err != nil {
+		t.Fatalf("status patch: %v", err)
+	}
+	err = dbPool.QueryRow(context.Background(),
+		`SELECT before_json, after_json FROM tb_admin_audit_logs
+		 WHERE action='admin.role.update' AND success ORDER BY id DESC LIMIT 1`).
+		Scan(&beforeJSON, &afterJSON)
+	if err != nil {
+		t.Fatalf("read status audit: %v", err)
+	}
+	_ = json.Unmarshal(beforeJSON, &before)
+	_ = json.Unmarshal(afterJSON, &after)
+	if before["name"] != "B" || before["description"] != "ops" || before["status"] != "disabled" {
+		t.Fatalf("status-patch before snapshot incomplete: %v", before)
+	}
+	if after["name"] != "B" || after["description"] != "ops" || after["status"] != "active" {
+		t.Fatalf("status-patch after snapshot incomplete: %v", after)
+	}
+
+	// unset description is recorded as JSON null, not omitted
+	if _, err := UpdateRole(context.Background(), dbPool, root, role.ID, RolePatch{Description: strptr("")}); err != nil {
+		t.Fatalf("desc clear: %v", err)
+	}
+	err = dbPool.QueryRow(context.Background(),
+		`SELECT after_json FROM tb_admin_audit_logs
+		 WHERE action='admin.role.update' AND success ORDER BY id DESC LIMIT 1`).Scan(&afterJSON)
+	if err != nil {
+		t.Fatalf("read clear audit: %v", err)
+	}
+	_ = json.Unmarshal(afterJSON, &after)
+	if v, present := after["description"]; !present || v != nil {
+		t.Fatalf("cleared description must be explicit JSON null, got %v (present=%v)", v, present)
+	}
+	// other fields still present alongside the null
+	if after["name"] != "B" || after["status"] != "active" {
+		t.Fatalf("clear-desc after snapshot missing fields: %v", after)
+	}
+}
+
+func strptr(s string) *string { return &s }

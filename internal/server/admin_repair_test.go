@@ -266,9 +266,9 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 	}
 }
 
-// UI static contract: the role picker must preselect current roles
-// (no empty-array overlay call), and status toggles must not depend
-// on data-name.
+// UI static contract (re-audit repair): these assertions lock the
+// RENDERED action construction and the fail-closed picker shapes —
+// not merely the presence of handler branches.
 func TestRepairAdminUIStaticContract(t *testing.T) {
 	read := func(rel string) string {
 		t.Helper()
@@ -279,29 +279,76 @@ func TestRepairAdminUIStaticContract(t *testing.T) {
 		return string(b)
 	}
 	users := read("users.js")
-	if strings.Contains(users, "rolePickerOverlay('Roles for ' + (target ? target.username : '#' + id),\n                    [],") {
-		t.Fatal("role picker still passes an empty currentRoleIds array")
+
+	// -- role picker fail closed --
+	// 1) catalog availability is a distinct gate, not a try/catch
+	//    fallback to empty preselection.
+	if !strings.Contains(users, "rolesCatalogReady") {
+		t.Fatal("users.js must track verified catalog availability (rolesCatalogReady)")
 	}
-	if !strings.Contains(users, "currentRoleIds") {
-		t.Fatal("users.js must build currentRoleIds from the target's roles")
+	// the silent fallback comment/shape must be gone
+	if strings.Contains(users, "falls back to empty preselection") {
+		t.Fatal("users.js still documents a fallback-to-empty picker path")
+	}
+	// 2) catalog load failure must propagate (throw), not be swallowed
+	if strings.Contains(users, "} catch (e) { /* picker falls back") {
+		t.Fatal("catalog load failure is silently swallowed")
+	}
+	// 3) the Roles button is rendered ONLY behind the verified gate —
+	//    the rendered action construction must carry the condition.
+	if !strings.Contains(users, "if (canRoles && rolesCatalogReady)") {
+		t.Fatal("Roles button render must be gated on rolesCatalogReady")
+	}
+	// 4) unresolvable current role codes abort — no silent filter
+	//    dropping them into an empty/checked-less preselection.
+	if strings.Contains(users, ".filter(rid => typeof rid === 'number')") {
+		t.Fatal("unresolved role codes must abort, not be filtered away")
+	}
+	if !strings.Contains(users, "typeof rid !== 'number'") {
+		t.Fatal("picker must fail closed on unresolvable current role codes")
+	}
+	// 5) no-roles.read actor gets NO Roles button at all (button gate
+	//    requires rolesCatalogReady which only a successful catalog
+	//    load sets).
+	if !strings.Contains(users, "if (hasPermission('admin.roles.read'))") {
+		t.Fatal("catalog load must be permission-gated before it can set rolesCatalogReady")
 	}
 
+	// -- editdesc actually rendered --
 	roles := read("roles.js")
-	// status toggle must be status-only PATCH (no name field)
+	// the RENDERED actions array must construct the editdesc button —
+	// checking only the event branch would pass with a dead button.
+	editdescButton := `data-act="editdesc" data-id="${r.id}">Description</button>`
+	if !strings.Contains(roles, editdescButton) {
+		t.Fatal("renderRoles must construct a data-act=editdesc Description button")
+	}
+	if !strings.Contains(roles, "actions.push") {
+		t.Fatal("rendered actions must be constructed via actions.push")
+	}
+	// and the event branch handles it
+	if !strings.Contains(roles, "act === 'editdesc'") {
+		t.Fatal("editdesc event branch missing")
+	}
+	// status toggle stays status-only
 	if strings.Contains(roles, "name: btn.dataset.name") {
 		t.Fatal("status toggle still sends name from data-name")
 	}
-	if !strings.Contains(roles, `{ status: act === 'disable' ? 'disabled' : 'active' }`) &&
-		!strings.Contains(roles, "status: act === 'disable' ? 'disabled' : 'active'") {
-		t.Fatal("status toggle must be a status-only PATCH")
+	// create form description input exists in the template
+	tmpl := readTemplateSource(t)
+	if !strings.Contains(tmpl, `id="adminNewRoleDesc"`) {
+		t.Fatal("role create form must include the description input")
 	}
-	// description editing must exist and be a description-only PATCH
-	if !strings.Contains(roles, "editdesc") {
-		t.Fatal("role description edit action missing")
+}
+
+// readTemplateSource reads the admin template Go source that renders
+// the create form (the HTML lives in Go string literals).
+func readTemplateSource(t *testing.T) string {
+	t.Helper()
+	b, err := osReadFile(filepath.Join("templates_admin.go"))
+	if err != nil {
+		t.Fatalf("read templates_admin.go: %v", err)
 	}
-	if !strings.Contains(roles, "adminNewRoleDesc") {
-		t.Fatal("role create form must support description")
-	}
+	return string(b)
 }
 
 func jsonDecode(body string, v interface{}) error {
@@ -310,4 +357,60 @@ func jsonDecode(body string, v interface{}) error {
 
 func osReadFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
+}
+
+// Picker normal path through the real API: with the catalog loaded
+// and current roles resolved, submitting the SAME role set back (the
+// "open picker, change nothing, Apply" case) must leave bindings
+// completely unchanged.
+func TestRepairPickerApplyUnchangedKeepsBindings(t *testing.T) {
+	e := newB12Env(t)
+
+	target := fmt.Sprintf("pick_%d", time.Now().UnixNano())
+	rec := e.mutateJSON(t, "POST", "/api/admin/users",
+		fmt.Sprintf(`{"username":%q,"display_name":"Pick","password":"pick-pass-123"}`, target))
+	if rec.Code != 200 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	_ = jsonDecode(rec.Body.String(), &created)
+	targetID := created.Data.ID
+
+	// bind superadmin (what the prechecked picker would show checked)
+	rolesRec := e.do(t, "GET", "/api/admin/roles", "", false)
+	var rolesResp struct {
+		Data struct {
+			Roles []struct {
+				ID   int64  `json:"id"`
+				Code string `json:"code"`
+			} `json:"roles"`
+		} `json:"data"`
+	}
+	_ = jsonDecode(rolesRec.Body.String(), &rolesResp)
+	var superID int64
+	for _, r := range rolesResp.Data.Roles {
+		if r.Code == "superadmin" {
+			superID = r.ID
+		}
+	}
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID),
+		fmt.Sprintf(`{"role_ids":[%d]}`, superID))
+	if rec.Code != 200 {
+		t.Fatalf("bind: %d", rec.Code)
+	}
+
+	// "Apply without changes": submit the same set back
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID),
+		fmt.Sprintf(`{"role_ids":[%d]}`, superID))
+	if rec.Code != 200 {
+		t.Fatalf("re-apply: %d %s", rec.Code, rec.Body.String())
+	}
+	bindings := e.bindingsOf(t, targetID)
+	if len(bindings) != 1 || bindings[0] != superID {
+		t.Fatalf("unchanged Apply altered bindings: %v", bindings)
+	}
 }

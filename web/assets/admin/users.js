@@ -2,16 +2,25 @@
  * enable/disable, password reset, role assignment, force logout. */
 'use strict';
 
+// rolesCatalogReady is true ONLY after a successful role-catalog
+// load. The role picker is fail-closed: without a verified catalog
+// the Roles button is not rendered at all, so no destructive empty
+// picker / PUT can be triggered from the UI.
+let rolesCatalogReady = false;
+
 async function loadUsers() {
     const json = await adminGet('/api/admin/users');
     if (!json.success) throw new Error(apiError(json, 'Failed to load admins'));
     state.users = json.data.users || [];
-    // the role picker needs the code→id map; load roles when permitted
-    if (hasPermission('admin.roles.read') && !state.roles.length) {
-        try {
-            const rj = await adminGet('/api/admin/roles');
-            if (rj.success) state.roles = rj.data.roles || [];
-        } catch (e) { /* picker falls back to empty preselection */ }
+    // The role picker needs the code→id map. A failed/unpermitted
+    // catalog load means NO role-assignment UI (fail closed) — never
+    // a fallback to empty preselection.
+    rolesCatalogReady = false;
+    if (hasPermission('admin.roles.read')) {
+        const rj = await adminGet('/api/admin/roles');
+        if (!rj.success) throw new Error(apiError(rj, 'Failed to load role catalog'));
+        state.roles = rj.data.roles || [];
+        rolesCatalogReady = true;
     }
 }
 
@@ -34,7 +43,10 @@ function renderUsers() {
                 ? `<button class="btn small danger" data-act="disable" data-id="${u.id}">Disable</button>`
                 : `<button class="btn small" data-act="enable" data-id="${u.id}">Enable</button>`);
         }
-        if (canRoles) {
+        // Role assignment UI is fail-closed: it requires the role
+        // catalog to be verified-loaded (admin.roles.read succeeded);
+        // otherwise no Roles button is rendered at all.
+        if (canRoles && rolesCatalogReady) {
             actions.push(`<button class="btn small" data-act="roles" data-id="${u.id}">Roles</button>`);
         }
         return `<tr>
@@ -105,15 +117,28 @@ async function bindAdminUsersEvents() {
                 const json = await adminMutate(`/api/admin/users/${id}/password`, 'PUT', {password: next});
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'roles') {
-                const target = state.users.find(u => u.id === id);
                 const t = state.users.find(u => u.id === id);
-                // map the target's CURRENT role codes to ids via the
-                // loaded roles list (code → id) so the picker prechecks
+                // FAIL CLOSED: the picker opens only when the catalog
+                // is verified AND every one of the target's current
+                // role codes resolves to a role id. Any unresolvable
+                // code aborts — treating existing roles as [] would
+                // turn Apply into a destructive clear.
+                if (!rolesCatalogReady || !state.roles.length) {
+                    window.alert('Role catalog unavailable — role assignment is disabled.');
+                    return;
+                }
                 const codeToId = {};
                 state.roles.forEach(r => { codeToId[r.code] = r.id; });
-                const currentRoleIds = ((t && t.roles) || [])
-                    .map(code => codeToId[code])
-                    .filter(rid => typeof rid === 'number');
+                const codes = (t && t.roles) || [];
+                const currentRoleIds = [];
+                for (const code of codes) {
+                    const rid = codeToId[code];
+                    if (typeof rid !== 'number') {
+                        window.alert(`Cannot resolve current role "${code}" — role assignment is disabled for this admin.`);
+                        return;
+                    }
+                    currentRoleIds.push(rid);
+                }
                 rolePickerOverlay('Roles for ' + (t ? t.username : '#' + id),
                     currentRoleIds, async (roleIds) => {
                         const json = await adminMutate(`/api/admin/users/${id}/roles`, 'PUT', {role_ids: roleIds});
