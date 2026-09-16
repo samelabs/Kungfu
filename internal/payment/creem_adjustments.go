@@ -2,11 +2,11 @@ package payment
 
 // Creem refund/dispute adjustment facts: minimal event structures,
 // reconciliation against the paid payment snapshot, and durable
-// idempotent persistence into tb_payment_adjustments.
-//
-// FACTS ONLY this round: zero Credits mutation, zero balance change,
-// no reversal execution. tb_payments.status stays "paid" — a refund or
-// dispute is an independent follow-up fact bound to payment_id.
+// idempotent persistence into tb_payment_adjustments together with the
+// cumulative authoritative Credits reversal. tb_payments.status stays
+// "paid" — refund/dispute remains an independent fact bound to
+// payment_id, but its persisted cumulative refunded_amount authorizes
+// the reverse_payment ledger (which may drive the balance negative).
 
 import (
 	"context"
@@ -239,55 +239,63 @@ type adjustmentBasis struct {
 	amountPaid            int64
 }
 
-// assertBasisConsistency enforces that every adjustment fact on one
-// payment shares the same provider transaction basis: the ratio
-// computation depends on a single denominator, so a differing basis is
-// a reconciliation failure — never auto-chosen.
-func assertBasisConsistency(ctx context.Context, tx pgx.Tx, paymentID int64, incoming adjustmentBasis) error {
-	var existingTxnID string
-	var existingPaid int64
-	var n int
-	if err := tx.QueryRow(ctx, `
-		SELECT provider_transaction_id, amount_paid_minor, COUNT(*)
-		FROM tb_payment_adjustments WHERE payment_id = $1
-		GROUP BY provider_transaction_id, amount_paid_minor`, paymentID).Scan(&existingTxnID, &existingPaid, &n); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil // no prior facts: incoming establishes the basis
-		}
-		return err
-	}
-	if existingTxnID != incoming.providerTransactionID {
-		return fmt.Errorf("adjustment basis conflict: existing provider_transaction_id %q, incoming %q", existingTxnID, incoming.providerTransactionID)
-	}
-	if existingPaid != incoming.amountPaid {
-		return fmt.Errorf("adjustment basis conflict: existing amount_paid %d, incoming %d", existingPaid, incoming.amountPaid)
-	}
-	return nil
-}
-
-// maxRefundedAndBasis reads the cumulative provider refund authority:
-// MAX(refunded_amount_minor) across the payment's persisted facts, plus
-// the canonical basis (any row — consistency already asserted).
-func maxRefundedAndBasis(ctx context.Context, tx pgx.Tx, paymentID int64) (maxRefunded int64, basis adjustmentBasis, found bool, err error) {
+// resolveAdjustmentFacts validates the persisted facts of one payment in
+// a single deterministic pass:
+//
+//   - 0 rows                       → incoming establishes the basis
+//   - rows, all one basis          → incoming must match that canonical basis
+//   - rows with >1 distinct basis  → reconciliation failure, fail closed
+//     (historical anomaly: never auto-merged, never "latest/max/first")
+//
+// On success it returns the canonical basis and MAX(refunded_amount_minor)
+// computed over that SAME verified set — the denominator and the refund
+// authority can never come from different collections of rows.
+func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, incoming adjustmentBasis) (maxRefunded int64, basis adjustmentBasis, found bool, err error) {
 	rows, err := tx.Query(ctx, `
-		SELECT COALESCE(refunded_amount_minor, 0), provider_transaction_id, amount_paid_minor
+		SELECT provider_transaction_id, amount_paid_minor, COALESCE(refunded_amount_minor, 0)
 		FROM tb_payment_adjustments WHERE payment_id = $1`, paymentID)
 	if err != nil {
 		return 0, adjustmentBasis{}, false, err
 	}
 	defer rows.Close()
+
+	maxRefunded = 0
+	basis = adjustmentBasis{}
+	found = false
 	for rows.Next() {
-		var r int64
 		var txnID string
-		var paid int64
-		if err := rows.Scan(&r, &txnID, &paid); err != nil {
+		var paid, refunded int64
+		if err := rows.Scan(&txnID, &paid, &refunded); err != nil {
 			return 0, adjustmentBasis{}, false, err
 		}
-		if r > maxRefunded {
-			maxRefunded = r
+		if !found {
+			basis = adjustmentBasis{providerTransactionID: txnID, amountPaid: paid}
+			found = true
+		} else if basis.providerTransactionID != txnID || basis.amountPaid != paid {
+			// Historical multi-basis anomaly: fail closed, no guesses.
+			return 0, adjustmentBasis{}, false, fmt.Errorf(
+				"reconciliation: persisted adjustment facts for payment %d span multiple provider transaction bases (%q/%d vs %q/%d)",
+				paymentID, basis.providerTransactionID, basis.amountPaid, txnID, paid)
 		}
-		basis = adjustmentBasis{providerTransactionID: txnID, amountPaid: paid}
-		found = true
+		if refunded > maxRefunded {
+			maxRefunded = refunded
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, adjustmentBasis{}, false, err
+	}
+	if !found {
+		return 0, adjustmentBasis{}, false, nil
+	}
+	if basis.providerTransactionID != incoming.providerTransactionID {
+		return 0, adjustmentBasis{}, false, fmt.Errorf(
+			"reconciliation: incoming adjustment basis (%q) does not match canonical basis (%q) of persisted facts",
+			incoming.providerTransactionID, basis.providerTransactionID)
+	}
+	if basis.amountPaid != incoming.amountPaid {
+		return 0, adjustmentBasis{}, false, fmt.Errorf(
+			"reconciliation: incoming adjustment amount_paid %d does not match canonical %d",
+			incoming.amountPaid, basis.amountPaid)
 	}
 	return maxRefunded, basis, found, nil
 }
@@ -331,22 +339,18 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 		return false, errors.New(409, "PAYMENT_NOT_PAID", "Adjustments apply only to paid payments")
 	}
 
-	incoming := adjustmentBasis{
-		providerTransactionID: fact.ProviderTransactionID,
-		amountPaid:            fact.AmountPaidMinor,
-	}
-	if err := assertBasisConsistency(ctx, tx, fact.PaymentID, incoming); err != nil {
-		return false, fmt.Errorf("reconciliation: %w", err)
-	}
-
 	inserted, err = repository.InsertPaymentAdjustment(ctx, tx, fact)
 	if err != nil {
 		return false, err
 	}
 
-	// Cumulative provider authority from PERSISTED facts (duplicates and
-	// A1-era facts included).
-	maxRefunded, basis, found, err := maxRefundedAndBasis(ctx, tx, fact.PaymentID)
+	// Canonical basis validation + cumulative provider authority over the
+	// SAME verified fact set (duplicates and A1-era facts included;
+	// historical multi-basis fails closed with everything rolled back).
+	maxRefunded, basis, found, err := resolveAdjustmentFacts(ctx, tx, fact.PaymentID, adjustmentBasis{
+		providerTransactionID: fact.ProviderTransactionID,
+		amountPaid:            fact.AmountPaidMinor,
+	})
 	if err != nil {
 		return false, err
 	}
@@ -403,8 +407,9 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 }
 
 // HandleCreemAdjustmentEvent is the webhook entry: parse, reconcile
-// against the payment found by provider order binding, persist. Zero
-// Credits mutation — this round records facts only.
+// against the payment found by provider order binding, persist the
+// durable fact, and advance the cumulative authoritative Credits
+// reversal. The payment remains paid.
 func HandleCreemAdjustmentEvent(ctx context.Context, pool *pg.Pool, ev *CreemWebhookEvent) error {
 	switch ev.EventType {
 	case "refund.created":

@@ -447,3 +447,81 @@ func TestReversalConcurrentNoOverReverse(t *testing.T) {
 		t.Fatalf("balance = %v, want 500", b)
 	}
 }
+
+// seedHistoricalFacts inserts pre-A2 adjustment facts directly (no
+// reversal), with precise scoped cleanup.
+func seedHistoricalFacts(t *testing.T, pool *pg.Pool, p *model.Payment, basisID string, amountPaid int64, refunded int64, tag string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_payment_adjustments (payment_id, provider, provider_event_id, provider_object_id, kind,
+			provider_transaction_id, provider_order_id, amount_minor, currency,
+			transaction_amount_minor, amount_paid_minor, refunded_amount_minor,
+			object_status, transaction_status, reason, provider_created_at)
+		VALUES ($1,'creem',$2,$3,'refund',$4,$5,605,'USD',1000,$6,$7,'succeeded','succeeded',NULL,$8)`,
+		p.ID, adjUnique("evt_hist"), adjUnique("ref_hist_"+tag), basisID,
+		*p.ProviderOrderID, amountPaid, refunded, time.Now().Unix()); err != nil {
+		t.Fatalf("seed historical fact: %v", err)
+	}
+}
+
+// Case A: same amount_paid, DIFFERENT txn ids → historical multi-basis.
+// Case B: same txn id, different amount_paid (1210/1300) → multi-basis.
+// Both: a subsequent valid adjustment event must fail closed with the
+// history untouched — no new fact, no reverse_payment, no balance move,
+// payment still paid.
+func TestReversalHistoricalMultiBasisFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		seedFn func(t *testing.T, pool *pg.Pool, p *model.Payment)
+	}{
+		{"different txn ids", func(t *testing.T, pool *pg.Pool, p *model.Payment) {
+			seedHistoricalFacts(t, pool, p, adjUnique("txn_A"), 1210, 605, "a")
+			seedHistoricalFacts(t, pool, p, adjUnique("txn_B"), 1210, 605, "b")
+		}},
+		{"different amount_paid", func(t *testing.T, pool *pg.Pool, p *model.Payment) {
+			basis := adjUnique("txn_same")
+			seedHistoricalFacts(t, pool, p, basis, 1210, 605, "c")
+			seedHistoricalFacts(t, pool, p, basis, 1300, 605, "d")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := crTestPool(t)
+			botID := crSeedBot(t, pool)
+			fc := newFakeCreem(t, pkgProducts()...)
+			code := rev2SeedPaidPayment(t, pool, fc, botID, 0)
+			p := mustGetPayment(t, pool, code)
+			order := *p.ProviderOrderID
+
+			tc.seedFn(t, pool, p)
+
+			var factsBefore int
+			_ = pool.QueryRow(context.Background(),
+				`SELECT COUNT(*) FROM tb_payment_adjustments WHERE payment_id=$1`, p.ID).Scan(&factsBefore)
+			if factsBefore != 2 {
+				t.Fatalf("seed produced %d facts", factsBefore)
+			}
+
+			// valid event matching ONE of the historical bases
+			if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+				rev2RefundEvent(t, pool, code, order, 1210, 605, 605)); err == nil {
+				t.Fatal("event on historically inconsistent basis must fail closed")
+			}
+
+			var factsAfter int
+			var revCount int
+			var bal float64
+			_ = pool.QueryRow(context.Background(),
+				`SELECT COUNT(*) FROM tb_payment_adjustments WHERE payment_id=$1`, p.ID).Scan(&factsAfter)
+			_ = pool.QueryRow(context.Background(),
+				`SELECT COUNT(*) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&revCount)
+			_ = pool.QueryRow(context.Background(),
+				`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
+			if factsAfter != 2 || revCount != 0 || bal != 1000 {
+				t.Fatalf("facts=%d rev=%d bal=%v — must stay untouched", factsAfter, revCount, bal)
+			}
+			if p2 := mustGetPayment(t, pool, code); p2.Status != "paid" {
+				t.Fatalf("status = %s", p2.Status)
+			}
+		})
+	}
+}
