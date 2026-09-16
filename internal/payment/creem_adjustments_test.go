@@ -123,8 +123,10 @@ func TestRefundFactRecordedExact(t *testing.T) {
 	}
 
 	adjN, txN, bal := adjCounts(t, pool, code)
-	if adjN != 1 || txN != 1 || bal != 1000 {
-		t.Fatalf("adj=%d tx=%d bal=%v — facts must not move money", adjN, txN, bal)
+	// A2: full-amount refund (540/1080 cumulative) authorizes reversal of
+	// round4(1000*540/1080)=500 → 1 grant + 1 reverse_payment, balance 500.
+	if adjN != 1 || txN != 2 || bal != 500 {
+		t.Fatalf("adj=%d tx=%d bal=%v — want 1 fact, grant+reverse, bal 500", adjN, txN, bal)
 	}
 }
 
@@ -157,7 +159,8 @@ func TestPartialRefundFact(t *testing.T) {
 		t.Fatalf("partial refund amount = %d", amount)
 	}
 	_, txN, bal := adjCounts(t, pool, code)
-	if txN != 1 || bal != 1000 {
+	// A2: cumulative 300/1080 → reversal round4(1000*300/1080)=277.7778
+	if txN != 2 || bal != 722.2222 {
 		t.Fatalf("tx=%d bal=%v", txN, bal)
 	}
 }
@@ -207,8 +210,9 @@ func TestRefundAndDisputeIndependentFacts(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(540)
+	basis := adjUnique("txn")
 	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+		ID: basis, Amount: 1000, AmountPaid: 1080, Currency: "USD",
 		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
 	}
 	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
@@ -218,7 +222,7 @@ func TestRefundAndDisputeIndependentFacts(t *testing.T) {
 	dispute := &CreemDisputeObject{
 		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
 		Transaction: &CreemTransactionFact{
-			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
+			ID: basis, Amount: 1000, AmountPaid: 1080, Currency: "USD",
 			Status: "chargeback_open", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
 		},
 	}
@@ -372,8 +376,9 @@ func TestRefundFactTaxDifference1210(t *testing.T) {
 		t.Fatalf("amounts = %d/%d", amountMinor, amountPaid)
 	}
 	_, txN, bal := adjCounts(t, pool, code)
-	if txN != 1 || bal != 1000 {
-		t.Fatalf("tx=%d bal=%v", txN, bal)
+	// A2: cumulative 605/1210 → reversal round4(1000*605/1210)=500
+	if txN != 2 || bal != 500 {
+		t.Fatalf("tx=%d bal=%v — want grant+reverse, bal 500", txN, bal)
 	}
 }
 

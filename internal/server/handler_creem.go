@@ -159,16 +159,18 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"success":true}`))
 
 	case ev.EventType == "refund.created" || ev.EventType == "dispute.created":
-		// Adjustment FACTS only: reconcile against the paid payment and
-		// persist a durable, idempotent tb_payment_adjustments row.
-		// ZERO Credits mutation — the reversal economic policy stays
-		// undecided and lands in a later round on top of these facts.
+		// Adjustment fact + authoritative Credits reversal, atomically:
+		// reconcile against the paid payment, persist the idempotent
+		// tb_payment_adjustments row, and advance the cumulative
+		// reverse_payment ledger by the provider refunded-amount ratio
+		// (may drive the balance negative). Ordinary spends still cannot
+		// cross zero; only this reversal path can.
 		if err := payment.HandleCreemAdjustmentEvent(r.Context(), s.Pool, &ev); err != nil {
 			log.Printf("creem webhook %s reconciliation failed: event=%s err=%v", ev.EventType, ev.ID, err)
 			ErrorResponse(w, http.StatusBadRequest, "RECONCILIATION_FAILED", "Adjustment facts did not reconcile", nil)
 			return
 		}
-		log.Printf("WARNING creem webhook %s recorded as payment adjustment fact (credits reversal policy undecided): event=%s", ev.EventType, ev.ID)
+		log.Printf("creem webhook %s recorded as payment adjustment fact with authoritative reversal: event=%s", ev.EventType, ev.ID)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"success":true}`))
 

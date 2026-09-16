@@ -320,17 +320,19 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 	if adjN != 1 {
 		t.Fatalf("adjustment rows = %d, want 1", adjN)
 	}
+	// A2: the 540/1080 cumulative refund authorizes reversal of
+	// round4(1000*540/1080)=500 — exactly one reverse_payment row.
 	var balAfter float64
 	_ = s.Pool.QueryRow(context.Background(),
 		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balAfter)
-	if balAfter != balBefore {
-		t.Fatalf("balance moved: %v -> %v", balBefore, balAfter)
+	if balAfter != 500 {
+		t.Fatalf("balance = %v, want 500 (grant 1000 − reversal 500)", balAfter)
 	}
 	var txN int
 	_ = s.Pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&txN)
-	if txN != 1 {
-		t.Fatalf("tb_transactions rows = %d, want 1 (grant only)", txN)
+	if txN != 2 {
+		t.Fatalf("tb_transactions rows = %d, want 2 (grant + reverse)", txN)
 	}
 
 	// missing signature on a refund event → 401, zero adjustment rows

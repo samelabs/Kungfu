@@ -30,16 +30,56 @@ import (
 var ErrNonFinite = fmt.Errorf("non-finite credit value")
 
 // Record records a credit transaction and updates the bot's balance — the
-// single balance-mutation primitive.
+// single balance-mutation primitive for ordinary flows.
 //
 // Transaction nesting: when called with an existing transaction (tx != nil)
 // it joins it (caller owns commit/rollback); without one it starts, commits,
 // and on error rolls back its own transaction. The bot row is locked with
 // SELECT ... FOR UPDATE, then balance is updated and the ledger row inserted
-// inside that same transaction. A negative resulting balance is rejected with
-// the 402 INSUFFICIENT_CREDITS contract.
+// inside that same transaction.
+//
+// Ordinary rules: any amount >= 0 is always accepted (a negative resulting
+// balance from a POSITIVE amount is fine — positive credits reduce debt);
+// an amount < 0 that would push the balance below zero is rejected with the
+// 402 INSUFFICIENT_CREDITS contract. Authoritative negative-balance
+// capability lives ONLY in RecordAuthoritativeReversal.
 func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	txnType string, amount float64, refType, refID *string) (float64, error) {
+
+	// Ordinary debit gate: a negative amount may never make the balance
+	// negative. Positive amounts always pass (debt offset).
+	if amount < 0 {
+		// checked inside record() against the locked current balance
+		return record(ctx, pool, tx, botID, txnType, amount, refType, refID, false)
+	}
+	return record(ctx, pool, tx, botID, txnType, amount, refType, refID, true)
+}
+
+// RecordAuthoritativeReversal is the NARROW exceptional primitive backing
+// Payment authoritative reversal: it must be a negative, finite amount and
+// is allowed to drive the balance BELOW zero (debt), because a provider
+// refund/dispute claws back credits the provider has already returned in
+// fiat. Production callers are restricted to internal/payment (see the
+// architecture guard test); no boolean capability switch is exposed to
+// business domains.
+func RecordAuthoritativeReversal(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
+	txnType string, amount float64, refType, refID *string) (float64, error) {
+
+	if math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return 0, ErrNonFinite
+	}
+	if amount >= 0 {
+		return 0, fmt.Errorf("authoritative reversal requires a negative amount, got %v", amount)
+	}
+	return record(ctx, pool, tx, botID, txnType, amount, refType, refID, true)
+}
+
+// record is the single internal implementation shared by Record and
+// RecordAuthoritativeReversal. allowNegative is never exposed outside this
+// package: false = reject a resulting negative balance (ordinary debit
+// contract), true = allow it (authoritative reversal only).
+func record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
+	txnType string, amount float64, refType, refID *string, allowNegative bool) (float64, error) {
 
 	// Finite invariant — the final hard gate: NaN/±Inf never reaches a
 	// balance UPDATE or a ledger INSERT.
@@ -75,7 +115,7 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 		return 0, ErrNonFinite
 	}
 
-	if newBalance < 0 {
+	if newBalance < 0 && !allowNegative {
 		return 0, errors.New(402, "INSUFFICIENT_CREDITS",
 			fmt.Sprintf("Insufficient credits. Need %v, have %v", absFloat(amount), currentBalance))
 	}
@@ -123,4 +163,27 @@ func absFloat(f float64) float64 {
 		return -f
 	}
 	return f
+}
+
+// SumAmountByTypeRef returns the SUM of transaction amounts for one bot
+// with the given txn type and reference. This is the ONLY sanctioned way
+// for other domains to read aggregate ledger facts about their own
+// references — they never query tb_transactions directly. Works with a
+// pool or a caller-owned transaction (querier), so payment reversal can
+// read it INSIDE its locked transaction.
+func SumAmountByTypeRef(ctx context.Context, q pg.Querier, botID int64,
+	txnType string, refType, refID string) (float64, error) {
+
+	var sum float64
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount), 0) FROM tb_transactions
+		WHERE bot_id = $1 AND type = $2 AND ref_type = $3 AND ref_id = $4`,
+		botID, txnType, refType, refID).Scan(&sum)
+	if err != nil {
+		return 0, fmt.Errorf("sum transactions: %w", err)
+	}
+	if math.IsNaN(sum) || math.IsInf(sum, 0) {
+		return 0, ErrNonFinite
+	}
+	return sum, nil
 }
