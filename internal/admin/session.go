@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"net/http"
+	"sort"
 	"time"
 
 	"kungfu.md/internal/errors"
@@ -234,6 +235,25 @@ func bumpAuthVersionAndRevokeSessions(ctx context.Context, q pg.Querier, adminID
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	return nil
+}
+
+// lockAdminRowsOrdered locks ALL admin rows the mutation touches
+// (actor + targets) FOR UPDATE in ascending-id order — the single
+// global lock order for every admin-management transaction, so
+// cross-actor operations serialize instead of deadlocking (the audit
+// INSERT's actor FK KEY SHARE lock is then always held by the same
+// transaction first).
+func lockAdminRowsOrdered(ctx context.Context, q pg.Querier, ids ...int64) error {
+	seen := map[int64]bool{}
+	ordered := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ordered = append(ordered, id)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	return repository.LockAdminRowsForUpdate(ctx, q, ordered)
 }
 
 func nullableString(s string) *string {

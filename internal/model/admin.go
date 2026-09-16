@@ -68,3 +68,26 @@ type AdminAuditLog struct {
 	ErrorCode     *string
 	CreatedAt     time.Time
 }
+
+// AdminPermission is one RBAC permission code (seeded by migration 006).
+type AdminPermission struct {
+	Code        string
+	Description *string
+	CreatedAt   time.Time
+}
+
+// AdminSessionInfo is a session row joined with its owning admin for
+// the session-management API. Deliberately carries NO token material:
+// neither the raw token nor its hash ever leaves the repository layer.
+type AdminSessionInfo struct {
+	ID          int64
+	AdminID     int64
+	Username    string
+	DisplayName string
+	IPAddress   *string
+	UserAgent   *string
+	CreatedAt   time.Time
+	LastSeenAt  time.Time
+	ExpiresAt   time.Time
+	RevokedAt   *time.Time
+}

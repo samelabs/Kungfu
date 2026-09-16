@@ -132,12 +132,47 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)
 
 	// -- API routes: Admin (kf_admin server-side session) --
-	// B1.1: identity foundation only. Mutation gate: DELETE requires
-	// X-CSRF-Token; POST (login) is the credential entry point and is
-	// rate-limited instead.
+	// B1.1 identity foundation + B1.2 management surface. Every
+	// authenticated mutation requires X-CSRF-Token (enforced in
+	// requireAdminMutation); the only exception remains the login
+	// POST, which is rate-limited instead.
 	r.Post("/api/admin/session", s.handleAdminSessionCreate)
 	r.Get("/api/admin/session", s.handleAdminSessionGet)
 	r.Delete("/api/admin/session", s.handleAdminSessionDelete)
+
+	// B1.2: admin accounts
+	r.Get("/api/admin/users", s.handleAdminUsersList)
+	r.Post("/api/admin/users", s.handleAdminUsersCreate)
+	r.Get("/api/admin/users/{id}", s.handleAdminUserGet)
+	r.Patch("/api/admin/users/{id}", s.handleAdminUserPatch)
+	r.Post("/api/admin/users/{id}/enable", s.handleAdminUserEnable)
+	r.Post("/api/admin/users/{id}/disable", s.handleAdminUserDisable)
+	r.Put("/api/admin/users/{id}/roles", s.handleAdminUserRoles)
+	r.Put("/api/admin/users/{id}/password", s.handleAdminUserPassword)
+	r.Post("/api/admin/users/{id}/force-logout", s.handleAdminUserForceLogout)
+	r.Post("/api/admin/me/password", s.handleAdminMePassword)
+
+	// B1.2: roles + permissions
+	r.Get("/api/admin/roles", s.handleAdminRolesList)
+	r.Post("/api/admin/roles", s.handleAdminRolesCreate)
+	r.Get("/api/admin/roles/{id}", s.handleAdminRoleGet)
+	r.Patch("/api/admin/roles/{id}", s.handleAdminRolePatch)
+	r.Put("/api/admin/roles/{id}/permissions", s.handleAdminRolePermissions)
+	r.Get("/api/admin/permissions", s.handleAdminPermissionsList)
+
+	// B1.2: sessions + audit explorer
+	r.Get("/api/admin/sessions", s.handleAdminSessionsList)
+	r.Delete("/api/admin/sessions/{id}", s.handleAdminSessionRevoke)
+	r.Get("/api/admin/audit", s.handleAdminAuditList)
+
+	// B1.2: Admin Workspace HTML routes
+	r.Get("/admin", s.handleAdminPage("dashboard"))
+	r.Get("/admin/login", s.handleAdminPage("login"))
+	r.Get("/admin/account", s.handleAdminPage("account"))
+	r.Get("/admin/users", s.handleAdminPage("users"))
+	r.Get("/admin/roles", s.handleAdminPage("roles"))
+	r.Get("/admin/sessions", s.handleAdminPage("sessions"))
+	r.Get("/admin/audit", s.handleAdminPage("audit"))
 
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())

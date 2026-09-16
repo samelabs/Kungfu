@@ -1,0 +1,86 @@
+/* Admin Workspace styles — independent from the Owner workspace. */
+
+.admin-shell { max-width: 1200px; margin: 0 auto; padding: 0 1rem 3rem; }
+
+.admin-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 0; border-bottom: 1px solid rgba(127,127,127,.25);
+    margin-bottom: 1rem;
+}
+.admin-header-brand { display: flex; align-items: center; gap: .6rem; }
+.admin-header-brand h1 { font-size: 1.25rem; margin: 0; }
+.admin-home-link { text-decoration: none; opacity: .7; }
+.admin-home-link:hover { opacity: 1; }
+
+.admin-nav { margin-bottom: 1.25rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+
+.admin-main { min-height: 50vh; }
+.admin-section h2 { margin-top: 0; }
+
+.admin-card {
+    background: rgba(127,127,127,.06);
+    border: 1px solid rgba(127,127,127,.2);
+    border-radius: 10px; padding: 1rem; overflow-x: auto;
+    margin-bottom: 1.5rem;
+}
+
+.admin-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.admin-table th, .admin-table td {
+    text-align: left; padding: .45rem .6rem;
+    border-bottom: 1px solid rgba(127,127,127,.15);
+    vertical-align: top;
+}
+.admin-table thead th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+.admin-table td.actions { white-space: nowrap; }
+.admin-table td.ua { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-table td.detail details { margin: .1rem 0; }
+.admin-table td.detail pre {
+    max-width: 420px; overflow-x: auto; font-size: .75rem;
+    background: rgba(0,0,0,.25); padding: .5rem; border-radius: 6px;
+}
+
+.admin-form { display: flex; flex-direction: column; gap: .4rem; max-width: 420px; margin-bottom: 1.5rem; }
+.admin-form label { font-size: .8rem; opacity: .8; margin-top: .4rem; }
+.admin-form .btn { margin-top: .8rem; align-self: flex-start; }
+
+.admin-filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.admin-filters input, .admin-filters select { min-width: 140px; }
+
+.admin-pager { display: flex; align-items: center; gap: 1rem; }
+
+.admin-kv { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 0; }
+.admin-kv dt { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; opacity: .65; }
+.admin-kv dd { margin: 0; }
+
+.tag {
+    display: inline-block; font-size: .72rem; padding: .1rem .45rem;
+    border-radius: 999px; background: rgba(47,124,115,.18);
+    border: 1px solid rgba(47,124,115,.4); margin: .05rem;
+}
+.status.ok { color: #2f9e78; }
+.status.error { color: #d05656; }
+
+.notice { padding: .5rem .75rem; border-radius: 8px; font-size: .9rem; }
+.notice.ok { background: rgba(47,158,120,.15); color: #2f9e78; }
+.notice.error { background: rgba(208,86,86,.15); color: #d05656; }
+
+.muted { opacity: .6; }
+
+.admin-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.admin-modal {
+    background: #1e2429; color: inherit; border-radius: 12px;
+    padding: 1.25rem 1.5rem; max-width: 480px; width: 90%;
+    max-height: 80vh; overflow-y: auto;
+}
+.admin-modal h3 { margin-top: 0; }
+.role-list { display: flex; flex-direction: column; gap: .35rem; margin: .75rem 0; }
+.role-list .check { display: flex; align-items: center; gap: .5rem; }
+.modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+
+.perm-list { list-style: none; padding: 0; margin: 0; }
+.perm-list li { padding: .25rem 0; border-bottom: 1px solid rgba(127,127,127,.12); font-size: .85rem; }
+
+.btn.small { font-size: .75rem; padding: .2rem .55rem; }
