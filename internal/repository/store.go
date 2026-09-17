@@ -44,18 +44,6 @@ func CreateStoreProduct(ctx context.Context, q pg.Querier, code string, in Store
 	return scanStoreProduct(row)
 }
 
-// SetStoreProductStatus flips active <-> inactive. Products are never
-// deleted, so historical redemptions keep their FK.
-func SetStoreProductStatus(ctx context.Context, q pg.Querier, code, status string) (bool, error) {
-	tag, err := q.Exec(ctx, `
-		UPDATE tb_store_products SET status = $2, updated_at = NOW()
-		WHERE code = $1`, code, status)
-	if err != nil {
-		return false, err
-	}
-	return tag.RowsAffected() > 0, nil
-}
-
 // FindStoreProductByCode returns a product by code, or nil when absent.
 func FindStoreProductByCode(ctx context.Context, q pg.Querier, code string) (*model.StoreProduct, error) {
 	row := q.QueryRow(ctx, `

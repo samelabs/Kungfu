@@ -84,21 +84,24 @@ func runInTx(ctx context.Context, pool *pg.Pool, fn func(tx pgx.Tx) error) error
 }
 
 // SetProductActive / SetProductInactive toggle catalog visibility.
-// Deactivation is the only "removal": rows persist for redemption history.
+// Deactivation is the only "removal": rows persist for redemption
+// history. Thin tx-owner wrappers over the SAME SetProductStatusTx
+// primitive the Admin control plane uses — the ONLY business
+// implementation of product status mutation.
 func SetProductActive(ctx context.Context, pool *pg.Pool, code string) (bool, error) {
-	return setProductStatus(ctx, pool, code, model.ProductStatusActive)
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := SetProductStatusTx(ctx, tx, code, model.ProductStatusActive)
+		return err
+	})
+	return err == nil, err
 }
 
 func SetProductInactive(ctx context.Context, pool *pg.Pool, code string) (bool, error) {
-	return setProductStatus(ctx, pool, code, model.ProductStatusInactive)
-}
-
-func setProductStatus(ctx context.Context, pool *pg.Pool, code, status string) (bool, error) {
-	ok, err := repository.SetStoreProductStatus(ctx, pool, code, status)
-	if err != nil {
-		return false, errors.New(500, "INTERNAL_ERROR", "Could not update product status")
-	}
-	return ok, nil
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := SetProductStatusTx(ctx, tx, code, model.ProductStatusInactive)
+		return err
+	})
+	return err == nil, err
 }
 
 // GetProduct returns a product by code regardless of status.

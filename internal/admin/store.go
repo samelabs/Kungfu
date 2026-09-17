@@ -322,3 +322,6 @@ type StoreProduct = model.StoreProduct
 
 // Redemption is the redemption row type for handler serialization.
 type Redemption = model.Redemption
+
+// StoreTransitionOutcome mirrors store.TransitionOutcome for handlers.
+type StoreTransitionOutcome = store.TransitionOutcome

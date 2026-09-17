@@ -5,6 +5,8 @@ package server
 // serialization. No repository/store/credits imports; no SQL.
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -92,12 +94,40 @@ func (s *Server) handleAdminStoreProductsCreate(w http.ResponseWriter, r *http.R
 		handleAppError(w, err)
 		return
 	}
-	title, _ := input["title"].(string)
-	description, _ := input["description"].(string)
-	price, ok := jsonFloat(input["credits_price"])
-	if !ok {
-		MissingField(w, "title, description, credits_price")
+	// Fail-closed field parsing: title and credits_price are REQUIRED
+	// (string / number); description is OPTIONAL — omitted is legal
+	// (no description), present must be a string, any other type is
+	// a 400 with ZERO mutation. No silent coercion.
+	titleV, exists := input["title"]
+	if !exists {
+		MissingField(w, "title, credits_price")
 		return
+	}
+	title, ok := titleV.(string)
+	if !ok {
+		ErrorResponse(w, 400, "INVALID_TITLE", "title must be a string", nil)
+		return
+	}
+	priceV, exists := input["credits_price"]
+	if !exists {
+		MissingField(w, "title, credits_price")
+		return
+	}
+	price, ok := jsonFloat(priceV)
+	if !ok {
+		ErrorResponse(w, 400, "INVALID_PRICE", "credits_price must be a number", nil)
+		return
+	}
+	description := ""
+	if dv, exists := input["description"]; exists {
+		// JSON null is a PRESENT non-string value → 400 (fail closed;
+		// omit the field entirely for "no description")
+		ds, ok := dv.(string)
+		if !ok {
+			ErrorResponse(w, 400, "INVALID_DESCRIPTION", "description must be a string", nil)
+			return
+		}
+		description = ds
 	}
 	created, err := admin.CreateStoreProduct(r.Context(), s.Pool, principal, admin.StoreProductInput{
 		Title: title, Description: description, CreditsPrice: price,
@@ -255,8 +285,11 @@ func (s *Server) handleAdminStoreRedemptionGet(w http.ResponseWriter, r *http.Re
 
 // transition routes share one shape: optional note field.
 func (s *Server) handleAdminStoreRedemptionTransition(w http.ResponseWriter, r *http.Request, noteField string,
-	run func(principal *admin.Principal, code, note string) error) {
-	input, err := parseAdminJSONBody(r)
+	run func(principal *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error)) {
+	// Optional-object body: empty / {} / {note} are all legal; a
+	// present note must be a string; malformed or non-object JSON is
+	// a 400. Fail closed — never a silent coercion.
+	input, err := parseAdminOptionalJSONObject(r)
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
@@ -278,45 +311,60 @@ func (s *Server) handleAdminStoreRedemptionTransition(w http.ResponseWriter, r *
 			note = sv
 		}
 	}
-	if err := run(principal, code, note); err != nil {
-		handleAppError(w, err)
-		return
-	}
-	// return the fresh authoritative state
-	red, err := admin.GetStoreRedemption(r.Context(), s.Pool, principal, code)
+	outcome, err := run(principal, code, note)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreRedemptionDTO(red), "")
+	// The response uses the transaction-local authoritative After —
+	// NO second (permission-gated) read after the commit. An actor
+	// with store.redemptions.manage but NOT store.redemptions.read
+	// still gets the committed state here.
+	SuccessResponse(w, adminStoreRedemptionDTO(outcome.After), "")
 }
 
 func (s *Server) handleAdminStoreRedemptionApprove(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) error {
-		_, err := admin.ApproveStoreRedemption(r.Context(), s.Pool, p, code, note)
-		return err
+	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
+		return admin.ApproveStoreRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
 func (s *Server) handleAdminStoreRedemptionReject(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) error {
-		_, err := admin.RejectStoreRedemption(r.Context(), s.Pool, p, code, note)
-		return err
+	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
+		return admin.RejectStoreRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
 func (s *Server) handleAdminStoreRedemptionFulfill(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "fulfillment_note", func(p *admin.Principal, code, note string) error {
-		_, err := admin.FulfillStoreRedemption(r.Context(), s.Pool, p, code, note)
-		return err
+	s.handleAdminStoreRedemptionTransition(w, r, "fulfillment_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
+		return admin.FulfillStoreRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
 func (s *Server) handleAdminStoreRedemptionCancel(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "", func(p *admin.Principal, code, note string) error {
-		_, err := admin.CancelStoreRedemption(r.Context(), s.Pool, p, code)
-		return err
+	s.handleAdminStoreRedemptionTransition(w, r, "", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
+		return admin.CancelStoreRedemption(r.Context(), s.Pool, p, code)
 	})
+}
+
+// parseAdminOptionalJSONObject accepts an EMPTY body (treated as an
+// empty object), a JSON object, or fails closed on anything else.
+// B1.2's required-body endpoints are untouched — this is a separate
+// parser for the B2 optional-body endpoints only.
+func parseAdminOptionalJSONObject(r *http.Request) (map[string]interface{}, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 262144))
+	if err != nil {
+		return nil, &parseError{msg: "Request body must be valid JSON"}
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return map[string]interface{}{}, nil
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &data); err != nil || data == nil {
+		return nil, &parseError{msg: "Request body must be a JSON object"}
+	}
+	return data, nil
 }
 
 // -- helpers --

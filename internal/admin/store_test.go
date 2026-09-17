@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -679,4 +681,134 @@ func b2RedeemDirect(t *testing.T, dbPool *pg.Pool, botID int64, productCode stri
 		t.Fatalf("redeem direct: %v", err)
 	}
 	return res.Redemption.Code
+}
+
+// ===========================================================================
+// B2 repair: Finding 3 — legacy product status wrappers delegate to the
+// single Tx primitive.
+// ===========================================================================
+
+func TestB2RepairLegacyProductStatusWrappers(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	ctx := context.Background()
+
+	p, err := store.CreateProduct(ctx, dbPool, store.ProductInput{Title: "Legacy Status", CreditsPrice: 2})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// deactivate → status correct
+	ok, err := store.SetProductInactive(ctx, dbPool, p.Code)
+	if err != nil || !ok {
+		t.Fatalf("deactivate: %v %v", ok, err)
+	}
+	got := productStatus(t, dbPool, p.Code)
+	if got != "inactive" {
+		t.Fatalf("status = %s", got)
+	}
+	// repeat deactivate → idempotent, still inactive
+	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("idempotent deactivate: %v %v", ok, err)
+	}
+	if got = productStatus(t, dbPool, p.Code); got != "inactive" {
+		t.Fatalf("status after repeat = %s", got)
+	}
+
+	// activate → correct; repeat → idempotent
+	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("activate: %v %v", ok, err)
+	}
+	if got = productStatus(t, dbPool, p.Code); got != "active" {
+		t.Fatalf("status = %s", got)
+	}
+	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("idempotent activate: %v %v", ok, err)
+	}
+	if got = productStatus(t, dbPool, p.Code); got != "active" {
+		t.Fatalf("status after repeat = %s", got)
+	}
+}
+
+func productStatus(t *testing.T, dbPool *pg.Pool, code string) string {
+	t.Helper()
+	var s string
+	if err := dbPool.QueryRow(context.Background(),
+		`SELECT status FROM tb_store_products WHERE code=$1`, code).Scan(&s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// Source contract: the legacy wrappers must delegate to the single Tx
+// primitive and no second repository status-mutation entrypoint may
+// exist. AST-level: SetProductActive/Inactive bodies call
+// SetProductStatusTx via runInTx, and repository has no remaining
+// status-mutation function besides the Returning (row-locked) one.
+func TestB2RepairSingleStatusMutationImplementation(t *testing.T) {
+	root := repoRoot(t)
+
+	storeSrc := readSourceForGuard(t, filepath.Join(root, "internal", "store", "store.go"))
+	for _, fn := range []string{"SetProductActive", "SetProductInactive"} {
+		body := extractFuncBody(storeSrc, fn)
+		if body == "" {
+			t.Fatalf("%s not found in store.go", fn)
+		}
+		if !strings.Contains(body, "SetProductStatusTx") || !strings.Contains(body, "runInTx") {
+			t.Fatalf("%s must delegate to SetProductStatusTx inside runInTx (single implementation)", fn)
+		}
+		if strings.Contains(body, "repository.SetStoreProductStatus") {
+			t.Fatalf("%s still calls the removed direct repository path", fn)
+		}
+	}
+
+	// repository: the only status writer is the row-locked Returning variant
+	repoSrc := readSourceForGuard(t, filepath.Join(root, "internal", "repository", "store.go"))
+	if strings.Contains(repoSrc, "func SetStoreProductStatus(") {
+		t.Fatal("repository.SetStoreProductStatus (second status entrypoint) must not exist")
+	}
+	if !strings.Contains(repoSrc, "func SetStoreProductStatusReturning(") {
+		t.Fatal("SetStoreProductStatusReturning missing")
+	}
+	// no other production package calls a status mutation on products
+	// besides the Tx primitive
+	txSrc := readSourceForGuard(t, filepath.Join(root, "internal", "store", "store_tx.go"))
+	if !strings.Contains(txSrc, "SetStoreProductStatusReturning") {
+		t.Fatal("SetProductStatusTx must be the sole caller of the status write")
+	}
+}
+
+// readSourceForGuard reads a production source file for contract tests.
+func readSourceForGuard(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
+}
+
+// extractFuncBody returns the source text of one top-level function
+// (balanced-brace scan from the "func NAME(" signature).
+func extractFuncBody(src, name string) string {
+	idx := strings.Index(src, "func "+name+"(")
+	if idx < 0 {
+		return ""
+	}
+	depth := 0
+	start := -1
+	for i := idx; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			depth--
+			if depth == 0 && start >= 0 {
+				return src[start : i+1]
+			}
+		}
+	}
+	return ""
 }

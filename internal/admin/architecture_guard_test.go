@@ -272,31 +272,97 @@ func TestAdminHandlersDoNotImportRepository(t *testing.T) {
 	})
 }
 
-// Guard (B2): the Admin Store orchestration must not write Store SQL.
-// tb_store_products / tb_redemptions SQL belongs exclusively to
-// internal/repository/store.go (extended by AST detector reuse).
-var storeTableNames = []string{"tb_store_products", "tb_redemptions"}
-
-func TestAdminStoreOrchestrationWritesNoStoreSQL(t *testing.T) {
+// Guard (B2, AST-based): tb_store_products / tb_redemptions SQL may
+// exist ONLY in internal/repository/store.go. Scanned production
+// sources: internal/admin, internal/server, internal/store (the Store
+// domain itself must not write SQL either). The AST string-literal
+// detector catches inline and multiline raw SQL while ignoring
+// comments, identifiers, prose, and substring matches.
+func TestStoreSQLLivesOnlyInRepository(t *testing.T) {
 	root := repoRoot(t)
-	walkSources(t, filepath.Join(root, "internal", "admin"), func(path, src string) {
-		for _, line := range codeLines(src) {
-			up := strings.ToUpper(line)
-			for _, table := range storeTableNames {
-				if !strings.Contains(up, strings.ToUpper(table)) {
-					continue
-				}
-				quoted := strings.Contains(line, "`"+table) || strings.Contains(line, "\""+table)
-				if !quoted {
-					continue
-				}
-				if strings.Contains(up, "SELECT") || strings.Contains(up, "INSERT") ||
-					strings.Contains(up, "UPDATE") || strings.Contains(up, "DELETE") ||
-					strings.Contains(up, "LOCK TABLE") {
-					t.Errorf("%s: store-table SQL must live only in internal/repository/store.go: %s",
-						path, strings.TrimSpace(line))
-				}
+	dirs := []string{
+		filepath.Join(root, "internal", "admin"),
+		filepath.Join(root, "internal", "server"),
+		filepath.Join(root, "internal", "store"),
+	}
+	for _, dir := range dirs {
+		for _, path := range collectProductionGoFiles(t, dir) {
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for _, v := range detectStoreSQLInSource(path, string(src)) {
+				t.Errorf("%s: store-table SQL (%s) must live only in internal/repository/store.go: %q",
+					v.Position, v.Table, v.Literal)
 			}
 		}
-	})
+	}
+}
+
+// Synthetic fixtures for the store-table detector: multiline raw SQL
+// must be caught; prose/comments/substrings must not.
+func TestStoreSQLDetectorSyntheticFixtures(t *testing.T) {
+	mustDetect := []struct {
+		name   string
+		source string
+		table  string
+	}{
+		{
+			name:   "multiline raw select products",
+			source: "q := `\nSELECT id, code\nFROM tb_store_products\nWHERE code = $1\n`",
+			table:  "tb_store_products",
+		},
+		{
+			name:   "multiline raw update products",
+			source: "q := `\nUPDATE\n    tb_store_products\nSET title = 'x'\n`",
+			table:  "tb_store_products",
+		},
+		{
+			name:   "multiline raw select redemptions",
+			source: "q := `\nSELECT id\nFROM tb_redemptions\nWHERE code = $1\n`",
+			table:  "tb_redemptions",
+		},
+		{
+			name:   "multiline raw update redemptions",
+			source: "q := `\nUPDATE\n  tb_redemptions\nSET status = 'cancelled'\n`",
+			table:  "tb_redemptions",
+		},
+		{
+			name:   "inline delete redemptions",
+			source: `q := "DELETE FROM tb_redemptions WHERE id = 1"`,
+			table:  "tb_redemptions",
+		},
+	}
+	for _, tc := range mustDetect {
+		t.Run("detect/"+tc.name, func(t *testing.T) {
+			src := "package fixtures\n\nfunc f() {\n\tvar q string\n\t_ = q\n\t" + tc.source + "\n}\n"
+			vs := detectStoreSQLInSource("fixtures.go", src)
+			if len(vs) == 0 {
+				t.Fatalf("detector MISSED %s", tc.name)
+			}
+			if vs[0].Table != tc.table {
+				t.Fatalf("found %s, want %s", vs[0].Table, tc.table)
+			}
+		})
+	}
+
+	mustNotDetect := []struct {
+		name   string
+		source string
+	}{
+		{name: "bare table name", source: `s := "tb_store_products"`},
+		{name: "prose mention", source: `m := "the tb_redemptions table is owned by repository"`},
+		{name: "substring", source: "q := `UPDATE xtb_store_products_y SET a=1`"},
+		{name: "comment", source: "// UPDATE tb_store_products SET x=1\nq := `SELECT 1`"},
+		{name: "identifier-ish func", source: `f := "repository.FindStoreProductByCode"`},
+	}
+	for _, tc := range mustNotDetect {
+		t.Run("ignore/"+tc.name, func(t *testing.T) {
+			src := "package fixtures\n\nfunc f() {\n\t" + tc.source + "\n\t_ = q\n}\n"
+			vs := detectStoreSQLInSource("fixtures.go", src)
+			if len(vs) != 0 {
+				t.Fatalf("FALSE POSITIVE on %s: %+v", tc.name, vs)
+			}
+		})
+	}
 }

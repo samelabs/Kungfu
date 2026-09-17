@@ -207,6 +207,57 @@ func detectAdminSQLInDirs(t *testing.T, dirs ...string) []sqlViolation {
 	return violations
 }
 
+// storeTables are the Store tables owned by internal/repository/store.go.
+var storeTables = []string{"tb_store_products", "tb_redemptions"}
+
+// detectTableSQLInSource is the GENERALIZED AST detector: violations
+// for string literals referencing any of the given tables in SQL
+// context. Reused for both the admin-plane and store-table guards.
+func detectTableSQLInSource(path, src string, tables []string) []sqlViolation {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, src, 0)
+	if err != nil {
+		return []sqlViolation{{Path: path, Position: "parse error", Literal: err.Error()}}
+	}
+	var out []sqlViolation
+	ast.Inspect(f, func(n ast.Node) bool {
+		bl, ok := n.(*ast.BasicLit)
+		if !ok || bl.Kind != token.STRING {
+			return true
+		}
+		lit := unquoteBasicLit(bl)
+		if lit == "" {
+			return true
+		}
+		var table string
+		up := strings.ToUpper(lit)
+		for _, t := range tables {
+			if sqlHasWord(up, t) {
+				table = t
+				break
+			}
+		}
+		if table == "" {
+			return true
+		}
+		if hasSQLContext(lit) {
+			pos := fset.Position(bl.Pos())
+			shown := lit
+			if len(shown) > 120 {
+				shown = shown[:120] + "..."
+			}
+			out = append(out, sqlViolation{Path: path, Position: pos.String(), Literal: shown, Table: table})
+		}
+		return true
+	})
+	return out
+}
+
+// detectStoreSQLInSource runs the detector for Store tables.
+func detectStoreSQLInSource(path, src string) []sqlViolation {
+	return detectTableSQLInSource(path, src, storeTables)
+}
+
 // Guard: SQL against tb_admin* tables lives ONLY in
 // internal/repository/admin.go (outside the scanned dirs) or in
 // migrations (not Go). internal/admin, internal/server, and

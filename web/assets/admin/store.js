@@ -39,6 +39,8 @@ function renderStoreProducts() {
     } else {
         const rows = storeState.products.items.map(p => {
             const actions = [];
+            // Detail needs only the read permission
+            actions.push(`<button class="btn small" data-pact="detail" data-code="${escapeHtml(p.code)}">Detail</button>`);
             if (canManage) {
                 actions.push(`<button class="btn small" data-pact="edit" data-code="${escapeHtml(p.code)}">Edit</button>`);
                 actions.push(p.status === 'active'
@@ -90,6 +92,11 @@ async function bindStoreProductsEvents() {
                 if (act === 'activate' || act === 'deactivate') {
                     const json = await adminMutate(`/api/admin/store/products/${code}/${act}`, 'POST');
                     if (!json.success) throw new Error(apiError(json));
+                } else if (act === 'detail') {
+                    // fetch the authoritative detail via the GET endpoint
+                    const json = await adminGet(`/api/admin/store/products/${code}`);
+                    if (!json.success) throw new Error(apiError(json));
+                    showStoreProductDetail(json.data);
                 } else if (act === 'edit') {
                     const p = storeState.products.items.find(x => x.code === code);
                     const title = window.prompt('Title:', p ? p.title : '');
@@ -176,9 +183,10 @@ function renderStoreRedemptions() {
     } else {
         const rows = storeState.redemptions.items.map(r => {
             const ops = canManage ? (REDEMPTION_ACTIONS[r.status] || []) : [];
-            const actions = ops.map(op =>
-                `<button class="btn small ${op.cls}" data-ract="${op.act}" data-code="${escapeHtml(r.code)}" data-title="${escapeHtml(r.product_title)}">${op.label}</button>`
-            ).join(' ');
+            const actions = [`<button class="btn small" data-ract="detail" data-code="${escapeHtml(r.code)}">Detail</button>`]
+                .concat(ops.map(op =>
+                    `<button class="btn small ${op.cls}" data-ract="${op.act}" data-code="${escapeHtml(r.code)}" data-title="${escapeHtml(r.product_title)}">${op.label}</button>`
+                )).join(' ');
             return `<tr>
                 <td><code>${escapeHtml(r.code)}</code></td>
                 <td>${r.bot_id}</td>
@@ -222,6 +230,16 @@ async function bindStoreRedemptionsEvents() {
             if (!btn) return;
             const code = btn.dataset.code;
             const act = btn.dataset.ract;
+            if (act === 'detail') {
+                try {
+                    const json = await adminGet(`/api/admin/store/redemptions/${code}`);
+                    if (!json.success) throw new Error(apiError(json));
+                    showStoreRedemptionDetail(json.data);
+                } catch (err) {
+                    window.alert(err.message);
+                }
+                return;
+            }
             // economic refund actions need explicit confirmation
             const confirmNeeded = (act === 'reject' || act === 'cancel');
             if (confirmNeeded) {
@@ -274,4 +292,59 @@ function bindPager(prevId, nextId, pagerState, reload) {
         const pages = Math.max(1, Math.ceil(pagerState.total / pagerState.pageSize));
         if (pagerState.page < pages) { pagerState.page++; reload(); }
     });
+}
+
+/* ---------- detail panels (read permission only) ---------- */
+
+function showStoreProductDetail(p) {
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-overlay';
+    overlay.innerHTML = `<div class="admin-modal">
+        <h3>Product Detail</h3>
+        <dl class="admin-kv">
+            <dt>Code</dt><dd><code>${escapeHtml(p.code)}</code></dd>
+            <dt>Title</dt><dd>${escapeHtml(p.title)}</dd>
+            <dt>Description</dt><dd>${escapeHtml(p.description || '—')}</dd>
+            <dt>Credits price</dt><dd>${fmtPrice(p.credits_price)}</dd>
+            <dt>Status</dt><dd>${escapeHtml(p.status)}</dd>
+            <dt>Created at</dt><dd>${fmtTime(p.created_at)}</dd>
+            <dt>Updated at</dt><dd>${fmtTime(p.updated_at)}</dd>
+        </dl>
+        <div class="modal-actions">
+            <button class="btn" data-x="close" type="button">Close</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-x="close"]').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function showStoreRedemptionDetail(r) {
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-overlay';
+    overlay.innerHTML = `<div class="admin-modal">
+        <h3>Redemption Detail</h3>
+        <dl class="admin-kv">
+            <dt>Code</dt><dd><code>${escapeHtml(r.code)}</code></dd>
+            <dt>Bot ID</dt><dd>${r.bot_id}</dd>
+            <dt>Product ID</dt><dd>${r.product_id}</dd>
+            <dt>Product title</dt><dd>${escapeHtml(r.product_title)}</dd>
+            <dt>Credits cost</dt><dd>${fmtPrice(r.credits_cost)}</dd>
+            <dt>Request key</dt><dd><code>${escapeHtml(r.request_key)}</code></dd>
+            <dt>Status</dt><dd>${escapeHtml(r.status)}</dd>
+            <dt>Review note</dt><dd>${escapeHtml(r.review_note || '—')}</dd>
+            <dt>Fulfillment note</dt><dd>${escapeHtml(r.fulfillment_note || '—')}</dd>
+            <dt>Created at</dt><dd>${fmtTime(r.created_at)}</dd>
+            <dt>Updated at</dt><dd>${fmtTime(r.updated_at)}</dd>
+            <dt>Reviewed at</dt><dd>${fmtTime(r.reviewed_at)}</dd>
+            <dt>Fulfilled at</dt><dd>${fmtTime(r.fulfilled_at)}</dd>
+            <dt>Cancelled at</dt><dd>${fmtTime(r.cancelled_at)}</dd>
+        </dl>
+        <div class="modal-actions">
+            <button class="btn" data-x="close" type="button">Close</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-x="close"]').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 }
