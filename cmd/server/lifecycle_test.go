@@ -14,8 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"strings"
+
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
+	"kungfu.md/internal/server"
 )
 
 // newTestLifecycle starts a real http.Server on an ephemeral port
@@ -156,23 +159,38 @@ func TestR1InFlightRequestCompletesWithinGrace(t *testing.T) {
 // the lifecycle completes.
 func TestR1ShutdownBudgetDoesNotHang(t *testing.T) {
 	var closed int32
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-make(chan struct{}) // never releases
+		started <- struct{}{}
+		<-release // hold the handler IN-FLIGHT past the budget
+		w.WriteHeader(200)
 	})
 	lc, addr, signals := newTestLifecycle(t, handler, 300*time.Millisecond, &closed)
 
 	done := make(chan error, 1)
 	go func() { done <- ServeLifecycle(context.Background(), lc) }()
+	waitServing(t, addr)
 
-	// occupy a connection WITHOUT completing a request, so graceful
-	// Shutdown has an open (idle-active) connection to wait on
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
+	// a REAL HTTP request whose handler provably entered (started)
+	reqDone := make(chan error, 1)
+	go func() {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("http://" + addr + "/")
+		if err == nil {
+			resp.Body.Close()
+		}
+		reqDone <- err
+	}()
+	select {
+	case <-started:
+		// handler is now actively in-flight
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler never started")
 	}
-	defer conn.Close()
-	time.Sleep(150 * time.Millisecond) // let it register
 
+	// trigger shutdown WITHOUT releasing: Shutdown must hit its
+	// deadline on the ACTIVE request and return bounded
 	signals <- shutdownTrigger{}
 	select {
 	case err := <-done:
@@ -180,10 +198,18 @@ func TestR1ShutdownBudgetDoesNotHang(t *testing.T) {
 			t.Fatalf("ServeLifecycle: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("shutdown exceeded its budget and hung")
+		t.Fatal("shutdown exceeded its budget and hung on the active request")
 	}
 	if n := atomic.LoadInt32(&closed); n != 1 {
 		t.Fatalf("closers ran %d times, want 1", n)
+	}
+
+	// release the held handler / drain the request goroutine (no leaks)
+	close(release)
+	select {
+	case <-reqDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("held request goroutine never drained")
 	}
 }
 
@@ -368,4 +394,92 @@ func waitServing(t *testing.T, addr string) {
 		time.Sleep(30 * time.Millisecond)
 	}
 	t.Fatalf("server at %s never started serving", addr)
+}
+
+// ===========================================================================
+// R1 repair: full SUCCESS-side startup integration against the real
+// CI PostgreSQL — the complete production construction path without
+// spawning a cmd/server subprocess or using OS signals.
+// ===========================================================================
+
+func TestR1SuccessfulStartupIntegrationRealPG(t *testing.T) {
+	// real test DB (CI provides KF_TEST_DATABASE_URL; skip-guard keeps
+	// the no-skip CI contract honest in local envs without the var)
+	url := strings.TrimSpace(os.Getenv("KF_TEST_DATABASE_URL"))
+	if url == "" {
+		t.Skip("KF_TEST_DATABASE_URL not set")
+	}
+
+	// 1) valid config per the existing Config contract (no env alias,
+	//    no compatibility shims — construct the struct directly)
+	cfg := &config.Config{
+		SessionSecret: "r1-integration-secret",
+		ListenAddr:    "127.0.0.1:0", // ephemeral listener supplied below
+		RateLimits:    map[string]config.RateLimitConfig{},
+	}
+
+	// 2) DB open + connectivity verification on the REAL database
+	pool, err := pg.NewPool(url)
+	if err != nil {
+		t.Fatalf("pg.NewPool(real DB): %v", err)
+	}
+
+	// 3) application/router construction
+	srv := server.New(cfg, pool)
+	handler := srv.Router // the real production http.Handler
+
+	// 4) explicit http.Server + lifecycle on an ephemeral listener;
+	//    the lifecycle OWNER closes the pool exactly once
+	var closed int32
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		pool.Close() // listener failure is pre-lifecycle: close manually
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	httpServer := &http.Server{Handler: handler}
+	signals := make(chan shutdownTrigger, 2)
+	lc := &lifecycle{
+		httpServer:      httpServer,
+		listener:        ln,
+		shutdownBudget:  3 * time.Second,
+		signals:         signals,
+		backgroundStops: []chan struct{}{make(chan struct{})},
+		closers:         []io.Closer{poolCloser{pool}, countingCloser{&closed}},
+	}
+
+	// 5) serve and make a REAL request through the production router
+	done := make(chan error, 1)
+	go func() { done <- ServeLifecycle(context.Background(), lc) }()
+	waitServing(t, addr)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	// unauthenticated public route through the REAL production router
+	resp, err := client.Get("http://" + addr + "/robots.txt")
+	if err != nil {
+		t.Fatalf("real router request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /robots.txt = %d, want 200", resp.StatusCode)
+	}
+
+	// 6) trigger shutdown → clean return
+	signals <- shutdownTrigger{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ServeLifecycle returned %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not complete cleanly")
+	}
+
+	// lifecycle closed the pool exactly once (countingCloser is the
+	// second closer; poolCloser is the first — both ran once each)
+	if n := atomic.LoadInt32(&closed); n != 1 {
+		t.Fatalf("closers ran %d times, want 1", n)
+	}
+	// pool is closed by the lifecycle; a second Close would be the bug
+	// the single-owner invariant prevents. Nothing else to clean up.
 }
