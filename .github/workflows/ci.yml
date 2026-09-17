@@ -58,7 +58,9 @@ jobs:
         run: go vet ./...
 
       - name: go test (with real PostgreSQL integration)
-        run: go test ./... -v 2>&1 | tee /tmp/test-output.log
+        run: |
+          set -o pipefail
+          go test ./... -v 2>&1 | tee /tmp/test-output.log
 
       - name: Guard integration tests must not skip
         run: |
