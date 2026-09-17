@@ -472,11 +472,14 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 // B2 repair: Finding 5 — fail-closed HTTP parsing.
 // ===========================================================================
 
-func countProducts(t *testing.T, e *b12Env) int64 {
+// countProductsByPrefix counts ONLY the products this test created
+// (title prefix scoped) — parallel packages legitimately insert
+// products into the shared CI database, so a global COUNT is a race.
+func countProductsByPrefix(t *testing.T, e *b12Env, prefix string) int64 {
 	t.Helper()
 	var n int64
 	if err := e.s.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_store_products`).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM tb_store_products WHERE title LIKE $1`, prefix+"%").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -484,29 +487,31 @@ func countProducts(t *testing.T, e *b12Env) int64 {
 
 func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 	e := newB2HTTPEnv(t)
-	before := countProducts(t, e)
+	// unique prefix per run: assertions scope to THIS test's products
+	prefix := fmt.Sprintf("FCP %d", time.Now().UnixNano())
 
 	// description omitted → success
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/products", `{"title":"P Omit","credits_price":2}`)
+	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+		fmt.Sprintf(`{"title":%q,"credits_price":2}`, prefix+" Omit"))
 	if rec.Code != 200 {
 		t.Fatalf("omitted description: %d %s", rec.Code, rec.Body.String())
 	}
 	// description string → success
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/products", `{"title":"P Str","description":"d","credits_price":2}`)
+	rec = e.mutateJSON(t, "POST", "/api/admin/store/products",
+		fmt.Sprintf(`{"title":%q,"description":"d","credits_price":2}`, prefix+" Str"))
 	if rec.Code != 200 {
 		t.Fatalf("string description: %d", rec.Code)
 	}
-	afterOK := countProducts(t, e)
-	if afterOK != before+2 {
-		t.Fatalf("products = %d, want %d", afterOK, before+2)
+	if n := countProductsByPrefix(t, e, prefix); n != 2 {
+		t.Fatalf("created products = %d, want 2", n)
 	}
 
-	// invalid description types → 400, ZERO mutation
+	// invalid description types → 400, ZERO mutation (of ours)
 	for name, body := range map[string]string{
-		"number": `{"title":"X","description":5,"credits_price":2}`,
-		"object": `{"title":"X","description":{"a":1},"credits_price":2}`,
-		"array":  `{"title":"X","description":[1],"credits_price":2}`,
-		"null":   `{"title":"X","description":null,"credits_price":2}`,
+		"number": fmt.Sprintf(`{"title":%q,"description":5,"credits_price":2}`, prefix+" N"),
+		"object": fmt.Sprintf(`{"title":%q,"description":{"a":1},"credits_price":2}`, prefix+" O"),
+		"array":  fmt.Sprintf(`{"title":%q,"description":[1],"credits_price":2}`, prefix+" A"),
+		"null":   fmt.Sprintf(`{"title":%q,"description":null,"credits_price":2}`, prefix+" Z"),
 	} {
 		rec := e.mutateJSON(t, "POST", "/api/admin/store/products", body)
 		if rec.Code != 400 {
@@ -525,11 +530,10 @@ func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 			t.Fatalf("%s: %d, want 400", name, rec.Code)
 		}
 	}
-	if n := countProducts(t, e); n != afterOK {
-		t.Fatalf("invalid payloads mutated products: %d want %d", n, afterOK)
+	if n := countProductsByPrefix(t, e, prefix); n != 2 {
+		t.Fatalf("invalid payloads mutated products: %d want 2", n)
 	}
 }
-
 func TestB2RepairTransitionOptionalBody(t *testing.T) {
 	e := newB2HTTPEnv(t)
 	ctx := context.Background()
