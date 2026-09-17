@@ -349,12 +349,18 @@ func (s *Server) handleAdminStoreRedemptionCancel(w http.ResponseWriter, r *http
 
 // parseAdminOptionalJSONObject accepts an EMPTY body (treated as an
 // empty object), a JSON object, or fails closed on anything else.
-// B1.2's required-body endpoints are untouched — this is a separate
-// parser for the B2 optional-body endpoints only.
+// Bodies larger than 256KB are rejected explicitly — LimitReader alone
+// would SILENTLY IGNORE bytes beyond the cap, so we read limit+1 and
+// fail on the overflow. B1.2's required-body endpoints are untouched —
+// this is a separate parser for the B2 optional-body endpoints only.
 func parseAdminOptionalJSONObject(r *http.Request) (map[string]interface{}, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 262144))
+	const maxBody = 262144 // 256KB
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		return nil, &parseError{msg: "Request body must be valid JSON"}
+	}
+	if len(body) > maxBody {
+		return nil, &parseError{msg: "Request body exceeds the 256KB limit"}
 	}
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {

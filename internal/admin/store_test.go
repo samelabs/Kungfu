@@ -748,17 +748,26 @@ func TestB2RepairSingleStatusMutationImplementation(t *testing.T) {
 	root := repoRoot(t)
 
 	storeSrc := readSourceForGuard(t, filepath.Join(root, "internal", "store", "store.go"))
+	// both public wrappers delegate to the shared legacy helper, which
+	// is the ONLY tx-owner over SetProductStatusTx for the legacy path
 	for _, fn := range []string{"SetProductActive", "SetProductInactive"} {
 		body := extractFuncBody(storeSrc, fn)
 		if body == "" {
 			t.Fatalf("%s not found in store.go", fn)
 		}
-		if !strings.Contains(body, "SetProductStatusTx") || !strings.Contains(body, "runInTx") {
-			t.Fatalf("%s must delegate to SetProductStatusTx inside runInTx (single implementation)", fn)
+		if !strings.Contains(body, "legacySetProductStatus") {
+			t.Fatalf("%s must delegate to legacySetProductStatus", fn)
 		}
 		if strings.Contains(body, "repository.SetStoreProductStatus") {
 			t.Fatalf("%s still calls the removed direct repository path", fn)
 		}
+	}
+	helper := extractFuncBody(storeSrc, "legacySetProductStatus")
+	if helper == "" {
+		t.Fatal("legacySetProductStatus not found")
+	}
+	if !strings.Contains(helper, "SetProductStatusTx") || !strings.Contains(helper, "runInTx") {
+		t.Fatal("legacySetProductStatus must delegate to SetProductStatusTx inside runInTx (single implementation)")
 	}
 
 	// repository: the only status writer is the row-locked Returning variant
@@ -811,4 +820,47 @@ func extractFuncBody(src, name string) string {
 		}
 	}
 	return ""
+}
+
+// ===========================================================================
+// B2 repair-2: legacy wrapper contract preserved (missing → false,nil).
+// ===========================================================================
+
+func TestB2Repair2LegacyStatusNotFoundContract(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	ctx := context.Background()
+
+	// nonexistent codes → (false, nil), NOT an error
+	ok, err := store.SetProductInactive(ctx, dbPool, "nonexistent1")
+	if err != nil || ok {
+		t.Fatalf("inactive(nonexistent) = (%v, %v), want (false, nil)", ok, err)
+	}
+	ok, err = store.SetProductActive(ctx, dbPool, "nonexistent2")
+	if err != nil || ok {
+		t.Fatalf("active(nonexistent) = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	// existing product: correct status, repeated idempotent
+	p, err := store.CreateProduct(ctx, dbPool, store.ProductInput{Title: "R2 Status", CreditsPrice: 1})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("inactive = (%v, %v)", ok, err)
+	}
+	if s := productStatus(t, dbPool, p.Code); s != "inactive" {
+		t.Fatalf("status = %s", s)
+	}
+	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("repeat inactive = (%v, %v)", ok, err)
+	}
+	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("active = (%v, %v)", ok, err)
+	}
+	if s := productStatus(t, dbPool, p.Code); s != "active" {
+		t.Fatalf("status = %s", s)
+	}
+	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+		t.Fatalf("repeat active = (%v, %v)", ok, err)
+	}
 }

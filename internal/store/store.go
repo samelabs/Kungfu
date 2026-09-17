@@ -89,19 +89,37 @@ func runInTx(ctx context.Context, pool *pg.Pool, fn func(tx pgx.Tx) error) error
 // primitive the Admin control plane uses — the ONLY business
 // implementation of product status mutation.
 func SetProductActive(ctx context.Context, pool *pg.Pool, code string) (bool, error) {
-	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
-		_, err := SetProductStatusTx(ctx, tx, code, model.ProductStatusActive)
-		return err
-	})
-	return err == nil, err
+	return legacySetProductStatus(ctx, pool, code, model.ProductStatusActive)
 }
 
 func SetProductInactive(ctx context.Context, pool *pg.Pool, code string) (bool, error) {
+	return legacySetProductStatus(ctx, pool, code, model.ProductStatusInactive)
+}
+
+// legacySetProductStatus preserves the historical public wrapper
+// contract while delegating to the single business implementation
+// (SetProductStatusTx):
+//
+//	missing product  → (false, nil)   [404 maps to found=false]
+//	other errors     → (false, err)   verbatim
+//	product present  → (true, nil)
+func legacySetProductStatus(ctx context.Context, pool *pg.Pool, code, status string) (bool, error) {
+	var found bool
 	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
-		_, err := SetProductStatusTx(ctx, tx, code, model.ProductStatusInactive)
-		return err
+		oc, err := SetProductStatusTx(ctx, tx, code, status)
+		if err != nil {
+			return err
+		}
+		found = oc.After != nil
+		return nil
 	})
-	return err == nil, err
+	if err != nil {
+		if ae, ok := err.(*errors.AppError); ok && ae.HTTPCode == 404 {
+			return false, nil // legacy contract: not found is not an error
+		}
+		return false, err
+	}
+	return found, nil
 }
 
 // GetProduct returns a product by code regardless of status.

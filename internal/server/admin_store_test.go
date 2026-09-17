@@ -753,3 +753,217 @@ func TestB2RepairRedemptionDetailUIContract(t *testing.T) {
 		}
 	}
 }
+
+// ===========================================================================
+// B2 repair-2: Finding 2 — >256KB body fails closed; Finding 3 —
+// redemptions.read-only detail on a REAL existing redemption.
+// ===========================================================================
+
+func TestB2Repair2OversizedBodyFailsClosed(t *testing.T) {
+	e := newB2HTTPEnv(t)
+	ctx := context.Background()
+
+	// seed a pending redemption to prove ZERO mutation
+	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+		fmt.Sprintf(`{"title":"OB2 %d","credits_price":1}`, time.Now().UnixNano()))
+	if rec.Code != 200 {
+		t.Fatalf("product: %d", rec.Code)
+	}
+	var prod struct {
+		Data struct {
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &prod)
+	var botID int64
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	if err := e.s.Pool.QueryRow(ctx, `
+		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
+		VALUES ($1, $2, 'x', 'active', 49) RETURNING id`,
+		"ob2bot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_transactions WHERE bot_id=$1`, botID)
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_redemptions WHERE bot_id=$1`, botID)
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_bots WHERE id=$1`, botID)
+	})
+	var redCode string
+	if err := e.s.Pool.QueryRow(ctx, `
+		WITH ins AS (
+			INSERT INTO tb_redemptions (code, bot_id, product_id, product_title, credits_cost, request_key)
+			VALUES (substr(md5(random()::text), 1, 12), $1,
+				(SELECT id FROM tb_store_products WHERE code=$2),
+				(SELECT title FROM tb_store_products WHERE code=$2), 1, $3)
+			RETURNING code)
+		INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
+		SELECT $1, 'spend_redemption', -1, 48, 'redemption', ins.code, NOW() FROM ins
+		RETURNING (SELECT code FROM ins)`, botID, prod.Data.Code, "rk"+suffix).Scan(&redCode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_redemptions WHERE code=$1`, redCode)
+	})
+
+	// build a body: valid JSON object padded to exactly 256KB via an
+	// ignored extra field (the note itself is capped at 500 chars by
+	// the domain), then extra trailing bytes — the first 256KB alone
+	// is legal JSON that fits the limit.
+	prefix := `{"review_note":"ok","pad":"`
+	suffixPad := `"}`
+	padLen := 262144 - len(prefix) - len(suffixPad)
+	body := prefix + strings.Repeat("x", padLen) + suffixPad // exactly 256KB
+	if len(body) != 262144 {
+		t.Fatalf("pad construction: %d", len(body))
+	}
+	oversized := body + strings.Repeat("y", 1024) // trailing bytes beyond the cap
+
+	req := httptest.NewRequest("POST", "/api/admin/store/redemptions/"+redCode+"/approve",
+		strings.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(e.cookie)
+	req.Header.Set("X-CSRF-Token", e.csrf)
+	rec2 := httptest.NewRecorder()
+	e.router.ServeHTTP(rec2, req)
+	if rec2.Code != 400 {
+		t.Fatalf("oversized body = %d %s, want 400", rec2.Code, rec2.Body.String())
+	}
+
+	// ZERO mutation: status unchanged, no refund, balance unchanged
+	var status string
+	_ = e.s.Pool.QueryRow(ctx, `SELECT status FROM tb_redemptions WHERE code=$1`, redCode).Scan(&status)
+	if status != "pending_review" {
+		t.Fatalf("status mutated by oversized body: %s", status)
+	}
+	var balance float64
+	_ = e.s.Pool.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance)
+	if balance != 49 {
+		t.Fatalf("balance changed: %v", balance)
+	}
+	var refunds int
+	_ = e.s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM tb_transactions
+		WHERE type='refund_redemption' AND ref_type='redemption' AND ref_id=$1`, redCode).Scan(&refunds)
+	if refunds != 0 {
+		t.Fatalf("refund rows = %d, want 0", refunds)
+	}
+
+	// sanity: the EXACT-256KB body alone IS accepted (limit not off-by-one)
+	req = httptest.NewRequest("POST", "/api/admin/store/redemptions/"+redCode+"/approve",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(e.cookie)
+	req.Header.Set("X-CSRF-Token", e.csrf)
+	rec3 := httptest.NewRecorder()
+	e.router.ServeHTTP(rec3, req)
+	if rec3.Code != 200 {
+		t.Fatalf("exact-256KB legal body rejected: %d %s", rec3.Code, rec3.Body.String())
+	}
+}
+
+func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
+	e := newB2HTTPEnv(t)
+	ctx := context.Background()
+
+	// seed a REAL redemption
+	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+		fmt.Sprintf(`{"title":"RD %d","credits_price":1}`, time.Now().UnixNano()))
+	if rec.Code != 200 {
+		t.Fatalf("product: %d", rec.Code)
+	}
+	var prod struct {
+		Data struct {
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &prod)
+	var botID int64
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	if err := e.s.Pool.QueryRow(ctx, `
+		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
+		VALUES ($1, $2, 'x', 'active', 50) RETURNING id`,
+		"rdbot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_transactions WHERE bot_id=$1`, botID)
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_redemptions WHERE bot_id=$1`, botID)
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_bots WHERE id=$1`, botID)
+	})
+	var redCode string
+	if err := e.s.Pool.QueryRow(ctx, `
+		WITH ins AS (
+			INSERT INTO tb_redemptions (code, bot_id, product_id, product_title, credits_cost, request_key)
+			VALUES (substr(md5(random()::text), 1, 12), $1,
+				(SELECT id FROM tb_store_products WHERE code=$2),
+				(SELECT title FROM tb_store_products WHERE code=$2), 1, $3)
+			RETURNING code)
+		INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
+		SELECT $1, 'spend_redemption', -1, 49, 'redemption', ins.code, NOW() FROM ins
+		RETURNING (SELECT code FROM ins)`, botID, prod.Data.Code, "rk"+suffix).Scan(&redCode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_redemptions WHERE code=$1`, redCode)
+	})
+
+	// build a redemptions.read-only actor (reuse the scoped-login shape)
+	code := fmt.Sprintf("ro%d%d", time.Now().UnixNano()%1000000, time.Now().Nanosecond()%97)
+	rec = e.mutateJSON(t, "POST", "/api/admin/roles", fmt.Sprintf(`{"code":%q,"name":"RO"}`, code))
+	if rec.Code != 200 {
+		t.Fatalf("role: %d", rec.Code)
+	}
+	var rr struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &rr)
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+		`{"permission_codes":["store.redemptions.read"]}`)
+	if rec.Code != 200 {
+		t.Fatalf("perms: %d", rec.Code)
+	}
+	username := fmt.Sprintf("ro_%d", time.Now().UnixNano())
+	password := "ro-pass-123"
+	rec = e.mutateJSON(t, "POST", "/api/admin/users",
+		fmt.Sprintf(`{"username":%q,"display_name":"RO","password":%q}`, username, password))
+	if rec.Code != 200 {
+		t.Fatalf("user: %d", rec.Code)
+	}
+	var ur struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &ur)
+	ids, _ := json.Marshal([]int64{rr.Data.ID})
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID), `{"role_ids":`+string(ids)+`}`)
+	if rec.Code != 200 {
+		t.Fatalf("assign: %d", rec.Code)
+	}
+	ro := &b12Env{s: e.s, router: e.router, username: username, password: password}
+	ro.login(t)
+
+	// list → 200
+	rec = ro.do(t, "GET", "/api/admin/store/redemptions", "", false)
+	if rec.Code != 200 {
+		t.Fatalf("read-only list = %d", rec.Code)
+	}
+	// detail on the REAL existing redemption → 200 with its code
+	rec = ro.do(t, "GET", "/api/admin/store/redemptions/"+redCode, "", false)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), redCode) {
+		t.Fatalf("read-only detail(existing) = %d %s", rec.Code, rec.Body.String())
+	}
+	// transition → 403
+	rec = ro.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+redCode+"/approve", `{}`)
+	if rec.Code != 403 {
+		t.Fatalf("read-only transition = %d, want 403", rec.Code)
+	}
+	// state untouched
+	var status string
+	_ = e.s.Pool.QueryRow(ctx, `SELECT status FROM tb_redemptions WHERE code=$1`, redCode).Scan(&status)
+	if status != "pending_review" {
+		t.Fatalf("state changed by denied transition: %s", status)
+	}
+}
