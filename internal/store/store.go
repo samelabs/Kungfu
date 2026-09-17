@@ -16,11 +16,9 @@ package store
 import (
 	"context"
 	stderrors "errors"
-	"math"
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -49,44 +47,40 @@ type ProductInput struct {
 	CreditsPrice float64
 }
 
-// CreateProduct adds an active product to the catalog (internal service
-// capability — no HTTP surface this round).
+// CreateProduct adds an active product to the catalog. Thin tx-owner
+// wrapper over the SAME CreateProductTx primitive the Admin control
+// plane uses — one implementation, no second state machine.
 func CreateProduct(ctx context.Context, pool *pg.Pool, in ProductInput) (*model.StoreProduct, error) {
-	title := strings.TrimSpace(in.Title)
-	if title == "" || utf8.RuneCountInString(title) > 128 {
-		return nil, errors.New(400, "INVALID_TITLE", "Title must be 1-128 chars")
-	}
-	if utf8.RuneCountInString(in.Description) > 500 {
-		return nil, errors.New(400, "INVALID_DESCRIPTION", "Description must be at most 500 chars")
-	}
-	if math.IsNaN(in.CreditsPrice) || math.IsInf(in.CreditsPrice, 0) {
-		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a finite number")
-	}
-	if in.CreditsPrice <= 0 {
-		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be greater than zero")
-	}
-
-	var desc *string
-	if in.Description != "" {
-		desc = &in.Description
-	}
-
-	code, err := publiccode.GenerateUnique(func(c string) (bool, error) {
-		return repository.StoreProductCodeExists(ctx, pool, c)
+	var out *model.StoreProduct
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		oc, err := CreateProductTx(ctx, pool, tx, in)
+		if err != nil {
+			return err
+		}
+		out = oc.After
+		return nil
 	})
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not allocate product code")
+		return nil, err
 	}
+	return out, nil
+}
 
-	p, err := repository.CreateStoreProduct(ctx, pool, code, repository.StoreProductInput{
-		Title:        title,
-		Description:  desc,
-		CreditsPrice: in.CreditsPrice,
-	})
+// runInTx is the shared wrapper-owner transaction helper: BEGIN,
+// fn, COMMIT (rollback on any error).
+func runInTx(ctx context.Context, pool *pg.Pool, fn func(tx pgx.Tx) error) error {
+	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not create product")
+		return errors.New(500, "INTERNAL_ERROR", "Could not begin transaction")
 	}
-	return p, nil
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Could not commit transaction")
+	}
+	return nil
 }
 
 // SetProductActive / SetProductInactive toggle catalog visibility.
@@ -300,7 +294,19 @@ type TransitionResult struct {
 // the debit already happened at creation. Re-approving an approved
 // redemption is an idempotent success; any other status is rejected.
 func ApproveRedemption(ctx context.Context, pool *pg.Pool, code string, reviewNote string) (*TransitionResult, error) {
-	return lockTransition(ctx, pool, code, reviewNote, model.RedemptionStatusApproved, false)
+	var res *TransitionResult
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		oc, err := ApproveRedemptionTx(ctx, tx, code, reviewNote)
+		if err != nil {
+			return err
+		}
+		res = &TransitionResult{Redemption: oc.After, Transitioned: oc.Transitioned}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // RejectRedemption: pending_review -> rejected with an atomic refund:
@@ -315,7 +321,19 @@ func ApproveRedemption(ctx context.Context, pool *pg.Pool, code string, reviewNo
 // Re-rejecting a rejected redemption returns idempotent success without a
 // second refund (the WHERE guard makes the economic action unreachable).
 func RejectRedemption(ctx context.Context, pool *pg.Pool, code string, reviewNote string) (*TransitionResult, error) {
-	return refundTransition(ctx, pool, code, reviewNote, model.RedemptionStatusRejected)
+	var res *TransitionResult
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		oc, err := RejectRedemptionTx(ctx, pool, tx, code, reviewNote)
+		if err != nil {
+			return err
+		}
+		res = &TransitionResult{Redemption: oc.After, Transitioned: oc.Transitioned}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // CancelRedemption: pending_review -> cancelled, or approved -> cancelled
@@ -323,7 +341,19 @@ func RejectRedemption(ctx context.Context, pool *pg.Pool, code string, reviewNot
 // become a dead order). Atomic with refund_redemption. fulfilled/rejected
 // cannot be cancelled; double cancel never refunds twice.
 func CancelRedemption(ctx context.Context, pool *pg.Pool, code string) (*TransitionResult, error) {
-	return refundTransition(ctx, pool, code, "", model.RedemptionStatusCancelled)
+	var res *TransitionResult
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		oc, err := CancelRedemptionTx(ctx, pool, tx, code)
+		if err != nil {
+			return err
+		}
+		res = &TransitionResult{Redemption: oc.After, Transitioned: oc.Transitioned}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // FulfillRedemption: approved -> fulfilled, recording the minimal virtual
@@ -331,125 +361,19 @@ func CancelRedemption(ctx context.Context, pool *pg.Pool, code string) (*Transit
 // double fulfill is an idempotent success. pending_review cannot be
 // fulfilled directly.
 func FulfillRedemption(ctx context.Context, pool *pg.Pool, code string, fulfillmentNote string) (*TransitionResult, error) {
-	r, err := lockTransition(ctx, pool, code, fulfillmentNote, model.RedemptionStatusFulfilled, true)
-	return r, err
-}
-
-// lockTransition performs a no-refund transition (approve / fulfill):
-// lock, verify the legal edge, guarded UPDATE, commit.
-func lockTransition(ctx context.Context, pool *pg.Pool, code, note, target string, requireApprovedOnly bool) (*TransitionResult, error) {
-	from := model.RedemptionStatusPendingReview
-	if requireApprovedOnly {
-		from = model.RedemptionStatusApproved
-	}
-
-	tx, err := pool.TxBegin(ctx)
+	var res *TransitionResult
+	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
+		oc, err := FulfillRedemptionTx(ctx, tx, code, fulfillmentNote)
+		if err != nil {
+			return err
+		}
+		res = &TransitionResult{Redemption: oc.After, Transitioned: oc.Transitioned}
+		return nil
+	})
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not begin transition")
+		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
-
-	r, err := repository.LockRedemptionByCode(ctx, tx, code)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load redemption")
-	}
-	if r == nil {
-		return nil, errors.New(404, "REDEMPTION_NOT_FOUND", "Redemption not found")
-	}
-
-	// Idempotent: already in the target state.
-	if r.Status == target {
-		return &TransitionResult{Redemption: r, Transitioned: false}, nil
-	}
-	// Only the single legal edge is allowed.
-	if r.Status != from {
-		return nil, errors.New(409, "INVALID_REDEMPTION_STATE",
-			"Redemption is "+r.Status+" and cannot become "+target)
-	}
-
-	var notePtr *string
-	if note != "" {
-		notePtr = &note
-	}
-	ok, err := repository.UpdateRedemptionStatus(ctx, tx, r.ID, from, target, notePtr)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not update redemption")
-	}
-	if !ok {
-		// Locked row changed status between read and UPDATE — impossible
-		// under FOR UPDATE, kept as a hard guard.
-		return nil, errors.New(409, "INVALID_REDEMPTION_STATE", "Concurrent state change")
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not commit transition")
-	}
-	applyTransition(r, target, notePtr)
-	return &TransitionResult{Redemption: r, Transitioned: true}, nil
-}
-
-// refundTransition performs a refunding transition (reject / cancel):
-// lock, verify the legal edge(s), refund via credits.Record in the same
-// transaction, guarded UPDATE, commit. At most one refund ever reaches
-// the ledger because the guarded UPDATE only fires from a refundable
-// status and the row lock serializes all transitions.
-func refundTransition(ctx context.Context, pool *pg.Pool, code, note, target string) (*TransitionResult, error) {
-	// Legal pre-states: reject only from pending_review; cancel from
-	// pending_review or approved.
-	legalFrom := map[string]bool{
-		model.RedemptionStatusPendingReview: true,
-	}
-	if target == model.RedemptionStatusCancelled {
-		legalFrom[model.RedemptionStatusApproved] = true
-	}
-
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not begin transition")
-	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
-
-	r, err := repository.LockRedemptionByCode(ctx, tx, code)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load redemption")
-	}
-	if r == nil {
-		return nil, errors.New(404, "REDEMPTION_NOT_FOUND", "Redemption not found")
-	}
-
-	// Idempotent: already rejected/cancelled.
-	if r.Status == target {
-		return &TransitionResult{Redemption: r, Transitioned: false}, nil
-	}
-	if !legalFrom[r.Status] {
-		return nil, errors.New(409, "INVALID_REDEMPTION_STATE",
-			"Redemption is "+r.Status+" and cannot become "+target)
-	}
-
-	// Refund inside the same transaction.
-	refType := "redemption"
-	if _, err := credits.Record(ctx, pool, tx, r.BotID, TxnTypeRefundRedemption,
-		r.CreditsCost, &refType, &r.Code); err != nil {
-		return nil, err // nothing committed
-	}
-
-	var notePtr *string
-	if note != "" {
-		notePtr = &note
-	}
-	ok, err := repository.UpdateRedemptionStatus(ctx, tx, r.ID, r.Status, target, notePtr)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not update redemption")
-	}
-	if !ok {
-		return nil, errors.New(409, "INVALID_REDEMPTION_STATE", "Concurrent state change")
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Could not commit transition")
-	}
-	applyTransition(r, target, notePtr)
-	return &TransitionResult{Redemption: r, Transitioned: true}, nil
+	return res, nil
 }
 
 // applyTransition mirrors a committed transition onto the in-memory copy.

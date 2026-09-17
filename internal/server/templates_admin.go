@@ -62,6 +62,7 @@ func (s *Server) renderAdmin(w http.ResponseWriter, data *tmplData) {
 <script src="/assets/admin/roles.js?v=1"></script>
 <script src="/assets/admin/sessions.js?v=1"></script>
 <script src="/assets/admin/audit.js?v=1"></script>
+<script src="/assets/admin/store.js?v=1"></script>
 <script src="/assets/admin/init.js?v=1"></script>
 </body>
 </html>`
@@ -77,6 +78,8 @@ func adminNavHTML(data *tmplData) string {
     <a class="btn" data-admin-nav="roles" href="/admin/roles">Roles</a>
     <a class="btn" data-admin-nav="sessions" href="/admin/sessions">Sessions</a>
     <a class="btn" data-admin-nav="audit" href="/admin/audit">Audit</a>
+    <a class="btn" data-admin-nav="store_products" href="/admin/store/products">Store Products</a>
+    <a class="btn" data-admin-nav="store_redemptions" href="/admin/store/redemptions">Store Redemptions</a>
     <a class="btn" data-admin-nav="account" href="/admin/account">Account</a>
     <button class="btn danger" id="adminLogoutBtn" type="button">Logout</button>
 </nav>`
@@ -96,6 +99,10 @@ func adminSectionHTML(data *tmplData) string {
 		return adminSessionsHTML()
 	case "audit":
 		return adminAuditHTML()
+	case "store_products":
+		return adminStoreProductsHTML()
+	case "store_redemptions":
+		return adminStoreRedemptionsHTML()
 	default: // dashboard
 		return adminDashboardHTML()
 	}
@@ -206,6 +213,65 @@ func adminAuditHTML() string {
         <button class="btn" id="auditPrevPage" type="button">← Prev</button>
         <span id="auditPageInfo"></span>
         <button class="btn" id="auditNextPage" type="button">Next →</button>
+    </div>
+</section>`
+}
+
+func adminStoreProductsHTML() string {
+	return `<section class="admin-section" id="adminStoreProductsSection">
+    <h2>Store Products</h2>
+    <form id="adminStoreProductFilters" class="admin-filters" autocomplete="off">
+        <select id="storeProductStatus">
+            <option value="all">status: all</option>
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+        </select>
+        <input id="storeProductQ" type="text" placeholder="search code / title">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminStoreProductsCard" class="admin-card"></div>
+    <div class="admin-pager">
+        <button class="btn" id="storeProductsPrev" type="button">← Prev</button>
+        <span id="storeProductsPageInfo"></span>
+        <button class="btn" id="storeProductsNext" type="button">Next →</button>
+    </div>
+    <div data-admin-view="store.products.manage">
+        <h3>Create product</h3>
+        <form id="adminStoreProductCreateForm" class="admin-form" autocomplete="off">
+            <label for="storeNewTitle">Title</label>
+            <input id="storeNewTitle" type="text" required maxlength="128" autocomplete="off">
+            <label for="storeNewDesc">Description (optional)</label>
+            <input id="storeNewDesc" type="text" maxlength="500" autocomplete="off">
+            <label for="storeNewPrice">Credits price</label>
+            <input id="storeNewPrice" type="number" step="any" min="0.0001" required autocomplete="off">
+            <button class="btn primary" type="submit">Create</button>
+            <p class="notice" id="storeProductCreateNotice" hidden></p>
+        </form>
+    </div>
+</section>`
+}
+
+func adminStoreRedemptionsHTML() string {
+	return `<section class="admin-section" id="adminStoreRedemptionsSection">
+    <h2>Store Redemptions</h2>
+    <form id="adminStoreRedemptionFilters" class="admin-filters" autocomplete="off">
+        <select id="storeRedemptionStatus">
+            <option value="all">status: all</option>
+            <option value="pending_review">pending_review</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="fulfilled">fulfilled</option>
+            <option value="cancelled">cancelled</option>
+        </select>
+        <input id="storeRedemptionBotID" type="number" min="1" placeholder="bot_id">
+        <input id="storeRedemptionQ" type="text" placeholder="search code / title / request_key">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminStoreRedemptionsCard" class="admin-card"></div>
+    <div class="admin-pager">
+        <button class="btn" id="storeRedemptionsPrev" type="button">← Prev</button>
+        <span id="storeRedemptionsPageInfo"></span>
+        <button class="btn" id="storeRedemptionsNext" type="button">Next →</button>
     </div>
 </section>`
 }

@@ -165,6 +165,20 @@ func (s *Server) buildRouter() http.Handler {
 	r.Delete("/api/admin/sessions/{id}", s.handleAdminSessionRevoke)
 	r.Get("/api/admin/audit", s.handleAdminAuditList)
 
+	// B2: Store Administration (Admin control plane → store domain)
+	r.Get("/api/admin/store/products", s.handleAdminStoreProductsList)
+	r.Post("/api/admin/store/products", s.handleAdminStoreProductsCreate)
+	r.Get("/api/admin/store/products/{code}", s.handleAdminStoreProductGet)
+	r.Patch("/api/admin/store/products/{code}", s.handleAdminStoreProductPatch)
+	r.Post("/api/admin/store/products/{code}/activate", s.handleAdminStoreProductActivate)
+	r.Post("/api/admin/store/products/{code}/deactivate", s.handleAdminStoreProductDeactivate)
+	r.Get("/api/admin/store/redemptions", s.handleAdminStoreRedemptionsList)
+	r.Get("/api/admin/store/redemptions/{code}", s.handleAdminStoreRedemptionGet)
+	r.Post("/api/admin/store/redemptions/{code}/approve", s.handleAdminStoreRedemptionApprove)
+	r.Post("/api/admin/store/redemptions/{code}/reject", s.handleAdminStoreRedemptionReject)
+	r.Post("/api/admin/store/redemptions/{code}/fulfill", s.handleAdminStoreRedemptionFulfill)
+	r.Post("/api/admin/store/redemptions/{code}/cancel", s.handleAdminStoreRedemptionCancel)
+
 	// B1.2: Admin Workspace HTML routes
 	r.Get("/admin", s.handleAdminPage("dashboard"))
 	r.Get("/admin/login", s.handleAdminPage("login"))
@@ -173,6 +187,8 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/admin/roles", s.handleAdminPage("roles"))
 	r.Get("/admin/sessions", s.handleAdminPage("sessions"))
 	r.Get("/admin/audit", s.handleAdminPage("audit"))
+	r.Get("/admin/store/products", s.handleAdminPage("store_products"))
+	r.Get("/admin/store/redemptions", s.handleAdminPage("store_redemptions"))
 
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	stderrors "errors"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -297,4 +298,200 @@ func classifyInsertError(err error) error {
 		}
 	}
 	return err
+}
+
+// ============================================================
+// B2: Store Administration repository additions. Same SQL-ownership
+// file; Admin reads are platform-global (no bot ownership filter).
+// ============================================================
+
+// LockStoreProductByCode locks ANY product row (regardless of
+// status) FOR UPDATE inside the caller's transaction — the Admin
+// edit/status path shares this lock with Redeem's snapshot read, so
+// concurrent edit vs redeem serializes on the row. Returns nil when
+// the code does not exist.
+func LockStoreProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model.StoreProduct, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, code, title, description, credits_price, status, created_at, updated_at
+		FROM tb_store_products
+		WHERE code = $1
+		FOR UPDATE`, code)
+	p, err := scanStoreProduct(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
+}
+
+// UpdateStoreProduct writes the editable columns (title, description,
+// credits_price) of a locked product row and returns the fresh row.
+// code/id/created_at/status are never touched here.
+func UpdateStoreProduct(ctx context.Context, tx pgx.Tx, id int64, title string, description *string, creditsPrice float64) (*model.StoreProduct, error) {
+	row := tx.QueryRow(ctx, `
+		UPDATE tb_store_products
+		SET title = $2, description = $3, credits_price = $4, updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, code, title, description, credits_price, status, created_at, updated_at`,
+		id, title, description, creditsPrice)
+	return scanStoreProduct(row)
+}
+
+// SetStoreProductStatusReturning flips the status of a locked product
+// row and returns the fresh row.
+func SetStoreProductStatusReturning(ctx context.Context, tx pgx.Tx, id int64, status string) (*model.StoreProduct, error) {
+	row := tx.QueryRow(ctx, `
+		UPDATE tb_store_products
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, code, title, description, credits_price, status, created_at, updated_at`,
+		id, status)
+	return scanStoreProduct(row)
+}
+
+// FindRedemptionByID re-reads a redemption row by numeric id inside
+// the caller's transaction — the authoritative post-mutation state
+// for Admin audit before/after facts.
+func FindRedemptionByID(ctx context.Context, q pg.Querier, id int64) (*model.Redemption, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, product_id, product_title, credits_cost,
+		       request_key, status, review_note, fulfillment_note,
+		       created_at, updated_at, reviewed_at, fulfilled_at, cancelled_at
+		FROM tb_redemptions
+		WHERE id = $1`, id)
+	r, err := scanRedemption(row)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
+}
+
+// -- Admin global list queries --
+
+// AdminProductFilter carries the Admin product list parameters.
+type AdminProductFilter struct {
+	Status   string // "" or all = both; else active|inactive
+	Q        string
+	Page     int
+	PageSize int
+}
+
+// AdminListStoreProducts returns the full catalog (or a status
+// slice) matching a search, paginated, ordered created_at DESC,
+// id DESC, plus the total match count.
+func AdminListStoreProducts(ctx context.Context, q pg.Querier, f AdminProductFilter) ([]model.StoreProduct, int64, error) {
+	where, args := "WHERE 1=1", []interface{}{}
+	n := 0
+	addArg := func(v interface{}) string {
+		n++
+		args = append(args, v)
+		return "$" + strconv.Itoa(n)
+	}
+	if f.Status == model.ProductStatusActive || f.Status == model.ProductStatusInactive {
+		where += " AND status = " + addArg(f.Status)
+	}
+	if f.Q != "" {
+		like := "%" + f.Q + "%"
+		where += " AND (code LIKE " + addArg(like) + " OR title LIKE " + addArg(like) + ")"
+	}
+
+	var total int64
+	if err := q.QueryRow(ctx,
+		"SELECT COUNT(*) FROM tb_store_products "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (f.Page - 1) * f.PageSize
+	limit := addArg(f.PageSize)
+	off := addArg(offset)
+	rows, err := q.Query(ctx, `
+		SELECT id, code, title, description, credits_price, status, created_at, updated_at
+		FROM tb_store_products `+where+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT `+limit+` OFFSET `+off, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var items []model.StoreProduct
+	for rows.Next() {
+		var it model.StoreProduct
+		if err := rows.Scan(&it.ID, &it.Code, &it.Title, &it.Description,
+			&it.CreditsPrice, &it.Status, &it.CreatedAt, &it.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, it)
+	}
+	return items, total, rows.Err()
+}
+
+// AdminRedemptionFilter carries the Admin redemption list parameters.
+type AdminRedemptionFilter struct {
+	Status   string
+	BotID    int64
+	Q        string
+	Page     int
+	PageSize int
+}
+
+// AdminListRedemptions returns ALL redemptions (platform view, no
+// ownership filter) matching the filters, paginated, ordered
+// created_at DESC, id DESC, plus the total match count.
+func AdminListRedemptions(ctx context.Context, q pg.Querier, f AdminRedemptionFilter) ([]model.Redemption, int64, error) {
+	where, args := "WHERE 1=1", []interface{}{}
+	n := 0
+	addArg := func(v interface{}) string {
+		n++
+		args = append(args, v)
+		return "$" + strconv.Itoa(n)
+	}
+	switch f.Status {
+	case "", "all":
+	case model.RedemptionStatusPendingReview, model.RedemptionStatusApproved,
+		model.RedemptionStatusRejected, model.RedemptionStatusFulfilled,
+		model.RedemptionStatusCancelled:
+		where += " AND status = " + addArg(f.Status)
+	default:
+		return nil, 0, stderrors.New("invalid status filter")
+	}
+	if f.BotID > 0 {
+		where += " AND bot_id = " + addArg(f.BotID)
+	}
+	if f.Q != "" {
+		like := "%" + f.Q + "%"
+		where += " AND (code LIKE " + addArg(like) +
+			" OR product_title LIKE " + addArg(like) +
+			" OR request_key LIKE " + addArg(like) + ")"
+	}
+
+	var total int64
+	if err := q.QueryRow(ctx,
+		"SELECT COUNT(*) FROM tb_redemptions "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (f.Page - 1) * f.PageSize
+	limit := addArg(f.PageSize)
+	off := addArg(offset)
+	rows, err := q.Query(ctx, `
+		SELECT id, code, bot_id, product_id, product_title, credits_cost,
+		       request_key, status, review_note, fulfillment_note,
+		       created_at, updated_at, reviewed_at, fulfilled_at, cancelled_at
+		FROM tb_redemptions `+where+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT `+limit+` OFFSET `+off, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var items []model.Redemption
+	for rows.Next() {
+		var it model.Redemption
+		if err := rows.Scan(&it.ID, &it.Code, &it.BotID, &it.ProductID, &it.ProductTitle,
+			&it.CreditsCost, &it.RequestKey, &it.Status, &it.ReviewNote, &it.FulfillmentNote,
+			&it.CreatedAt, &it.UpdatedAt, &it.ReviewedAt, &it.FulfilledAt, &it.CancelledAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, it)
+	}
+	return items, total, rows.Err()
 }

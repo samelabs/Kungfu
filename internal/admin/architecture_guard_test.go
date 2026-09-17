@@ -64,9 +64,13 @@ func TestAdminDomainDependencyAllowlist(t *testing.T) {
 		"kungfu.md/internal/model":      true,
 		"kungfu.md/internal/errors":     true,
 		"kungfu.md/internal/security":   true,
+		// B2 evolution: the Admin control plane orchestrates the Store
+		// domain (admin → store is legal from B2 on). Store → admin
+		// remains permanently banned (TestStoreDoesNotImportAdmin).
+		"kungfu.md/internal/store": true,
 	}
 	banned := []string{
-		"kungfu.md/internal/store", "kungfu.md/internal/payment",
+		"kungfu.md/internal/payment",
 		"kungfu.md/internal/credits", "kungfu.md/internal/task",
 		"kungfu.md/internal/storage", "kungfu.md/internal/service",
 		"kungfu.md/internal/server", "kungfu.md/internal/consumption",
@@ -242,20 +246,56 @@ func TestMigration006IsAdditiveOnly(t *testing.T) {
 	}
 }
 
-// Guard (B1.2 repair): production admin handlers must NOT import the
-// repository — the dependency pipeline is server → internal/admin →
-// repository → PostgreSQL. Only non-Admin handlers and non-handler
-// server files are exempt.
+// Guard (B1.2 repair + B2): production admin handlers must NOT import
+// the repository, credits, or store packages — the dependency pipeline
+// is server → internal/admin → domain → repository → PostgreSQL.
 func TestAdminHandlersDoNotImportRepository(t *testing.T) {
 	root := repoRoot(t)
+	bannedImports := []string{
+		"kungfu.md/internal/repository",
+		"kungfu.md/internal/credits",
+		"kungfu.md/internal/store",
+	}
 	walkSources(t, filepath.Join(root, "internal", "server"), func(path, src string) {
 		base := filepath.Base(path)
 		if !strings.HasPrefix(base, "handler_admin") {
 			return // non-admin handlers unaffected
 		}
 		for _, line := range codeLines(src) {
-			if strings.Contains(strings.TrimSpace(line), "\"kungfu.md/internal/repository\"") {
-				t.Errorf("%s: admin handler must not import internal/repository (server → admin → repository pipeline)", path)
+			trimmed := strings.TrimSpace(line)
+			for _, imp := range bannedImports {
+				if strings.Contains(trimmed, "\""+imp+"\"") {
+					t.Errorf("%s: admin handler must not import %s (server → admin → domain pipeline)", path, imp)
+				}
+			}
+		}
+	})
+}
+
+// Guard (B2): the Admin Store orchestration must not write Store SQL.
+// tb_store_products / tb_redemptions SQL belongs exclusively to
+// internal/repository/store.go (extended by AST detector reuse).
+var storeTableNames = []string{"tb_store_products", "tb_redemptions"}
+
+func TestAdminStoreOrchestrationWritesNoStoreSQL(t *testing.T) {
+	root := repoRoot(t)
+	walkSources(t, filepath.Join(root, "internal", "admin"), func(path, src string) {
+		for _, line := range codeLines(src) {
+			up := strings.ToUpper(line)
+			for _, table := range storeTableNames {
+				if !strings.Contains(up, strings.ToUpper(table)) {
+					continue
+				}
+				quoted := strings.Contains(line, "`"+table) || strings.Contains(line, "\""+table)
+				if !quoted {
+					continue
+				}
+				if strings.Contains(up, "SELECT") || strings.Contains(up, "INSERT") ||
+					strings.Contains(up, "UPDATE") || strings.Contains(up, "DELETE") ||
+					strings.Contains(up, "LOCK TABLE") {
+					t.Errorf("%s: store-table SQL must live only in internal/repository/store.go: %s",
+						path, strings.TrimSpace(line))
+				}
 			}
 		}
 	})

@@ -81,6 +81,16 @@ async function renderPage() {
                 await loadAudit(); renderAudit();
             }
         }
+        if (SECTION === 'store_products') {
+            if (hasPermission('store.products.read')) {
+                await loadStoreProducts(); renderStoreProducts();
+            }
+        }
+        if (SECTION === 'store_redemptions') {
+            if (hasPermission('store.redemptions.read')) {
+                await loadStoreRedemptions(); renderStoreRedemptions();
+            }
+        }
     } catch (err) {
         window.alert(err.message);
     }
@@ -93,6 +103,8 @@ async function renderPage() {
     bindAdminRolesEvents();
     bindAdminSessionsEvents();
     bindAdminAuditEvents();
+    bindStoreProductsEvents();
+    bindStoreRedemptionsEvents();
 
     if (SECTION !== 'login') {
         try {
