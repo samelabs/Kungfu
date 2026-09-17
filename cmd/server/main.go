@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,36 +16,45 @@ import (
 	"kungfu.md/internal/version"
 )
 
+// main is the process lifecycle owner: fail-closed startup, then the
+// single ServeLifecycle shutdown orchestration on real OS signals.
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("[kungfu.md] Starting Kungfu %s", version.Get())
 
-	// Load configuration
+	// Startup step 1: config load — required config missing/malformed
+	// fails closed here, before any resource is opened.
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("startup failed (config): %v", err)
 	}
-
 	log.Printf("[kungfu.md] Config loaded: listen=%s db=%s@%s:%d/%s",
 		cfg.ListenAddr, cfg.DBUser, cfg.DBHost, cfg.DBPort, cfg.DBName)
 
-	// Connect to PostgreSQL
+	// Startup step 2: DB open + connectivity verification — an
+	// invalid DSN or unreachable DB fails closed BEFORE serving.
 	pool, err := pg.NewPool(cfg.DatabaseURL())
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatalf("startup failed (database): %v", err)
 	}
-	defer pool.Close()
 	log.Println("[kungfu.md] Database connected")
 
-	// Create HTTP server
+	// Startup step 3: application + router construction.
 	srv := server.New(cfg, pool)
 
-	// Start rate limiter GC every 5 minutes
+	// Background loop (rate limiter GC) with an explicit stop signal —
+	// ServeLifecycle stops it during shutdown; nothing leaks.
+	gcStop := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			srv.RateLimiter.GC()
+		for {
+			select {
+			case <-ticker.C:
+				srv.RateLimiter.GC()
+			case <-gcStop:
+				return
+			}
 		}
 	}()
 
@@ -56,26 +66,34 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in background
+	// Shutdown orchestration: SIGINT/SIGTERM feed the SAME path.
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signals := make(chan shutdownTrigger, 2)
 	go func() {
-		log.Printf("[kungfu.md] Listening on %s", cfg.ListenAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+		for range sigCh {
+			select {
+			case signals <- shutdownTrigger{}:
+			default: // orchestration already triggered
+			}
 		}
 	}()
 
-	// Wait for shutdown signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("[kungfu.md] Shutting down...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("[kungfu.md] Server shutdown error: %v", err)
+	err = ServeLifecycle(context.Background(), &lifecycle{
+		httpServer:      httpServer,
+		shutdownBudget:  10 * time.Second,
+		signals:         signals,
+		backgroundStops: []chan struct{}{gcStop},
+		closers:         []io.Closer{poolCloser{pool}},
+	})
+	if err != nil {
+		log.Fatalf("runtime error: %v", err)
 	}
-
-	log.Println("[kungfu.md] Server stopped")
+	log.Println("[kungfu.md] Process exited cleanly")
 }
+
+// poolCloser adapts pg.Pool's parameterless Close to io.Closer so the
+// lifecycle closes the DB exactly once, after HTTP shutdown.
+type poolCloser struct{ pool *pg.Pool }
+
+func (p poolCloser) Close() error { p.pool.Close(); return nil }
