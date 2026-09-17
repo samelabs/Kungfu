@@ -9,6 +9,7 @@ package delivery
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"testing"
@@ -70,7 +71,7 @@ func TestPostJSONBoundedReadDeterministic2xx(t *testing.T) {
 		Body:       body,
 	})
 
-	res := PostJSON("http://stub.local/hook", []byte(`{}`), TestTaskErrorConfig())
+	res := PostJSON(context.Background(), "http://stub.local/hook", []byte(`{}`), TestTaskErrorConfig())
 
 	if !res.Success {
 		t.Fatalf("2xx must succeed: %v", res.ErrorCode)
@@ -99,7 +100,7 @@ func TestPostJSONBoundedReadDeterministic500(t *testing.T) {
 		Body:       body,
 	})
 
-	res := PostJSON("http://stub.local/hook", []byte(`{}`), AgentSubmitErrorConfig())
+	res := PostJSON(context.Background(), "http://stub.local/hook", []byte(`{}`), AgentSubmitErrorConfig())
 
 	if res.Success {
 		t.Fatal("500 must not succeed")

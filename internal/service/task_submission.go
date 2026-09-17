@@ -101,7 +101,7 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	payload := delivery.BuildPayload(code, input)
 	payloadBytes, _ := json.Marshal(payload)
 
-	postResult := delivery.PostJSON(postapi, payloadBytes, delivery.AgentSubmitErrorConfig())
+	postResult := delivery.PostJSON(ctx, postapi, payloadBytes, delivery.AgentSubmitErrorConfig())
 
 	if !postResult.Success {
 		_ = tx.Rollback(ctx)

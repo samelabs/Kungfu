@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -73,8 +74,12 @@ func init() {
 const maxExistingResponseBytes = 65535
 
 // PostJSON sends a POST request with a JSON body, classifying failures via errCfg.
-func PostJSON(url string, body []byte, errCfg ErrorConfig) PostResult {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+// The caller's context governs the request lifecycle: cancellation or
+// deadline of ctx terminates the transport work via
+// http.NewRequestWithContext. The 10s client timeout remains a lower
+// safety net, NOT the primary budget.
+func PostJSON(ctx context.Context, url string, body []byte, errCfg ErrorConfig) PostResult {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return PostResult{
 			Success:      false,

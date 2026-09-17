@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -67,6 +69,7 @@ func (s *Server) buildRouter() http.Handler {
 
 	// Recovery middleware (catches panics)
 	r.Use(s.recoverMiddleware)
+	r.Use(requestDeadlineMiddleware)
 
 	// -- Static file routes --
 	r.Get("/robots.txt", serveStaticFile("robots.txt", "text/plain; charset=utf-8", ""))
@@ -305,3 +308,36 @@ func clampInt(val, min, max int) int {
 // These reference functions defined in handler_*.go files
 
 // Context keys for storing bot in request context
+
+// ============================================================
+// R2.1: the SINGLE application request execution budget.
+// ============================================================
+
+const requestDeadlineBudgetDefault = 25 * time.Second
+
+// requestDeadlineBudgetForTest lets tests shorten the budget for
+// deterministic proofs; production never sets it (nil -> 25s default).
+var requestDeadlineBudgetForTest *time.Duration
+
+func requestDeadline() time.Duration {
+	if requestDeadlineBudgetForTest != nil {
+		return *requestDeadlineBudgetForTest
+	}
+	return requestDeadlineBudgetDefault
+}
+
+// requestDeadlineMiddleware is the ONLY request-budget owner: every
+// inbound request gets a 25s deadline on its context before the
+// handler runs. Handlers, domains, repositories, and providers all
+// observe the same cancellation because they already receive
+// r.Context(); no handler adds a second WithTimeout. 25s is strictly
+// below the frozen http.Server WriteTimeout (30s), leaving ~5s for
+// error writeback; per-call client safety nets (PostAPI 10s, Creem
+// 15s) remain the lower-layer bounds.
+func requestDeadlineMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), requestDeadline())
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}

@@ -186,7 +186,7 @@ func TestPostJSONBoundedReadLarge2xx(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res := delivery.PostJSON(srv.URL, []byte(`{}`), delivery.TestTaskErrorConfig())
+	res := delivery.PostJSON(context.Background(), srv.URL, []byte(`{}`), delivery.TestTaskErrorConfig())
 	if !res.Success {
 		t.Fatalf("large 2xx must still be a delivery success: %v", res.ErrorCode)
 	}
@@ -215,7 +215,7 @@ func TestPostJSONBoundedReadLargeNon2xx(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res := delivery.PostJSON(srv.URL, []byte(`{}`), delivery.AgentSubmitErrorConfig())
+	res := delivery.PostJSON(context.Background(), srv.URL, []byte(`{}`), delivery.AgentSubmitErrorConfig())
 	if res.Success {
 		t.Fatal("non-2xx must still be rejected")
 	}
@@ -248,7 +248,7 @@ func TestPostJSONHugeStreamSmoke(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res := delivery.PostJSON(srv.URL, []byte(`{}`), delivery.TestTaskErrorConfig())
+	res := delivery.PostJSON(context.Background(), srv.URL, []byte(`{}`), delivery.TestTaskErrorConfig())
 	if !res.Success {
 		t.Fatalf("delivery failed: %v", res.ErrorCode)
 	}

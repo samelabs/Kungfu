@@ -117,7 +117,7 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	payload := delivery.BuildPayload(code, input)
 	payloadBytes, _ := json.Marshal(payload)
 
-	postResult := delivery.PostJSON(postapi, payloadBytes, delivery.TestTaskErrorConfig())
+	postResult := delivery.PostJSON(ctx, postapi, payloadBytes, delivery.TestTaskErrorConfig())
 
 	if !postResult.Success {
 		_ = tx.Rollback(ctx)
