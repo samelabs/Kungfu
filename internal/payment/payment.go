@@ -113,7 +113,7 @@ func CompletePayment(ctx context.Context, pool *pg.Pool, code string) (*model.Pa
 	if err != nil {
 		return nil, false, errors.New(500, "INTERNAL_ERROR", "Could not begin payment completion")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 
 	p, err := repository.LockPaymentByCode(ctx, tx, code)
 	if err != nil {
@@ -250,7 +250,7 @@ func BindProviderOrder(ctx context.Context, pool *pg.Pool, provider, code, provi
 	if err != nil {
 		return fmt.Errorf("begin bind tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	other, err := repository.ProviderOrderBelongsToAnotherPayment(ctx, tx, provider, providerOrderID, code)
 	if err != nil {

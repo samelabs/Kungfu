@@ -81,7 +81,7 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	botID, err := repository.InsertRegisteredBot(ctx, tx, name, apiKey, hashedPassword, ip)
 	if err != nil {

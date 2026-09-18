@@ -325,7 +325,7 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 	if err != nil {
 		return false, fmt.Errorf("begin adjustment tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	// Lock the payment row: serializes adjustment + reversal per payment.
 	p, err := repository.LockPaymentByID(ctx, tx, fact.PaymentID)

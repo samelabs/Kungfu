@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"kungfu.md/internal/config"
 	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
+	"kungfu.md/internal/service"
 )
 
 // deadlineTestServer builds a server with the production router and a
@@ -63,36 +65,35 @@ func TestR21FastRequestCompletes(t *testing.T) {
 // Uses the real middleware with a test-only budget override.
 
 func TestR21HandlerObservesDeadlineCancellation(t *testing.T) {
-	withDeadlineBudget(t, 300*time.Millisecond, func() {
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			select {
-			case <-r.Context().Done():
-				// handler CAN observe cancellation — proves the ctx
-				// with the budget actually reached the handler
-				return
-			case <-time.After(10 * time.Second):
-				t.Error("handler never observed cancellation")
-			}
-		})
-		// wire the middleware exactly as the production router does
-		var router http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestDeadlineMiddleware(handler).ServeHTTP(w, r)
-		})
-		req := httptest.NewRequest("GET", "/anything", nil)
-		rec := httptest.NewRecorder()
-		done := make(chan struct{})
-		start := time.Now()
-		go func() { router.ServeHTTP(rec, req); close(done) }()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
-		case <-done:
-			elapsed := time.Since(start)
-			if elapsed >= time.Second {
-				t.Fatalf("request ran %v — deadline not enforced", elapsed)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("request did not terminate after deadline")
+		case <-r.Context().Done():
+			// handler CAN observe cancellation — proves the ctx
+			// with the budget actually reached the handler
+			return
+		case <-time.After(10 * time.Second):
+			t.Error("handler never observed cancellation")
 		}
 	})
+	// the production middleware with an explicit short budget —
+	// same mechanism, injected duration (no mutable package state)
+	var router http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestDeadlineMiddleware(300*time.Millisecond)(handler).ServeHTTP(w, r)
+	})
+	req := httptest.NewRequest("GET", "/anything", nil)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	start := time.Now()
+	go func() { router.ServeHTTP(rec, req); close(done) }()
+	select {
+	case <-done:
+		elapsed := time.Since(start)
+		if elapsed >= time.Second {
+			t.Fatalf("request ran %v — deadline not enforced", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not terminate after deadline")
+	}
 }
 
 // -- 3) real PG: blocked query is released by the caller deadline --
@@ -156,93 +157,9 @@ func TestR21BlockedPGQueryReleasedByDeadline(t *testing.T) {
 // pointing at a slow test server, using the server's test-only
 // creemBaseOverride field.
 
-func TestR21CreemCancellationThroughProvider(t *testing.T) {
-	if testing.Short() {
-		t.Skip("short mode")
-	}
-	slowRelease := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-slowRelease:
-		}
-	}))
-	defer slow.Close()       // runs LAST (after handlers released)
-	defer close(slowRelease) // runs FIRST: release handlers so Close can finish
-
-	// delivery-level proof first: PostJSON with a caller deadline far
-	// below the 10s client timeout terminates early via ctx.
-	cctx, ccancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-	defer ccancel()
-	start := time.Now()
-	res := postJSONForTest(cctx, slow.URL, []byte(`{}`))
-	elapsed := time.Since(start)
-	if res.Success {
-		t.Fatal("slow endpoint unexpectedly succeeded")
-	}
-	if elapsed >= 2*time.Second {
-		t.Fatalf("PostJSON waited %v — caller deadline did not propagate to transport", elapsed)
-	}
-	if res.ErrorCode == "" {
-		t.Fatal("network-error classification missing")
-	}
-}
-
-// postJSONForTest drives the production delivery.PostJSON primitive.
-func postJSONForTest(ctx context.Context, url string, body []byte) delivery.PostResult {
-	return delivery.PostJSON(ctx, url, body, delivery.TestTaskErrorConfig())
-}
-
-// withDeadlineBudget temporarily overrides the middleware budget for
-// deterministic tests (production default: 25s, frozen).
-func withDeadlineBudget(t *testing.T, d time.Duration, fn func()) {
-	t.Helper()
-	prev := requestDeadlineBudgetForTest
-	requestDeadlineBudgetForTest = &d
-	defer func() { requestDeadlineBudgetForTest = prev }()
-	fn()
-}
-
 // -- 5) service-path PostAPI cancellation: the same ctx the HTTP
 // request carries reaches delivery.PostJSON through the service layer
 // shape (slow remote, caller deadline << 10s client timeout). --
-
-func TestR21ServicePathPostAPICancellation(t *testing.T) {
-	pool, err := pg.NewPool(testDatabaseURL(t))
-	if err != nil {
-		t.Skipf("local postgres unavailable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	_ = pool // service chain runs against the real DB when driven live;
-	// here the proof is ctx propagation through the service call shape.
-
-	slowRelease := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-slowRelease:
-		}
-	}))
-	defer slow.Close()       // runs LAST (after handlers released)
-	defer close(slowRelease) // runs FIRST: release handlers so Close can finish
-
-	// the caller context an HTTP request would carry (the same object
-	// service.Submit receives and forwards verbatim)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	res := delivery.PostJSON(ctx, slow.URL, []byte(`{}`), delivery.AgentSubmitErrorConfig())
-	elapsed := time.Since(start)
-	if res.Success {
-		t.Fatal("slow PostAPI unexpectedly succeeded")
-	}
-	if elapsed >= 3*time.Second {
-		t.Fatalf("service-path PostAPI waited %v — ctx not reaching transport", elapsed)
-	}
-	if res.ErrorCode != delivery.AgentSubmitErrorConfig().NetworkCode {
-		t.Fatalf("network-error classification changed: %q", res.ErrorCode)
-	}
-}
 
 // -- 6) transactional mutation: cancel during the outbound window →
 // rollback leaves no partial economic fact; row lock released; a
@@ -348,4 +265,223 @@ func TestR21CancelDuringOutboundRollsBackEconomically(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id=$1`, newID)
 	})
+}
+
+// ===========================================================================
+// R2.1 repair: REAL service.Submit PostAPI cancellation + REAL Creem
+// checkout handler cancellation (both through the production router /
+// service mechanisms, real PostgreSQL).
+// ===========================================================================
+
+// -- real service.Submit: slow PostAPI + short request deadline --
+
+func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
+	pool, err := pg.NewPool(testDatabaseURL(t))
+	if err != nil {
+		t.Skipf("local postgres unavailable: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	ctxBG := context.Background()
+
+	// slow fake PostAPI that confirms the request actually arrived
+	arrived := make(chan struct{}, 1)
+	slowRelease := make(chan struct{})
+	slowPost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		select {
+		case <-r.Context().Done():
+		case <-slowRelease:
+		}
+	}))
+	defer slowPost.Close()
+	defer close(slowRelease)
+
+	// seed an open task whose PostAPI is the slow server
+	var botID int64
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	if err := pool.QueryRow(ctxBG, `
+		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
+		VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
+		"submitbot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		t.Fatal(err)
+	}
+	var taskCode string
+	if err := pool.QueryRow(ctxBG, `
+		INSERT INTO tb_tasks (bot_id, code, title, requirements, postapi, price, budget, status, created_at, updated_at)
+		VALUES ($1, substr(md5(random()::text),1,12), 'R2.1 Task', 'x', $2, 1, 1000, 'open', NOW(), NOW())
+		RETURNING code`, botID, slowPost.URL).Scan(&taskCode); err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	cleanup := func() {
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_transactions WHERE bot_id=$1`, botID)
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_tasks WHERE code=$1`, taskCode)
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_bots WHERE id=$1`, botID)
+	}
+	defer cleanup()
+
+	// budget BEFORE the call
+	var budgetBefore float64
+	_ = pool.QueryRow(ctxBG, `SELECT budget FROM tb_tasks WHERE code=$1`, taskCode).Scan(&budgetBefore)
+
+	// the request context with a deadline far below the 10s PostAPI net
+	ctx, cancel := context.WithTimeout(ctxBG, 800*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, submitErr := service.Submit(ctx, pool, taskCode, botID, map[string]interface{}{"a": 1})
+	elapsed := time.Since(start)
+
+	// upstream observed the request (proves the chain reached PostAPI)
+	select {
+	case <-arrived:
+	default:
+		t.Fatal("PostAPI request never arrived — chain broken")
+	}
+	// bounded return well before the 10s client timeout
+	if elapsed >= 5*time.Second {
+		t.Fatalf("Submit ran %v — not bounded by the request deadline", elapsed)
+	}
+	_ = submitErr // failure semantics are the existing delivery codes
+
+	// transaction invariant: no partial settlement
+	time.Sleep(100 * time.Millisecond) // let any deferred cleanup settle
+	var budgetAfter float64
+	var earn int
+	var advanced int
+	_ = pool.QueryRow(ctxBG, `SELECT budget FROM tb_tasks WHERE code=$1`, taskCode).Scan(&budgetAfter)
+	_ = pool.QueryRow(ctxBG, `
+		SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='earn_task'`, botID).Scan(&earn)
+	_ = pool.QueryRow(ctxBG, `
+		SELECT COUNT(*) FROM tb_tasks WHERE code=$1 AND budget <> $2`, taskCode, budgetBefore).Scan(&advanced)
+	if budgetAfter != budgetBefore {
+		t.Fatalf("task budget mutated on cancelled submit: %v -> %v", budgetBefore, budgetAfter)
+	}
+	if earn != 0 {
+		t.Fatalf("earn_task settlement committed on cancelled submit: %d", earn)
+	}
+	if advanced != 0 {
+		t.Fatal("task state partially advanced")
+	}
+
+	// row lock released: a later independent transaction locks/updates
+	// the same task within a bounded wait
+	lockCtx, lockCancel := context.WithTimeout(ctxBG, 3*time.Second)
+	defer lockCancel()
+	ltx, err := pool.TxBegin(lockCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := ltx.Exec(lockCtx,
+		`UPDATE tb_tasks SET budget = budget WHERE code = $1`, taskCode)
+	if err != nil {
+		_ = ltx.Rollback(lockCtx)
+		t.Fatalf("later transaction blocked on the task row: %v", err)
+	}
+	if err := ltx.Commit(lockCtx); err != nil {
+		t.Fatal(err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("later update affected %d rows", tag.RowsAffected())
+	}
+}
+
+// -- real Creem checkout handler: slow provider GET product + short
+// request deadline; cancellation BEFORE any local payment creation --
+
+func TestR21RealCreemCheckoutCancellation(t *testing.T) {
+	s := deadlineTestServer(t) // real PG pool + production config shape
+	ctxBG := context.Background()
+
+	// slow fake provider: the GET product phase blocks; the request's
+	// arrival is confirmed so we know the handler reached the provider
+	arrived := make(chan struct{}, 1)
+	slowRelease := make(chan struct{})
+	slowCreem := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		select {
+		case <-r.Context().Done():
+		case <-slowRelease:
+		}
+	}))
+	defer slowCreem.Close()
+	defer close(slowRelease)
+
+	// configure a valid Creem runtime (all-or-none contract) pointed at
+	// the slow fake via the existing test-only base override
+	s.Config.CreemAPIKey = "test-key"
+	s.Config.CreemWebhookSecret = "test-secret"
+	s.Config.CreemMode = "test"
+	s.Config.CreemSuccessURL = "https://example.com/return"
+	s.Config.CreemPackages = map[string]config.CreemPackage{
+		"starter": {Code: "starter", ProductID: "prod_r21", Credits: 100},
+	}
+	s.creemBaseOverride = slowCreem.URL
+
+	// seed the owner bot + session cookie
+	_, botID := seededTestServerOn(t, s)
+	w := httptest.NewRecorder()
+	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
+
+	// short deterministic request deadline through the SAME router
+	// mechanism (buildRouterWithDeadline — no mutable global state)
+	router := s.buildRouterWithDeadline(800 * time.Millisecond)
+
+	var paymentsBefore int
+	_ = s.Pool.QueryRow(ctxBG, `SELECT COUNT(*) FROM tb_payments`).Scan(&paymentsBefore)
+
+	req := httptest.NewRequest("POST", "/api/owner/payments/checkout",
+		strings.NewReader(`{"package":"starter"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	start := time.Now()
+	go func() { router.ServeHTTP(rec, req); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("checkout handler did not return bounded")
+	}
+	elapsed := time.Since(start)
+
+	// upstream observed the request (chain reached the provider)
+	select {
+	case <-arrived:
+	default:
+		t.Fatal("provider request never arrived")
+	}
+	// bounded BEFORE the 15s Creem client timeout
+	if elapsed >= 5*time.Second {
+		t.Fatalf("checkout ran %v — request deadline not effective", elapsed)
+	}
+
+	// no payment row was created (cancellation hit the GET-product
+	// phase, before pending payment creation)
+	var paymentsAfter int
+	_ = s.Pool.QueryRow(ctxBG, `SELECT COUNT(*) FROM tb_payments`).Scan(&paymentsAfter)
+	if paymentsAfter != paymentsBefore {
+		t.Fatalf("payment rows created during cancelled checkout: %d -> %d", paymentsBefore, paymentsAfter)
+	}
+}
+
+// seededTestServerOn seeds an active bot on the GIVEN server (variant
+// of the shared helper for an externally-constructed Server).
+func seededTestServerOn(t *testing.T, s *Server) (t2 *Server, botID int64) {
+	t.Helper()
+	var id int64
+	err := s.Pool.QueryRow(context.Background(), `
+		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
+		VALUES ($1, $2, 'x', 'active', 10) RETURNING id`,
+		"r21owner"+fmt.Sprint(time.Now().UnixNano()),
+		"kf_live_r21o"+fmt.Sprint(time.Now().UnixNano())).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed bot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool.Exec(context.Background(),
+			`DELETE FROM tb_bots WHERE id=$1`, id)
+	})
+	return s, id
 }

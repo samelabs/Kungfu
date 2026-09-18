@@ -141,7 +141,7 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error creating task")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	// Lock task budget (deduct credits)
 	if budget > 0 {
@@ -196,7 +196,7 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating task status")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
 	if err != nil {
@@ -255,7 +255,7 @@ func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string,
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error adding budget")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
 	if err != nil {
@@ -307,7 +307,7 @@ func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating task")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
 	if err != nil {
@@ -376,7 +376,7 @@ func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error refunding budget")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	task, err := repository.FindOwnerTaskByCodeForUpdate(ctx, tx, botID, code)
 	if err != nil {

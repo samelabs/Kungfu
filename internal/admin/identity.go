@@ -73,7 +73,7 @@ func Bootstrap(ctx context.Context, pool *pg.Pool, username, displayName, passwo
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	defer tx.Rollback(ctx)
+	defer pg.Rollback(tx)
 
 	// Serialize concurrent first-bootstraps: the EXCLUSIVE lock makes
 	// the second transaction's COUNT wait until the first commits, so
@@ -192,7 +192,7 @@ func Login(ctx context.Context, pool *pg.Pool, in LoginInput) (*LoginResult, err
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	defer tx.Rollback(ctx)
+	defer pg.Rollback(tx)
 
 	session, err := repository.InsertAdminSession(ctx, tx, &model.AdminSession{
 		AdminID:     adminRec.ID,

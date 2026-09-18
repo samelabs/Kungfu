@@ -63,13 +63,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Router.ServeHTTP(w, r)
 }
 
-// buildRouter creates the chi router with all routes.
+// buildRouter creates the chi router with all routes and the FIXED
+// production request deadline (25s — the single budget authority).
 func (s *Server) buildRouter() http.Handler {
+	return s.buildRouterWithDeadline(requestDeadlineBudgetDefault)
+}
+
+// buildRouterWithDeadline is the single router builder: production
+// enters via buildRouter with the fixed budget; tests inject an
+// explicit short duration. Same routes, same mechanism, no mutable
+// package state, no second deadline owner.
+func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r := chi.NewRouter()
 
 	// Recovery middleware (catches panics)
 	r.Use(s.recoverMiddleware)
-	r.Use(requestDeadlineMiddleware)
+	r.Use(requestDeadlineMiddleware(deadline))
 
 	// -- Static file routes --
 	r.Get("/robots.txt", serveStaticFile("robots.txt", "text/plain; charset=utf-8", ""))
@@ -313,31 +322,27 @@ func clampInt(val, min, max int) int {
 // R2.1: the SINGLE application request execution budget.
 // ============================================================
 
+// requestDeadlineBudgetDefault is the ONLY production request-budget
+// authority: a fixed 25s, strictly below the frozen 30s WriteTimeout.
+// No env/config override, no package mutable state.
 const requestDeadlineBudgetDefault = 25 * time.Second
 
-// requestDeadlineBudgetForTest lets tests shorten the budget for
-// deterministic proofs; production never sets it (nil -> 25s default).
-var requestDeadlineBudgetForTest *time.Duration
-
-func requestDeadline() time.Duration {
-	if requestDeadlineBudgetForTest != nil {
-		return *requestDeadlineBudgetForTest
-	}
-	return requestDeadlineBudgetDefault
-}
-
 // requestDeadlineMiddleware is the ONLY request-budget owner: every
-// inbound request gets a 25s deadline on its context before the
+// inbound request gets the given deadline on its context before the
 // handler runs. Handlers, domains, repositories, and providers all
 // observe the same cancellation because they already receive
 // r.Context(); no handler adds a second WithTimeout. 25s is strictly
 // below the frozen http.Server WriteTimeout (30s), leaving ~5s for
 // error writeback; per-call client safety nets (PostAPI 10s, Creem
-// 15s) remain the lower-layer bounds.
-func requestDeadlineMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), requestDeadline())
-		defer cancel()
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+// 15s) remain the lower-layer bounds. Production wires the fixed 25s
+// via buildRouter; tests inject an explicit short duration through
+// buildRouterWithDeadline — same mechanism, same routes.
+func requestDeadlineMiddleware(budget time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), budget)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

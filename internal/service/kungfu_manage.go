@@ -86,7 +86,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during publishing")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = pg.Rollback(tx) }()
 
 	code, codeErr := repository.GenerateUniqueKungfuCode(ctx, tx)
 	if codeErr != nil {

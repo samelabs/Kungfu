@@ -73,7 +73,7 @@ func runInTx(ctx context.Context, pool *pg.Pool, fn func(tx pgx.Tx) error) error
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Could not begin transaction")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 	if err := fn(tx); err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func redeemTx(ctx context.Context, pool *pg.Pool, botID int64, productCode, requ
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not begin redemption")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 
 	// Lock the product row and take the snapshot from it.
 	product, err := repository.LockActiveStoreProductByCode(ctx, tx, productCode)
@@ -264,7 +264,7 @@ func redeemTx(ctx context.Context, pool *pg.Pool, botID int64, productCode, requ
 		if stderrors.Is(err, repository.ErrRequestKeyConflict) {
 			// Lost the race: DO NOT query on the aborted transaction.
 			// Roll back and resolve the replay on the pool connection.
-			_ = tx.Rollback(ctx)
+			_ = pg.Rollback(tx)
 			existing, ferr := repository.FindRedemptionByRequestKey(ctx, pool, botID, requestKey)
 			if ferr != nil || existing == nil {
 				return nil, errors.New(500, "INTERNAL_ERROR", "Could not resolve concurrent request key")

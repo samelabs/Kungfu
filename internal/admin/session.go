@@ -195,7 +195,7 @@ func RevokeSession(ctx context.Context, pool *pg.Pool, principal *Principal) err
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	defer tx.Rollback(ctx)
+	defer pg.Rollback(tx)
 
 	if err := repository.RevokeAdminSessionByID(ctx, tx, principal.Session.ID); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")

@@ -112,12 +112,34 @@ func CommitOrSkip(ctx context.Context, tx pgx.Tx, startedNew bool) error {
 	return tx.Commit(ctx)
 }
 
-// RollbackOrSkip rolls back only if startedNew is true.
-func RollbackOrSkip(ctx context.Context, tx pgx.Tx, startedNew bool) error {
+// Rollback is the AUTHORITATIVE transaction rollback-cleanup
+// primitive (R2.1 repair): every production transaction owner rolls
+// back through here. It deliberately does NOT use the request/
+// business context — a cancelled request context would make ROLLBACK
+// itself a no-op, leaving aborted transactions holding locks until
+// connection destruction. The cleanup-only context has a hard 2s
+// timeout: ordinary request-cancellation cleanup completes far below
+// it; if rollback cannot complete in 2s the connection is unusable
+// and pgx destroys it (the last-resort path, not normal cleanup).
+//
+// The cleanup context exists ONLY for ROLLBACK — never for queries,
+// mutations, commits, provider calls, logging, or audit writes.
+// Commit keeps the caller's context.
+//
+// No retry, no goroutine, no framework.
+func Rollback(tx pgx.Tx) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return tx.Rollback(cleanupCtx)
+}
+
+// RollbackOrSkip rolls back only if startedNew is true, via the
+// authoritative cleanup primitive (request-context independent).
+func RollbackOrSkip(tx pgx.Tx, startedNew bool) error {
 	if !startedNew {
 		return nil
 	}
-	return tx.Rollback(ctx)
+	return Rollback(tx)
 }
 
 // Querier is the interface satisfied by both *pgxpool.Pool and pgx.Tx.

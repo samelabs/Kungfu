@@ -62,7 +62,7 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 
 	// 1. Lock the task row.
 	task, err := repository.FindTaskByCodeForUpdate(ctx, tx, code)
@@ -94,20 +94,20 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	//    Gate failures roll back FIRST (releasing the tx/connection) and
 	//    only then write the best-effort log on the pool.
 	if rule := ValidatePostapi(postapi, 2048); rule != nil {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePrice(price); rule != nil {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if !fundable(task.Budget, price) {
 		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		testLogEvent(ctx, pool, code, botID, "kfcheck", input, false, nil, nil,
 			rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
@@ -120,7 +120,7 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	postResult := delivery.PostJSON(ctx, postapi, payloadBytes, delivery.TestTaskErrorConfig())
 
 	if !postResult.Success {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		testLogEvent(ctx, pool, code, botID, "post_failed", payload, false,
 			postResult.ResponseCode, postResult.ResponseBody,
 			postResult.ErrorCode, postResult.ErrorMessage)

@@ -50,7 +50,7 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after commit
+	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 
 	// 1. Lock the task row — the serialization point for the whole flow.
 	task, err := repository.FindTaskByCodeForUpdate(ctx, tx, taskCode)
@@ -76,23 +76,23 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	//    deadlocks a MaxConns=1 pool. Zero POST hits, no settlement.
 	if task.Status != taskStatusOpen {
 		rule := RaiseRule("TASK_NOT_OPEN")
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePostapi(postapi, 2048); rule != nil {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if rule := ValidatePrice(price); rule != nil {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
 	if !fundable(task.Budget, price) {
 		rule := RaiseRule("TASK_BUDGET_EXHAUSTED")
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		insertTaskEventLog(ctx, pool, code, botID, "kfcheck", nil, false, nil, nil, rule.Rule.Code, rule.Rule.LogMsg)
 		return nil, rule.ToAppError()
 	}
@@ -104,7 +104,7 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 	postResult := delivery.PostJSON(ctx, postapi, payloadBytes, delivery.AgentSubmitErrorConfig())
 
 	if !postResult.Success {
-		_ = tx.Rollback(ctx)
+		_ = pg.Rollback(tx)
 		insertTaskEventLog(ctx, pool, code, botID, "post_failed", nil, false,
 			postResult.ResponseCode, nil, postResult.ErrorCode, "")
 		return nil, errors.NewWithDetails(424,

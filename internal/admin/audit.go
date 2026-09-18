@@ -48,7 +48,7 @@ func WithAuditTx(ctx context.Context, pool *pg.Pool, e *AuditEntry, fn func(ctx 
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	defer tx.Rollback(ctx)
+	defer pg.Rollback(tx)
 
 	if err := fn(ctx, tx); err != nil {
 		return err

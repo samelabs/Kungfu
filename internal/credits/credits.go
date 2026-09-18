@@ -96,7 +96,7 @@ func record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 	defer func() {
 		if startedNew {
 			// Only reached if we return an error before commit
-			_ = pg.RollbackOrSkip(ctx, useTx, true)
+			_ = pg.RollbackOrSkip(useTx, true)
 		}
 	}()
 
