@@ -97,6 +97,13 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// Assets (/assets/*)
 	r.Get("/assets/*", serveAssets())
 
+	// Infrastructure probes (public, no auth). Liveness never
+	// touches PG; readiness Pings PG via r.Context() under the
+	// existing request deadline. /api/ping remains the Agent
+	// identity/balance API and is not a probe alias.
+	r.Get("/healthz", s.handleHealth)
+	r.Get("/readyz", s.handleReady)
+
 	// -- API routes: Agent (X-Bot-Key auth) --
 	r.Post("/api/register", s.handleRegister)
 	r.Get("/api/ping", s.handlePing)
