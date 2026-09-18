@@ -83,31 +83,29 @@ func TestRollbackCleanupReusesConnectionAfterCancel(t *testing.T) {
 		t.Fatalf("backend PID changed %d -> %d — cleanup relied on connection destruction, not reuse", pidA, pidB)
 	}
 
-	// and the pool still serves a fresh transaction
-	tx2, err := pool.TxBegin(ctxBG)
+	// and the pool still serves a fresh transaction (one properly
+	// bounded context owns the whole proof — cancel always deferred)
+	freshCtx, freshCancel := context.WithTimeout(ctxBG, 3*time.Second)
+	defer freshCancel()
+	tx2, err := pool.TxBegin(freshCtx)
 	if err != nil {
 		t.Fatalf("fresh transaction failed after cleanup: %v", err)
 	}
-	if _, err := tx2.Exec(ctx2ctx(), `SELECT 1`); err != nil {
+	if _, err := tx2.Exec(freshCtx, `SELECT 1`); err != nil {
 		_ = Rollback(tx2)
 		t.Fatalf("fresh transaction work failed: %v", err)
 	}
-	if err := tx2.Commit(ctx2ctx()); err != nil {
+	if err := tx2.Commit(freshCtx); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func ctx2ctx() context.Context {
-	c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	_ = cancel
-	return c
-}
-
 // ===========================================================================
-// Architecture guard (AST): production Go files outside internal/pg
-// must not call .Rollback( directly on a transaction — all rollback
-// cleanup goes through the authoritative pg.Rollback primitive.
-// Tests are exempt.
+// Architecture guard (AST): production transaction rollback ownership
+// lives ONLY in internal/pg. ANY selector call *.Rollback(...) on ANY
+// receiver in ANY production .go file outside internal/pg is a
+// violation — no receiver-name heuristics. Scans from the repo root
+// (cmd/ included); excludes _test.go, internal/pg/**, and .git/**.
 // ===========================================================================
 
 func TestRollbackOwnedOnlyByPG(t *testing.T) {
@@ -117,18 +115,23 @@ func TestRollbackOwnedOnlyByPG(t *testing.T) {
 	}
 	root = filepath.Dir(filepath.Dir(root)) // repo root
 
+	pgDir := filepath.Join(root, "internal", "pg")
 	violations := []string{}
-	err = filepath.Walk(filepath.Join(root, "internal"), func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
+			name := info.Name()
+			if strings.HasPrefix(name, ".") && name != "." {
+				return filepath.SkipDir // .git and friends
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		if strings.HasPrefix(path, filepath.Join(root, "internal", "pg")+string(filepath.Separator)) {
+		if strings.HasPrefix(path, pgDir+string(filepath.Separator)) {
 			return nil // pg itself owns the primitive
 		}
 		src, rerr := os.ReadFile(path)
@@ -150,16 +153,16 @@ func TestRollbackOwnedOnlyByPG(t *testing.T) {
 			if !ok || sel.Sel.Name != "Rollback" {
 				return true
 			}
-			// receiver must be an identifier named tx/useTx (a transaction)
-			ident, ok := sel.X.(*ast.Ident)
-			if !ok {
+			// The SANCTIONED form is the package-qualified primitive
+			// pg.Rollback(tx) — receiver is the package identifier.
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "pg" {
 				return true
 			}
-			if ident.Name != "tx" && ident.Name != "useTx" {
-				return true // not a transaction variable
-			}
+			// ANY other receiver (variable, chained call, anything):
+			// ownership is structural, not name-based.
 			pos := fset.Position(call.Pos())
-			violations = append(violations, fmt.Sprintf("%s: direct %s.Rollback(...) — use pg.Rollback", pos, ident.Name))
+			violations = append(violations, fmt.Sprintf(
+				"%s: direct .Rollback(...) call — production rollback ownership belongs to internal/pg (use pg.Rollback)", pos))
 			return true
 		})
 		return nil

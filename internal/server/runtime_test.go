@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"kungfu.md/internal/config"
-	"kungfu.md/internal/delivery"
+	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/service"
@@ -157,116 +157,6 @@ func TestR21BlockedPGQueryReleasedByDeadline(t *testing.T) {
 // pointing at a slow test server, using the server's test-only
 // creemBaseOverride field.
 
-// -- 5) service-path PostAPI cancellation: the same ctx the HTTP
-// request carries reaches delivery.PostJSON through the service layer
-// shape (slow remote, caller deadline << 10s client timeout). --
-
-// -- 6) transactional mutation: cancel during the outbound window →
-// rollback leaves no partial economic fact; row lock released; a
-// subsequent independent transaction can mutate the same row. --
-
-func TestR21CancelDuringOutboundRollsBackEconomically(t *testing.T) {
-	pool, err := pg.NewPool(testDatabaseURL(t))
-	if err != nil {
-		t.Skipf("local postgres unavailable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	ctxBudget, cancelBudget := context.WithCancel(context.Background())
-	defer cancelBudget()
-
-	tx, err := pool.TxBegin(ctxBudget)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var botID int64
-	err = tx.QueryRow(ctxBudget, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
-		"r21bot"+fmt.Sprint(time.Now().UnixNano()),
-		"kf_live_r21"+fmt.Sprint(time.Now().UnixNano())).Scan(&botID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_transactions WHERE bot_id=$1`, botID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id=$1`, botID)
-	})
-
-	// the settlement fact INSIDE the uncommitted transaction
-	if _, err := tx.Exec(ctxBudget,
-		`INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
-		 VALUES ($1, 'earn_task', 1, 1, 'task', 'r21probe', NOW())`, botID); err != nil {
-		t.Fatal(err)
-	}
-
-	// slow outbound on the SAME ctx; cancel while it is in flight
-	slowRelease := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-slowRelease:
-		}
-	}))
-	defer slow.Close()       // runs LAST (after handlers released)
-	defer close(slowRelease) // runs FIRST: release handlers so Close can finish
-
-	outboundDone := make(chan struct{})
-	go func() {
-		defer close(outboundDone)
-		_ = delivery.PostJSON(ctxBudget, slow.URL, []byte(`{}`), delivery.AgentSubmitErrorConfig())
-	}()
-	time.Sleep(100 * time.Millisecond) // outbound provably in flight
-	cancelBudget()                     // deadline/cancel during PostAPI
-	<-outboundDone                     // PostAPI terminated by ctx
-
-	// the caller's rollback path (same shape Submit uses on failure)
-	_ = tx.Rollback(ctxBudget)
-
-	// no partial economic fact committed
-	var ledger int
-	_ = pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND ref_id='r21probe'`, botID).Scan(&ledger)
-	if ledger != 0 {
-		t.Fatalf("partial fact committed after cancellation: %d rows", ledger)
-	}
-
-	// the cancelled transaction rolled back ENTIRELY: even the bot
-	// insert is gone (nothing partially committed)
-	var bots int
-	_ = pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_bots WHERE id=$1`, botID).Scan(&bots)
-	if bots != 0 {
-		t.Fatal("bot row survived the cancelled transaction — partial commit!")
-	}
-
-	// lock released: a subsequent independent transaction commits work
-	// that conflicts with the rolled-back one (re-insert the same
-	// unique api_key) within a bounded wait
-	subCtx, subCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer subCancel()
-	subTx, err := pool.TxBegin(subCtx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var newID int64
-	err = subTx.QueryRow(subCtx, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 0.5) RETURNING id`,
-		"r21bot"+fmt.Sprint(time.Now().UnixNano()),
-		"kf_live_r21"+fmt.Sprint(time.Now().UnixNano())).Scan(&newID)
-	if err != nil {
-		_ = subTx.Rollback(subCtx)
-		t.Fatalf("subsequent transaction blocked (lock not released): %v", err)
-	}
-	if err := subTx.Commit(subCtx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id=$1`, newID)
-	})
-}
-
 // ===========================================================================
 // R2.1 repair: REAL service.Submit PostAPI cancellation + REAL Creem
 // checkout handler cancellation (both through the production router /
@@ -296,39 +186,51 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 	defer slowPost.Close()
 	defer close(slowRelease)
 
-	// seed an open task whose PostAPI is the slow server
-	var botID int64
+	// TWO distinct bots: the task belongs to the OWNER; the agent
+	// submits to it (the production subject split).
 	suffix := fmt.Sprint(time.Now().UnixNano())
+	var ownerID, agentID int64
+	if err := pool.QueryRow(ctxBG, `
+		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
+		VALUES ($1, $2, 'x', 'active', 500) RETURNING id`,
+		"r21owner_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
 	if err := pool.QueryRow(ctxBG, `
 		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
 		VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
-		"submitbot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		"r21agent_"+suffix, "kf_live_"+suffix+strings.Repeat("b", 64-len(suffix))).Scan(&agentID); err != nil {
 		t.Fatal(err)
 	}
 	var taskCode string
 	if err := pool.QueryRow(ctxBG, `
 		INSERT INTO tb_tasks (bot_id, code, title, requirements, postapi, price, budget, status, created_at, updated_at)
 		VALUES ($1, substr(md5(random()::text),1,12), 'R2.1 Task', 'x', $2, 1, 1000, 'open', NOW(), NOW())
-		RETURNING code`, botID, slowPost.URL).Scan(&taskCode); err != nil {
+		RETURNING code`, ownerID, slowPost.URL).Scan(&taskCode); err != nil {
 		t.Fatalf("task: %v", err)
 	}
-	cleanup := func() {
-		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_transactions WHERE bot_id=$1`, botID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_transactions WHERE bot_id IN ($1,$2)`, ownerID, agentID)
 		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_tasks WHERE code=$1`, taskCode)
-		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_bots WHERE id=$1`, botID)
-	}
-	defer cleanup()
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_logs WHERE bot_id IN ($1,$2)`, ownerID, agentID)
+		_, _ = pool.Exec(ctxBG, `DELETE FROM tb_bots WHERE id IN ($1,$2)`, ownerID, agentID)
+	})
 
-	// budget BEFORE the call
+	// baseline economics/state
 	var budgetBefore float64
+	var ownerBalanceBefore, agentBalanceBefore float64
+	var statusBefore string
 	_ = pool.QueryRow(ctxBG, `SELECT budget FROM tb_tasks WHERE code=$1`, taskCode).Scan(&budgetBefore)
+	_ = pool.QueryRow(ctxBG, `SELECT balance FROM tb_bots WHERE id=$1`, ownerID).Scan(&ownerBalanceBefore)
+	_ = pool.QueryRow(ctxBG, `SELECT balance FROM tb_bots WHERE id=$1`, agentID).Scan(&agentBalanceBefore)
+	_ = pool.QueryRow(ctxBG, `SELECT status FROM tb_tasks WHERE code=$1`, taskCode).Scan(&statusBefore)
 
 	// the request context with a deadline far below the 10s PostAPI net
 	ctx, cancel := context.WithTimeout(ctxBG, 800*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
-	_, submitErr := service.Submit(ctx, pool, taskCode, botID, map[string]interface{}{"a": 1})
+	submitRes, submitErr := service.Submit(ctx, pool, taskCode, agentID, map[string]interface{}{"a": 1})
 	elapsed := time.Since(start)
 
 	// upstream observed the request (proves the chain reached PostAPI)
@@ -341,30 +243,52 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 	if elapsed >= 5*time.Second {
 		t.Fatalf("Submit ran %v — not bounded by the request deadline", elapsed)
 	}
-	_ = submitErr // failure semantics are the existing delivery codes
 
-	// transaction invariant: no partial settlement
-	time.Sleep(100 * time.Millisecond) // let any deferred cleanup settle
-	var budgetAfter float64
+	// canonical failure contract: non-nil error, AppError, 424,
+	// POSTAPI_NETWORK_ERROR
+	if submitErr == nil {
+		t.Fatalf("cancelled Submit returned success: %+v", submitRes)
+	}
+	ae, ok := submitErr.(*apperrors.AppError)
+	if !ok {
+		t.Fatalf("Submit error is not the canonical AppError: %T %+v", submitErr, submitErr)
+	}
+	if ae.HTTPCode != 424 {
+		t.Fatalf("HTTPCode = %d, want 424", ae.HTTPCode)
+	}
+	if ae.Code != "POSTAPI_NETWORK_ERROR" {
+		t.Fatalf("Code = %q, want POSTAPI_NETWORK_ERROR", ae.Code)
+	}
+
+	// transaction invariant: nothing partially settled
+	time.Sleep(100 * time.Millisecond) // let deferred cleanup settle
+	var budgetAfter, ownerBalanceAfter, agentBalanceAfter float64
+	var statusAfter string
 	var earn int
-	var advanced int
 	_ = pool.QueryRow(ctxBG, `SELECT budget FROM tb_tasks WHERE code=$1`, taskCode).Scan(&budgetAfter)
+	_ = pool.QueryRow(ctxBG, `SELECT status FROM tb_tasks WHERE code=$1`, taskCode).Scan(&statusAfter)
+	_ = pool.QueryRow(ctxBG, `SELECT balance FROM tb_bots WHERE id=$1`, ownerID).Scan(&ownerBalanceAfter)
+	_ = pool.QueryRow(ctxBG, `SELECT balance FROM tb_bots WHERE id=$1`, agentID).Scan(&agentBalanceAfter)
 	_ = pool.QueryRow(ctxBG, `
-		SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='earn_task'`, botID).Scan(&earn)
-	_ = pool.QueryRow(ctxBG, `
-		SELECT COUNT(*) FROM tb_tasks WHERE code=$1 AND budget <> $2`, taskCode, budgetBefore).Scan(&advanced)
+		SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='earn_task'`, agentID).Scan(&earn)
 	if budgetAfter != budgetBefore {
-		t.Fatalf("task budget mutated on cancelled submit: %v -> %v", budgetBefore, budgetAfter)
+		t.Fatalf("owner task budget mutated on cancelled submit: %v -> %v", budgetBefore, budgetAfter)
+	}
+	if statusAfter != statusBefore {
+		t.Fatalf("task status changed: %s -> %s", statusBefore, statusAfter)
 	}
 	if earn != 0 {
-		t.Fatalf("earn_task settlement committed on cancelled submit: %d", earn)
+		t.Fatalf("agent earn_task settlement committed: %d", earn)
 	}
-	if advanced != 0 {
-		t.Fatal("task state partially advanced")
+	if agentBalanceAfter != agentBalanceBefore {
+		t.Fatalf("agent balance changed: %v -> %v", agentBalanceBefore, agentBalanceAfter)
+	}
+	if ownerBalanceAfter != ownerBalanceBefore {
+		t.Fatalf("owner balance changed: %v -> %v", ownerBalanceBefore, ownerBalanceAfter)
 	}
 
 	// row lock released: a later independent transaction locks/updates
-	// the same task within a bounded wait
+	// the same task within a bounded context
 	lockCtx, lockCancel := context.WithTimeout(ctxBG, 3*time.Second)
 	defer lockCancel()
 	ltx, err := pool.TxBegin(lockCtx)
@@ -386,7 +310,9 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 }
 
 // -- real Creem checkout handler: slow provider GET product + short
-// request deadline; cancellation BEFORE any local payment creation --
+// request deadline; cancellation BEFORE any local payment creation.
+// Asserts the existing HTTP contract (502 PAYMENT_PROVIDER_UNAVAILABLE)
+// and owner-scoped payment-row invariance. --
 
 func TestR21RealCreemCheckoutCancellation(t *testing.T) {
 	s := deadlineTestServer(t) // real PG pool + production config shape
@@ -418,17 +344,20 @@ func TestR21RealCreemCheckoutCancellation(t *testing.T) {
 	s.creemBaseOverride = slowCreem.URL
 
 	// seed the owner bot + session cookie
-	_, botID := seededTestServerOn(t, s)
+	_, ownerID := seededTestServerOn(t, s)
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, ownerID, s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
+
+	// baseline: OWNER-SCOPED payment rows (never whole-table counts —
+	// parallel packages share the CI database)
+	var paymentsBefore int
+	_ = s.Pool.QueryRow(ctxBG,
+		`SELECT COUNT(*) FROM tb_payments WHERE bot_id = $1`, ownerID).Scan(&paymentsBefore)
 
 	// short deterministic request deadline through the SAME router
 	// mechanism (buildRouterWithDeadline — no mutable global state)
 	router := s.buildRouterWithDeadline(800 * time.Millisecond)
-
-	var paymentsBefore int
-	_ = s.Pool.QueryRow(ctxBG, `SELECT COUNT(*) FROM tb_payments`).Scan(&paymentsBefore)
 
 	req := httptest.NewRequest("POST", "/api/owner/payments/checkout",
 		strings.NewReader(`{"package":"starter"}`))
@@ -457,12 +386,22 @@ func TestR21RealCreemCheckoutCancellation(t *testing.T) {
 		t.Fatalf("checkout ran %v — request deadline not effective", elapsed)
 	}
 
-	// no payment row was created (cancellation hit the GET-product
-	// phase, before pending payment creation)
+	// existing HTTP contract: 502 + PAYMENT_PROVIDER_UNAVAILABLE
+	if rec.Code != 502 {
+		t.Fatalf("checkout status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "PAYMENT_PROVIDER_UNAVAILABLE") {
+		t.Fatalf("error code missing PAYMENT_PROVIDER_UNAVAILABLE: %s", rec.Body.String())
+	}
+
+	// owner-scoped payment rows unchanged (cancellation hit the
+	// GET-product phase, before pending payment creation)
 	var paymentsAfter int
-	_ = s.Pool.QueryRow(ctxBG, `SELECT COUNT(*) FROM tb_payments`).Scan(&paymentsAfter)
+	_ = s.Pool.QueryRow(ctxBG,
+		`SELECT COUNT(*) FROM tb_payments WHERE bot_id = $1`, ownerID).Scan(&paymentsAfter)
 	if paymentsAfter != paymentsBefore {
-		t.Fatalf("payment rows created during cancelled checkout: %d -> %d", paymentsBefore, paymentsAfter)
+		t.Fatalf("owner payment rows changed during cancelled checkout: %d -> %d",
+			paymentsBefore, paymentsAfter)
 	}
 }
 
