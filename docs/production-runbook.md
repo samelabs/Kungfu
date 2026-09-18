@@ -37,7 +37,7 @@ Required values (record **presence + source only**, never values):
 | `TRUSTED_PROXY_CIDRS` | when behind a proxy | must match the real direct proxy peer/network (S6.3) |
 | `CREEM_API_KEY` `CREEM_WEBHOOK_SECRET` `CREEM_PACKAGES_JSON` `CREEM_MODE` `CREEM_SUCCESS_URL` | when payments enabled | all-or-none: all five set, or all five unset (payments disabled) |
 
-Evidence hygiene: record e.g. "`SESSION_SECRET` present, injected via <source>". Secret values never appear in any artifact (see §16).
+Evidence hygiene: record e.g. "`SESSION_SECRET` present, injected via <source>". Secret values never appear in any artifact (see §15).
 
 No new environment variables are introduced by this runbook.
 
@@ -47,9 +47,11 @@ No new environment variables are introduced by this runbook.
 
 ```bash
 for f in migrations/*.sql; do
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+  psql "<operator-supplied connection string to the TARGET production database>"     -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
+
+Note: the placeholder is **operational psql connection material supplied by the operator**, NOT a Kungfu environment variable (Kungfu has no `DATABASE_URL` variable and this runbook introduces none). The connection must target the **same PostgreSQL database the deployment uses**, with the deployment's intended TLS posture, and its credentials are never recorded in acceptance evidence (§15).
 
 2. Record the applied set — current baseline: **001_schema → 008_agent_key_hash**.
 3. Confirm persistent (non-ephemeral) PostgreSQL connectivity from the deployment environment.
@@ -62,7 +64,7 @@ done
 | `verify-full` | **Preferred** production posture where the provider certificate + hostname validation are available. |
 | `verify-ca` / `require` | Acceptable **only** as an explicit, recorded deployment exception with a written reason. |
 
-A weaker encrypted mode is a deployment decision, not an application defect; the absence of `verify-full` is classified a **DEPLOYMENT BLOCKER / exception record**, never an unconditional code blocker. No certificate-management mechanism is invented here (operator provisions CA material per their provider).
+Semantics: `verify-full` remains preferred. If it is unavailable and the deployment proposes `verify-ca` or `require`, acceptance **remains blocked (DEPLOYMENT BLOCKER) UNTIL the exception and its rationale are explicitly reviewed and recorded**; once the exception is accepted, the absence of `verify-full` is no longer an unresolved blocker for that deployment. This is deployment policy only — the S6.6 application enum contract is unchanged, `disable` is never acceptable for a networked production database, and no certificate-management mechanism is invented here (operator provisions CA material per their provider).
 
 ## 3. Public HTTP / Proxy Pre-Flight
 
@@ -117,7 +119,7 @@ Using a **controlled HTTPS PostAPI endpoint** (one the acceptance environment ow
 2. Agent lists open tasks (`GET /api/tasks`) and gets one (`GET /api/tasks/{code}`).
 3. Agent submits (`POST /api/tasks/{code}/submissions`).
 4. The controlled PostAPI **receives the expected HTTPS POST** (record arrival at the fake/controlled endpoint).
-5. A 2xx delivery completes the submission path (task budget decrement + `earn_task` visible in the ledger check, §14).
+5. A 2xx delivery completes the submission path (task budget decrement + `earn_task` visible in the ledger check, §11).
 
 Scope note: repository CI remains the authority for failure/424 and concurrency semantics; this deployed smoke proves **real outbound network reachability only**. No new PostAPI mechanism is created.
 
@@ -145,7 +147,7 @@ Non-destructive/controlled path:
 1. Owner lists products (`GET /api/owner/store/products`).
 2. Exercise a redemption for a low-value **test product** (`POST /api/owner/store/redemptions`) in the acceptance environment.
 3. Admin observes/processes the test redemption (`GET /api/admin/store/redemptions`, then approve or reject).
-4. Economic results checked against the Credits ledger (§14): `spend_redemption` (and `refund_redemption` if rejected) rows appear; balance moves accordingly.
+4. Economic results checked against the Credits ledger (§11): `spend_redemption` (and `refund_redemption` if rejected) rows appear; balance moves accordingly.
 
 Only existing store state transitions are used; none are invented.
 
