@@ -104,7 +104,7 @@ func Load() (*Config, error) {
 		DBUser:    envStr("DB_USER", "kungfu_app"),
 		DBPass:    envStr("DB_PASS", ""),
 		DBPort:    envInt("DB_PORT", 5432),
-		DBSSLMode: envStr("DB_SSLMODE", "disable"),
+		DBSSLMode: envStr("DB_SSLMODE", ""),
 
 		APIVersion: version.Get(),
 		KeyPrefix:  "kf_live_",
@@ -147,6 +147,19 @@ func Load() (*Config, error) {
 	// configuration gate (operators should use `openssl rand -hex 32`).
 	if len(cfg.SessionSecret) < 32 {
 		return nil, fmt.Errorf("SESSION_SECRET must be at least 32 bytes for HMAC signing; generate one with `openssl rand -hex 32`")
+	}
+
+	// S6.6: DB_SSLMODE has NO implicit default — the transport posture
+	// must be an explicit, conscious choice. Only the four approved
+	// modes pass; allow/prefer (plaintext-downgrade paths), empty, and
+	// unknown values fail closed before any database open.
+	switch cfg.DBSSLMode {
+	case "disable", "require", "verify-ca", "verify-full":
+	default:
+		if cfg.DBSSLMode == "" {
+			return nil, fmt.Errorf("DB_SSLMODE environment variable is required (disable | require | verify-ca | verify-full)")
+		}
+		return nil, fmt.Errorf("DB_SSLMODE value %q is not supported (allowed: disable | require | verify-ca | verify-full)", cfg.DBSSLMode)
 	}
 
 	if err := loadCreemConfig(cfg); err != nil {

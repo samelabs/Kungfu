@@ -8,6 +8,7 @@ func creemBase(t *testing.T) {
 	t.Helper()
 	t.Setenv("DB_PASS", "pw")
 	t.Setenv("SESSION_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("DB_SSLMODE", "disable")
 }
 
 func setFullCreem(t *testing.T, packagesJSON string) {

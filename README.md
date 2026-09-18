@@ -38,7 +38,7 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=your_password SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
+DB_PASS=your_password SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
 ### Configuration
@@ -53,7 +53,7 @@ All configuration is via environment variables. No config files, nothing stored 
 | `DB_PORT` | `5432` | | PostgreSQL port |
 | `DB_NAME` | `kungfu_md` | | Database name |
 | `DB_USER` | `kungfu_app` | | Database user |
-| `DB_SSLMODE` | `disable` | | PostgreSQL SSL mode |
+| `DB_SSLMODE` | — | **yes** | PostgreSQL TLS mode: `disable` / `require` / `verify-ca` / `verify-full` (no default). `disable` is only for trusted local development/CI PostgreSQL — it is not production-safe. `require` forces encryption but does not verify endpoint identity; `verify-ca` verifies the CA without hostname checks; `verify-full` (preferred in production where available) verifies certificate AND hostname against MITM. Invalid or missing values fail startup. |
 | `LISTEN_ADDR` | `127.0.0.1:8090` | | Listen address |
 | `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs/IPs. Default trusts loopback direct peers only. When TLS terminates at an upstream reverse proxy, configure that proxy's direct CIDR — forwarded client IP and `X-Forwarded-Proto` (cookie Secure flag) are honored ONLY from a trusted direct peer. Any invalid entry fails startup. |
 | `DEBUG_MODE` | `false` | | Verbose logging |
@@ -186,7 +186,7 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=パスワード SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
+DB_PASS=パスワード SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
 設定は環境変数のみで行います。`DB_PASS` と `SESSION_SECRET`（32バイト以上、`openssl rand -hex 32` 推奨）が必須です。すべての設定項目は英語版の Configuration を参照してください。
@@ -244,7 +244,7 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=密码 SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
+DB_PASS=密码 SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
 所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS` 和 `SESSION_SECRET`（至少 32 字节，推荐 `openssl rand -hex 32`）为必填项。完整配置项请参见英文版 Configuration。
@@ -302,7 +302,7 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=비밀번호 SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
+DB_PASS=비밀번호 SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
 모든 설정은 환경 변수로 처리됩니다. `DB_PASS`와 `SESSION_SECRET`(32바이트 이상, `openssl rand -hex 32` 권장)은 필수입니다. 전체 설정 항목은 영어판 Configuration을 참조하세요.

@@ -12,6 +12,7 @@ func s63Base(t *testing.T) {
 	t.Helper()
 	t.Setenv("DB_PASS", "pw")
 	t.Setenv("SESSION_SECRET", s63Secret)
+	t.Setenv("DB_SSLMODE", "disable")
 }
 
 func TestS63InvalidTrustedProxyCIDRFailsClosed(t *testing.T) {

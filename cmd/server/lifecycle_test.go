@@ -319,6 +319,7 @@ func TestR1MissingSessionSecretFailsStartup(t *testing.T) {
 	var loadErr error
 	withEnv(t, map[string]string{
 		"DB_PASS":        "x",
+		"DB_SSLMODE":     "disable",
 		"SESSION_SECRET": "",
 	}, func() {
 		_, loadErr = config.Load()
@@ -332,6 +333,7 @@ func TestR1MalformedConfigFailsStartup(t *testing.T) {
 	var loadErr error
 	withEnv(t, map[string]string{
 		"DB_PASS":             "x",
+		"DB_SSLMODE":          "disable",
 		"SESSION_SECRET":      "0123456789abcdef0123456789abcdef",
 		"CREEM_PACKAGES_JSON": "{not json",
 	}, func() {
@@ -347,6 +349,7 @@ func TestR1ValidConfigLoads(t *testing.T) {
 	var cfg *config.Config
 	withEnv(t, map[string]string{
 		"DB_PASS":        "x",
+		"DB_SSLMODE":     "disable",
 		"SESSION_SECRET": "0123456789abcdef0123456789abcdef",
 	}, func() {
 		cfg, loadErr = config.Load()
