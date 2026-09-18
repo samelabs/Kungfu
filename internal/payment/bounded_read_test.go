@@ -7,6 +7,7 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,10 +30,23 @@ func r22Client(base string) *CreemClient {
 // -- GetProduct oversized 2xx: fail closed, no definitive facts --
 
 func TestR22GetProductOversizedResponse(t *testing.T) {
-	// a 2xx body >1 MiB whose first 1 MiB looks like a plausible
-	// product JSON prefix
-	prefix := `{"id":"prod_r22","name":"`
-	huge := prefix + strings.Repeat("x", 1<<20) + `"}`
+	// body: first EXACT 1 MiB is a COMPLETE valid Creem product JSON
+	// (padded with legal trailing whitespace), then overflow bytes.
+	// The OLD io.LimitReader(1MiB) implementation would return the
+	// first 1 MiB — a perfectly parseable product — and ACCEPT it.
+	// The strict reader must reject on true length > cap.
+	product := `{"id":"prod_r22","name":"Starter","billing_type":"onetime","status":"active","mode":"test","price":500,"currency":"USD"}`
+	padded := product + strings.Repeat("\n", creemResponseCap-len(product))
+	huge := padded + `{"overflow":true}`
+
+	// self-verifying fixture invariant (not a comment claim)
+	if !json.Valid([]byte(padded)) {
+		t.Fatal("fixture broken: first 1 MiB is not valid JSON — old-implementation proof invalid")
+	}
+	if len(huge) <= creemResponseCap {
+		t.Fatal("fixture broken: body must exceed the cap")
+	}
+
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
@@ -44,7 +58,7 @@ func TestR22GetProductOversizedResponse(t *testing.T) {
 	start := time.Now()
 	_, err := client.GetProduct(context.Background(), "prod_r22")
 	if err == nil {
-		t.Fatal("oversized GetProduct response must fail closed")
+		t.Fatal("oversized GetProduct response must fail closed (old LimitReader would have accepted it)")
 	}
 	var def *ErrCreemDefinitive
 	if errors.As(err, &def) {
@@ -52,6 +66,53 @@ func TestR22GetProductOversizedResponse(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("not bounded")
+	}
+}
+
+// ---- §4: definitive-status ordering — read failure beats HTTP 400 ----
+// An untrusted/incomplete body must NEVER become a definitive fact
+// merely because the status is 400.
+
+func TestR22Definitive400WithOversizeIsAmbiguity(t *testing.T) {
+	// HTTP 400 whose body's first 1 MiB is complete valid provider
+	// error JSON + whitespace, then overflow.
+	errBody := `{"error":{"type":"invalid_request","message":"bad"}}`
+	padded := errBody + strings.Repeat("\n", creemResponseCap-len(errBody))
+	huge := padded + `{"overflow":true}`
+	if !json.Valid([]byte(padded)) || len(huge) <= creemResponseCap {
+		t.Fatal("fixture broken")
+	}
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(huge))
+	}))
+	defer fake.Close()
+
+	client := r22Client(fake.URL)
+	_, err := client.doRaw(context.Background(), http.MethodGet, "/v1/products/prod_r22", nil)
+	if err == nil {
+		t.Fatal("400 + oversize must error")
+	}
+	var def *ErrCreemDefinitive
+	if errors.As(err, &def) {
+		t.Fatalf("400 + oversize is I/O ambiguity, not ErrCreemDefinitive: %v", err)
+	}
+}
+
+func TestR22Definitive400WithMidStreamReadErrorIsAmbiguity(t *testing.T) {
+	// HTTP 400 + partial valid-looking JSON + non-EOF read error:
+	// read failure happens BEFORE status classification.
+	client := r22Client("http://unused.invalid")
+	client.http.Transport = faultingTransport{status: 400}
+
+	_, err := client.doRaw(context.Background(), http.MethodGet, "/v1/products/prod_r22", nil)
+	if err == nil {
+		t.Fatal("400 + mid-stream read error must error")
+	}
+	var def *ErrCreemDefinitive
+	if errors.As(err, &def) {
+		t.Fatalf("400 + read error is I/O ambiguity, not ErrCreemDefinitive: %v", err)
 	}
 }
 
@@ -114,13 +175,17 @@ func TestR22CreemMidStreamReadError(t *testing.T) {
 	}
 }
 
-// faultingTransport serves a 2xx response whose body errors mid-stream
-// after delivering a valid-looking JSON prefix.
-type faultingTransport struct{}
+// faultingTransport serves a response whose body errors mid-stream
+// after delivering a valid-looking JSON prefix. status defaults to 200.
+type faultingTransport struct{ status int }
 
-func (faultingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (ft faultingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	status := ft.status
+	if status == 0 {
+		status = 200
+	}
 	return &http.Response{
-		StatusCode: 200,
+		StatusCode: status,
 		Header:     make(http.Header),
 		Body:       &faultingBody{},
 	}, nil
@@ -165,9 +230,15 @@ func TestR22CreateCheckoutOversizedKeepsPaymentPending(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":"prod_r22","name":"Starter","billing_type":"onetime","status":"active","mode":"test","price":500,"currency":"USD"}`))
 			return
 		}
-		// checkout creation: a 2xx body strictly larger than 1 MiB
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`{"id":"ch_","checkout_url":"https://x/` + strings.Repeat("y", 1<<20) + `"}"`))
+		// checkout creation: HTTP 400 with a body whose first 1 MiB is a
+		// COMPLETE valid provider-error JSON (+whitespace), then overflow.
+		// Old: LimitReader truncation + 400 -> ErrCreemDefinitive ->
+		// FailPayment. New: oversize detected first -> ambiguity ->
+		// payment stays pending.
+		errBody := `{"error":{"type":"invalid_request","message":"bad"}}`
+		padded := errBody + strings.Repeat("\n", creemResponseCap-len(errBody))
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(padded + `{"overflow":true}`))
 	}))
 	defer fake.Close()
 
@@ -188,25 +259,30 @@ func TestR22CreateCheckoutOversizedKeepsPaymentPending(t *testing.T) {
 		t.Fatalf("oversized CreateCheckout must not succeed: %+v", res)
 	}
 	ae, ok := IsAppErrR22(err)
-	if !ok || ae.HTTPCode != 502 {
-		t.Fatalf("expected 502 provider-unavailable, got %v", err)
+	if !ok || ae.HTTPCode != 502 || ae.Code != "PAYMENT_PROVIDER_UNAVAILABLE" {
+		t.Fatalf("expected 502 PAYMENT_PROVIDER_UNAVAILABLE, got %+v", err)
 	}
 
-	// the pending payment exists and STAYS pending
+	// the pending payment exists, STAYS pending, and did NOT fail
+	// (the old 400-definitive path would have marked it failed)
 	var status string
 	var providerOrder *string
-	var grants int
+	var failed, grants int
 	_ = pool.QueryRow(ctx,
 		`SELECT status, provider_order_id FROM tb_payments WHERE bot_id=$1 ORDER BY id DESC LIMIT 1`,
 		botID).Scan(&status, &providerOrder)
 	if status != "pending" {
-		t.Fatalf("payment status = %s, want pending", status)
+		t.Fatalf("payment status = %s, want pending (old definitive-400 path would fail it)", status)
+	}
+	_ = pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM tb_payments WHERE bot_id=$1 AND status='failed'`, botID).Scan(&failed)
+	if failed != 0 {
+		t.Fatalf("failed payments = %d — must remain pending, not failed", failed)
 	}
 	if providerOrder != nil {
 		t.Fatal("provider order was bound on an oversized checkout")
 	}
-	_ = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='grant_payment'`, botID).Scan(&grants)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='grant_payment'`, botID).Scan(&grants)
 	if grants != 0 {
 		t.Fatalf("grant_payment rows = %d", grants)
 	}

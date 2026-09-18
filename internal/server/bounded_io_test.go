@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -37,17 +38,53 @@ func TestR22BoundedReaderBoundary(t *testing.T) {
 	}
 }
 
-// buildOversizedJSON returns a body whose FIRST cap bytes are a valid
-// JSON object (padded with legal trailing whitespace INSIDE the JSON
-// text), followed by at least one extra byte — the exact scenario
-// silent truncation used to accept.
-func buildOversizedJSON(cap int, prefix string) string {
-	pad := int(cap) - len(prefix) - 2 // trailing whitespace inside cap
-	if pad < 0 {
-		panic("prefix larger than cap")
+// -- unknown-length / chunked: the real read path is the authority --
+// Content-Length = -1 + chunked TransferEncoding must STILL reject an
+// oversized body — proving no Content-Length shortcut exists.
+
+func TestR22OversizedUnknownLengthRejected(t *testing.T) {
+	const cap = 1 << 16
+	body := strings.NewReader(`{"a":"` + strings.Repeat("x", cap) + `"}`)
+
+	req := httptest.NewRequest("POST", "/x", body)
+	req.ContentLength = -1 // unknown length
+	req.TransferEncoding = []string{"chunked"}
+
+	if _, err := readBoundedRequestBody(req, cap); err == nil {
+		t.Fatal("oversized body with unknown Content-Length must be rejected by the real read path")
 	}
-	body := prefix + strings.Repeat("\n", pad) // still valid JSON at exactly cap
-	return body + `{"overflow":true}`          // bytes beyond the cap
+}
+
+// buildOversizedJSON returns a body whose FIRST cap bytes are EXACTLY
+// a valid JSON object (prefix + trailing whitespace padding), with at
+// least one overflow byte appended — the exact scenario silent
+// truncation used to accept. The caller MUST assert the invariant via
+// assertExactCapJSON (self-verifying proof, not a comment claim).
+func buildOversizedJSON(t *testing.T, cap int, prefix string) string {
+	t.Helper()
+	if len(prefix) >= cap {
+		t.Fatalf("prefix %d >= cap %d", len(prefix), cap)
+	}
+	// prefix + trailing whitespace must be EXACTLY cap bytes and valid
+	// JSON — the truncated prefix the old LimitReader(cap) would have
+	// handed to json.Unmarshal as if it were the complete body.
+	padded := prefix + strings.Repeat("\n", cap-len(prefix))
+	body := padded + `{"overflow":true}`
+	assertExactCapJSON(t, body, cap)
+	return body
+}
+
+// assertExactCapJSON proves: first cap bytes are complete valid JSON,
+// and the full body strictly exceeds the cap.
+func assertExactCapJSON(t *testing.T, body string, cap int) {
+	t.Helper()
+	first := body[:cap]
+	if !json.Valid([]byte(first)) {
+		t.Fatalf("fixture broken: first %d bytes are NOT valid JSON — proof invalid", cap)
+	}
+	if len(body) <= cap {
+		t.Fatalf("fixture broken: body len %d must exceed cap %d", len(body), cap)
+	}
 }
 
 // -- A. Store Redeem oversized: balance/redemption/ledger untouched --
@@ -79,7 +116,7 @@ func TestR22StoreRedeemOversizedFailClosed(t *testing.T) {
 	_ = pool.QueryRow(ctxBG2(), "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&balanceBefore)
 
 	// first 1 MiB is a VALID redeem JSON (whitespace-padded), then extra
-	body := buildOversizedJSON(1<<20,
+	body := buildOversizedJSON(t, 1<<20,
 		fmt.Sprintf(`{"product_code":%q,"request_key":"rk-oversize-%s"}`, prodCode, suffix))
 
 	req := httptest.NewRequest("POST", "/api/owner/store/redemptions", strings.NewReader(body))
@@ -153,8 +190,8 @@ func TestR22CheckoutOversizedFailClosed(t *testing.T) {
 	_ = pool.QueryRow(ctxBG2(),
 		"SELECT COUNT(*) FROM tb_payments WHERE bot_id=$1", botID).Scan(&paymentsBefore)
 
-	// first 64 KiB valid checkout JSON, then extra bytes
-	body := buildOversizedJSON(1<<16, `{"package":"starter"}`)
+	// first 64 KiB is EXACTLY valid checkout JSON, then overflow
+	body := buildOversizedJSON(t, 1<<16, `{"package":"starter"}`)
 
 	req := httptest.NewRequest("POST", "/api/owner/payments/checkout", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -177,6 +214,9 @@ func TestR22CheckoutOversizedFailClosed(t *testing.T) {
 }
 
 // -- C. Webhook oversized: INVALID_BODY BEFORE signature verification --
+// Attributable proof only: no whole-table counts (packages share the
+// CI database). The body's first 1 MiB is a valid event JSON with a
+// test-unique event id marker; overflow follows the cap.
 
 func TestR22WebhookOversizedFailsBeforeSignature(t *testing.T) {
 	pool, err := pg.NewPool(testDatabaseURL(t))
@@ -193,16 +233,16 @@ func TestR22WebhookOversizedFailsBeforeSignature(t *testing.T) {
 	s.Config.CreemWebhookSecret = "whsec"
 	router := s.buildRouter()
 
-	// >1 MiB raw body with a VALID signature would still be rejected
-	// on body size FIRST — so send it with NO signature header: if the
-	// handler answered 401 INVALID_SIGNATURE it read the body fine and
-	// skipped our gate; it must answer 400 INVALID_BODY instead.
-	inner := buildOversizedJSON(1<<20, `{"id":"evt_1","event_type":"checkout.completed"}`)
+	// test-unique event id: the attributable marker
+	eventID := "evt_r22_" + fmt.Sprint(time.Now().UnixNano())
+	inner := buildOversizedJSON(t, 1<<20,
+		fmt.Sprintf(`{"id":%q,"event_type":"checkout.completed"}`, eventID))
 
-	var paymentsBefore, adjustmentsBefore int
-	_ = pool.QueryRow(ctxBG2(), "SELECT COUNT(*) FROM tb_payments").Scan(&paymentsBefore)
-	_ = pool.QueryRow(ctxBG2(), "SELECT COUNT(*) FROM tb_payment_adjustments").Scan(&adjustmentsBefore)
+	// baseline: adjustments attributable to THIS event (must be 0)
+	adjBefore := countR22Adjustments(t, pool, eventID)
 
+	// NO signature header: if the handler answered 401 it read the
+	// body fine and skipped our gate; it must answer 400 INVALID_BODY
 	req := httptest.NewRequest("POST", "/api/webhooks/creem", strings.NewReader(inner))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -212,12 +252,24 @@ func TestR22WebhookOversizedFailsBeforeSignature(t *testing.T) {
 		t.Fatalf("oversized webhook = %d %s, want 400 INVALID_BODY (before signature)",
 			rec.Code, rec.Body.String())
 	}
-	var paymentsAfter, adjustmentsAfter int
-	_ = pool.QueryRow(ctxBG2(), "SELECT COUNT(*) FROM tb_payments").Scan(&paymentsAfter)
-	_ = pool.QueryRow(ctxBG2(), "SELECT COUNT(*) FROM tb_payment_adjustments").Scan(&adjustmentsAfter)
-	if paymentsAfter != paymentsBefore || adjustmentsAfter != adjustmentsBefore {
-		t.Fatal("webhook mutation happened on oversized body")
+	if adjBefore != 0 {
+		t.Fatalf("baseline marker adjustments = %d", adjBefore)
 	}
+	if after := countR22Adjustments(t, pool, eventID); after != 0 {
+		t.Fatalf("adjustment rows created for %s: %d", eventID, after)
+	}
+}
+
+func countR22Adjustments(t *testing.T, pool *pg.Pool, eventID string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(ctxBG2(),
+		`SELECT COUNT(*) FROM tb_payment_adjustments WHERE provider='creem' AND provider_event_id=$1`,
+		eventID).Scan(&n); err != nil {
+		// table absent in this schema generation => zero attributable rows
+		return 0
+	}
+	return n
 }
 
 // -- helpers --
