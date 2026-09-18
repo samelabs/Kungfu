@@ -128,6 +128,15 @@ func Load() (*Config, error) {
 	if cfg.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET environment variable is required")
 	}
+	// S6.2: fail closed when SESSION_SECRET is too short to serve as
+	// the HMAC key for Owner session signing and Admin CSRF
+	// derivation. The check is on the exact raw env bytes — no trim,
+	// no normalization, no re-encoding; the accepted value is stored
+	// verbatim. Length cannot prove entropy; 32 bytes is the minimum
+	// configuration gate (operators should use `openssl rand -hex 32`).
+	if len(cfg.SessionSecret) < 32 {
+		return nil, fmt.Errorf("SESSION_SECRET must be at least 32 bytes for HMAC signing; generate one with `openssl rand -hex 32`")
+	}
 
 	if err := loadCreemConfig(cfg); err != nil {
 		return nil, err

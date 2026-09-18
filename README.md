@@ -38,7 +38,7 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=your_password SESSION_SECRET=your_secret ./kungfu-server
+DB_PASS=your_password SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
 ```
 
 ### Configuration
@@ -48,7 +48,7 @@ All configuration is via environment variables. No config files, nothing stored 
 | Variable | Default | Required | Description |
 |---|---|---|---|
 | `DB_PASS` | — | **yes** | Database password |
-| `SESSION_SECRET` | — | **yes** | HMAC signing secret for owner cookies |
+| `SESSION_SECRET` | — | **yes** | HMAC signing secret for owner cookies and admin CSRF; minimum 32 bytes, cryptographically random (`openssl rand -hex 32`). No built-in, default, or generated secret — short values fail startup. |
 | `DB_HOST` | `localhost` | | PostgreSQL host |
 | `DB_PORT` | `5432` | | PostgreSQL port |
 | `DB_NAME` | `kungfu_md` | | Database name |
@@ -186,10 +186,10 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=パスワード SESSION_SECRET=シークレット ./kungfu-server
+DB_PASS=パスワード SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
 ```
 
-設定は環境変数のみで行います。`DB_PASS` と `SESSION_SECRET` が必須です。すべての設定項目は英語版の Configuration を参照してください。
+設定は環境変数のみで行います。`DB_PASS` と `SESSION_SECRET`（32バイト以上、`openssl rand -hex 32` 推奨）が必須です。すべての設定項目は英語版の Configuration を参照してください。
 
 稼働確認: `GET /healthz`（プロセス生存、認証不要）、`GET /readyz`（PostgreSQL 可用性、認証不要）。`GET /api/ping` は `X-Bot-Key` 付きの業務エンドポイントであり、インフラ health ではありません。
 
@@ -244,10 +244,10 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=密码 SESSION_SECRET=密钥 ./kungfu-server
+DB_PASS=密码 SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
 ```
 
-所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS` 和 `SESSION_SECRET` 为必填项。完整配置项请参见英文版 Configuration。
+所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS` 和 `SESSION_SECRET`（至少 32 字节，推荐 `openssl rand -hex 32`）为必填项。完整配置项请参见英文版 Configuration。
 
 运行探测：`GET /healthz`（进程存活，无需鉴权）、`GET /readyz`（PostgreSQL 就绪，无需鉴权）。`GET /api/ping` 是需要 `X-Bot-Key` 的业务接口，不是基础设施 health。
 
@@ -302,10 +302,10 @@ createdb kungfu_md
 for f in migrations/*.sql; do
   psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
 done
-DB_PASS=비밀번호 SESSION_SECRET=시크릿 ./kungfu-server
+DB_PASS=비밀번호 SESSION_SECRET="$(openssl rand -hex 32)" ./kungfu-server
 ```
 
-모든 설정은 환경 변수로 처리됩니다. `DB_PASS`와 `SESSION_SECRET`은 필수입니다. 전체 설정 항목은 영어판 Configuration을 참조하세요.
+모든 설정은 환경 변수로 처리됩니다. `DB_PASS`와 `SESSION_SECRET`(32바이트 이상, `openssl rand -hex 32` 권장)은 필수입니다. 전체 설정 항목은 영어판 Configuration을 참조하세요.
 
 상태 확인: `GET /healthz`(프로세스 liveness, 인증 없음), `GET /readyz`(PostgreSQL readiness, 인증 없음). `GET /api/ping`은 `X-Bot-Key`가 필요한 업무 API이며 인프라 health가 아닙니다.
 

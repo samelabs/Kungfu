@@ -332,7 +332,7 @@ func TestR1MalformedConfigFailsStartup(t *testing.T) {
 	var loadErr error
 	withEnv(t, map[string]string{
 		"DB_PASS":             "x",
-		"SESSION_SECRET":      "s",
+		"SESSION_SECRET":      "0123456789abcdef0123456789abcdef",
 		"CREEM_PACKAGES_JSON": "{not json",
 	}, func() {
 		_, loadErr = config.Load()
@@ -347,14 +347,14 @@ func TestR1ValidConfigLoads(t *testing.T) {
 	var cfg *config.Config
 	withEnv(t, map[string]string{
 		"DB_PASS":        "x",
-		"SESSION_SECRET": "s",
+		"SESSION_SECRET": "0123456789abcdef0123456789abcdef",
 	}, func() {
 		cfg, loadErr = config.Load()
 	})
 	if loadErr != nil {
 		t.Fatalf("valid config must load: %v", loadErr)
 	}
-	if cfg.SessionSecret != "s" || cfg.ListenAddr == "" {
+	if cfg.SessionSecret != "0123456789abcdef0123456789abcdef" || cfg.ListenAddr == "" {
 		t.Fatal("config values missing")
 	}
 }
