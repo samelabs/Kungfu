@@ -189,7 +189,7 @@ done
 DB_PASS=パスワード SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
-設定は環境変数のみで行います。`DB_PASS` と `SESSION_SECRET`（32バイト以上、`openssl rand -hex 32` 推奨）が必須です。すべての設定項目は英語版の Configuration を参照してください。
+設定は環境変数のみで行います。`DB_PASS`、`SESSION_SECRET`（32バイト以上、`openssl rand -hex 32` 推奨）、`DB_SSLMODE` が必須です。Quick Start の `DB_SSLMODE=disable` は信頼されたローカル/開発用 PostgreSQL にのみ使用できます。本番の PostgreSQL TLS 方針は英語版の Configuration を参照してください。他の設定項目も英語版の Configuration を参照してください。
 
 稼働確認: `GET /healthz`（プロセス生存、認証不要）、`GET /readyz`（PostgreSQL 可用性、認証不要）。`GET /api/ping` は `X-Bot-Key` 付きの業務エンドポイントであり、インフラ health ではありません。
 
@@ -247,7 +247,7 @@ done
 DB_PASS=密码 SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
-所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS` 和 `SESSION_SECRET`（至少 32 字节，推荐 `openssl rand -hex 32`）为必填项。完整配置项请参见英文版 Configuration。
+所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS`、`SESSION_SECRET`（至少 32 字节，推荐 `openssl rand -hex 32`）、`DB_SSLMODE` 均为必填项。快速开始中的 `DB_SSLMODE=disable` 仅用于可信的本地/开发 PostgreSQL。生产环境的 PostgreSQL TLS 配置参见英文版 Configuration。完整配置项请参见英文版 Configuration。
 
 运行探测：`GET /healthz`（进程存活，无需鉴权）、`GET /readyz`（PostgreSQL 就绪，无需鉴权）。`GET /api/ping` 是需要 `X-Bot-Key` 的业务接口，不是基础设施 health。
 
@@ -305,7 +305,7 @@ done
 DB_PASS=비밀번호 SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu-server
 ```
 
-모든 설정은 환경 변수로 처리됩니다. `DB_PASS`와 `SESSION_SECRET`(32바이트 이상, `openssl rand -hex 32` 권장)은 필수입니다. 전체 설정 항목은 영어판 Configuration을 참조하세요.
+모든 설정은 환경 변수로 처리됩니다. `DB_PASS`, `SESSION_SECRET`(32바이트 이상, `openssl rand -hex 32` 권장), `DB_SSLMODE`가 필수입니다. Quick Start의 `DB_SSLMODE=disable`은 신뢰할 수 있는 로컬/개발용 PostgreSQL에만 사용할 수 있습니다. 프로덕션 PostgreSQL TLS 구성은 영어판 Configuration을 참조하세요. 전체 설정 항목도 영어판 Configuration을 참조하세요.
 
 상태 확인: `GET /healthz`(프로세스 liveness, 인증 없음), `GET /readyz`(PostgreSQL readiness, 인증 없음). `GET /api/ping`은 `X-Bot-Key`가 필요한 업무 API이며 인프라 health가 아닙니다.
 
