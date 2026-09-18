@@ -71,3 +71,60 @@ jobs:
 
       - name: go build
         run: go build ./...
+
+      - name: Container image build
+        run: |
+          docker build -t "kungfu-ci:${GITHUB_SHA}" .
+
+      - name: Container image structural contract
+        run: |
+          set -euo pipefail
+          IMG="kungfu-ci:${GITHUB_SHA}"
+          USER_VAL=$(docker inspect -f '{{.Config.User}}' "$IMG")
+          ENTRY=$(docker inspect -f '{{json .Config.Entrypoint}}' "$IMG")
+          EXPOSE=$(docker inspect -f '{{json .Config.ExposedPorts}}' "$IMG")
+          ENV_JSON=$(docker inspect -f '{{json .Config.Env}}' "$IMG")
+          echo "User=$USER_VAL Entrypoint=$ENTRY ExposedPorts=$EXPOSE"
+          case "$USER_VAL" in
+            ""|root|0|0:0) echo "image must run non-root, got User=$USER_VAL"; exit 1 ;;
+          esac
+          test "$ENTRY" = '["/usr/local/bin/kungfu-server"]'
+          echo "$EXPOSE" | grep -q '"8090/tcp"'
+          echo "$ENV_JSON" | grep -q '"LISTEN_ADDR=0.0.0.0:8090"'
+          docker run --rm --entrypoint /usr/local/bin/kungfu-adminctl "$IMG" --help
+
+      - name: Container smoke (healthz + readyz + SIGTERM)
+        run: |
+          set -euo pipefail
+          IMG="kungfu-ci:${GITHUB_SHA}"
+          NAME="kungfu-smoke-${GITHUB_SHA}"
+          cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name "$NAME" --network host \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_NAME=kungfu_md \
+            -e DB_USER=kungfu_ci \
+            -e DB_PASS="$DB_PASS" \
+            -e DB_SSLMODE=disable \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            "$IMG"
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8090/healthz >/tmp/healthz.body \
+               && curl -sf http://127.0.0.1:8090/readyz >/tmp/readyz.body; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            echo "container did not become healthy"
+            docker logs "$NAME" || true
+            exit 1
+          fi
+          grep -q '"status": "ok"' /tmp/healthz.body
+          grep -q '"status": "ready"' /tmp/readyz.body
+          docker stop -t 15 "$NAME"
+          trap - EXIT
+          docker rm "$NAME" >/dev/null

@@ -1,0 +1,14 @@
+.git
+.env
+*.env
+**/*.env
+kungfu-server
+kungfu-adminctl
+adminctl
+Dockerfile.dev
+compose.dev.yaml
+compose.yaml
+docker-compose.yml
+.DS_Store
+tmp/
+*.test

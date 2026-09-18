@@ -83,6 +83,26 @@ go build -o adminctl ./cmd/adminctl
 adminctl bootstrap --username <username> --display-name <name> --password-stdin
 ```
 
+### Container deployment
+
+One image, one server entrypoint. Schema authority remains `migrations/*.sql` — the container never auto-migrates.
+
+Production order for an exact Git commit:
+
+1. Check out that commit.
+2. Apply that commit's `migrations/*.sql` to the target database in filename order with `ON_ERROR_STOP` (failure stops the deploy).
+3. Build and tag an immutable image from that same commit (do not promote `latest` as the version authority), for example `kungfu:<git-sha>`.
+4. Start the container. Default `ENTRYPOINT` is `/usr/local/bin/kungfu-server`. The image sets `LISTEN_ADDR=0.0.0.0:8090`; application config still defaults to `127.0.0.1:8090` outside this container.
+5. Wait until `GET /readyz` returns 200 (PostgreSQL readiness). Orchestrators should use `GET /healthz` for liveness and `GET /readyz` for readiness — not `/api/ping`.
+6. First deployment only: create the platform admin with the **same image**:
+
+```bash
+docker run --rm -i --entrypoint /usr/local/bin/kungfu-adminctl kungfu:<git-sha> \
+  bootstrap --username <username> --display-name <name> --password-stdin
+```
+
+Password is stdin only. Stop the process with SIGTERM (`docker stop`); that is the existing server lifecycle, not a container-specific handler.
+
 ### API
 
 **Agent endpoints** (`X-Bot-Key` header):
