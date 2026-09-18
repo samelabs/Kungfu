@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -46,9 +47,12 @@ type Config struct {
 
 	// PostAPI HTTP client timeouts
 
-	// Trusted proxy CIDRs for client IP extraction (comma-separated env var)
-	// When set, X-Forwarded-For is only honored from these IPs.
-	TrustedProxyCIDRs []string
+	// Trusted proxy networks, parsed ONCE at Config.Load from the
+	// TRUSTED_PROXY_CIDRS comma-separated env var. The direct TCP peer
+	// must belong to one of these for forwarded request metadata
+	// (X-Forwarded-For / X-Forwarded-Proto) to be honored. Any invalid
+	// non-empty entry fails Load (no silent drop, no default fallback).
+	TrustedProxyCIDRs []*net.IPNet
 
 	// Creem fixed-package payment runtime. All-or-nothing: every key
 	// unset → disabled (server still boots); any subset → Load fails
@@ -117,8 +121,6 @@ func Load() (*Config, error) {
 		ListenAddr:    envStr("LISTEN_ADDR", "127.0.0.1:8090"),
 		SessionSecret: envStr("SESSION_SECRET", ""),
 
-		TrustedProxyCIDRs: parseCIDRList(envStr("TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")),
-
 		RateLimits: defaultRateLimits(),
 	}
 
@@ -128,6 +130,15 @@ func Load() (*Config, error) {
 	if cfg.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET environment variable is required")
 	}
+
+	// S6.3: parse trusted proxies ONCE, fail closed on any invalid
+	// non-empty entry (a bare IP stays legal as a /32 or /128 host
+	// network, preserving the historical contract).
+	trustedCIDRs, err := parseTrustedProxyCIDRs(envStr("TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.TrustedProxyCIDRs = trustedCIDRs
 	// S6.2: fail closed when SESSION_SECRET is too short to serve as
 	// the HMAC key for Owner session signing and Admin CSRF
 	// derivation. The check is on the exact raw env bytes — no trim,
@@ -253,17 +264,37 @@ func envInt(key string, def int) int {
 	return def
 }
 
-func parseCIDRList(s string) []string {
+// parseTrustedProxyCIDRs parses the TRUSTED_PROXY_CIDRS env value into
+// typed networks. Every non-empty entry must be a valid CIDR or a
+// bare literal IPv4/IPv6 address (treated as /32 or /128); anything
+// else is a configuration error — invalid entries are never silently
+// dropped and never fall back to defaults.
+func parseTrustedProxyCIDRs(s string) ([]*net.IPNet, error) {
 	if s == "" {
-		return nil
+		return nil, nil
 	}
-	parts := strings.Split(s, ",")
-	var result []string
-	for _, p := range parts {
-		c := strings.TrimSpace(p)
-		if c != "" {
-			result = append(result, c)
+	var result []*net.IPNet
+	for _, part := range strings.Split(s, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
 		}
+		if !strings.Contains(entry, "/") {
+			ip := net.ParseIP(entry)
+			if ip == nil {
+				return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS entry %q is not a valid IP or CIDR", entry)
+			}
+			if ip.To4() != nil {
+				entry += "/32"
+			} else {
+				entry += "/128"
+			}
+		}
+		_, cidr, err := net.ParseCIDR(entry)
+		if err != nil {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS entry %q is not a valid IP or CIDR", entry)
+		}
+		result = append(result, cidr)
 	}
-	return result
+	return result, nil
 }

@@ -51,6 +51,43 @@ func GetClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	return remoteIP
 }
 
+// directPeerIP extracts the parsed direct TCP peer address from
+// RemoteAddr, or nil when it cannot be parsed.
+func directPeerIP(r *http.Request) net.IP {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return net.ParseIP(host)
+}
+
+// IsHTTPS is the ONE canonical HTTPS authority for Owner/Admin cookie
+// lifecycle decisions:
+//
+//	A. r.TLS != nil                              -> true (unconditional)
+//	B. trusted direct peer + single-token
+//	   X-Forwarded-Proto "https" (case-insens.) -> true
+//	C. anything else (untrusted peer, malformed
+//	   or multi-value forwarded proto)           -> false
+//
+// It reuses the same direct-peer trust predicate as GetClientIP, so
+// an untrusted peer can never make cookies Secure by spoofing
+// X-Forwarded-Proto.
+func IsHTTPS(r *http.Request, trustedCIDRs []*net.IPNet) bool {
+	if r.TLS != nil {
+		return true
+	}
+	ip := directPeerIP(r)
+	if ip == nil {
+		return false
+	}
+	if !isTrustedProxy(ip.String(), trustedCIDRs) {
+		return false
+	}
+	proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	return strings.EqualFold(proto, "https")
+}
+
 func isTrustedProxy(ip string, cidrs []*net.IPNet) bool {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
@@ -62,32 +99,6 @@ func isTrustedProxy(ip string, cidrs []*net.IPNet) bool {
 		}
 	}
 	return false
-}
-
-// ParseTrustedCIDRs converts a list of CIDR strings into net.IPNet.
-// Invalid entries are silently skipped.
-func ParseTrustedCIDRs(cidrs []string) []*net.IPNet {
-	var result []*net.IPNet
-	for _, s := range cidrs {
-		// If no /prefix, treat as /32 (IPv4) or /128 (IPv6)
-		if !strings.Contains(s, "/") {
-			ip := net.ParseIP(s)
-			if ip == nil {
-				continue
-			}
-			if ip.To4() != nil {
-				s += "/32"
-			} else {
-				s += "/128"
-			}
-		}
-		_, cidr, err := net.ParseCIDR(s)
-		if err != nil {
-			continue
-		}
-		result = append(result, cidr)
-	}
-	return result
 }
 
 // GetUserAgent extracts the User-Agent header.

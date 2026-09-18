@@ -55,7 +55,7 @@ All configuration is via environment variables. No config files, nothing stored 
 | `DB_USER` | `kungfu_app` | | Database user |
 | `DB_SSLMODE` | `disable` | | PostgreSQL SSL mode |
 | `LISTEN_ADDR` | `127.0.0.1:8090` | | Listen address |
-| `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs for `X-Forwarded-For` |
+| `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs/IPs. Default trusts loopback direct peers only. When TLS terminates at an upstream reverse proxy, configure that proxy's direct CIDR — forwarded client IP and `X-Forwarded-Proto` (cookie Secure flag) are honored ONLY from a trusted direct peer. Any invalid entry fails startup. |
 | `DEBUG_MODE` | `false` | | Verbose logging |
 | `CREEM_API_KEY` | — | optional* | Creem API key |
 | `CREEM_WEBHOOK_SECRET` | — | optional* | Creem webhook HMAC secret |

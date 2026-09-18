@@ -322,8 +322,7 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Set session cookie
-	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	setOwnerCookie(w, result.BotID, s.Config.SessionSecret, isHTTPS)
+	setOwnerCookie(w, result.BotID, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))
 
 	SuccessResponse(w, map[string]interface{}{
 		"bot_id":   result.BotID,
@@ -340,8 +339,7 @@ func (s *Server) handleOwnerSessionLogout(w http.ResponseWriter, r *http.Request
 	if bot, err := s.requireOwnerAuth(r); err == nil && bot != nil {
 		service.OwnerLogout(r.Context(), s.Pool, bot.ID)
 	}
-	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	clearOwnerCookie(w, isHTTPS)
+	clearOwnerCookie(w, middleware.IsHTTPS(r, s.TrustedProxies))
 	SuccessResponse(w, map[string]interface{}{}, "Owner logout successful")
 }
 

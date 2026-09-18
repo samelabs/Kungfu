@@ -108,8 +108,7 @@ func (s *Server) handleAdminSessionCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	admin.SetAdminCookie(w, result.RawToken, isHTTPS)
+	admin.SetAdminCookie(w, result.RawToken, middleware.IsHTTPS(r, s.TrustedProxies))
 
 	SuccessResponse(w, map[string]interface{}{
 		"id":           result.Admin.ID,
@@ -161,8 +160,7 @@ func (s *Server) handleAdminSessionDelete(w http.ResponseWriter, r *http.Request
 	}
 	// Stale/absent session: still clear the cookie so the client can
 	// always log out locally.
-	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	admin.ClearAdminCookie(w, isHTTPS)
+	admin.ClearAdminCookie(w, middleware.IsHTTPS(r, s.TrustedProxies))
 	SuccessResponse(w, map[string]interface{}{}, "Admin logout successful")
 }
 

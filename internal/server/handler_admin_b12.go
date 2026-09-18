@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"kungfu.md/internal/middleware"
 	"net/http"
 	"strconv"
 	"strings"
@@ -354,8 +355,7 @@ func (s *Server) handleAdminMePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// All sessions (including this one) are revoked: clear the local
 	// cookie so the browser drops its login state.
-	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-	admin.ClearAdminCookie(w, isHTTPS)
+	admin.ClearAdminCookie(w, middleware.IsHTTPS(r, s.TrustedProxies))
 	SuccessResponse(w, map[string]interface{}{}, "Password changed — please log in again")
 }
 
@@ -592,8 +592,7 @@ func (s *Server) handleAdminSessionRevoke(w http.ResponseWriter, r *http.Request
 	// If the actor revoked their OWN current session, clear the local
 	// cookie (the mutation itself already succeeded).
 	if revoked.AdminID == principal.Admin.ID && revoked.ID == principal.Session.ID {
-		isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-		admin.ClearAdminCookie(w, isHTTPS)
+		admin.ClearAdminCookie(w, middleware.IsHTTPS(r, s.TrustedProxies))
 	}
 	SuccessResponse(w, adminSessionDTO(revoked), "Session revoked")
 }

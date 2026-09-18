@@ -15,7 +15,6 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"kungfu.md/internal/config"
-	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 )
@@ -54,7 +53,7 @@ func New(cfg *config.Config, pool *pg.Pool) *Server {
 		Config:         cfg,
 		Pool:           pool,
 		RateLimiter:    rl,
-		TrustedProxies: middleware.ParseTrustedCIDRs(cfg.TrustedProxyCIDRs),
+		TrustedProxies: cfg.TrustedProxyCIDRs,
 	}
 
 	s.Router = s.buildRouter()

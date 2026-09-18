@@ -133,15 +133,3 @@ func signCookie(encoded, secret string) string {
 	mac.Write([]byte(encoded))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
-
-// IsHTTPS checks if the request is over HTTPS.
-func IsHTTPS(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	// Check common proxy headers
-	if xfProto := r.Header.Get("X-Forwarded-Proto"); xfProto == "https" {
-		return true
-	}
-	return false
-}
