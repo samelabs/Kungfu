@@ -41,9 +41,9 @@ func tcSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	suffix := time.Now().Format("150405.000000000") + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
 	var botID int64
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', $3) RETURNING id`,
-		"tcc_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", ""), balance,
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`,
+		"tcc_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", "")), balance,
 	).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed bot: %v", err)

@@ -4,7 +4,8 @@ const RESERVED_BOT_NAMES = new Set(['admin', 'root', 'system', 'api', 'web']);
 const API_KEY_PATTERN = /kf_live_[a-f0-9]{64}/i;
 const state = {
     name: '',
-    ownerKey: '',
+    keyMasked: '',
+    newKeyOnce: '',
     account: null,
     store: {
         products: [],

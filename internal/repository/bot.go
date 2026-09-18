@@ -53,10 +53,13 @@ func FindActiveBotAccountByID(ctx context.Context, q pg.Querier, botID int64) (*
 }
 
 // -- 2. findActiveBotKeyById --
-// FindActiveBotKeyByID returns the active bot with key fields, or nil if not found.
+// FindActiveBotKeyByID returns the active bot with key metadata
+// (stored SHA-256 digest + display-only last4), or nil if not found.
+// The plaintext key no longer exists at rest; reset verification
+// compares against APIKeyHash.
 func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, api_key, status, key_issued_at
+		SELECT id, bot_name, api_key_hash, api_key_last4, status, key_issued_at
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
@@ -64,7 +67,7 @@ func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*mode
 		dbID        int32
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&dbID, &b.BotName, &b.APIKey, &b.Status, &keyIssuedAt); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.APIKeyHash, &b.APIKeyLast4, &b.Status, &keyIssuedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -75,13 +78,15 @@ func FindActiveBotKeyByID(ctx context.Context, q pg.Querier, botID int64) (*mode
 	return &b, nil
 }
 
-// -- 3. findActiveBotByApiKey --
-// FindActiveBotByAPIKey looks up an active bot by its API key, or nil if not found.
-func FindActiveBotByAPIKey(ctx context.Context, q pg.Querier, key string) (*model.Bot, error) {
+// -- 3. findActiveBotByApiKeyHash --
+// FindActiveBotByAPIKeyHash looks up an active bot by the SHA-256
+// digest of its API key, or nil if not found. The repository accepts
+// ONLY the digest — there is no plaintext-key query path.
+func FindActiveBotByAPIKeyHash(ctx context.Context, q pg.Querier, keyHash []byte) (*model.Bot, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, bot_name, status
 		FROM tb_bots
-		WHERE api_key = $1 AND status = 'active'`, key)
+		WHERE api_key_hash = $1 AND status = 'active'`, keyHash)
 	var (
 		b    model.Bot
 		dbID int32
@@ -207,11 +212,14 @@ func UpdatePasswordHashByID(ctx context.Context, q pg.Querier, botID int64, pass
 	return err
 }
 
-// -- 11. updateApiKeyById --
-func UpdateAPIKeyByID(ctx context.Context, q pg.Querier, botID int64, newKey string) error {
+// -- 11. updateAgentKeyHashById --
+// UpdateAgentKeyHashByID atomically replaces the stored key digest,
+// display-only last4, and issuance timestamp. It never accepts or
+// writes a raw key.
+func UpdateAgentKeyHashByID(ctx context.Context, q pg.Querier, botID int64, keyHash []byte, last4 string) error {
 	_, err := q.Exec(ctx, `
-		UPDATE tb_bots SET api_key = $1, key_issued_at = NOW(), updated_at = NOW() WHERE id = $2`,
-		newKey, botID)
+		UPDATE tb_bots SET api_key_hash = $1, api_key_last4 = $2, key_issued_at = NOW(), updated_at = NOW() WHERE id = $3`,
+		keyHash, last4, botID)
 	return err
 }
 
@@ -226,15 +234,15 @@ func UpdateLastActiveAt(ctx context.Context, q pg.Querier, botID int64) error {
 // InsertRegisteredBot inserts a freshly registered bot inside an open
 // transaction with balance=0; the signup grant (+66, grant_signup) is applied
 // afterwards via the credits domain so the ledger always has a genesis entry.
-func InsertRegisteredBot(ctx context.Context, q pg.Querier, name, apiKey, passwordHash, ip string) (int64, error) {
+func InsertRegisteredBot(ctx context.Context, q pg.Querier, name string, keyHash []byte, keyLast4, passwordHash, ip string) (int64, error) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	var id int32
 	err := q.QueryRow(ctx, `
 		INSERT INTO tb_bots
-		    (bot_name, api_key, password_hash, key_issued_at, balance, register_ip, status, last_active_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 0, $5, 'active', $6, NOW(), NOW())
+		    (bot_name, api_key_hash, api_key_last4, password_hash, key_issued_at, balance, register_ip, status, last_active_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, 'active', $7, NOW(), NOW())
 		RETURNING id`,
-		name, apiKey, passwordHash, now, ip, now).Scan(&id)
+		name, keyHash, keyLast4, passwordHash, now, ip, now).Scan(&id)
 	if err != nil {
 		return 0, err
 	}

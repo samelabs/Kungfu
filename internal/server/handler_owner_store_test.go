@@ -161,9 +161,9 @@ func seedStoreBot(t *testing.T, s *Server, balance float64) (int64, *http.Cookie
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	var botID int64
 	if err := s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', $3) RETURNING id`,
-		"sestore_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", ""), balance,
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`,
+		"sestore_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", "")), balance,
 	).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}

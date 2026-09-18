@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/rand/v2"
@@ -28,8 +29,9 @@ var (
 	botNameCharPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 )
 
-// BotLookupFunc is a function that finds a bot by API key.
-type BotLookupFunc func(ctx context.Context, key string) (*model.Bot, error)
+// BotLookupFunc is a function that finds a bot by the SHA-256 digest
+// of its API key. The raw credential never crosses into the lookup.
+type BotLookupFunc func(ctx context.Context, keyHash []byte) (*model.Bot, error)
 
 // BotActiveUpdateFunc is a function that updates last_active_at.
 type BotActiveUpdateFunc func(ctx context.Context, botID int64) error
@@ -40,6 +42,31 @@ func GenerateKey() string {
 		panic("crypto/rand.Read failed: " + err.Error())
 	}
 	return keyPrefix + hex.EncodeToString(b)
+}
+
+// HashAgentKey derives the canonical SHA-256 digest over the exact
+// raw key bytes (no lowering, no canonicalization — the same bytes
+// that pass format validation are the bytes that get hashed, both
+// here and in migration 008's backfill). SHA-256 is correct for
+// Agent keys: they carry 256 bits of cryptographic randomness, so a
+// fast digest over the full-entropy value is not brute-forceable
+// (unlike low-entropy passwords, which need bcrypt).
+func HashAgentKey(raw string) []byte {
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
+}
+
+// AgentKeyLast4 returns the display-only last 4 characters of a raw
+// agent key. Presentation metadata only — never an authentication or
+// lookup input.
+func AgentKeyLast4(raw string) string {
+	return raw[len(raw)-4:]
+}
+
+// AgentKeyMasked derives the display-only masked form (prefix +
+// "****" + last4). Not an authentication authority.
+func AgentKeyMasked(last4 string) string {
+	return keyPrefix + "****" + last4
 }
 
 // ValidateKeyFormat checks if a key matches the exact format.
@@ -74,7 +101,9 @@ func VerifyBotAuth(ctx context.Context, lookupFn BotLookupFunc, r *http.Request)
 		return nil, apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
 	}
 
-	bot, err := lookupFn(ctx, key)
+	// The raw credential stops here: only its SHA-256 digest crosses
+	// into the repository lookup.
+	bot, err := lookupFn(ctx, HashAgentKey(key))
 	if err != nil || bot == nil {
 		return nil, apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
 	}

@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
@@ -49,9 +50,9 @@ func seedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	suffix := uniq()
 	var botID int64
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', $3) RETURNING id`,
-		"srbot_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", ""), balance,
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`,
+		"srbot_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", "")), balance,
 	).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed bot: %v", err)
@@ -838,4 +839,18 @@ func TestMigrationChainIncludes003(t *testing.T) {
 		 VALUES ('badstatus0001', $1, $2, 'x', 1, 'rk_bad_status', 'shipped')`, botID, prodID); err == nil {
 		t.Fatal("invalid status accepted by DB")
 	}
+}
+
+// s61SeedKeyHash / s61SeedLast4: mechanical S6.1 fixture helpers —
+// seed the SHA-256 digest + display last4 for a raw agent key.
+func s61SeedKeyHash(raw string) []byte {
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
+}
+
+func s61SeedLast4(raw string) string {
+	if len(raw) < 4 {
+		return raw
+	}
+	return raw[len(raw)-4:]
 }

@@ -67,8 +67,12 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 			})
 	}
 
-	// Generate key and hash password
-	apiKey := auth.GenerateKey()
+	// Generate the raw key exactly once, derive its digest + display
+	// metadata immediately, and persist ONLY those. The raw key exists
+	// transiently in process memory and is returned once below.
+	rawKey := auth.GenerateKey()
+	keyHash := auth.HashAgentKey(rawKey)
+	keyLast4 := auth.AgentKeyLast4(rawKey)
 	hashedPassword, err := auth.HashPassword(password)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
@@ -83,7 +87,7 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
-	botID, err := repository.InsertRegisteredBot(ctx, tx, name, apiKey, hashedPassword, ip)
+	botID, err := repository.InsertRegisteredBot(ctx, tx, name, keyHash, keyLast4, hashedPassword, ip)
 	if err != nil {
 		// Check for unique constraint violation
 		if isUniqueViolation(err) {
@@ -106,7 +110,7 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 
 	return &RegistrationResult{
 		BotName: name,
-		Key:     apiKey,
+		Key:     rawKey,
 		Balance: 0, // API returns 0; the 66-credit bonus is in the DB
 		Message: "Registration successful. Give only the key to agents; keep the password for human key management.",
 	}, nil

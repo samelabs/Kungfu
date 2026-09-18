@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -198,9 +199,9 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	var botID int64
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	if err := e.s.Pool.QueryRow(context.Background(), `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 50) RETURNING id`,
-		"b2http_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 50) RETURNING id`,
+		"b2http_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {
@@ -373,9 +374,9 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	// balance starts at 90.5 = 100 − 9.5 spend (the seed ledger row
 	// below records the spend; the reject must refund back to 100)
 	if err := e.s.Pool.QueryRow(ctx, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 90.5) RETURNING id`,
-		"mobot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 90.5) RETURNING id`,
+		"mobot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {
@@ -555,9 +556,9 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 		var botID int64
 		suffix := fmt.Sprint(time.Now().UnixNano())
 		if err := e.s.Pool.QueryRow(ctx, `
-			INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-			VALUES ($1, $2, 'x', 'active', 50) RETURNING id`,
-			"obbot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+			INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+			VALUES ($1, $2, $3, 'x', 'active', 50) RETURNING id`,
+			"obbot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
@@ -782,9 +783,9 @@ func TestB2Repair2OversizedBodyFailsClosed(t *testing.T) {
 	var botID int64
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	if err := e.s.Pool.QueryRow(ctx, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 49) RETURNING id`,
-		"ob2bot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 49) RETURNING id`,
+		"ob2bot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -884,9 +885,9 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 	var botID int64
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	if err := e.s.Pool.QueryRow(ctx, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 50) RETURNING id`,
-		"rdbot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 50) RETURNING id`,
+		"rdbot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -970,4 +971,18 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 	if status != "pending_review" {
 		t.Fatalf("state changed by denied transition: %s", status)
 	}
+}
+
+// s61SeedKeyHash / s61SeedLast4: mechanical S6.1 fixture helpers —
+// seed the SHA-256 digest + display last4 for a raw agent key.
+func s61SeedKeyHash(raw string) []byte {
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
+}
+
+func s61SeedLast4(raw string) string {
+	if len(raw) < 4 {
+		return raw
+	}
+	return raw[len(raw)-4:]
 }

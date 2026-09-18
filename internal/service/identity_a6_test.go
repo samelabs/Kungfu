@@ -150,9 +150,9 @@ func TestAccountOverviewRealZero(t *testing.T) {
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1,$2,'x','active',0) RETURNING id`,
-		"a6ov_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", "")).Scan(&botID)
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"a6ov_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", ""))).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -174,9 +174,9 @@ func TestAccountOverviewKungfuStatsFailure(t *testing.T) {
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
 	pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1,$2,'x','active',0) RETURNING id`,
-		"a6ov_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", "")).Scan(&botID)
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"a6ov_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", ""))).Scan(&botID)
 	t.Cleanup(func() { a6CleanupBot(t, pool, botID) })
 
 	_, err := AccountOverview(context.Background(), failStatsQuerier{Querier: pool, failOn: "tb_kungfus"}, botID)
@@ -195,9 +195,9 @@ func TestAccountOverviewTaskCountFailure(t *testing.T) {
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
 	pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1,$2,'x','active',0) RETURNING id`,
-		"a6ov_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", "")).Scan(&botID)
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"a6ov_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", ""))).Scan(&botID)
 	t.Cleanup(func() { a6CleanupBot(t, pool, botID) })
 
 	_, err := AccountOverview(context.Background(), failStatsQuerier{Querier: pool, failOn: "tb_tasks"}, botID)

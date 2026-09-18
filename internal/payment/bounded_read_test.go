@@ -7,6 +7,7 @@ package payment
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -211,9 +212,9 @@ func TestR22CreateCheckoutOversizedKeepsPaymentPending(t *testing.T) {
 	var botID int64
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
-		"r22ck_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&botID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"r22ck_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -302,4 +303,18 @@ func pgtestURL(t *testing.T) string {
 func IsAppErrR22(err error) (*apperrors.AppError, bool) {
 	ae, ok := err.(*apperrors.AppError)
 	return ae, ok
+}
+
+// s61SeedKeyHash / s61SeedLast4: mechanical S6.1 fixture helpers —
+// seed the SHA-256 digest + display last4 for a raw agent key.
+func s61SeedKeyHash(raw string) []byte {
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
+}
+
+func s61SeedLast4(raw string) string {
+	if len(raw) < 4 {
+		return raw
+	}
+	return raw[len(raw)-4:]
 }

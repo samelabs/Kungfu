@@ -117,9 +117,9 @@ func crSeedBot(t *testing.T, pool *pg.Pool) int64 {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	var botID int64
 	if err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
-		"cfp_"+suffix, "kf_live_"+suffix).Scan(&botID); err != nil {
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"cfp_"+suffix, s61SeedKeyHash("kf_live_"+suffix), s61SeedLast4("kf_live_"+suffix)).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupBotRows(t, pool, botID) })

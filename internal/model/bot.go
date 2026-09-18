@@ -3,7 +3,8 @@ package model
 type Bot struct {
 	ID           int64   `db:"id" json:"id"`
 	BotName      string  `db:"bot_name" json:"bot_name"`
-	APIKey       string  `db:"api_key" json:"api_key"`
+	APIKeyHash   []byte  `db:"api_key_hash" json:"-"`
+	APIKeyLast4  string  `db:"api_key_last4" json:"-"`
 	PasswordHash string  `db:"password_hash" json:"-"`
 	KeyIssuedAt  *string `db:"key_issued_at" json:"key_issued_at,omitempty"`
 	Balance      float64 `db:"balance" json:"balance"`

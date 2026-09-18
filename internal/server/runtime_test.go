@@ -191,15 +191,15 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	var ownerID, agentID int64
 	if err := pool.QueryRow(ctxBG, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 500) RETURNING id`,
-		"r21owner_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&ownerID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 500) RETURNING id`,
+		"r21owner_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctxBG, `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 0) RETURNING id`,
-		"r21agent_"+suffix, "kf_live_"+suffix+strings.Repeat("b", 64-len(suffix))).Scan(&agentID); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"r21agent_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("b", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("b", 64-len(suffix)))).Scan(&agentID); err != nil {
 		t.Fatal(err)
 	}
 	var taskCode string
@@ -411,10 +411,11 @@ func seededTestServerOn(t *testing.T, s *Server) (t2 *Server, botID int64) {
 	t.Helper()
 	var id int64
 	err := s.Pool.QueryRow(context.Background(), `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 10) RETURNING id`,
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 10) RETURNING id`,
 		"r21owner"+fmt.Sprint(time.Now().UnixNano()),
-		"kf_live_r21o"+fmt.Sprint(time.Now().UnixNano())).Scan(&id)
+		s61SeedKeyHash("kf_live_r21o"+fmt.Sprint(time.Now().UnixNano())),
+		s61SeedLast4("kf_live_r21o"+fmt.Sprint(time.Now().UnixNano()))).Scan(&id)
 	if err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}

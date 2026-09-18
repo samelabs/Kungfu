@@ -39,9 +39,9 @@ func a4TestBot(t *testing.T, pool *pg.Pool) int64 {
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', 5000) RETURNING id`,
-		"a4det_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", ""),
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 5000) RETURNING id`,
+		"a4det_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", "")),
 	).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed bot: %v", err)

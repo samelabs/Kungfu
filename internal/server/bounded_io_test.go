@@ -280,9 +280,9 @@ func seedR22Bot(t *testing.T, pool *pg.Pool, suffix string) (struct{}, int64) {
 	t.Helper()
 	var id int64
 	if err := pool.QueryRow(ctxBG2(), `
-		INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		VALUES ($1, $2, 'x', 'active', 20) RETURNING id`,
-		"r22bot_"+suffix, "kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))).Scan(&id); err != nil {
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		VALUES ($1, $2, $3, 'x', 'active', 20) RETURNING id`,
+		"r22bot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&id); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {

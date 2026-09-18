@@ -6,6 +6,7 @@ package credits
 
 import (
 	"context"
+	"crypto/sha256"
 	"math"
 	"os"
 	"strings"
@@ -34,9 +35,9 @@ func finSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
 	if err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', $3) RETURNING id`,
-		"fin_"+suffix, "kf_live_"+strings.ReplaceAll(suffix, ".", ""), balance,
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`,
+		"fin_"+suffix, s61SeedKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), s61SeedLast4("kf_live_"+strings.ReplaceAll(suffix, ".", "")), balance,
 	).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
@@ -124,4 +125,18 @@ func TestBalanceRejectsNonFinitePersisted(t *testing.T) {
 	if b, err := Balance(ctx, pool, finBot); err != nil || b != 42 {
 		t.Fatalf("finite balance read: %v %v", b, err)
 	}
+}
+
+// s61SeedKeyHash / s61SeedLast4: mechanical S6.1 fixture helpers —
+// seed the SHA-256 digest + display last4 for a raw agent key.
+func s61SeedKeyHash(raw string) []byte {
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
+}
+
+func s61SeedLast4(raw string) string {
+	if len(raw) < 4 {
+		return raw
+	}
+	return raw[len(raw)-4:]
 }

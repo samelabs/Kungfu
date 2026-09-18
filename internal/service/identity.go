@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"crypto/subtle"
-	"kungfu.md/internal/credits"
-	"regexp"
 	"strings"
+
+	"kungfu.md/internal/credits"
 
 	"kungfu.md/internal/auth"
 	"kungfu.md/internal/errors"
@@ -169,12 +169,15 @@ func CurrentOwnerKey(ctx context.Context, q pg.Querier, botID int64) (map[string
 			"source":   "owner_session",
 		}, true)
 
+	// Metadata projection only: the full key is not recoverable from
+	// the stored digest. key_masked is display-only.
 	return map[string]interface{}{
 		"bot_name":      bot.BotName,
-		"key":           bot.APIKey,
+		"key_masked":    auth.AgentKeyMasked(bot.APIKeyLast4),
+		"key_last4":     bot.APIKeyLast4,
+		"key_issued_at": bot.KeyIssuedAt,
 		"balance":       balance,
 		"status":        bot.Status,
-		"key_issued_at": bot.KeyIssuedAt,
 	}, nil
 }
 
@@ -240,10 +243,9 @@ func ChangePassword(ctx context.Context, pool *pg.Pool, name, password, newPassw
 
 // -- ResetKey --
 
-var apiKeyFormatRegex = regexp.MustCompile(`(?i)^kf_live_[a-f0-9]{64}$`)
-
 // ResetKey formats log entries for the owner dashboard.
-// Requires the current key to match + rate limit check.
+// Requires the current RAW key (second credential) + rate limit.
+// The stored SHA-256 digest is the only at-rest key material.
 func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, botID int64, currentKey string) (map[string]interface{}, error) {
 	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)
 	if err != nil {
@@ -258,13 +260,14 @@ func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, bo
 		return nil, errors.New(400, "MISSING_FIELD", "Missing required field: current_key")
 	}
 
-	// Validate key format
-	if !apiKeyFormatRegex.MatchString(currentKey) {
+	// Validate key format (canonical auth helper; case-insensitive hex)
+	if !auth.ValidateKeyFormat(currentKey) {
 		return nil, errors.New(400, "INVALID_KEY", "Current key format is invalid")
 	}
 
-	// Verify current key matches (constant-time)
-	if subtle.ConstantTimeCompare([]byte(bot.APIKey), []byte(currentKey)) != 1 {
+	// Verify the supplied raw key against the stored digest
+	// (constant-time). The plaintext key no longer exists at rest.
+	if subtle.ConstantTimeCompare(bot.APIKeyHash, auth.HashAgentKey(currentKey)) != 1 {
 		return nil, errors.New(401, "INVALID_KEY", "Current key is incorrect")
 	}
 
@@ -274,10 +277,10 @@ func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, bo
 		return nil, errors.NewRateLimitError(details.RetryAfter, details.Limit, details.Window)
 	}
 
-	// Generate new key
+	// Generate the new raw key once; persist only digest + last4 +
+	// issuance time atomically. The raw key is returned once below.
 	newKey := auth.GenerateKey()
-
-	if err := repository.UpdateAPIKeyByID(ctx, pool, botID, newKey); err != nil {
+	if err := repository.UpdateAgentKeyHashByID(ctx, pool, botID, auth.HashAgentKey(newKey), auth.AgentKeyLast4(newKey)); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating key")
 	}
 

@@ -60,10 +60,10 @@ func seededTestServer(t *testing.T) (*Server, int64) {
 	s := newLogoutTestServer(t)
 	var botID int64
 	err := s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', 10)
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 10)
 		 RETURNING id`,
-		"a1logout_"+time.Now().Format("150405.000000000"), "kf_live_test"+time.Now().Format("150405000000000"),
+		"a1logout_"+time.Now().Format("150405.000000000"), s61SeedKeyHash("kf_live_test"+time.Now().Format("150405000000000")), s61SeedLast4("kf_live_test"+time.Now().Format("150405000000000")),
 	).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed bot: %v", err)

@@ -111,8 +111,10 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 // requireBotAuth authenticates via X-Bot-Key header.
 func (s *Server) requireBotAuth(r *http.Request) (*model.Bot, error) {
 	ctx := r.Context()
-	lookupFn := func(ctx context.Context, key string) (*model.Bot, error) {
-		return repository.FindActiveBotByAPIKey(ctx, s.Pool, key)
+	// The lookup receives ONLY the SHA-256 digest from auth — the raw
+	// X-Bot-Key credential never reaches the repository.
+	lookupFn := func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
+		return repository.FindActiveBotByAPIKeyHash(ctx, s.Pool, keyHash)
 	}
 	bot, err := auth.VerifyBotAuth(ctx, lookupFn, r)
 	if err != nil {

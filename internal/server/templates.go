@@ -484,7 +484,6 @@ func ownerOverviewHTML(d *tmplData) string {
     </div>
     <div id="keyBox" class="keybox"></div>
     <div class="actions">
-        <button class="btn primary" type="button" id="copyKeyBtn">` + d.T("owner.overview.copy_key") + `</button>
         <button class="btn" type="button" id="reloadBtn">` + d.T("owner.overview.reload") + `</button>
     </div>
     <div id="overviewNotice" class="notice overview-notice">` + d.T("owner.overview.notice") + `</div>
@@ -511,12 +510,19 @@ func ownerKeyHTML(d *tmplData) string {
 	return `<section class="panel">
     <h2>` + d.T("owner.key.heading") + `</h2>
     <div id="keyBox" class="keybox overview-keybox is-empty"></div>
+    <p>` + d.T("owner.key.not_retrievable") + `</p>
+    <form id="resetKeyForm" novalidate>
+        <label>` + d.T("owner.key.current_key") + `</label>
+        <input name="current_key" type="password" autocomplete="off" required minlength="72" maxlength="72">
+        <div class="actions">
+            <button class="btn primary" type="submit">` + d.T("owner.key.reset") + `</button>
+        </div>
+    </form>
+    <div id="newKeyBox" class="keybox overview-keybox is-empty"></div>
     <div class="actions">
-        <button class="btn primary" type="button" id="copyKeyBtn">` + d.T("owner.key.copy") + `</button>
+        <button class="btn primary" type="button" id="copyNewKeyBtn">` + d.T("owner.key.copy_new") + `</button>
     </div>
-    <div class="actions">
-        <button class="btn primary" type="button" id="resetKeyBtn">` + d.T("owner.key.reset") + `</button>
-    </div>
+    <p>` + d.T("owner.key.one_time_warning") + `</p>
     <div id="resetNotice" class="notice">` + d.T("owner.key.notice") + `</div>
 </section>`
 }

@@ -42,9 +42,9 @@ func revSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	var botID int64
 	suffix := revUnique()
 	if err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1, $2, 'x', 'active', $3) RETURNING id`,
-		"revtest_"+suffix, "kf_live_rev_"+suffix, balance).Scan(&botID); err != nil {
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`,
+		"revtest_"+suffix, s61SeedKeyHash("kf_live_rev_"+suffix), s61SeedLast4("kf_live_rev_"+suffix), balance).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

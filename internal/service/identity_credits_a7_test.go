@@ -39,8 +39,8 @@ func a7TestBot(t *testing.T, pool *pg.Pool, balance float64) (int64, string, str
 	key := "kf_live_" + strings.ReplaceAll(suffix, ".", "")
 	var botID int64
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1,$2,'x','active',$3) RETURNING id`, name, key, balance).Scan(&botID)
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', $4) RETURNING id`, name, s61SeedKeyHash(key), s61SeedLast4(key), balance).Scan(&botID)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestAPIKeyAuthIndependentOfBalance(t *testing.T) {
 	botID, _, key := a7TestBot(t, pool, 7)
 	_ = botID
 
-	bot, err := repository.FindActiveBotByAPIKey(context.Background(), pool, key)
+	bot, err := repository.FindActiveBotByAPIKeyHash(context.Background(), pool, s61SeedKeyHash(key))
 	if err != nil || bot == nil {
 		t.Fatalf("auth lookup failed: %v", err)
 	}

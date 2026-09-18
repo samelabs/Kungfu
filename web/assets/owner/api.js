@@ -21,10 +21,13 @@ async function requestJson(url, options = {}) {
     }
 }
 
+// loadOwnerKey fetches MASKED key metadata only — the full current
+// key is not recoverable from the server; nothing here can ever
+// repopulate a raw credential.
 async function loadOwnerKey() {
     const json = await requestJson('/api/key', {method: 'GET'});
     if (!json.success) throw new Error(noticeText(json.error || t('js.key_load_failed')));
-    state.ownerKey = json.data.key || '';
+    state.keyMasked = json.data.key_masked || '';
 }
 
 async function loadAccount() {

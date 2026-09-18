@@ -76,9 +76,9 @@ func bcpBot(t *testing.T, s *Server) int64 {
 	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), atomic.AddInt64(&bcpBotSeq, 1))
 	var botID int64
 	if err := s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_bots (bot_name, api_key, password_hash, status, balance)
-		 VALUES ($1,$2,'x','active',0) RETURNING id`,
-		"bcp_"+suffix, "kf_live_"+suffix).Scan(&botID); err != nil {
+		`INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
+		 VALUES ($1, $2, $3, 'x', 'active', 0) RETURNING id`,
+		"bcp_"+suffix, s61SeedKeyHash("kf_live_"+suffix), s61SeedLast4("kf_live_"+suffix)).Scan(&botID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

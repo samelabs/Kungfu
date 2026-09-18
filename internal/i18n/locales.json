@@ -71,7 +71,11 @@
         "heading": "Owner key",
         "copy": "Copy key",
         "reset": "Reset key",
-        "notice": "Rotate your key when you need a new agent credential."
+        "notice": "Rotate your key when you need a new agent credential.",
+        "not_retrievable": "The full current key is not retrievable. Keep it safe; resetting requires the current key.",
+        "current_key": "Current key",
+        "copy_new": "Copy new key",
+        "one_time_warning": "The new key is shown once. Copy it now — after leaving this page it cannot be recovered."
       },
       "tasks": {
         "heading": "Tasks",
@@ -196,7 +200,11 @@
         "key_reset": "Key reset. Copy the new key above.",
         "key_copied": "Key copied.",
         "reloaded": "Workspace refreshed.",
-        "new_password_diff": "New password must be different from current password"
+        "new_password_diff": "New password must be different from current password",
+        "continue_to_owner": "Continue to Owner",
+        "key_one_time_warning": "This key is shown once. Copy it now; after continuing it cannot be recovered.",
+        "registered_key_below": "Registered. Your new agent key is below.",
+        "reset_key_required": "Enter the current key to reset."
       },
       "js": {
         "task_not_ready": "Task management is not ready yet. Finish the task setup before creating or managing tasks.",
@@ -450,7 +458,11 @@
         "heading": "Owner 密钥",
         "copy": "复制密钥",
         "reset": "重置密钥",
-        "notice": "需要新的 Agent 凭据时，可在这里轮换密钥。"
+        "notice": "需要新的 Agent 凭据时，可在这里轮换密钥。",
+        "not_retrievable": "完整密钥无法找回。请妥善保管；重置需要提供当前密钥。",
+        "current_key": "当前密钥",
+        "copy_new": "复制新密钥",
+        "one_time_warning": "新密钥仅显示一次。请立即复制——离开本页后无法找回。"
       },
       "tasks": {
         "heading": "任务",
@@ -575,7 +587,11 @@
         "key_reset": "密钥已重置，请复制上面的新密钥。",
         "key_copied": "密钥已复制。",
         "reloaded": "工作区已刷新。",
-        "new_password_diff": "新密码不能与当前密码相同"
+        "new_password_diff": "新密码不能与当前密码相同",
+        "continue_to_owner": "继续进入 Owner",
+        "key_one_time_warning": "该密钥仅显示一次。请立即复制；继续后将无法找回。",
+        "registered_key_below": "注册成功。你的新代理密钥如下。",
+        "reset_key_required": "请输入当前密钥以重置。"
       },
       "js": {
         "task_not_ready": "任务管理尚未就绪。请先完成任务配置，再创建或管理任务。",
@@ -829,7 +845,11 @@
         "heading": "Owner キー",
         "copy": "キーをコピー",
         "reset": "キーをリセット",
-        "notice": "新しいエージェント認証情報が必要なときにキーをローテーションできます。"
+        "notice": "新しいエージェント認証情報が必要なときにキーをローテーションできます。",
+        "not_retrievable": "現在の完全なキーは取得できません。安全に保管してください。リセットには現在のキーが必要です。",
+        "current_key": "現在のキー",
+        "copy_new": "新しいキーをコピー",
+        "one_time_warning": "新しいキーは一度だけ表示されます。今すぐコピーしてください。ページを離れると復元できません。"
       },
       "tasks": {
         "heading": "タスク",
@@ -954,7 +974,11 @@
         "key_reset": "キーをリセットしました。上の新しいキーをコピーしてください。",
         "key_copied": "キーをコピーしました。",
         "reloaded": "ワークスペースを更新しました。",
-        "new_password_diff": "新しいパスワードは現在のパスワードと同じにできません"
+        "new_password_diff": "新しいパスワードは現在のパスワードと同じにできません",
+        "continue_to_owner": "オーナーへ進む",
+        "key_one_time_warning": "このキーは一度だけ表示されます。今すぐコピーしてください。続行後は復元できません。",
+        "registered_key_below": "登録完了。新しいエージェントキーは以下です。",
+        "reset_key_required": "リセットには現在のキーを入力してください。"
       },
       "js": {
         "task_not_ready": "タスク管理はまだ利用できません。タスク設定を完了してから作成・管理してください。",
@@ -1208,7 +1232,11 @@
         "heading": "오너 키",
         "copy": "키 복사",
         "reset": "키 재발급",
-        "notice": "새 에이전트 자격 증명이 필요할 때 키를 교체하세요."
+        "notice": "새 에이전트 자격 증명이 필요할 때 키를 교체하세요.",
+        "not_retrievable": "현재 전체 키는 다시 조회할 수 없습니다. 안전하게 보관하세요. 재발급에는 현재 키가 필요합니다.",
+        "current_key": "현재 키",
+        "copy_new": "새 키 복사",
+        "one_time_warning": "새 키는 한 번만 표시됩니다. 지금 복사하세요. 페이지를 떠나면 복구할 수 없습니다."
       },
       "tasks": {
         "heading": "작업",
@@ -1333,7 +1361,11 @@
         "key_reset": "키가 재발급되었습니다. 위의 새 키를 복사하세요.",
         "key_copied": "키를 복사했습니다.",
         "reloaded": "워크스페이스를 새로고침했습니다.",
-        "new_password_diff": "새 비밀번호는 현재 비밀번호와 달라야 합니다"
+        "new_password_diff": "새 비밀번호는 현재 비밀번호와 달라야 합니다",
+        "continue_to_owner": "오너로 계속",
+        "key_one_time_warning": "이 키는 한 번만 표시됩니다. 지금 복사하세요. 계속한 후에는 복구할 수 없습니다.",
+        "registered_key_below": "등록 완료. 새 에이전트 키는 아래에 있습니다.",
+        "reset_key_required": "재발급하려면 현재 키를 입력하세요."
       },
       "js": {
         "task_not_ready": "작업 관리가 아직 준비되지 않았습니다. 작업 설정을 완료한 뒤 생성/관리하세요.",
@@ -1587,7 +1619,11 @@
         "heading": "Clave de owner",
         "copy": "Copiar clave",
         "reset": "Regenerar clave",
-        "notice": "Renueva tu clave cuando necesites una nueva credencial para agentes."
+        "notice": "Renueva tu clave cuando necesites una nueva credencial para agentes.",
+        "not_retrievable": "La clave actual completa no se puede recuperar. Guárdala bien; restablecer requiere la clave actual.",
+        "current_key": "Clave actual",
+        "copy_new": "Copiar nueva clave",
+        "one_time_warning": "La nueva clave se muestra una sola vez. Cópiala ahora; al salir de esta página no se podrá recuperar."
       },
       "tasks": {
         "heading": "Tareas",
@@ -1712,7 +1748,11 @@
         "key_reset": "Clave regenerada. Copia la nueva clave de arriba.",
         "key_copied": "Clave copiada.",
         "reloaded": "Workspace actualizado correctamente.",
-        "new_password_diff": "La nueva contraseña debe ser diferente a la contraseña actual"
+        "new_password_diff": "La nueva contraseña debe ser diferente a la contraseña actual",
+        "continue_to_owner": "Continuar a Owner",
+        "key_one_time_warning": "Esta clave se muestra una sola vez. Cópiala ahora; después de continuar no se podrá recuperar.",
+        "registered_key_below": "Registrado. Tu nueva clave de agente está abajo.",
+        "reset_key_required": "Introduce la clave actual para restablecer."
       },
       "js": {
         "task_not_ready": "La gestión de tareas aún no está lista. Termina la configuración antes de crear o gestionar tareas.",
