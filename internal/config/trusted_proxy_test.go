@@ -67,9 +67,9 @@ func TestS63SingleTrustedProxyIPPreservesExistingContract(t *testing.T) {
 
 func TestS63DefaultTrustedProxiesRemainLoopback(t *testing.T) {
 	s63Base(t)
+	// TRUSTED_PROXY_CIDRS left unset — Config.Load itself must supply
+	// the documented loopback default.
 	t.Setenv("TRUSTED_PROXY_CIDRS", "")
-	// empty env falls back to the documented default inside Load
-	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("default must load: %v", err)

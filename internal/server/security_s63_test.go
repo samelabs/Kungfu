@@ -66,7 +66,7 @@ func TestS63CookieLifecycleUsesCanonicalHTTPSAuthority(t *testing.T) {
 func TestS63NoAlternateForwardedProtoPath(t *testing.T) {
 	files := s63ProdFiles(t)
 	for rel, src := range files {
-		if strings.Contains(src, `r.Header.Get("X-Forwarded-Proto")`) {
+		if strings.Contains(src, "r.Header.Get(\"X-Forwarded-Proto\")") {
 			t.Fatalf("%s still reads X-Forwarded-Proto directly", rel)
 		}
 		if strings.Contains(src, "func IsHTTPS(") {
@@ -81,6 +81,22 @@ func TestS63NoAlternateForwardedProtoPath(t *testing.T) {
 	}
 	if strings.Contains(string(b), "IsHTTPS") {
 		t.Fatal("auth.IsHTTPS still exists")
+	}
+}
+
+// Detector self-proof (both directions): the exact production source
+// token is detected; benign lookalikes are not.
+func TestS63GuardDetectorMatchesRealSourceToken(t *testing.T) {
+	const needle = "r.Header.Get(\"X-Forwarded-Proto\")"
+	directRead := "isHTTPS := r.Header.Get(\"X-Forwarded-Proto\") == \"https\""
+	if !strings.Contains(directRead, needle) {
+		t.Fatal("detector fails to match a real direct XFP Get read")
+	}
+	// Header.Values is the multi-value form the canonical owner uses —
+	// it must NOT be flagged by the Get-based needle.
+	valuesForm := "protos := r.Header.Values(\"X-Forwarded-Proto\")"
+	if strings.Contains(valuesForm, needle) {
+		t.Fatal("detector would false-positive on the canonical Values form")
 	}
 }
 

@@ -67,6 +67,33 @@ func TestS63MalformedForwardedProtoFailsClosed(t *testing.T) {
 	}
 }
 
+// Actual multiple header VALUES (Header.Get would hide them): the
+// invariant is EXACTLY ONE header value — duplicates fail closed too.
+func TestS63MultipleForwardedProtoHeaderValuesFailClosed(t *testing.T) {
+	// https + http
+	r := s63Req("127.0.0.5:8080", "")
+	r.Header.Add("X-Forwarded-Proto", "https")
+	r.Header.Add("X-Forwarded-Proto", "http")
+	if IsHTTPS(r, s63Loopback) {
+		t.Fatal("two X-Forwarded-Proto values (https/http) must fail closed")
+	}
+
+	// duplicate https + https — consistency is not the rule; exactly
+	// one value is.
+	r2 := s63Req("127.0.0.5:8080", "")
+	r2.Header.Add("X-Forwarded-Proto", "https")
+	r2.Header.Add("X-Forwarded-Proto", "https")
+	if IsHTTPS(r2, s63Loopback) {
+		t.Fatal("duplicate X-Forwarded-Proto https values must fail closed")
+	}
+
+	// zero values
+	r3 := s63Req("127.0.0.5:8080", "")
+	if IsHTTPS(r3, s63Loopback) {
+		t.Fatal("zero X-Forwarded-Proto values must not be HTTPS")
+	}
+}
+
 func TestS63MalformedRemoteAddrCannotBecomeTrusted(t *testing.T) {
 	for _, remote := range []string{"not-an-addr", "999.999.999.999:1", ""} {
 		r := s63Req(remote, "https")

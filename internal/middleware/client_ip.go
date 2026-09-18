@@ -84,8 +84,15 @@ func IsHTTPS(r *http.Request, trustedCIDRs []*net.IPNet) bool {
 	if !isTrustedProxy(ip.String(), trustedCIDRs) {
 		return false
 	}
-	proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
-	return strings.EqualFold(proto, "https")
+	// Header.Get returns only the FIRST value — ambiguous multi-header
+	// forwarded proto must fail closed, so read the full value slice:
+	// zero or multiple header values -> false; exactly one -> trimmed,
+	// case-insensitive "https".
+	protos := r.Header.Values("X-Forwarded-Proto")
+	if len(protos) != 1 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(protos[0]), "https")
 }
 
 func isTrustedProxy(ip string, cidrs []*net.IPNet) bool {
