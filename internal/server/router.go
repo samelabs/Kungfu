@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/middleware"
@@ -225,15 +228,50 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	return r
 }
 
-// recoverMiddleware catches panics and returns 500.
+// recoverMiddleware is the ONE HTTP request panic boundary.
+//
+// Contract:
+//   - handler panics never escape to the server loop
+//   - panic before the response is committed -> canonical 500
+//     INTERNAL_ERROR (existing public contract, no panic details)
+//   - panic after the response is committed (explicit WriteHeader or
+//     an implicit-commit first Write) -> the committed bytes stand:
+//     no second WriteHeader, no appended error JSON, no rewriting
+//   - http.ErrAbortHandler keeps its native net/http sentinel
+//     semantics and is re-panicked, not converted to a 500
+//   - every recovered panic leaves a server-side diagnostic
+//     (method, path only — never query, headers, cookies, or body)
+//
+// The wrapper does NOT buffer the response; normal writes pass
+// straight through. Production handlers have no Flusher/Hijacker/
+// Pusher/ResponseController dependencies, so the basic
+// WrapResponseWriter is sufficient.
 func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 		defer func() {
-			if rec := recover(); rec != nil {
-				ErrorResponse(w, 500, "INTERNAL_ERROR", "An internal error occurred", nil)
+			rec := recover()
+			if rec == nil {
+				return
 			}
+			// net/http's abort sentinel is a control signal, not an
+			// application panic: preserve its native semantics.
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			// Diagnostic: method + path (never RawQuery), panic type,
+			// stack. No credentials, cookies, bodies, or secrets.
+			log.Printf("panic recovered: method=%s path=%s panic_type=%T\n%s",
+				r.Method, r.URL.Path, rec, debug.Stack())
+			if ww.Status() != 0 || ww.BytesWritten() > 0 {
+				// Response already committed: leave the bytes as they
+				// are. Swallow the panic; do not append a second
+				// error document.
+				return
+			}
+			ErrorResponse(ww, 500, "INTERNAL_ERROR", "An internal error occurred", nil)
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(ww, r)
 	})
 }
 
