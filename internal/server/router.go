@@ -78,6 +78,9 @@ func (s *Server) buildRouter() http.Handler {
 func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r := chi.NewRouter()
 
+	// Global baseline security headers — outermost so every response
+	// (HTML, JSON, static, errors, recovered panics) inherits them.
+	r.Use(securityHeadersMiddleware)
 	// Recovery middleware (catches panics)
 	r.Use(s.recoverMiddleware)
 	r.Use(requestDeadlineMiddleware(deadline))
