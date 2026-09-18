@@ -11,7 +11,6 @@ package server
 
 import (
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 
@@ -65,7 +64,9 @@ func (s *Server) handleOwnerPaymentCheckout(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	// R2.2: strict bounded read — 64 KiB cap, oversize/read failure
+	// fail closed (existing INVALID_JSON contract).
+	body, err := readBoundedRequestBody(r, 1<<16)
 	if err != nil {
 		InvalidJSON(w, "Could not read request body")
 		return
@@ -121,7 +122,10 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Raw body FIRST: signature is HMAC over the exact bytes. No decode
 	// → re-encode → sign, ever.
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	// R2.2: strict bounded read — 1 MiB cap; oversize fails closed with
+	// the existing INVALID_BODY contract BEFORE signature verification,
+	// JSON decode, or any DB/domain mutation.
+	raw, err := readBoundedRequestBody(r, 1<<20)
 	if err != nil {
 		ErrorResponse(w, http.StatusBadRequest, "INVALID_BODY", "Could not read request body", nil)
 		return

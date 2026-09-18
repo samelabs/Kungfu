@@ -7,7 +7,6 @@ package server
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -127,7 +126,9 @@ func (s *Server) handleOwnerStoreRedeem(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	// R2.2: strict bounded read — 1 MiB cap, oversize/read failure
+	// fail closed (existing INVALID_JSON contract).
+	body, err := readBoundedRequestBody(r, 1<<20)
 	if err != nil {
 		InvalidJSON(w, "Could not read request body")
 		return

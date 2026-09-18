@@ -156,7 +156,13 @@ func (c *CreemClient) doRaw(ctx context.Context, method, path string, body inter
 		return nil, err // network ambiguity — not definitive
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, rerr := readCreemResponse(resp)
+	if rerr != nil {
+		// I/O ambiguity: oversize or read failure can NEVER yield
+		// definitive provider facts — not ErrCreemDefinitive, not a
+		// partial body parsed as authoritative.
+		return nil, fmt.Errorf("creem response read: %w", rerr)
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return raw, nil
 	}
@@ -164,6 +170,27 @@ func (c *CreemClient) doRaw(ctx context.Context, method, path string, body inter
 		return nil, &ErrCreemDefinitive{Status: resp.StatusCode, Body: string(raw)}
 	}
 	return nil, fmt.Errorf("creem ambiguous failure (HTTP %d): %s", resp.StatusCode, truncate(string(raw), 200))
+}
+
+// creemResponseCap is the fixed provider-response byte budget (1 MiB).
+// A COMPLETE response within the cap is required; anything larger,
+// or any read failure, is an I/O error — partial bytes are never
+// returned as if they were the provider's authoritative answer.
+const creemResponseCap = 1 << 20
+
+// readCreemResponse is the ONLY provider-response read primitive:
+// <= cap and fully read → bytes; > cap (cap+1 detectable) or any
+// underlying read error → error. No silent truncation, no ignored
+// ReadAll error.
+func readCreemResponse(resp *http.Response) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, creemResponseCap+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > creemResponseCap {
+		return nil, fmt.Errorf("response exceeds %d bytes", creemResponseCap)
+	}
+	return data, nil
 }
 
 func (c *CreemClient) do(ctx context.Context, method, path string, body interface{}, out interface{}) error {
@@ -188,7 +215,11 @@ func (c *CreemClient) do(ctx context.Context, method, path string, body interfac
 		return err // network ambiguity — not definitive
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, rerr := readCreemResponse(resp)
+	if rerr != nil {
+		// I/O ambiguity — never definitive, never partial-body facts.
+		return fmt.Errorf("creem response read: %w", rerr)
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if out == nil {
 			return nil
