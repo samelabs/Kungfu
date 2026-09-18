@@ -119,6 +119,7 @@ func TestCheckoutDisabled503(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "PAYMENT_NOT_CONFIGURED") {
@@ -132,6 +133,7 @@ func TestCheckoutRequiresAuth(t *testing.T) {
 	router := s.buildRouter()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
+	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code == http.StatusOK {
 		t.Fatal("unauthenticated checkout returned 200")
@@ -205,6 +207,7 @@ func TestCheckoutUnknownPackage(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"enterprise"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "INVALID_PACKAGE") {
@@ -247,6 +250,7 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 	// paid payment via real checkout + webhook
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -393,6 +397,7 @@ func TestCreemE2EPackageFlow(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"standard"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -459,6 +464,7 @@ func TestOwnerPaymentGetCrossBot404(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookieA)
 	router.ServeHTTP(rec, req)
 	var out struct {

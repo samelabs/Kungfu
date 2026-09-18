@@ -122,34 +122,34 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 
 	// -- API routes: Owner (session auth) --
 	r.Get("/api/owner/session", s.handleOwnerSessionGet)
-	r.Post("/api/owner/session", s.handleOwnerSessionLogin)
-	r.Delete("/api/owner/session", s.handleOwnerSessionLogout)
+	r.Post("/api/owner/session", ownerMutation(s.handleOwnerSessionLogin))
+	r.Delete("/api/owner/session", ownerMutation(s.handleOwnerSessionLogout))
 
 	r.Get("/api/account", s.handleAccount)
 	r.Get("/api/key", s.handleKey)
-	r.Post("/api/change-password", s.handleChangePassword)
-	r.Post("/api/reset-key", s.handleResetKey)
+	r.Post("/api/change-password", ownerMutation(s.handleChangePassword))
+	r.Post("/api/reset-key", ownerMutation(s.handleResetKey))
 
 	r.Get("/api/owner/tasks", s.handleOwnerTasksList)
 	r.Get("/api/owner/tasks/{code}", s.handleOwnerTaskGet)
-	r.Post("/api/owner/tasks", s.handleOwnerTaskCreate)
-	r.Post("/api/owner/tasks/{code}/open", s.handleOwnerTaskOpen)
-	r.Post("/api/owner/tasks/{code}/close", s.handleOwnerTaskClose)
-	r.Post("/api/owner/tasks/{code}/add-budget", s.handleOwnerTaskAddBudget)
-	r.Post("/api/owner/tasks/{code}/refund", s.handleOwnerTaskRefund)
-	r.Post("/api/owner/tasks/{code}/edit", s.handleOwnerTaskEdit)
+	r.Post("/api/owner/tasks", ownerMutation(s.handleOwnerTaskCreate))
+	r.Post("/api/owner/tasks/{code}/open", ownerMutation(s.handleOwnerTaskOpen))
+	r.Post("/api/owner/tasks/{code}/close", ownerMutation(s.handleOwnerTaskClose))
+	r.Post("/api/owner/tasks/{code}/add-budget", ownerMutation(s.handleOwnerTaskAddBudget))
+	r.Post("/api/owner/tasks/{code}/refund", ownerMutation(s.handleOwnerTaskRefund))
+	r.Post("/api/owner/tasks/{code}/edit", ownerMutation(s.handleOwnerTaskEdit))
 
-	r.Post("/api/testtask/{code}", s.handleTestTask)
+	r.Post("/api/testtask/{code}", ownerMutation(s.handleTestTask))
 
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
 	// Owner store entry points (session -> bot_id; the only subject)
 	r.Get("/api/owner/payments/packages", s.handleOwnerPaymentPackages)
-	r.Post("/api/owner/payments/checkout", s.handleOwnerPaymentCheckout)
+	r.Post("/api/owner/payments/checkout", ownerMutation(s.handleOwnerPaymentCheckout))
 	r.Get("/api/owner/payments/{code}", s.handleOwnerPaymentGet)
 	r.Post("/api/webhooks/creem", s.handleCreemWebhook)
 	r.Get("/api/owner/store/products", s.handleOwnerStoreProducts)
-	r.Post("/api/owner/store/redemptions", s.handleOwnerStoreRedeem)
+	r.Post("/api/owner/store/redemptions", ownerMutation(s.handleOwnerStoreRedeem))
 	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)
 
 	// -- API routes: Admin (kf_admin server-side session) --

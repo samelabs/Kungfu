@@ -86,6 +86,7 @@ func TestLogoutValidSessionSucceedsClearsCookieAndAudits(t *testing.T) {
 	before := countOwnerLogoutLogs(t, s, botID)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/owner/session", nil)
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -114,6 +115,7 @@ func TestLogoutNoSessionStillSucceedsNoAudit(t *testing.T) {
 	before := countOwnerLogoutLogs(t, s, botID)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/owner/session", nil)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -140,6 +142,7 @@ func TestLogoutInvalidCookieStillSucceedsNoAudit(t *testing.T) {
 	before := countOwnerLogoutLogs(t, s, botID)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/owner/session", nil)
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "kf_owner", Value: "garbage.sig"})
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -164,6 +167,7 @@ func TestLogoutDeletedBotSessionStillSucceeds(t *testing.T) {
 	cookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/owner/session", nil)
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
