@@ -12,9 +12,12 @@ cd Kungfu
 # Build
 go build -o kungfu-server ./cmd/server
 
-# Database
+# Database — apply the full migration chain in filename order.
+# Failure of any file must stop setup. There is no server auto-migration.
 createdb kungfu_md
-psql kungfu_md -f migrations/001_schema.sql
+for f in migrations/*.sql; do
+  psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
+done
 
 # Run
 DB_PASS=your_password SESSION_SECRET=your_secret ./kungfu-server
@@ -33,7 +36,7 @@ go build ./...      # Must succeed
 ### Rules
 
 - **Formatting**: `gofmt` is non-negotiable. No exceptions.
-- **Layering**: handler → service → repository → model. Data flows strictly downward. Never import upward.
+- **Layering**: HTTP/control entry → owning business domain/service → repository → PostgreSQL. Admin control plane → owning business domain → repository. Credits owns balance/ledger. Never: handler → repository bypass, business → Admin reverse dependency, alternate balance/transaction SQL, or a second rollback/timeout/recovery authority.
 - **SQL**: Parameterized queries only (`$1, $2, ...`). Never concatenate strings into SQL.
 - **Errors**: Always check errors. Never discard with `_`. Use typed `errors.New()` for API-facing errors.
 - **Comments**: Write comments that explain *why*, not *what*. No placeholder comments. No `TODO`/`FIXME` in committed code.
@@ -43,18 +46,24 @@ go build ./...      # Must succeed
 
 | Layer | Package | Responsibility |
 |---|---|---|
-| Handlers | `internal/server` | Parse HTTP, format HTTP. No business logic. |
-| Services | `internal/service` | Business logic and transaction boundaries. |
-| Repositories | `internal/repository` | SQL execution and row scanning. No logic. |
-| Models | `internal/model` | Plain structs. No methods, no dependencies. |
+| HTTP / control entry | `internal/server`, `cmd/**` | Parse HTTP, format HTTP. No business SQL. |
+| Owning domain | `internal/admin`, `internal/store`, `internal/service`, `internal/payment`, … | Business rules and transaction orchestration. |
+| Credits | `internal/credits` | Sole writer of `tb_bots.balance` / `tb_transactions`. |
+| Repositories | `internal/repository` | SQL execution and row scanning. No business logic. |
+| Models | `internal/model` | Plain structs. |
 
 ### Transaction Pattern
 
 Services own transaction boundaries. When a service calls another service within the same transaction, the inner call reuses the outer transaction via `pg.Querier`:
 
+Request/business context does not own rollback cleanup. Production cleanup is `pg.Rollback(tx)` only.
+
 ```go
-tx, _ := pool.TxBegin(ctx)
-defer func() { _ = tx.Rollback(ctx) }()
+tx, err := pool.TxBegin(ctx)
+if err != nil {
+	return err
+}
+defer func() { _ = pg.Rollback(tx) }()
 
 // This reuses tx, does NOT start a new transaction
 balance, err := Record(ctx, pool, tx, botID, "earn_task", amount, ...)

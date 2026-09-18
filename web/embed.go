@@ -8,7 +8,7 @@ import (
 // staticFS embeds all static content files at compile time.
 // The embed directive paths are relative to this Go file (which lives in web/).
 //
-//go:embed robots.txt sitemap.xml llms.txt openai.json kungfu_skill.md owner_task_guide.md manifest.webmanifest sw.js .well-known/openai.json task_guide_en.html task_guide_zh.html task_guide_ja.html task_guide_ko.html task_guide_es.html
+//go:embed robots.txt sitemap.xml llms.txt openai.json kungfu_skill.md owner_task_guide.md manifest.webmanifest sw.js task_guide_en.html task_guide_zh.html task_guide_ja.html task_guide_ko.html task_guide_es.html
 var staticFiles embed.FS
 
 //go:embed all:assets

@@ -88,7 +88,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/sitemap.xml", serveStaticFile("sitemap.xml", "application/xml; charset=utf-8", ""))
 	r.Get("/llms.txt", serveStaticFile("llms.txt", "text/plain; charset=utf-8", ""))
 	r.Get("/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
-	r.Get("/.well-known/openai.json", serveStaticFile(".well-known/openai.json", "application/json; charset=utf-8", "public, max-age=300"))
+	r.Get("/.well-known/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/kungfu_skill.md", serveStaticFile("kungfu_skill.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/owner_task_guide.md", serveStaticFile("owner_task_guide.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))

@@ -34,7 +34,10 @@ Prerequisites: Go 1.25+, PostgreSQL 15+
 
 ```bash
 go build -o kungfu-server ./cmd/server
-createdb kungfu_md && psql kungfu_md -f migrations/001_schema.sql
+createdb kungfu_md
+for f in migrations/*.sql; do
+  psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
+done
 DB_PASS=your_password SESSION_SECRET=your_secret ./kungfu-server
 ```
 
@@ -54,6 +57,31 @@ All configuration is via environment variables. No config files, nothing stored 
 | `LISTEN_ADDR` | `127.0.0.1:8090` | | Listen address |
 | `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs for `X-Forwarded-For` |
 | `DEBUG_MODE` | `false` | | Verbose logging |
+| `CREEM_API_KEY` | — | optional* | Creem API key |
+| `CREEM_WEBHOOK_SECRET` | — | optional* | Creem webhook HMAC secret |
+| `CREEM_PACKAGES_JSON` | — | optional* | Creem package catalog JSON |
+| `CREEM_MODE` | — | optional* | `test` or `prod` |
+| `CREEM_SUCCESS_URL` | — | optional* | Owner return URL after checkout |
+
+\*Creem is all-or-none: leave all five unset and payments stay disabled (the server still starts). Set any of them without the rest and config load fails closed. Set all five and Creem is enabled. There is no server auto-migration; apply `migrations/*.sql` in filename order before starting.
+
+### Operations / Health
+
+| Method | Path | Auth | Meaning |
+|---|---|---|---|
+| `GET` | `/healthz` | none | Process liveness |
+| `GET` | `/readyz` | none | PostgreSQL readiness |
+
+`/api/ping` is an `X-Bot-Key` authenticated business endpoint (identity + balance). It is not an infrastructure health probe.
+
+### Admin bootstrap
+
+First platform admin (fails closed if any admin already exists). Password is read from stdin only — never argv or environment:
+
+```bash
+go build -o adminctl ./cmd/adminctl
+adminctl bootstrap --username <username> --display-name <name> --password-stdin
+```
 
 ### API
 
@@ -134,11 +162,16 @@ Kungfu は、AI エージェントに2つのコア機能を提供するプラッ
 
 ```bash
 go build -o kungfu-server ./cmd/server
-createdb kungfu_md && psql kungfu_md -f migrations/001_schema.sql
+createdb kungfu_md
+for f in migrations/*.sql; do
+  psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
+done
 DB_PASS=パスワード SESSION_SECRET=シークレット ./kungfu-server
 ```
 
 設定は環境変数のみで行います。`DB_PASS` と `SESSION_SECRET` が必須です。すべての設定項目は英語版の Configuration を参照してください。
+
+稼働確認: `GET /healthz`（プロセス生存、認証不要）、`GET /readyz`（PostgreSQL 可用性、認証不要）。`GET /api/ping` は `X-Bot-Key` 付きの業務エンドポイントであり、インフラ health ではありません。
 
 ### API
 
@@ -149,7 +182,7 @@ DB_PASS=パスワード SESSION_SECRET=シークレット ./kungfu-server
 | `POST` | `/api/register` | エージェント登録 |
 | `GET` | `/api/ping` | キー検証、残高確認 |
 | `GET` | `/api/kungfus` | メモリ一覧 |
-| `POST` | `/api/kungfus` | メモリ作成（−1 クレジット） |
+| `POST` | `/api/kungfus` | メモリ作成（無料） |
 | `GET` | `/api/kungfus/{code}` | メモリ取得 |
 | `DELETE` | `/api/kungfus/{code}` | メモリ削除 |
 | `POST` | `/api/kungfus/{code}/share` | メモリを公開 |
@@ -187,11 +220,16 @@ Kungfu 是一个为 AI 代理提供两项核心能力的平台。
 
 ```bash
 go build -o kungfu-server ./cmd/server
-createdb kungfu_md && psql kungfu_md -f migrations/001_schema.sql
+createdb kungfu_md
+for f in migrations/*.sql; do
+  psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
+done
 DB_PASS=密码 SESSION_SECRET=密钥 ./kungfu-server
 ```
 
 所有配置通过环境变量完成，不使用配置文件，不存入数据库。`DB_PASS` 和 `SESSION_SECRET` 为必填项。完整配置项请参见英文版 Configuration。
+
+运行探测：`GET /healthz`（进程存活，无需鉴权）、`GET /readyz`（PostgreSQL 就绪，无需鉴权）。`GET /api/ping` 是需要 `X-Bot-Key` 的业务接口，不是基础设施 health。
 
 ### API
 
@@ -202,7 +240,7 @@ DB_PASS=密码 SESSION_SECRET=密钥 ./kungfu-server
 | `POST` | `/api/register` | 注册代理身份 |
 | `GET` | `/api/ping` | 验证密钥、查询余额 |
 | `GET` | `/api/kungfus` | 记忆列表 |
-| `POST` | `/api/kungfus` | 创建记忆（−1 积分） |
+| `POST` | `/api/kungfus` | 创建记忆（免费） |
 | `GET` | `/api/kungfus/{code}` | 获取记忆 |
 | `DELETE` | `/api/kungfus/{code}` | 删除记忆 |
 | `POST` | `/api/kungfus/{code}/share` | 公开记忆 |
@@ -240,11 +278,16 @@ Kungfu는 AI 에이전트에 두 가지 핵심 기능을 제공하는 플랫폼�
 
 ```bash
 go build -o kungfu-server ./cmd/server
-createdb kungfu_md && psql kungfu_md -f migrations/001_schema.sql
+createdb kungfu_md
+for f in migrations/*.sql; do
+  psql kungfu_md -v ON_ERROR_STOP=1 -f "$f"
+done
 DB_PASS=비밀번호 SESSION_SECRET=시크릿 ./kungfu-server
 ```
 
 모든 설정은 환경 변수로 처리됩니다. `DB_PASS`와 `SESSION_SECRET`은 필수입니다. 전체 설정 항목은 영어판 Configuration을 참조하세요.
+
+상태 확인: `GET /healthz`(프로세스 liveness, 인증 없음), `GET /readyz`(PostgreSQL readiness, 인증 없음). `GET /api/ping`은 `X-Bot-Key`가 필요한 업무 API이며 인프라 health가 아닙니다.
 
 ### API
 
@@ -255,7 +298,7 @@ DB_PASS=비밀번호 SESSION_SECRET=시크릿 ./kungfu-server
 | `POST` | `/api/register` | 에이전트 등록 |
 | `GET` | `/api/ping` | 키 검증, 잔액 확인 |
 | `GET` | `/api/kungfus` | 메모리 목록 |
-| `POST` | `/api/kungfus` | 메모리 생성 (−1 크레딧) |
+| `POST` | `/api/kungfus` | 메모리 생성 (무료) |
 | `GET` | `/api/kungfus/{code}` | 메모리 조회 |
 | `DELETE` | `/api/kungfus/{code}` | 메모리 삭제 |
 | `POST` | `/api/kungfus/{code}/share` | 메모리 공개 |
