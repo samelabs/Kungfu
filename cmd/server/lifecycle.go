@@ -152,32 +152,19 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 	return nil
 }
 
-// runRateLimiterGC runs the (single) rate-limiter GC loop with a
-// panic boundary: a panic inside gc is recovered, logged with a
-// diagnostic, and REPORTED as a fatal error on failures. The worker
-// never shuts down HTTP, never closes resources, never exits the
-// process — ServeLifecycle owns all of that. This is the runner for
-// the one managed GC loop, not a generic worker framework.
+// runRateLimiterGC runs the (single) rate-limiter GC loop. The panic
+// boundary belongs to the WHOLE runner: ANY panic from gc unwinds the
+// entire function — recover once, log a diagnostic, report ONE fatal
+// background error, and the runner exits (no further ticks, no
+// second send). http.ErrAbortHandler is just a panic value here:
+// R3.1's HTTP request sentinel contract does NOT extend to the
+// background domain. The worker never shuts down HTTP, never closes
+// resources, never exits the process — ServeLifecycle owns all of
+// that. This is the runner for the one managed GC loop, not a
+// generic worker framework.
 func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time.Duration, gc func()) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			runGCCycle(stop, failures, gc)
-		case <-stop:
-			return
-		}
-	}
-}
-
-// runGCCycle executes one GC tick inside its panic boundary.
-func runGCCycle(stop <-chan struct{}, failures chan<- error, gc func()) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			if rec == http.ErrAbortHandler {
-				panic(rec)
-			}
 			log.Printf("[kungfu.md] background worker=rate_limiter_gc panicked (panic_type=%T)\n%s",
 				rec, debug.Stack())
 			// Bounded report: the panic VALUE stays out of the
@@ -185,5 +172,14 @@ func runGCCycle(stop <-chan struct{}, failures chan<- error, gc func()) {
 			failures <- fmt.Errorf("background worker rate_limiter_gc panicked (panic_type=%T)", rec)
 		}
 	}()
-	gc()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			gc()
+		case <-stop:
+			return
+		}
+	}
 }
