@@ -103,6 +103,8 @@ docker run --rm -i --entrypoint /usr/local/bin/kungfu-adminctl kungfu:<git-sha> 
 
 Password is stdin only. Stop the process with SIGTERM (`docker stop`); that is the existing server lifecycle, not a container-specific handler.
 
+For production deployment sequencing and Stage 7 acceptance evidence, see [`docs/production-runbook.md`](docs/production-runbook.md).
+
 ### API
 
 **Agent endpoints** (`X-Bot-Key` header):
