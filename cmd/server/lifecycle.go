@@ -19,22 +19,25 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 )
 
 // lifecycle wires the pieces ServeLifecycle owns.
 type lifecycle struct {
-	httpServer      *http.Server
-	listener        net.Listener // optional: tests hand in a listener
-	shutdownBudget  time.Duration
-	signals         <-chan shutdownTrigger // OS signals (or a synthetic source in tests)
-	backgroundStops []chan struct{}        // tickers/background loops stopped at shutdown
-	closers         []io.Closer            // resource owners closed AFTER HTTP shutdown
+	httpServer       *http.Server
+	listener         net.Listener // optional: tests hand in a listener
+	shutdownBudget   time.Duration
+	signals          <-chan shutdownTrigger // OS signals (or a synthetic source in tests)
+	backgroundStops  []chan struct{}        // tickers/background loops stopped at shutdown
+	closers          []io.Closer            // resource owners closed AFTER HTTP shutdown
+	backgroundErrors <-chan error           // fatal background-worker failures (R3.2)
 }
 
 // shutdownTrigger is the minimal shape main's signal.Notify feeds in
@@ -110,6 +113,13 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 		runShutdown("server closed")
 		<-shutdownDone
 		return nil
+	case err := <-lc.backgroundErrors:
+		// Fatal background-worker failure → the SAME single shutdown
+		// path as a fatal serve error (R3.2). The worker itself only
+		// REPORTS; lifecycle remains the only shutdown owner.
+		runShutdown("background error")
+		<-shutdownDone
+		return err
 	case <-lc.signals:
 		runShutdown("signal")
 	case <-ctx.Done():
@@ -140,4 +150,40 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 	default:
 	}
 	return nil
+}
+
+// runRateLimiterGC runs the (single) rate-limiter GC loop with a
+// panic boundary: a panic inside gc is recovered, logged with a
+// diagnostic, and REPORTED as a fatal error on failures. The worker
+// never shuts down HTTP, never closes resources, never exits the
+// process — ServeLifecycle owns all of that. This is the runner for
+// the one managed GC loop, not a generic worker framework.
+func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time.Duration, gc func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			runGCCycle(stop, failures, gc)
+		case <-stop:
+			return
+		}
+	}
+}
+
+// runGCCycle executes one GC tick inside its panic boundary.
+func runGCCycle(stop <-chan struct{}, failures chan<- error, gc func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			log.Printf("[kungfu.md] background worker=rate_limiter_gc panicked (panic_type=%T)\n%s",
+				rec, debug.Stack())
+			// Bounded report: the panic VALUE stays out of the
+			// returned error; only the worker identity and type.
+			failures <- fmt.Errorf("background worker rate_limiter_gc panicked (panic_type=%T)", rec)
+		}
+	}()
+	gc()
 }

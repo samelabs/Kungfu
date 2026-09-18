@@ -43,20 +43,13 @@ func main() {
 	srv := server.New(cfg, pool)
 
 	// Background loop (rate limiter GC) with an explicit stop signal —
-	// ServeLifecycle stops it during shutdown; nothing leaks.
+	// ServeLifecycle stops it during shutdown; nothing leaks. R3.2:
+	// a GC panic is caught by the runner's panic boundary, reported
+	// on backgroundErrors, and routed through ServeLifecycle's single
+	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				srv.RateLimiter.GC()
-			case <-gcStop:
-				return
-			}
-		}
-	}()
+	backgroundErrors := make(chan error, 1)
+	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
 
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -80,11 +73,12 @@ func main() {
 	}()
 
 	err = ServeLifecycle(context.Background(), &lifecycle{
-		httpServer:      httpServer,
-		shutdownBudget:  10 * time.Second,
-		signals:         signals,
-		backgroundStops: []chan struct{}{gcStop},
-		closers:         []io.Closer{poolCloser{pool}},
+		httpServer:       httpServer,
+		shutdownBudget:   10 * time.Second,
+		signals:          signals,
+		backgroundStops:  []chan struct{}{gcStop},
+		closers:          []io.Closer{poolCloser{pool}},
+		backgroundErrors: backgroundErrors,
 	})
 	if err != nil {
 		log.Fatalf("runtime error: %v", err)
