@@ -126,25 +126,12 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 		ClientIP: func(r *http.Request) string {
 			return middleware.GetClientIP(r, s.TrustedProxies)
 		},
-		MemoryWork: &mcpserver.MemoryWorkDeps{
-			ListKungfus:   service.ListKungfusForBot,
-			GetKungfu:     service.GetKungfuForBot,
-			PushKungfu:    service.Push,
-			ShareKungfu:   service.Share,
-			UnshareKungfu: service.Unshare,
-			DeleteKungfu:  service.Delete,
-			ListOpenTasks: service.ListOpenTasks,
-			GetOpenTask:   service.GetOpenTask,
-			SubmitTask:    service.Submit,
-			CreateTask:    service.CreateTask,
-			CheckAPI:      s.RateLimiter.CheckAPI,
-			Limits: mcpserver.ContentLimits{
-				MaxTitleLength:       s.Config.MaxTitleLength,
-				MaxTags:              s.Config.MaxTags,
-				MaxTagLength:         s.Config.MaxTagLength,
-				MaxDescriptionLength: s.Config.MaxDescriptionLength,
-				MaxContentSize:       s.Config.MaxContentSize,
-			},
+		Limits: mcpserver.ContentLimits{
+			MaxTitleLength:       s.Config.MaxTitleLength,
+			MaxTags:              s.Config.MaxTags,
+			MaxTagLength:         s.Config.MaxTagLength,
+			MaxDescriptionLength: s.Config.MaxDescriptionLength,
+			MaxContentSize:       s.Config.MaxContentSize,
 		},
 	}
 	r.Handle("/mcp", mcpserver.Handler(mcpDeps))

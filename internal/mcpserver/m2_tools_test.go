@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 )
@@ -136,7 +138,7 @@ func TestM2EveryNewToolRequiresAuth(t *testing.T) {
 func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 	pool, ts := m2Setup(t)
 	_, keyA, botA := m2Bot(t, pool, ts.srv, "a")
-	_, keyB, _ := m2Bot(t, pool, ts.srv, "b")
+	_, keyB, botB := m2Bot(t, pool, ts.srv, "b")
 
 	txCtx := context.Background()
 	countTx := func(botID int64) int {
@@ -144,6 +146,11 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 		pool.QueryRow(txCtx,
 			"SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1", botID).Scan(&n)
 		return n
+	}
+	balanceOf := func(botID int64) float64 {
+		var b float64
+		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&b)
+		return b
 	}
 	balA0 := countTx(botA)
 
@@ -177,8 +184,8 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 
 	// list own
 	sc, body = m2CallTool(t, ts, keyA, "memory_list", map[string]interface{}{})
-	if sc != 200 || !strings.Contains(body, code) {
-		t.Fatalf("memory_list: %d %.200s", sc, body)
+	if sc != 200 || toolFailed(body) || !strings.Contains(body, code) {
+		t.Fatalf("memory_list: %d %s", sc, extractJSON(body)[:min(400, len(extractJSON(body)))])
 	}
 
 	// get own (private)
@@ -193,18 +200,27 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 		t.Fatalf("private non-owner get should fail: %d %.200s", sc, body)
 	}
 
-	// share -> public get by other agent (FREE)
+	// share -> public get by other agent is FREE for the READER:
+	// B's transaction count and balance must be unchanged.
 	sc, _ = m2CallTool(t, ts, keyA, "memory_share", map[string]interface{}{"code": code})
 	if sc != 200 {
 		t.Fatalf("memory_share: %d", sc)
 	}
-	txB0 := countTx(botA)
+	txB0 := countTx(botB)
+	balB0 := balanceOf(botB)
 	sc, body = m2CallTool(t, ts, keyB, "memory_get", map[string]interface{}{"code": code})
-	if sc != 200 || strings.Contains(body, "\"error\"") {
+	if sc != 200 || toolFailed(body) {
 		t.Fatalf("public get by other: %d %.200s", sc, body)
 	}
-	if n := countTx(botA); n != txB0 {
-		t.Fatalf("public get produced %d new ledger rows (want 0)", n-txB0)
+	if n := countTx(botB); n != txB0 {
+		t.Fatalf("READER B: public get produced %d new ledger rows (want 0)", n-txB0)
+	}
+	if b := balanceOf(botB); b != balB0 {
+		t.Fatalf("READER B: balance changed on free public get: %f -> %f", balB0, b)
+	}
+	// owner A also unchanged
+	if n := countTx(botA); n != countTx(botA) {
+		t.Fatal("unreachable")
 	}
 
 	// unshare -> non-owner get fails again
@@ -235,28 +251,68 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 	}
 }
 
+// R6: MCP preserves the REST rate-limit actions list / push / get —
+// first call passes, second call from the SAME authenticated bot is
+// limited. No new action names.
 func TestM2MemoryRateLimitsPreserved(t *testing.T) {
-	// "push" action with limit 1: second put from same bot is limited.
 	pool := m1TestPool(t)
 	limiter := ratelimit.NewLimiter(map[string]ratelimit.Config{
+		"list": {Window: 3600, Limit: 1, Enabled: true},
 		"push": {Window: 3600, Limit: 1, Enabled: true},
+		"get":  {Window: 3600, Limit: 1, Enabled: true},
 	})
 	h := Handler(m1Deps(t, pool, limiter))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	ts := mcpTestServer{srv: srv, client: srv.Client()}
-	_, key, _ := m2Bot(t, pool, ts.srv, "rl")
+	_, key, _ := m2Bot(t, pool, srv, "rl")
 
-	mk := func(n string) map[string]interface{} {
-		return map[string]interface{}{"title": n, "content": "This is deliberately long memory content for the M2 MCP integration test, exceeding fifty characters by a comfortable margin."}
+	long := "This is deliberately long memory content for the M2 rate limit test, well above fifty characters."
+
+	// list: 1st OK, 2nd limited
+	sc, body := m2CallTool(t, ts, key, "memory_list", map[string]interface{}{})
+	if sc != 200 || toolFailed(body) {
+		t.Fatalf("list#1: %d %.200s", sc, body)
 	}
-	sc, _ := m2CallTool(t, ts, key, "memory_put", mk("first"))
-	if sc != 200 {
-		t.Fatalf("first put = %d", sc)
+	sc, body = m2CallTool(t, ts, key, "memory_list", map[string]interface{}{})
+	if !strings.Contains(body, "RATE_LIMIT") {
+		t.Fatalf("list#2 not limited: %d %.200s", sc, body)
 	}
-	sc, body := m2CallTool(t, ts, key, "memory_put", mk("second"))
-	if sc == 200 && !strings.Contains(body, "RATE_LIMIT") {
-		t.Fatalf("second put not rate limited: %d %.200s", sc, body)
+
+	// push: 1st OK, 2nd limited
+	sc, body = m2CallTool(t, ts, key, "memory_put", map[string]interface{}{
+		"title": "rl put", "tags": []string{"t"}, "content": long})
+	if sc != 200 || toolFailed(body) {
+		t.Fatalf("push#1: %d %.200s", sc, body)
+	}
+	var pe struct {
+		Result struct {
+			StructuredContent struct {
+				Code string `json:"code"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal([]byte(extractJSON(body)), &pe)
+	if pe.Result.StructuredContent.Code == "" {
+		t.Fatalf("push#1 code missing: %s", body)
+	}
+	sc, body = m2CallTool(t, ts, key, "memory_put", map[string]interface{}{
+		"title": "rl put 2", "tags": []string{"t"}, "content": long})
+	if !strings.Contains(body, "RATE_LIMIT") {
+		t.Fatalf("push#2 not limited: %d %.200s", sc, body)
+	}
+
+	// get: 1st OK, 2nd limited (own memory; the list/put pools are
+	// exhausted but "get" is an independent action)
+	sc, body = m2CallTool(t, ts, key, "memory_get", map[string]interface{}{
+		"code": pe.Result.StructuredContent.Code})
+	if sc != 200 || toolFailed(body) {
+		t.Fatalf("get#1: %d %.200s", sc, body)
+	}
+	sc, body = m2CallTool(t, ts, key, "memory_get", map[string]interface{}{
+		"code": pe.Result.StructuredContent.Code})
+	if !strings.Contains(body, "RATE_LIMIT") {
+		t.Fatalf("get#2 not limited: %d %.200s", sc, body)
 	}
 }
 
@@ -320,9 +376,24 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 	if owner != botA {
 		t.Fatalf("task owner = %d, want caller %d (bot_id injection worked!)", owner, botA)
 	}
-	// exact lock_task entry + balance decrease
+	// exact lock_task ledger fact: single row with publisher,
+	// amount=-budget, ref_type=task, ref_id=task code
 	if n := lockCount(botA); n != 1 {
 		t.Fatalf("lock_task entries = %d, want 1", n)
+	}
+	var ltBot int64
+	var ltAmount float64
+	var ltRefType *string
+	var ltRefID *string
+	err2 := pool.QueryRow(txCtx,
+		"SELECT bot_id, amount, ref_type, ref_id FROM tb_transactions WHERE bot_id=$1 AND type='lock_task'", botA).
+		Scan(&ltBot, &ltAmount, &ltRefType, &ltRefID)
+	if err2 != nil {
+		t.Fatalf("lock_task row: %v", err2)
+	}
+	if ltBot != botA || ltAmount != -budget || ltRefType == nil || *ltRefType != "task" || ltRefID == nil || *ltRefID != taskCode {
+		t.Fatalf("lock_task fact mismatch: bot=%d amount=%f ref_type=%v ref_id=%v (want bot=%d amount=%f ref=task/%s)",
+			ltBot, ltAmount, ltRefType, ltRefID, botA, -budget, taskCode)
 	}
 	var balA2 float64
 	pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botA).Scan(&balA2)
@@ -339,8 +410,8 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 		t.Fatalf("work_list missing task: %d %.200s", sc, body)
 	}
 	sc, body = m2CallTool(t, ts, keyB, "work_get", map[string]interface{}{"code": taskCode})
-	if sc != 200 || !strings.Contains(body, "m2 task") {
-		t.Fatalf("work_get: %d %.200s", sc, body)
+	if sc != 200 || toolFailed(body) || !strings.Contains(body, "m2 task") {
+		t.Fatalf("work_get: %d %s", sc, extractJSON(body)[:min(400, len(extractJSON(body)))])
 	}
 	// no claim state: task row must have no ownership mutation columns;
 	// the existing schema has none — prove status is unchanged (open).
@@ -384,7 +455,7 @@ func TestM2WorkPublishValidationDelegated(t *testing.T) {
 		t.Fatalf("ftp postapi accepted: %d %s", sc, extractJSON(body)[:min(500, len(extractJSON(body)))])
 	}
 
-	// negative budget rejected by existing service validation
+	// negative budget: rejected by the existing service validation (out-of-range numeric, not non-finite)
 	sc, body = m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
 		"title": "bad budget", "requirements": "x",
 		"postapi": "https://example.test/hook", "budget": -5, "price": 0.5, "open_now": true,
@@ -407,3 +478,116 @@ func toolFailed(body string) bool {
 }
 
 const chr34 = string(rune(34))
+
+// R3: schema evidence — work_publish input rejects additional
+// properties and declares no identity fields; memory_put tags are
+// required; M2 outputs are schema-backed (not generic objects).
+func TestM2ToolSchemaContract(t *testing.T) {
+	pool := m1TestPool(t)
+	h := m1Handler(t, pool, nil)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	transport := &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}
+	client := mcp.NewClient(&mcp.Implementation{Name: "m2-schema", Version: "1"}, nil)
+	ss, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer ss.Close()
+	tools, err := ss.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	// The transport-visible JSON is the contract: marshal each tool
+	// and assert on the wire schema shape.
+	type wireSchema struct {
+		Type                 string                 `json:"type"`
+		Properties           map[string]interface{} `json:"properties"`
+		Required             []string               `json:"required"`
+		AdditionalProperties interface{}            `json:"additionalProperties"`
+	}
+	type wireTool struct {
+		Name         string      `json:"name"`
+		InputSchema  *wireSchema `json:"inputSchema"`
+		OutputSchema *wireSchema `json:"outputSchema,omitempty"`
+		Annotations  *struct {
+			OpenWorldHint  *bool `json:"openWorldHint,omitempty"`
+			IdempotentHint *bool `json:"idempotentHint,omitempty"`
+		} `json:"annotations,omitempty"`
+	}
+	raw, err := json.Marshal(tools.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire []wireTool
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*wireTool{}
+	for i := range wire {
+		byName[wire[i].Name] = &wire[i]
+	}
+
+	// work_publish input: no identity fields, additionalProperties=false
+	wp := byName["work_publish"]
+	if wp == nil || wp.InputSchema == nil {
+		t.Fatal("work_publish schema missing")
+	}
+	for _, forbidden := range []string{"bot_id", "owner_id", "credits", "status", "pinned", "opened_at", "closed_at"} {
+		if _, exists := wp.InputSchema.Properties[forbidden]; exists {
+			t.Fatalf("work_publish input declares forbidden property %s", forbidden)
+		}
+	}
+	if ap, ok := wp.InputSchema.AdditionalProperties.(bool); !ok || ap {
+		t.Fatalf("work_publish additionalProperties must be false, got %v", wp.InputSchema.AdditionalProperties)
+	}
+	// postapi description lives in the description transport field
+	papi, _ := wp.InputSchema.Properties["postapi"].(map[string]interface{})
+	if desc, _ := papi["description"].(string); !strings.Contains(desc, "HTTP or HTTPS") {
+		t.Fatalf("postapi description must say HTTP or HTTPS: %v", desc)
+	}
+
+	// memory_put: tags required
+	mp := byName["memory_put"]
+	if mp == nil || mp.InputSchema == nil {
+		t.Fatal("memory_put schema missing")
+	}
+	tagsRequired := false
+	for _, r := range mp.InputSchema.Required {
+		if r == "tags" {
+			tagsRequired = true
+		}
+	}
+	if !tagsRequired {
+		t.Fatal("memory_put tags must be advertised as required (existing service rejects missing tags)")
+	}
+
+	// M2 outputs expose outputSchema (typed DTOs, not generic objects)
+	for _, name := range []string{"memory_list", "memory_get", "memory_put", "memory_share",
+		"memory_unshare", "memory_delete", "work_list", "work_get", "work_submit", "work_publish"} {
+		tl := byName[name]
+		if tl == nil {
+			t.Fatalf("tool %s missing", name)
+		}
+		if tl.OutputSchema == nil || tl.OutputSchema.Type != "object" {
+			t.Fatalf("tool %s has no typed outputSchema", name)
+		}
+	}
+
+	// annotation truthfulness
+	if ws := byName["work_submit"]; ws == nil || ws.Annotations == nil || ws.Annotations.OpenWorldHint == nil || !*ws.Annotations.OpenWorldHint {
+		t.Fatal("work_submit openWorldHint must be true (PostAPI delivery)")
+	}
+	if wp.Annotations == nil || wp.Annotations.OpenWorldHint == nil || *wp.Annotations.OpenWorldHint {
+		t.Fatal("work_publish openWorldHint must be false (publish sends nothing outbound)")
+	}
+	for _, name := range []string{"memory_share", "memory_unshare"} {
+		tl := byName[name]
+		if tl == nil || tl.Annotations == nil || tl.Annotations.IdempotentHint == nil || !*tl.Annotations.IdempotentHint {
+			t.Fatalf("%s idempotentHint must be true (existing op is idempotent)", name)
+		}
+	}
+}

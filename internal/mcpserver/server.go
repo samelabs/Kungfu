@@ -52,10 +52,18 @@ type Deps struct {
 	// Register is the existing registration service (no duplication).
 	Register func(ctx context.Context, pool *pg.Pool, name, password, ip string) (*service.RegistrationResult, error)
 
-	// MemoryWork carries the M2 memory/work service seams (nil in M1
-	// tests that predate M2; when nil, only the M1 account tools are
-	// registered).
-	MemoryWork *MemoryWorkDeps
+	// Limits is the narrow typed projection of the existing Config
+	// values (no MCP defaults, no MCP env vars).
+	Limits ContentLimits
+}
+
+// limiter returns the existing RateLimiter authority (same actions as
+// REST: list/push/get/task_submit). Never nil in production wiring.
+func (d *Deps) limiter() *ratelimit.Limiter { return d.RateLimiter }
+
+// rateLimited is the shared 429 tool error.
+func rateLimited() error {
+	return &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
 }
 
 // publicMethods is the anonymous-call allowlist: MCP protocol
@@ -171,10 +179,8 @@ func newServer(deps Deps) *mcp.Server {
 		},
 	})
 	addAccountTools(s, deps)
-	if deps.MemoryWork != nil {
-		addMemoryTools(s, deps, *deps.MemoryWork)
-		addWorkTools(s, deps, *deps.MemoryWork)
-	}
+	addMemoryTools(s, deps)
+	addWorkTools(s, deps)
 	return s
 }
 

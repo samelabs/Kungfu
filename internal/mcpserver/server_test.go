@@ -48,25 +48,12 @@ func m1Deps(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) Deps {
 	return Deps{
 		Pool:        pool,
 		RateLimiter: limiter,
-		MemoryWork: &MemoryWorkDeps{
-			ListKungfus:   service.ListKungfusForBot,
-			GetKungfu:     service.GetKungfuForBot,
-			PushKungfu:    service.Push,
-			ShareKungfu:   service.Share,
-			UnshareKungfu: service.Unshare,
-			DeleteKungfu:  service.Delete,
-			ListOpenTasks: service.ListOpenTasks,
-			GetOpenTask:   service.GetOpenTask,
-			SubmitTask:    service.Submit,
-			CreateTask:    service.CreateTask,
-			CheckAPI:      limiter.CheckAPI,
-			Limits: ContentLimits{
-				MaxTitleLength:       128,
-				MaxTags:              10,
-				MaxTagLength:         32,
-				MaxDescriptionLength: 500,
-				MaxContentSize:       102400,
-			},
+		Limits: ContentLimits{
+			MaxTitleLength:       128,
+			MaxTags:              10,
+			MaxTagLength:         32,
+			MaxDescriptionLength: 500,
+			MaxContentSize:       102400,
 		},
 		AgentLookup: func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
 			return repository.FindActiveBotByAPIKeyHash(ctx, pool, keyHash)

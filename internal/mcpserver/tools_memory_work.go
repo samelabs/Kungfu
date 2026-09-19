@@ -2,38 +2,23 @@ package mcpserver
 
 // M2 memory + work tools. Pure adapter code: every tool resolves the
 // verified identity from the M1 Bearer mechanism, applies the SAME
-// RateLimiter actions as REST, and delegates to the existing service
-// authorities. No SQL, no Credits, no transactions, no PostAPI.
+// RateLimiter actions as REST through the injected limiter, calls the
+// EXISTING service authorities directly (no facade, no alternate
+// implementations), and projects their results into typed MCP output
+// DTOs (contracts_memory_work.go). No SQL, no Credits, no
+// transactions, no PostAPI.
 
 import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"kungfu.md/internal/pg"
 	"kungfu.md/internal/service"
 )
 
-// -- shared seams (injected from server composition; never repository) --
-
-// listKungfusFn matches service.ListKungfusForBot.
-type listKungfusFn = func(ctx context.Context, q pg.Querier, botID int64, limit, offset int) (map[string]interface{}, error)
-
-// getKungfuFn matches service.GetKungfuForBot.
-type getKungfuFn = func(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]interface{}, error)
-
-// pushKungfuFn matches service.Push.
-type pushKungfuFn = func(ctx context.Context, pool *pg.Pool, botID int64, input map[string]interface{},
-	maxTitleLen, maxTags, maxTagLen, maxDescLen, maxContentSize int) (*service.KungfuPushResult, error)
-
-// createTaskFn matches service.CreateTask.
-type createTaskFn = func(ctx context.Context, pool *pg.Pool, botID int64, cfg *service.OwnerTaskConfig, input *service.CreateTaskInput) (map[string]interface{}, error)
-
-// checkAPIFn matches ratelimit.Limiter.CheckAPI (same actions as REST).
-type checkAPIFn = func(botID int64, action string) bool
-
-// ContentLimits are the existing Config values supplied by the server
-// composition layer — no MCP-specific configuration exists.
+// ContentLimits is the narrow typed projection of the existing Config
+// values the memory tools need. Supplied by the production server;
+// no MCP defaults, no MCP env vars.
 type ContentLimits struct {
 	MaxTitleLength       int
 	MaxTags              int
@@ -42,38 +27,7 @@ type ContentLimits struct {
 	MaxContentSize       int
 }
 
-// MemoryWorkDeps extends Deps with the service seams M2 needs. All are
-// existing service functions injected by internal/server; mcpserver
-// keeps zero repository dependency.
-type MemoryWorkDeps struct {
-	ListKungfus   listKungfusFn
-	GetKungfu     getKungfuFn
-	PushKungfu    pushKungfuFn
-	ShareKungfu   func(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error)
-	UnshareKungfu func(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error)
-	DeleteKungfu  func(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error)
-
-	ListOpenTasks func(ctx context.Context, pool *pg.Pool) (map[string]interface{}, error)
-	GetOpenTask   func(ctx context.Context, pool *pg.Pool, code string) (map[string]interface{}, error)
-	SubmitTask    func(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, input map[string]interface{}) (*service.TaskSubmitResult, error)
-	CreateTask    createTaskFn
-
-	// CheckAPI is the existing RateLimiter authority (same actions as
-	// REST: list/push/get/task_submit).
-	CheckAPI checkAPIFn
-
-	// Limits come from existing Config.
-	Limits ContentLimits
-}
-
-// -- memory tools --
-
-type memoryListInput struct {
-	Limit  int `json:"limit,omitempty" jsonschema:"page size (default 50, max 100)"`
-	Offset int `json:"offset,omitempty" jsonschema:"pagination offset (min 0, max 10000)"`
-}
-
-func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
+func addMemoryTools(s *mcp.Server, deps Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "memory_list",
 		Description: "List your stored Kungfu memories.",
@@ -81,26 +35,28 @@ func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 			ReadOnlyHint:  true,
 			OpenWorldHint: boolPtr(false),
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in memoryListInput) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
+		Limit  int `json:"limit,omitempty" jsonschema:"page size (default 50, max 100)"`
+		Offset int `json:"offset,omitempty" jsonschema:"pagination offset (min 0, max 10000)"`
+	}) (*mcp.CallToolResult, MemoryListOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryListOutput{}, err
 		}
-		if mw.CheckAPI != nil && !mw.CheckAPI(bot.ID, "list") {
-			return nil, nil, &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
+		if !deps.limiter().CheckAPI(bot.ID, "list") {
+			return nil, MemoryListOutput{}, rateLimited()
 		}
-		// Same pagination contract as REST.
 		limit := in.Limit
 		if limit == 0 {
 			limit = 50
 		}
 		limit = clampInt(limit, 1, 100)
 		offset := clampInt(in.Offset, 0, 10000)
-		result, err := mw.ListKungfus(ctx, deps.Pool, bot.ID, limit, offset)
+		result, err := service.ListKungfusForBot(ctx, deps.Pool, bot.ID, limit, offset)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryListOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectMemoryList(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -112,19 +68,19 @@ func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code string `json:"code"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, MemoryGetOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryGetOutput{}, err
 		}
-		if mw.CheckAPI != nil && !mw.CheckAPI(bot.ID, "get") {
-			return nil, nil, &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
+		if !deps.limiter().CheckAPI(bot.ID, "get") {
+			return nil, MemoryGetOutput{}, rateLimited()
 		}
-		result, err := mw.GetKungfu(ctx, deps.Pool, bot.ID, in.Code)
+		result, err := service.GetKungfuForBot(ctx, deps.Pool, bot.ID, in.Code)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryGetOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectMemoryGet(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -139,22 +95,21 @@ func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code        string   `json:"code,omitempty" jsonschema:"existing memory code to update; omit to create"`
 		Title       string   `json:"title"`
-		Tags        []string `json:"tags,omitempty"`
+		Tags        []string `json:"tags"`
 		Description string   `json:"description,omitempty"`
 		Content     string   `json:"content"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, MemoryPutOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryPutOutput{}, err
 		}
-		if mw.CheckAPI != nil && !mw.CheckAPI(bot.ID, "push") {
-			return nil, nil, &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
+		if !deps.limiter().CheckAPI(bot.ID, "push") {
+			return nil, MemoryPutOutput{}, rateLimited()
 		}
 		// Adapter ONLY reshapes typed MCP input into the existing
 		// service input representation ([]string -> []interface{},
-		// matching what JSON decoding produces for REST); all
-		// validation stays in service.Push with the injected Config
-		// limits.
+		// matching JSON decoding); all validation stays in
+		// service.Push with the Config limits.
 		tags := make([]interface{}, len(in.Tags))
 		for i, t := range in.Tags {
 			tags[i] = t
@@ -168,61 +123,63 @@ func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 		if in.Code != "" {
 			input["code"] = in.Code
 		}
-		result, err := mw.PushKungfu(ctx, deps.Pool, bot.ID, input,
-			mw.Limits.MaxTitleLength, mw.Limits.MaxTags, mw.Limits.MaxTagLength,
-			mw.Limits.MaxDescriptionLength, mw.Limits.MaxContentSize)
+		result, err := service.Push(ctx, deps.Pool, bot.ID, input,
+			deps.Limits.MaxTitleLength, deps.Limits.MaxTags, deps.Limits.MaxTagLength,
+			deps.Limits.MaxDescriptionLength, deps.Limits.MaxContentSize)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryPutOutput{}, mapAppError(err)
 		}
-		return nil, map[string]interface{}{
-			"code":       result.Code,
-			"title":      result.Title,
-			"action":     result.Action,
-			"checksum":   result.Checksum,
-			"visibility": result.Visibility,
+		return nil, MemoryPutOutput{
+			Code:       result.Code,
+			Title:      result.Title,
+			Action:     result.Action,
+			Checksum:   result.Checksum,
+			Visibility: result.Visibility,
 		}, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "memory_share",
-		Description: "Make one of your memories publicly readable.",
+		Description: "Make one of your memories publicly readable. Idempotent.",
 		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  false,
-			OpenWorldHint: boolPtr(false),
+			ReadOnlyHint:   false,
+			IdempotentHint: true,
+			OpenWorldHint:  boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code string `json:"code"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, MemoryVisibilityOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryVisibilityOutput{}, err
 		}
-		result, err := mw.ShareKungfu(ctx, deps.Pool, bot.ID, in.Code)
+		result, err := service.Share(ctx, deps.Pool, bot.ID, in.Code)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryVisibilityOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectVisibility(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "memory_unshare",
-		Description: "Revoke public access to one of your memories.",
+		Description: "Revoke public access to one of your memories. Idempotent.",
 		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  false,
-			OpenWorldHint: boolPtr(false),
+			ReadOnlyHint:   false,
+			IdempotentHint: true,
+			OpenWorldHint:  boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code string `json:"code"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, MemoryVisibilityOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryVisibilityOutput{}, err
 		}
-		result, err := mw.UnshareKungfu(ctx, deps.Pool, bot.ID, in.Code)
+		result, err := service.Unshare(ctx, deps.Pool, bot.ID, in.Code)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryVisibilityOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectVisibility(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -234,22 +191,20 @@ func addMemoryTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code string `json:"code"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, MemoryDeleteOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, MemoryDeleteOutput{}, err
 		}
-		result, err := mw.DeleteKungfu(ctx, deps.Pool, bot.ID, in.Code)
+		result, err := service.Delete(ctx, deps.Pool, bot.ID, in.Code)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, MemoryDeleteOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectDelete(result), nil
 	})
 }
 
-// -- work tools --
-
-func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
+func addWorkTools(s *mcp.Server, deps Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "work_list",
 		Description: "List currently open and fundable work.",
@@ -257,15 +212,15 @@ func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 			ReadOnlyHint:  true,
 			OpenWorldHint: boolPtr(false),
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, WorkListOutput, error) {
 		if _, err := deps.resolveVerified(ctx); err != nil {
-			return nil, nil, err
+			return nil, WorkListOutput{}, err
 		}
-		result, err := mw.ListOpenTasks(ctx, deps.Pool)
+		result, err := service.ListOpenTasks(ctx, deps.Pool)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, WorkListOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectWorkList(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -277,15 +232,15 @@ func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code string `json:"code"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, WorkGetOutput, error) {
 		if _, err := deps.resolveVerified(ctx); err != nil {
-			return nil, nil, err
+			return nil, WorkGetOutput{}, err
 		}
-		result, err := mw.GetOpenTask(ctx, deps.Pool, in.Code)
+		result, err := service.GetOpenTask(ctx, deps.Pool, in.Code)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, WorkGetOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectWorkGet(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -295,31 +250,27 @@ func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 			ReadOnlyHint:    false,
 			DestructiveHint: boolPtr(false),
 			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(true), // sends data to an external endpoint
+			OpenWorldHint:   boolPtr(true), // performs the existing PostAPI delivery
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code    string                 `json:"code"`
 		Payload map[string]interface{} `json:"payload" jsonschema:"your task result body"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, WorkSubmitOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, WorkSubmitOutput{}, err
 		}
-		if mw.CheckAPI != nil && !mw.CheckAPI(bot.ID, "task_submit") {
-			return nil, nil, &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
+		if !deps.limiter().CheckAPI(bot.ID, "task_submit") {
+			return nil, WorkSubmitOutput{}, rateLimited()
 		}
 		// The payload is the Agent's result body, passed as-is to the
 		// existing Submit authority. delivery.BuildPayload (inside the
 		// service) remains the sole component that adds task_code.
-		result, err := mw.SubmitTask(ctx, deps.Pool, in.Code, bot.ID, in.Payload)
+		result, err := service.Submit(ctx, deps.Pool, in.Code, bot.ID, in.Payload)
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, WorkSubmitOutput{}, mapAppError(err)
 		}
-		return nil, map[string]interface{}{
-			"task_code": result.TaskCode,
-			"post":      result.Post,
-			"billing":   result.Billing,
-		}, nil
+		return nil, projectWorkSubmit(result), nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -329,26 +280,27 @@ func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 			ReadOnlyHint:    false,
 			DestructiveHint: boolPtr(false),
 			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(false),
+			OpenWorldHint:   boolPtr(false), // publish itself sends nothing outbound
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Title        string  `json:"title"`
 		Requirements string  `json:"requirements"`
-		PostAPI      string  `json:"postapi" jsonschema:"https URL that receives completed work results"`
+		PostAPI      string  `json:"postapi" jsonschema:"HTTP or HTTPS URL that receives completed work results"`
 		Budget       float64 `json:"budget"`
 		Price        float64 `json:"price" jsonschema:"credits paid per successful submission"`
 		OpenNow      bool    `json:"open_now" jsonschema:"open immediately (fundable) or keep pending"`
-	}) (*mcp.CallToolResult, map[string]interface{}, error) {
+	}) (*mcp.CallToolResult, WorkPublishOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, WorkPublishOutput{}, err
 		}
-		// Ownership derives ONLY from the verified credential — any
-		// bot_id in the request is ignored (not even parsed into the
-		// typed input). service.CreateTask owns validation, status
-		// selection, lock_task debit, and the transaction.
-		result, err := mw.CreateTask(ctx, deps.Pool, bot.ID,
-			&service.OwnerTaskConfig{MaxTitleLength: mw.Limits.MaxTitleLength},
+		// Ownership derives ONLY from the verified credential — the
+		// typed input schema (additionalProperties=false) rejects
+		// injected identity fields before the tool runs.
+		// service.CreateTask owns validation, status selection,
+		// lock_task debit, and the transaction.
+		result, err := service.CreateTask(ctx, deps.Pool, bot.ID,
+			&service.OwnerTaskConfig{MaxTitleLength: deps.Limits.MaxTitleLength},
 			&service.CreateTaskInput{
 				Title:        in.Title,
 				Requirements: in.Requirements,
@@ -358,9 +310,9 @@ func addWorkTools(s *mcp.Server, deps Deps, mw MemoryWorkDeps) {
 				OpenNow:      in.OpenNow,
 			})
 		if err != nil {
-			return nil, nil, mapAppError(err)
+			return nil, WorkPublishOutput{}, mapAppError(err)
 		}
-		return nil, result, nil
+		return nil, projectWorkPublish(result), nil
 	})
 }
 
