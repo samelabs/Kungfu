@@ -17,7 +17,7 @@ function renderCredits() {
     if (!wrap) return;
     const balanceEl = qs('#creditsBalance');
     if (balanceEl && state.account && typeof state.account.balance === 'number') {
-        balanceEl.textContent = formatCredits(state.account.balance);
+        balanceEl.textContent = state.account.balance;
     }
     const pkgs = (state.credits && state.credits.packages) || [];
     if (!state.credits || !state.credits.loaded) {

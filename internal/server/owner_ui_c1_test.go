@@ -116,27 +116,54 @@ func TestC1BalanceStatDOMContract(t *testing.T) {
 	}
 }
 
-// C1-6: Overview / Store / Credits all use the single formatCredits
-// authority for the main balance presentation.
-func TestC1SingleBalanceFormatter(t *testing.T) {
+// C1-6: no unapproved balance format policy — formatCredits/toFixed(4)
+// product rule introduced by C1 must not exist; per-page pre-C1
+// display behavior is restored (only the <b> stat structure changed).
+func TestC1NoBalanceFormatPolicy(t *testing.T) {
 	jsDir := filepath.Join("..", "..", "web", "assets", "owner")
 	core, err := os.ReadFile(filepath.Join(jsDir, "core.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(core), "function formatCredits(") {
-		t.Fatal("formatCredits authority missing from core.js")
-	}
-	if !strings.Contains(string(core), "toFixed(4)") {
-		t.Fatal("formatCredits must render 4-decimal precision")
+	if strings.Contains(string(core), "formatCredits") {
+		t.Fatal("formatCredits authority must not exist")
 	}
 	for _, f := range []string{"render-overview.js", "render-credits.js", "render-store.js"} {
 		src, err := os.ReadFile(filepath.Join(jsDir, f))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(src), "formatCredits(") {
-			t.Fatalf("%s does not use formatCredits", f)
+		if strings.Contains(string(src), "formatCredits(") {
+			t.Fatalf("%s still uses formatCredits", f)
+		}
+	}
+	// selectTask (read/navigation) must not produce a success toast.
+	rt, err := os.ReadFile(filepath.Join(jsDir, "render-tasks.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rt), "t('tasks.created')") {
+		t.Fatal("tasks.created key must not be referenced")
+	}
+}
+
+// C1-6b: no historical .notice containers in DYNAMIC Owner JS markup,
+// and no taskModalNotice.
+func TestC1NoNoticeInDynamicOwnerJSMarkup(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "web", "assets", "owner", "*.js"))
+	if err != nil || len(files) == 0 {
+		t.Fatal("owner js files not found")
+	}
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "taskModalNotice") {
+			t.Fatalf("%s still references taskModalNotice", f)
+		}
+		if strings.Contains(string(src), `class="notice`) || strings.Contains(string(src), `class=\'notice`) {
+			t.Fatalf("%s still generates class=\"notice\" markup", f)
 		}
 	}
 }

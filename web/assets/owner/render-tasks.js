@@ -35,7 +35,7 @@ async function selectTask(code) {
         state.selectedTask = json.data.task;
         renderTaskDetail(json.data.task);
         renderTasks();
-        showToast(noticeText(json.message || t('tasks.created')), 'ok');
+        // selectTask is a read/navigation operation — no success toast
     } catch (error) {
         showToast(noticeText(String(error)), 'error');
     }
@@ -143,7 +143,6 @@ function openTaskModal(mode, task) {
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('task_new.create'))}</button>
                     </div>
-                    <div id="taskModalNotice" class="notice"></div>
                 </form>
             </div>`;
     } else if (mode === 'edit') {
@@ -165,7 +164,6 @@ function openTaskModal(mode, task) {
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('tasks.save_basics'))}</button>
                     </div>
-                    <div id="taskModalNotice" class="notice"></div>
                 </form>
             </div>`;
     } else if (mode === 'budget') {
@@ -182,7 +180,6 @@ function openTaskModal(mode, task) {
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('tasks.add_budget_submit'))}</button>
                     </div>
-                    <div id="taskModalNotice" class="notice"></div>
                 </form>
             </div>`;
     }
@@ -224,8 +221,10 @@ function bindCreateSubmit(form, overlay) {
             closeModal();
             await loadTasks();
             renderTasks();
-            if (json.data?.task?.code) await selectTask(json.data.task.code);
+            // Creation completion feedback BEFORE the navigation read:
+            // selectTask() is a read/navigation op and produces no toast.
             showToast(noticeText(json.message || t('tasks.updated')), 'ok');
+            if (json.data?.task?.code) await selectTask(json.data.task.code);
         } catch (err) { showToast(noticeText(String(err)), 'error'); }
     });
 }

@@ -43,12 +43,6 @@ function ownerUrl(path) {
 }
 
 function qs(selector) { return document.querySelector(selector); }
-// Single Owner credit-balance presentation authority.
-// Credits support 4-decimal precision; never render 0/2 decimals.
-function formatCredits(v) {
-    const n = Number(v || 0);
-    return n.toFixed(4);
-}
 function qsa(selector) { return Array.from(document.querySelectorAll(selector)); }
 function t(key, vars = {}) {
     const parts = String(key).split('.');
