@@ -122,18 +122,6 @@ func VerifyBotAuth(ctx context.Context, lookupFn BotLookupFunc, r *http.Request)
 	return VerifyAgentKey(ctx, ExtractAPIKeyFromHeader(r), lookupFn)
 }
 
-// ExtractBearerToken extracts the token from an Authorization: Bearer
-// header (RFC 6750), the MCP transport's credential shape. Returns ""
-// when absent or not Bearer.
-func ExtractBearerToken(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
-		return strings.TrimSpace(h[len(prefix):])
-	}
-	return ""
-}
-
 // MaybeUpdateLastActive updates last_active_at with 10% probability (sampling)
 // to reduce DB write load. The update runs in a fire-and-forget goroutine.
 func MaybeUpdateLastActive(ctx context.Context, updateFn BotActiveUpdateFunc, botID int64) {

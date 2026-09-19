@@ -2,12 +2,10 @@ package server
 
 import (
 	"context"
-	"kungfu.md/internal/credits"
 	"net/http"
 	"strings"
 
 	"kungfu.md/internal/auth"
-	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/repository"
@@ -83,28 +81,19 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-fetch fresh identity after authentication; balance is composed
-	// separately from the credits domain.
-	freshBot, err := repository.FindActiveBotSummaryByID(r.Context(), s.Pool, bot.ID)
+	// Single account-status authority: the same typed service the MCP
+	// account_status tool calls. Output shape is unchanged.
+	st, err := service.ComposeAgentAccountStatus(r.Context(), s.Pool, bot.ID)
 	if err != nil {
-		handleAppError(w, apperrors.New(500, "INTERNAL_ERROR", "Error retrieving account"))
-		return
-	}
-	if freshBot == nil {
-		handleAppError(w, apperrors.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header"))
-		return
-	}
-	balance, balErr := credits.Balance(r.Context(), s.Pool, freshBot.ID)
-	if balErr != nil {
-		handleAppError(w, apperrors.New(500, "INTERNAL_ERROR", "Error retrieving account"))
+		handleAppError(w, err)
 		return
 	}
 
 	SuccessResponse(w, map[string]interface{}{
-		"bot_id":   freshBot.ID,
-		"bot_name": freshBot.BotName,
-		"balance":  balance,
-		"status":   freshBot.Status,
+		"bot_id":   st.BotID,
+		"bot_name": st.BotName,
+		"balance":  st.Balance,
+		"status":   st.Status,
 	}, "Key is valid")
 }
 

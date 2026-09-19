@@ -11,14 +11,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
+	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 )
 
@@ -36,15 +40,19 @@ func m1TestPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-// m1Server builds the production handler on httptest.
-func m1Handler(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) http.Handler {
+// m1Deps builds the production Deps wiring (tests may override fields).
+func m1Deps(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) Deps {
 	t.Helper()
 	if limiter == nil {
 		limiter = ratelimit.NewLimiter(map[string]ratelimit.Config{})
 	}
-	return Handler(Deps{
+	return Deps{
 		Pool:        pool,
 		RateLimiter: limiter,
+		AgentLookup: func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
+			return repository.FindActiveBotByAPIKeyHash(ctx, pool, keyHash)
+		},
+		AccountStatus: service.ComposeAgentAccountStatus,
 		ClientIP: func(r *http.Request) string {
 			host, _, err := splitHostPort(r.RemoteAddr)
 			if err != nil {
@@ -52,7 +60,33 @@ func m1Handler(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) http.Han
 			}
 			return host
 		},
-	})
+	}
+}
+
+// m1Handler builds the production handler on httptest.
+func m1Handler(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) http.Handler {
+	t.Helper()
+	return Handler(m1Deps(t, pool, limiter))
+}
+
+// m1RawRequest posts a raw JSON-RPC body with the given headers.
+func m1RawRequest(t *testing.T, srv *httptest.Server, body map[string]interface{}, hdr map[string]string) (int, string) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", srv.URL+"/mcp", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(resp.Body)
+	return resp.StatusCode, buf.String()
 }
 
 func splitHostPort(s string) (string, string, error) {
@@ -85,43 +119,35 @@ func TestM1ProtocolNegotiatesExactly20260728(t *testing.T) {
 	}
 }
 
-func TestM1OlderProtocolRejected(t *testing.T) {
+// The ACTUAL M1 contract: legacy initialize is NOT a public/anonymous
+// MCP operation on this surface. The 2026-07-28 handshake is
+// server/discover; a legacy initialize attempt cannot negotiate (the
+// SDK's own legacy fallback to an older revision is never reached
+// because the request is auth-rejected first). Kungfu advertises and
+// negotiates 2026-07-28 only — proven by the discovery test above.
+func TestM1LegacyInitializeIsNotPublic(t *testing.T) {
 	pool := m1TestPool(t)
 	h := m1Handler(t, pool, nil)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
-	// handcrafted initialize offering ONLY an older revision
-	body := map[string]interface{}{
+	sc, body := m1RawRequest(t, srv, map[string]interface{}{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
 		"params": map[string]interface{}{
 			"protocolVersion": "2025-06-18",
 			"capabilities":    map[string]interface{}{},
-			"clientInfo":      map[string]string{"name": "old", "version": "1"},
+			"clientInfo":      map[string]string{"name": "legacy", "version": "1"},
 		},
+	}, map[string]string{"Mcp-Method": "initialize"})
+
+	// Anonymous legacy initialize must NOT negotiate: HTTP-level
+	// rejection (401 — not a public operation) or a JSON-RPC error.
+	// A SUCCESS result with serverInfo must never appear.
+	if strings.Contains(body, "serverInfo") {
+		t.Fatalf("legacy initialize negotiated: %d %s", sc, body)
 	}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", srv.URL+"/mcp", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Mcp-Method", "initialize")
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var rbuf bytes.Buffer
-	_, _ = rbuf.ReadFrom(resp.Body)
-	rbody := rbuf.String()
-	// The ONLY acceptable outcomes: HTTP-level rejection (401 — legacy
-	// initialize is not anonymous on a 2026-07-28-only surface) or an
-	// in-band JSON-RPC error. A SUCCESS initialize result negotiating
-	// any protocol version (serverInfo present) must never appear.
-	if strings.Contains(rbody, "serverInfo") {
-		t.Fatalf("older protocol negotiated: %s", rbody)
-	}
-	if resp.StatusCode == 200 && !strings.Contains(rbody, "error") {
-		t.Fatalf("older protocol accepted: %d %s", resp.StatusCode, rbody)
+	if sc == 200 && !strings.Contains(body, "error") {
+		t.Fatalf("legacy initialize accepted anonymously: %d %s", sc, body)
 	}
 }
 
@@ -201,7 +227,47 @@ func TestM1OversizedBody413(t *testing.T) {
 	}
 }
 
-func TestM1ToolsListExactlyTwo(t *testing.T) {
+func TestM1ToolsListDeterministicOrder(t *testing.T) {
+	pool := m1TestPool(t)
+	h := m1Handler(t, pool, nil)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	want := []string{"account_register", "account_status"}
+
+	listNames := func() []string {
+		ctx := context.Background()
+		transport := &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}
+		client := mcp.NewClient(&mcp.Implementation{Name: "m1-ls", Version: "1"}, nil)
+		ss, err := client.Connect(ctx, transport, nil)
+		if err != nil {
+			t.Fatalf("connect: %v", err)
+		}
+		defer ss.Close()
+		tools, err := ss.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		var names []string
+		for _, tl := range tools.Tools {
+			names = append(names, tl.Name)
+		}
+		return names // NO client-side sort before comparison
+	}
+
+	for i := 0; i < 3; i++ {
+		got := listNames() // independent stateless client each call
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("list #%d = %v, want exactly %v in this order", i, got, want)
+		}
+	}
+}
+
+// TestM1ServerDiscoverAdvertisesExactCapabilities: server/discover (or
+// initialize result capabilities, whichever the negotiated protocol
+// exposes) must advertise TOOLS and nothing else — no logging, no
+// prompts, no resources, no sampling/roots.
+func TestM1ServerDiscoverAdvertisesExactCapabilities(t *testing.T) {
 	pool := m1TestPool(t)
 	h := m1Handler(t, pool, nil)
 	srv := httptest.NewServer(h)
@@ -209,24 +275,58 @@ func TestM1ToolsListExactlyTwo(t *testing.T) {
 
 	ctx := context.Background()
 	transport := &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}
-	client := mcp.NewClient(&mcp.Implementation{Name: "m1-ls", Version: "1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "m1-cap", Version: "1"}, nil)
 	ss, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer ss.Close()
 
-	tools, err := ss.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("list: %v", err)
+	// Connect performs the SEP-2575 stateless server/discover; the
+	// cached InitializeResult carries the server-advertised
+	// capabilities envelope.
+	res := ss.InitializeResult()
+	if res == nil {
+		t.Fatal("no discovery result")
 	}
-	names := map[string]bool{}
-	for _, tl := range tools.Tools {
-		names[tl.Name] = true
+	caps := res.Capabilities
+	if caps == nil {
+		t.Fatal("no capabilities advertised")
 	}
-	if len(names) != 2 || !names["account_register"] || !names["account_status"] {
-		t.Fatalf("tool catalog = %v, want exactly account_register+account_status", names)
+	if caps.Tools == nil {
+		t.Fatal("tools capability missing")
 	}
+	if caps.Tools.ListChanged {
+		t.Fatal("tools capability must not advertise listChanged (static catalog)")
+	}
+	if caps.Logging != nil {
+		t.Fatal("logging capability must not be advertised")
+	}
+	if caps.Prompts != nil {
+		t.Fatal("prompts capability must not be advertised")
+	}
+	if caps.Resources != nil {
+		t.Fatal("resources capability must not be advertised")
+	}
+	// exact serialized form: only "tools" may appear
+	b, _ := json.Marshal(caps)
+	if !strings.Contains(string(b), "\"tools\"") {
+		t.Fatalf("serialized capabilities: %s", b)
+	}
+	var env map[string]json.RawMessage
+	_ = json.Unmarshal(b, &env)
+	if len(env) != 1 {
+		t.Fatalf("advertised capability keys = %v, want exactly [tools]", envKeys(env))
+	}
+}
+
+func envKeys(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ---- auth boundary ----
@@ -351,17 +451,24 @@ func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return rt.RoundTrip(r)
 }
 
-func TestM1McpNameBodyMismatchCannotBypass(t *testing.T) {
+func TestM1McpNameBodyMismatchRejectedBeforeToolExecution(t *testing.T) {
 	pool := m1TestPool(t)
-	h := m1Handler(t, pool, nil)
+
+	// The protected tool's domain callback: must NEVER run.
+	statusCalls := 0
+	deps := m1Deps(t, pool, nil)
+	deps.AccountStatus = func(ctx context.Context, q pg.Querier, botID int64) (*service.AgentAccountStatus, error) {
+		statusCalls++
+		return &service.AgentAccountStatus{BotID: botID}, nil
+	}
+	h := Handler(deps)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
-	_, _ = m1RegisterBot(t, pool, fmt.Sprint(time.Now().UnixNano()))
-
 	// Header claims PUBLIC account_register; body calls PROTECTED
-	// account_status. No Authorization. The SDK's header/body
-	// consistency check must reject before any tool runs.
+	// account_status. The official SDK header/body consistency
+	// mechanism must reject the request at the protocol layer BEFORE
+	// any tool handler or domain callback runs.
 	body := map[string]interface{}{
 		"jsonrpc": "2.0", "id": 9, "method": "tools/call",
 		"params": map[string]interface{}{"name": "account_status", "arguments": map[string]interface{}{}},
@@ -371,7 +478,8 @@ func TestM1McpNameBodyMismatchCannotBypass(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Mcp-Method", "tools/call")
-	req.Header.Set("Mcp-Name", "account_register") // LIE
+	req.Header.Set("Mcp-Name", "account_register")          // LIE
+	req.Header.Set("Mcp-Protocol-Version", ProtocolVersion) // required by the 2026-07-28 standard-header contract
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -379,12 +487,25 @@ func TestM1McpNameBodyMismatchCannotBypass(t *testing.T) {
 	defer resp.Body.Close()
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(resp.Body)
+	rbody := buf.String()
 
-	// must NOT be a successful account_status execution. Without a
-	// valid credential the tool itself fails closed; the only
-	// acceptable 200 is an error-marked tool result.
-	if resp.StatusCode == 200 && strings.Contains(buf.String(), "balance") {
-		t.Fatalf("Mcp-Name/body mismatch executed a protected tool: %s", buf.String())
+	rejected := false
+	if resp.StatusCode == http.StatusBadRequest {
+		rejected = true // HTTP-level protocol rejection
+	}
+	if resp.StatusCode == 200 && (strings.Contains(rbody, "\"code\"") && strings.Contains(rbody, "error")) {
+		rejected = true // JSON-RPC error envelope (HeaderMismatch-style)
+	}
+	if !rejected {
+		t.Fatalf("mismatch not rejected at protocol layer: %d %s", resp.StatusCode, rbody)
+	}
+	// Proof the protected path never executed: the domain callback was
+	// never invoked and no account data leaked.
+	if statusCalls != 0 {
+		t.Fatalf("account_status domain callback ran %d time(s) on a mismatched request", statusCalls)
+	}
+	if strings.Contains(rbody, "balance") {
+		t.Fatalf("protected account data leaked: %s", rbody)
 	}
 }
 
@@ -522,24 +643,82 @@ func TestM1NoSessionStateEstablished(t *testing.T) {
 	ss2.Close()
 }
 
-func TestM1CancellationReachesToolContext(t *testing.T) {
-	// PropagateRequestCancellation=true ties the tool ctx to the HTTP
-	// request ctx; prove via a cancelled HTTP request that the tool
-	// ctx observes Done. Uses a slow registration (network to PG is
-	// fast) — instead prove structurally: cancel mid-request and
-	// verify the handler returns without hanging beyond the cancel.
+func TestM1CancellationPropagatesToToolContext(t *testing.T) {
+	pool := m1TestPool(t)
+
+	entered := make(chan struct{}, 1)
+	cancelled := make(chan struct{}, 1)
+	deps := m1Deps(t, pool, nil)
+	deps.Register = func(ctx context.Context, pool *pg.Pool, name, password, ip string) (*service.RegistrationResult, error) {
+		entered <- struct{}{}
+		select {
+		case <-ctx.Done():
+			cancelled <- struct{}{}
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Second):
+			return nil, nil
+		}
+	}
+	h := Handler(deps)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
 	ctx, cancel := context.WithCancel(context.Background())
-	req, _ := http.NewRequestWithContext(ctx, "GET", "/mcp", nil)
-	_ = req
-	cancel()
-	if ctx.Err() == nil {
-		t.Fatal("precondition: ctx must be cancelled")
+	body := map[string]interface{}{
+		"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+		"params": map[string]interface{}{
+			"name": "account_register",
+			"arguments": map[string]string{
+				"name":     "m1cancel_" + fmt.Sprint(time.Now().UnixNano()),
+				"password": "password123",
+			},
+			"_meta": map[string]interface{}{
+				"io.modelcontextprotocol/protocolVersion":    ProtocolVersion,
+				"io.modelcontextprotocol/clientInfo":         map[string]string{"name": "m1cancel", "version": "1"},
+				"io.modelcontextprotocol/clientCapabilities": map[string]interface{}{},
+			},
+		},
 	}
-	// Structural verification that the option is set lives in the
-	// handler construction; assert the constant wiring here.
-	if MaxRequestBodyBytes != 1<<20 {
-		t.Fatal("body cap drift")
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+"/mcp", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Mcp-Method", "tools/call")
+	req.Header.Set("Mcp-Name", "account_register")
+	req.Header.Set("Mcp-Protocol-Version", ProtocolVersion) // 2026-07-28: cancellation propagation applies
+
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := srv.Client().Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		errCh <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool never entered")
 	}
+	cancel() // cancel the originating HTTP request
+
+	select {
+	case <-cancelled:
+		// tool ctx observed cancellation through the real HTTP→SDK→tool path
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool context did not observe cancellation")
+	}
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("cancelled request should not complete successfully")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not terminate after cancellation")
+	}
+	// no detached execution: the cancelled signal IS the proof the tool
+	// goroutine reached its exit path (channel send happens before return).
 }
 
 func extractJSON(sse string) string {
@@ -572,4 +751,49 @@ func m1CallRegisterRaw(t *testing.T, srv *httptest.Server, name string) (int, st
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(resp.Body)
 	return resp.StatusCode, buf.String()
+}
+
+// ---- architecture guard ----
+
+// TestM1McpserverHasNoRepositoryDependency: production files under
+// internal/mcpserver must not import the repository package and must
+// not contain direct SQL / Credits mutation constructs. The MCP layer
+// is a protocol adapter only.
+func TestM1McpserverHasNoRepositoryDependency(t *testing.T) {
+	files, err := filepath.Glob("server.go")
+	if err != nil || len(files) == 0 {
+		// test runs with the package dir as cwd
+		entries, derr := os.ReadDir(".")
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		files = files[:0]
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
+				files = append(files, e.Name())
+			}
+		}
+	}
+	if len(files) == 0 {
+		t.Fatal("no production sources found")
+	}
+	forbiddenTokens := []string{
+		"kungfu.md/internal/repository",
+		"credits.Record",
+		"TxBegin",
+		"UPDATE tb_bots",
+		"INSERT INTO tb_transactions",
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(data)
+		for _, tok := range forbiddenTokens {
+			if strings.Contains(s, tok) {
+				t.Fatalf("%s contains forbidden token %q — mcpserver is a protocol adapter only", f, tok)
+			}
+		}
+	}
 }

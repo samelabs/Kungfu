@@ -113,19 +113,3 @@ func TestSharedVerifyAgentKeyAuthority(t *testing.T) {
 		}
 	}
 }
-
-func TestExtractBearerToken(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer "+GenerateKey())
-	if got := ExtractBearerToken(req); !ValidateKeyFormat(got) {
-		t.Fatalf("bearer extraction = %q", got)
-	}
-	req.Header.Set("Authorization", "Basic abc")
-	if ExtractBearerToken(req) != "" {
-		t.Fatal("non-bearer scheme must yield empty")
-	}
-	req.Header.Del("Authorization")
-	if ExtractBearerToken(req) != "" {
-		t.Fatal("absent header must yield empty")
-	}
-}

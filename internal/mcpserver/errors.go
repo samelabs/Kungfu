@@ -7,7 +7,6 @@ import (
 
 	apperr "kungfu.md/internal/errors"
 
-	"kungfu.md/internal/credits"
 	"kungfu.md/internal/model"
 )
 
@@ -30,12 +29,6 @@ func mapAppError(err error) error {
 		return &toolError{httpStatus: ae.HTTPCode, code: ae.Code, message: ae.Message}
 	}
 	return &toolError{httpStatus: 500, code: "INTERNAL_ERROR", message: "An internal error occurred"}
-}
-
-// accountBalance reads the CURRENT authoritative balance through the
-// existing Credits read API — MCP never computes balance itself.
-func accountBalance(ctx context.Context, deps Deps, botID int64) (float64, error) {
-	return credits.Balance(ctx, deps.Pool, botID)
 }
 
 // resolveVerified resolves the bot identity from the credential

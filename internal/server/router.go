@@ -17,8 +17,11 @@ import (
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/mcpserver"
 	"kungfu.md/internal/middleware"
+	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
+	"kungfu.md/internal/repository"
+	"kungfu.md/internal/service"
 )
 
 // Server holds all dependencies.
@@ -116,6 +119,10 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Handle("/mcp", mcpserver.Handler(mcpserver.Deps{
 		Pool:        s.Pool,
 		RateLimiter: s.RateLimiter,
+		AgentLookup: func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
+			return repository.FindActiveBotByAPIKeyHash(ctx, s.Pool, keyHash)
+		},
+		AccountStatus: service.ComposeAgentAccountStatus,
 		ClientIP: func(r *http.Request) string {
 			return middleware.GetClientIP(r, s.TrustedProxies)
 		},

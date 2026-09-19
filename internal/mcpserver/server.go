@@ -19,10 +19,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kungfu.md/internal/auth"
-	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
-	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 	"kungfu.md/internal/version"
 )
@@ -34,10 +32,20 @@ const ProtocolVersion = "2026-07-28"
 const MaxRequestBodyBytes = 1 << 20
 
 // Deps carries the existing-domain dependencies the tools call.
-// mcpserver never reaches around them into repository SQL.
+// mcpserver never reaches around them into repository SQL: the
+// Agent-key lookup arrives as an injected auth seam (transport
+// composition owned by the server layer), and account status goes
+// through the service layer.
 type Deps struct {
 	Pool        *pg.Pool
 	RateLimiter *ratelimit.Limiter
+	// AgentLookup is the existing bot-by-key-hash lookup seam
+	// (repository.FindActiveBotByAPIKeyHash in production wiring).
+	// Required — fail closed when nil.
+	AgentLookup auth.BotLookupFunc
+	// AccountStatus is the ONE account-status service (injected for
+	// the same seam reasons).
+	AccountStatus func(ctx context.Context, q pg.Querier, botID int64) (*service.AgentAccountStatus, error)
 	// ClientIP resolves the trusted client IP for rate limiting
 	// (supplied by the server layer's trusted-proxy mechanism).
 	ClientIP func(r *http.Request) string
@@ -65,10 +73,11 @@ func isPublicCall(method, toolName string) bool {
 // lookup by digest) and returns a TokenInfo whose Extra carries the
 // verified bot. The raw key never reaches repository code or logs.
 func (d *Deps) verifyToken(ctx context.Context, token string, r *http.Request) (*mcpsdkauth.TokenInfo, error) {
-	lookup := func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
-		return repository.FindActiveBotByAPIKeyHash(ctx, d.Pool, keyHash)
+	if d.AgentLookup == nil {
+		// Fail closed: no lookup seam, no authentication.
+		return nil, mcpsdkauth.ErrInvalidToken
 	}
-	bot, err := auth.VerifyAgentKey(ctx, token, lookup)
+	bot, err := auth.VerifyAgentKey(ctx, token, d.AgentLookup)
 	if err != nil || bot == nil {
 		return nil, mcpsdkauth.ErrInvalidToken
 	}
@@ -147,6 +156,14 @@ func newServer(deps Deps) *mcp.Server {
 	}, &mcp.ServerOptions{
 		SupportedProtocolVersions: []string{ProtocolVersion},
 		Logger:                    slog.Default(),
+		// Explicit capabilities: M1 exposes TOOLS ONLY with a static
+		// catalog (no listChanged notifications are ever produced).
+		// Do not inherit the SDK's historical default logging
+		// capability, and do not advertise prompts/resources/roots/
+		// sampling/Tasks.
+		Capabilities: &mcp.ServerCapabilities{
+			Tools: &mcp.ToolCapabilities{},
+		},
 	})
 	addAccountTools(s, deps)
 	return s
@@ -217,19 +234,18 @@ func addAccountTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, statusOutput{}, err
 		}
-		summary, err := repository.FindActiveBotSummaryByID(ctx, deps.Pool, bot.ID)
-		if err != nil || summary == nil {
-			return nil, statusOutput{}, &toolError{httpStatus: 401, code: "INVALID_KEY", message: "Account not found or inactive"}
-		}
-		balance, balErr := accountBalance(ctx, deps, bot.ID)
-		if balErr != nil {
+		if deps.AccountStatus == nil {
 			return nil, statusOutput{}, &toolError{httpStatus: 500, code: "INTERNAL_ERROR", message: "An internal error occurred"}
 		}
+		st, err := deps.AccountStatus(ctx, deps.Pool, bot.ID)
+		if err != nil {
+			return nil, statusOutput{}, mapAppError(err)
+		}
 		return nil, statusOutput{
-			BotID:   bot.ID,
-			BotName: summary.BotName,
-			Balance: balance,
-			Status:  summary.Status,
+			BotID:   st.BotID,
+			BotName: st.BotName,
+			Balance: st.Balance,
+			Status:  st.Status,
 		}, nil
 	})
 }

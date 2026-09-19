@@ -144,6 +144,40 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 	}, nil
 }
 
+// AgentAccountStatus is the ONE typed agent account-status
+// composition: active bot identity + authoritative Credits balance.
+// Both REST /api/ping and MCP account_status call it — there is no
+// second account-status mechanism. READ ONLY.
+type AgentAccountStatus struct {
+	BotID   int64
+	BotName string
+	Balance float64
+	Status  string
+}
+
+// ComposeAgentAccountStatus composes the account status for an
+// authenticated agent: repository identity read + Credits balance,
+// accepting pg.Querier (satisfied by *pg.Pool) for testability.
+func ComposeAgentAccountStatus(ctx context.Context, q pg.Querier, botID int64) (*AgentAccountStatus, error) {
+	bot, err := repository.FindActiveBotSummaryByID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	if bot == nil {
+		return nil, errors.New(401, "INVALID_KEY", "API Key is invalid or expired")
+	}
+	balance, balErr := credits.Balance(ctx, q, bot.ID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	return &AgentAccountStatus{
+		BotID:   bot.ID,
+		BotName: bot.BotName,
+		Balance: balance,
+		Status:  bot.Status,
+	}, nil
+}
+
 // -- Key --
 
 // CurrentOwnerKey returns the owner's current API key.
