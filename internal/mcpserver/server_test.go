@@ -48,6 +48,26 @@ func m1Deps(t *testing.T, pool *pg.Pool, limiter *ratelimit.Limiter) Deps {
 	return Deps{
 		Pool:        pool,
 		RateLimiter: limiter,
+		MemoryWork: &MemoryWorkDeps{
+			ListKungfus:   service.ListKungfusForBot,
+			GetKungfu:     service.GetKungfuForBot,
+			PushKungfu:    service.Push,
+			ShareKungfu:   service.Share,
+			UnshareKungfu: service.Unshare,
+			DeleteKungfu:  service.Delete,
+			ListOpenTasks: service.ListOpenTasks,
+			GetOpenTask:   service.GetOpenTask,
+			SubmitTask:    service.Submit,
+			CreateTask:    service.CreateTask,
+			CheckAPI:      limiter.CheckAPI,
+			Limits: ContentLimits{
+				MaxTitleLength:       128,
+				MaxTags:              10,
+				MaxTagLength:         32,
+				MaxDescriptionLength: 500,
+				MaxContentSize:       102400,
+			},
+		},
 		AgentLookup: func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
 			return repository.FindActiveBotByAPIKeyHash(ctx, pool, keyHash)
 		},
@@ -232,7 +252,15 @@ func TestM1ToolsListDeterministicOrder(t *testing.T) {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
-	want := []string{"account_register", "account_status"}
+	// The official SDK's tools/list returns the registry SORTED by
+	// tool name — that sorted order is the SDK's own deterministic
+	// contract (single registry, no second registry added). The exact
+	// 12-tool set in the SDK-deterministic order:
+	want := []string{
+		"account_register", "account_status",
+		"memory_delete", "memory_get", "memory_list", "memory_put", "memory_share", "memory_unshare",
+		"work_get", "work_list", "work_publish", "work_submit",
+	}
 
 	listNames := func() []string {
 		ctx := context.Background()
@@ -256,10 +284,22 @@ func TestM1ToolsListDeterministicOrder(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		got := listNames() // independent stateless client each call
-		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		if len(got) != len(want) || !equalStrings(got, want) {
 			t.Fatalf("list #%d = %v, want exactly %v in this order", i, got, want)
 		}
 	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestM1ServerDiscoverAdvertisesExactCapabilities: server/discover (or
@@ -791,6 +831,7 @@ func TestM1McpserverHasNoRepositoryDependency(t *testing.T) {
 		"kungfu.md/internal/repository",
 		"credits.Record",
 		"TxBegin",
+		"delivery.PostJSON",
 		"UPDATE tb_bots",
 		"INSERT INTO tb_transactions",
 	}

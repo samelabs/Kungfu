@@ -51,6 +51,11 @@ type Deps struct {
 	ClientIP func(r *http.Request) string
 	// Register is the existing registration service (no duplication).
 	Register func(ctx context.Context, pool *pg.Pool, name, password, ip string) (*service.RegistrationResult, error)
+
+	// MemoryWork carries the M2 memory/work service seams (nil in M1
+	// tests that predate M2; when nil, only the M1 account tools are
+	// registered).
+	MemoryWork *MemoryWorkDeps
 }
 
 // publicMethods is the anonymous-call allowlist: MCP protocol
@@ -166,6 +171,10 @@ func newServer(deps Deps) *mcp.Server {
 		},
 	})
 	addAccountTools(s, deps)
+	if deps.MemoryWork != nil {
+		addMemoryTools(s, deps, *deps.MemoryWork)
+		addWorkTools(s, deps, *deps.MemoryWork)
+	}
 	return s
 }
 
