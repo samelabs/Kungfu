@@ -6,13 +6,13 @@ import (
 )
 
 // Version is set from VERSION file at compile time.
-// Can be overridden with: go build -ldflags "-X kungfu.md/internal/version.Version=v1.2.0"
+// Can be overridden with: go build -ldflags "-X kungfu.md/internal/version.Version=v1.3.0"
 
 //go:embed VERSION
 var versionFile string
 
 // Version holds the application version string.
-var Version = "v1.2.0"
+var Version = "v1.3.0"
 
 func init() {
 	v := strings.TrimSpace(versionFile)
