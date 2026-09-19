@@ -222,7 +222,6 @@ func TestOwnerCreditsPageWiring(t *testing.T) {
 		`id="creditsBalance"`,
 		`id="creditsPackages"`,
 		`id="creditsPaymentResult"`,
-		`id="creditsNotice"`,
 		`/owner/credits?`,
 		`render-credits.js`,
 		`credits.js`,

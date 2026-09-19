@@ -28,16 +28,16 @@ function renderTasks() {
 }
 
 async function selectTask(code) {
-    setNotice('taskNotice', t('tasks.loading'));
+    // loading — silent
     try {
         const json = await requestJson(`/api/owner/tasks/${code}`, {method: 'GET'});
-        if (!json.success) return setNotice('taskNotice', json.error || json, 'error');
+        if (!json.success) { showToast(noticeText(json.error || json), 'error'); return; }
         state.selectedTask = json.data.task;
         renderTaskDetail(json.data.task);
         renderTasks();
-        setNotice('taskNotice', '', '');
+        showToast(noticeText(json.message || t('tasks.created')), 'ok');
     } catch (error) {
-        setNotice('taskNotice', String(error), 'error');
+        showToast(noticeText(String(error)), 'error');
     }
 }
 
@@ -91,8 +91,8 @@ function renderTaskDetail(task) {
     const copyBtn = qs('[data-copy]');
     if (copyBtn) {
         copyBtn.addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(copyBtn.dataset.copy || ''); setNotice('taskNotice', t('tasks.task_code_copied'), 'ok'); }
-            catch (e) { setNotice('taskNotice', String(e), 'error'); }
+            try { await navigator.clipboard.writeText(copyBtn.dataset.copy || ''); showToast(noticeText(t('tasks.task_code_copied')), 'ok'); }
+            catch (e) { showToast(noticeText(String(e)), 'error'); }
         });
     }
 }
@@ -100,17 +100,17 @@ function renderTaskDetail(task) {
 // ── Status actions (open/close/refund) ─────────────────────
 async function runTaskAction(code, action) {
     if (action === 'refund' && !window.confirm(t('tasks.refund_confirm'))) return;
-    setNotice('taskNotice', t('tasks.action_progress', {action}));
+    // action in progress — silent
     try {
         const json = await requestJson(`/api/owner/tasks/${code}/${action}`, {method: 'POST', body: '{}'});
-        if (!json.success) return setNotice('taskNotice', json.error || json, 'error');
+        if (!json.success) { showToast(noticeText(json.error || json), 'error'); return; }
         state.selectedTask = json.data.task;
         renderTaskDetail(json.data.task);
         updateTaskInList(json.data.task);
         renderTasks();
-        setNotice('taskNotice', json.message || t('tasks.updated'), 'ok');
+        showToast(noticeText(json.message || t('tasks.updated')), 'ok');
     } catch (error) {
-        setNotice('taskNotice', String(error), 'error');
+        showToast(noticeText(String(error)), 'error');
     }
 }
 
@@ -125,23 +125,23 @@ function openTaskModal(mode, task) {
         overlay.innerHTML = `
             <div class="modal-panel">
                 <div class="modal-head">
-                    <h2>${escapeHtml(t('owner.task_new.heading'))}</h2>
+                    <h2>${escapeHtml(t('task_new.heading'))}</h2>
                     <button class="modal-close" type="button" data-modal-close>×</button>
                 </div>
                 <form id="taskForm" class="modal-form" novalidate>
-                    <label>${escapeHtml(t('owner.task_new.title'))}</label>
+                    <label>${escapeHtml(t('task_new.title'))}</label>
                     <input name="title" required maxlength="128">
-                    <label>${escapeHtml(t('owner.task_new.requirements'))}</label>
+                    <label>${escapeHtml(t('task_new.requirements'))}</label>
                     <textarea name="requirements" required maxlength="20000" rows="4"></textarea>
-                    <label>${escapeHtml(t('owner.task_new.post_api'))}</label>
-                    <input name="postapi" required maxlength="2048" placeholder="${escapeHtml(t('owner.task_new.post_api_placeholder'))}">
+                    <label>${escapeHtml(t('task_new.post_api'))}</label>
+                    <input name="postapi" required maxlength="2048" placeholder="${escapeHtml(t('task_new.post_api_placeholder'))}">
                     <div class="row">
-                        <div><label>${escapeHtml(t('owner.task_new.budget'))}</label><input name="budget" type="number" step="0.0001" min="1000" required></div>
-                        <div><label>${escapeHtml(t('owner.task_new.price'))}</label><input name="price" type="number" step="0.0001" min="0.0001" required></div>
+                        <div><label>${escapeHtml(t('task_new.budget'))}</label><input name="budget" type="number" step="0.0001" min="1000" required></div>
+                        <div><label>${escapeHtml(t('task_new.price'))}</label><input name="price" type="number" step="0.0001" min="0.0001" required></div>
                     </div>
-                    <label class="checkline"><input name="open_now" type="checkbox"> ${escapeHtml(t('owner.task_new.open_now'))}</label>
+                    <label class="checkline"><input name="open_now" type="checkbox"> ${escapeHtml(t('task_new.open_now'))}</label>
                     <div class="actions form-actions">
-                        <button class="btn primary" type="submit">${escapeHtml(t('owner.task_new.create'))}</button>
+                        <button class="btn primary" type="submit">${escapeHtml(t('task_new.create'))}</button>
                     </div>
                     <div id="taskModalNotice" class="notice"></div>
                 </form>
@@ -215,54 +215,54 @@ function bindCreateSubmit(form, overlay) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = payload(form);
-        if (Number(data.budget) < 1000) return setNotice('taskModalNotice', t('tasks.create_budget_min'), 'error');
+        if (Number(data.budget) < 1000) return showToast(noticeText(t('tasks.create_budget_min')), 'error'); return;
         data.open_now = form.elements.open_now.checked;
-        setNotice('taskModalNotice', t('tasks.creating'));
+        // creating — silent
         try {
             const json = await requestJson('/api/owner/tasks', {method: 'POST', body: JSON.stringify(data)});
-            if (!json.success) return setNotice('taskModalNotice', json.error || json, 'error');
+            if (!json.success) { showToast(noticeText(json.error || json), 'error'); return; }
             closeModal();
             await loadTasks();
             renderTasks();
             if (json.data?.task?.code) await selectTask(json.data.task.code);
-            setNotice('taskNotice', json.message || t('tasks.updated'), 'ok');
-        } catch (err) { setNotice('taskModalNotice', String(err), 'error'); }
+            showToast(noticeText(json.message || t('tasks.updated')), 'ok');
+        } catch (err) { showToast(noticeText(String(err)), 'error'); }
     });
 }
 
 function bindEditSubmit(form, task) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        setNotice('taskModalNotice', t('tasks.saving'));
+        // saving — silent
         const data = payload(form);
         try {
             const json = await requestJson(`/api/owner/tasks/${task.code}/edit`, {method: 'POST', body: JSON.stringify(data)});
-            if (!json.success) return setNotice('taskModalNotice', json.error || json, 'error');
+            if (!json.success) { showToast(noticeText(json.error || json), 'error'); return; }
             closeModal();
             state.selectedTask = json.data.task;
             renderTaskDetail(json.data.task);
             updateTaskInList(json.data.task);
             renderTasks();
-            setNotice('taskNotice', json.message || t('tasks.updated'), 'ok');
-        } catch (err) { setNotice('taskModalNotice', String(err), 'error'); }
+            showToast(noticeText(json.message || t('tasks.updated')), 'ok');
+        } catch (err) { showToast(noticeText(String(err)), 'error'); }
     });
 }
 
 function bindBudgetSubmit(form, task) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        setNotice('taskModalNotice', t('tasks.adding_budget'));
+        // adding budget — silent
         const data = payload(form);
         try {
             const json = await requestJson(`/api/owner/tasks/${task.code}/add-budget`, {method: 'POST', body: JSON.stringify(data)});
-            if (!json.success) return setNotice('taskModalNotice', json.error || json, 'error');
+            if (!json.success) { showToast(noticeText(json.error || json), 'error'); return; }
             closeModal();
             state.selectedTask = json.data.task;
             renderTaskDetail(json.data.task);
             updateTaskInList(json.data.task);
             renderTasks();
-            setNotice('taskNotice', t('tasks.budget_added'), 'ok');
-        } catch (err) { setNotice('taskModalNotice', String(err), 'error'); }
+            showToast(noticeText(t('tasks.budget_added')), 'ok');
+        } catch (err) { showToast(noticeText(String(err)), 'error'); }
     });
 }
 

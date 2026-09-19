@@ -43,6 +43,12 @@ function ownerUrl(path) {
 }
 
 function qs(selector) { return document.querySelector(selector); }
+// Single Owner credit-balance presentation authority.
+// Credits support 4-decimal precision; never render 0/2 decimals.
+function formatCredits(v) {
+    const n = Number(v || 0);
+    return n.toFixed(4);
+}
 function qsa(selector) { return Array.from(document.querySelectorAll(selector)); }
 function t(key, vars = {}) {
     const parts = String(key).split('.');
@@ -84,26 +90,9 @@ function payload(form) {
     return data;
 }
 let _toastTimer = null;
-function setNotice(id, data, kind = '') {
-    const text = noticeText(data);
-    // Empty = hide inline notice + dismiss toast
-    const inline = document.getElementById(id);
-    if (inline) {
-        if (!inline.dataset.a11yInit) {
-            inline.setAttribute('role', 'status');
-            inline.setAttribute('aria-live', 'polite');
-            inline.dataset.a11yInit = '1';
-        }
-        inline.classList.toggle('error', kind === 'error');
-        inline.classList.toggle('ok', kind === 'ok');
-        inline.classList.toggle('pending', kind !== 'error' && kind !== 'ok' && text);
-        inline.textContent = text;
-    }
-    // Non-empty with kind = show fixed toast (for task actions feedback)
-    if (text && (kind === 'ok' || kind === 'error')) {
-        showToast(text, kind);
-    }
-}
+// Historical inline .notice mechanism removed. The global toast
+// (showToast) is the only transient success/error feedback surface.
+// Passive load facts never produce feedback.
 function showToast(text, kind = 'ok') {
     let toast = qs('#globalToast');
     if (!toast) {

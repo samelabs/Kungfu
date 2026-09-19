@@ -17,27 +17,27 @@ function renderCredits() {
     if (!wrap) return;
     const balanceEl = qs('#creditsBalance');
     if (balanceEl && state.account && typeof state.account.balance === 'number') {
-        balanceEl.textContent = state.account.balance;
+        balanceEl.textContent = formatCredits(state.account.balance);
     }
     const pkgs = (state.credits && state.credits.packages) || [];
     if (!state.credits || !state.credits.loaded) {
-        wrap.innerHTML = `<div class="muted">${escapeHtml(t('owner.credits.loading'))}</div>`;
+        wrap.innerHTML = `<div class="muted">${escapeHtml(t('credits.loading'))}</div>`;
         return;
     }
     if (!pkgs.length) {
-        wrap.innerHTML = `<div class="muted">${escapeHtml(t('owner.credits.unavailable'))}</div>`;
+        wrap.innerHTML = `<div class="muted">${escapeHtml(t('credits.unavailable'))}</div>`;
         return;
     }
     wrap.innerHTML = pkgs.map((p) => `
         <div class="store-product" data-package-code="${escapeHtml(p.code)}">
             <div class="store-product-main">
                 <strong>${escapeHtml(p.name)}</strong>
-                <div class="muted">${escapeHtml(t('owner.credits.price'))}: ${escapeHtml(creditsFormatAmount(p.amount_minor, p.currency))}</div>
-                <div>${escapeHtml(t('owner.credits.credits'))}: ${escapeHtml(String(p.credits))}</div>
+                <div class="muted">${escapeHtml(t('credits.price'))}: ${escapeHtml(creditsFormatAmount(p.amount_minor, p.currency))}</div>
+                <div>${escapeHtml(t('credits.credits'))}: ${escapeHtml(String(p.credits))}</div>
             </div>
             <div class="store-product-actions">
                 <button class="btn primary" type="button" data-buy-package="${escapeHtml(p.code)}" ${state.credits.buying ? 'disabled' : ''}>
-                    ${escapeHtml(state.credits.buying === p.code ? t('owner.credits.buying') : t('owner.credits.buy'))}
+                    ${escapeHtml(state.credits.buying === p.code ? t('credits.buying') : t('credits.buy'))}
                 </button>
             </div>
         </div>`).join('');
@@ -62,8 +62,8 @@ function renderCreditsPaymentResult() {
     box.hidden = false;
     let html = `<div><strong>${escapeHtml(label)}</strong></div>`;
     if (pending.status === 'pending') {
-        html += `<div class="muted">${escapeHtml(t('owner.credits.pending_hint'))}</div>`;
-        html += `<div class="actions"><button class="btn" type="button" id="creditsCheckStatus">${escapeHtml(t('owner.credits.check_status'))}</button></div>`;
+        html += `<div class="muted">${escapeHtml(t('credits.pending_hint'))}</div>`;
+        html += `<div class="actions"><button class="btn" type="button" id="creditsCheckStatus">${escapeHtml(t('credits.check_status'))}</button></div>`;
     }
     box.innerHTML = html;
 }

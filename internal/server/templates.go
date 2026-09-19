@@ -430,7 +430,6 @@ func ownerAuthLoginHTML(d *tmplData) string {
             <button class="btn primary" type="submit">` + d.T("owner.auth.login") + `</button>
             <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/register") + `">` + d.T("owner.auth.register") + `</a>
         </div>
-        <div id="loginNotice" class="notice">` + d.T("owner.auth.login_notice") + `</div>
     </form>
 </section>`
 }
@@ -449,7 +448,6 @@ func ownerAuthRegisterHTML(d *tmplData) string {
             <button class="btn primary" type="submit">` + d.T("owner.auth.register") + `</button>
             <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/login") + `">` + d.T("owner.auth.login") + `</a>
         </div>
-        <div id="registerNotice" class="notice">` + d.T("owner.auth.register_notice") + `</div>
     </form>
 </section>`
 }
@@ -486,7 +484,6 @@ func ownerOverviewHTML(d *tmplData) string {
     <div class="actions">
         <button class="btn" type="button" id="reloadBtn">` + d.T("owner.overview.reload") + `</button>
     </div>
-    <div id="overviewNotice" class="notice overview-notice">` + d.T("owner.overview.notice") + `</div>
 </section>`
 }
 
@@ -501,7 +498,6 @@ func ownerAccountHTML(d *tmplData) string {
         <div class="actions">
             <button class="btn primary" type="submit">` + d.T("owner.account.submit") + `</button>
         </div>
-        <div id="passwordNotice" class="notice">` + d.T("owner.account.notice") + `</div>
     </form>
 </section>`
 }
@@ -523,7 +519,6 @@ func ownerKeyHTML(d *tmplData) string {
         <button class="btn primary" type="button" id="copyNewKeyBtn">` + d.T("owner.key.copy_new") + `</button>
     </div>
     <p>` + d.T("owner.key.one_time_warning") + `</p>
-    <div id="resetNotice" class="notice">` + d.T("owner.key.notice") + `</div>
 </section>`
 }
 
@@ -569,7 +564,6 @@ func ownerTaskNewHTML(d *tmplData) string {
             <button class="btn primary" type="submit">` + d.T("owner.task_new.create") + `</button>
             <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks") + `">` + d.T("owner.task_new.cancel") + `</a>
         </div>
-        <div id="taskCreateNotice" class="notice">` + d.T("owner.task_new.notice") + `</div>
     </form>
 </section>`
 }
@@ -579,9 +573,8 @@ func ownerStoreHTML(d *tmplData) string {
     <h2>` + d.T("owner.store.title") + `</h2>
     <p>` + d.T("owner.store.summary") + `</p>
     <div class="stats">
-        <div class="stat"><span class="stat-label">` + d.T("owner.store.credits") + `</span><span class="stat-value" id="storeBalance">&mdash;</span></div>
+        <div class="stat"><b id="storeBalance">&mdash;</b><span>` + d.T("owner.store.credits") + `</span></div>
     </div>
-    <div id="storeNotice" class="notice" hidden></div>
     <h3>` + d.T("owner.store.products") + `</h3>
     <div id="storeProducts" class="store-products"><div class="muted">` + d.T("owner.store.loading") + `</div></div>
     <div id="storeResult" class="detail-box" hidden></div>
@@ -593,9 +586,8 @@ func ownerCreditsHTML(d *tmplData) string {
     <h2>` + d.T("owner.credits.title") + `</h2>
     <p>` + d.T("owner.credits.summary") + `</p>
     <div class="stats">
-        <div class="stat"><span class="stat-label">` + d.T("owner.credits.balance") + `</span><span class="stat-value" id="creditsBalance">&mdash;</span></div>
+        <div class="stat"><b id="creditsBalance">&mdash;</b><span>` + d.T("owner.credits.balance") + `</span></div>
     </div>
-    <div id="creditsNotice" class="notice" hidden></div>
     <div id="creditsPaymentResult" class="detail-box" hidden></div>
     <h3>` + d.T("owner.credits.packages") + `</h3>
     <div id="creditsPackages" class="store-products"><div class="muted">` + d.T("owner.credits.loading") + `</div></div>
@@ -621,7 +613,6 @@ func ownerLogsHTML(d *tmplData) string {
         <div class="mono" id="logsPageInfo">` + d.T("owner.logs.page_info") + `</div>
         <button class="btn" type="button" id="logsNextBtn">` + d.T("owner.logs.next") + `</button>
     </div>
-    <div id="logsNotice" class="notice">` + d.T("owner.logs.notice") + `</div>
 </section>`
 }
 

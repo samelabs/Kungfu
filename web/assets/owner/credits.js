@@ -26,7 +26,7 @@ function creditsReset() {
 
 async function loadCreditsPackages() {
     const json = await requestJson('/api/owner/payments/packages', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('owner.credits.packages_failed')));
+    if (!json.success) throw new Error(noticeText(json.error || t('credits.packages_failed')));
     state.credits.packages = (json.data && json.data.packages) || [];
     state.credits.loaded = true;
 }
@@ -35,7 +35,7 @@ async function buyPackage(code) {
     if (state.credits.buying) return;
     state.credits.buying = code;
     renderCredits();
-    setNotice('creditsNotice', t('owner.credits.buying'), 'ok');
+    // buying — silent (status panel shows it)
     try {
         const json = await requestJson('/api/owner/payments/checkout', {
             method: 'POST',
@@ -44,7 +44,7 @@ async function buyPackage(code) {
             body: JSON.stringify({package: code})
         });
         if (!json.success || !json.data || !json.data.checkout_url) {
-            throw new Error(noticeText((json && json.error) || t('owner.credits.checkout_failed')));
+            throw new Error(noticeText((json && json.error) || t('credits.checkout_failed')));
         }
         // Persist this payment's code before leaving: the return visit
         // resolves the payment status from it.
@@ -55,14 +55,14 @@ async function buyPackage(code) {
     } catch (error) {
         state.credits.buying = null;
         renderCredits();
-        setNotice('creditsNotice', String(error), 'error');
+        showToast(noticeText(String(error)), 'error')
     }
 }
 
 async function checkCreditsPayment(code, {silent} = {}) {
     const json = await requestJson(`/api/owner/payments/${encodeURIComponent(code)}`, {method: 'GET'});
     if (!json.success || !json.data || !json.data.payment) {
-        if (!silent) setNotice('creditsNotice', noticeText(json.error || t('owner.credits.checkout_failed')), 'error');
+        if (!silent) showToast(noticeText(json.error || t('credits.checkout_failed')), 'error')
         return null;
     }
     const payment = json.data.payment;
@@ -113,7 +113,7 @@ function bindCreditsEvents() {
             try { code = sessionStorage.getItem(CREDITS_PENDING_KEY); } catch (err) { /* ignore */ }
             if (!code && state.credits.lastPayment) code = state.credits.lastPayment.code;
             if (code) checkCreditsPayment(code, {silent: false}).catch((error) => {
-                setNotice('creditsNotice', String(error), 'error');
+                showToast(noticeText(String(error)), 'error')
             });
         }
     });

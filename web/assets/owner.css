@@ -372,49 +372,6 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      text-transform: uppercase;
      font-weight: 700;
  }
- .notice {
-     display: inline-flex;
-     align-items: flex-start;
-     gap: 8px;
-     max-width: 100%;
-     margin-top: 12px;
-     padding: 8px 10px;
-     border-radius: var(--radius-sm);
-     border: 1px solid #f4d8b3;
-     border-left: 3px solid #d5883a;
-     background: #fff9ef;
-     color: #9a4f13;
-     font: 12px/1.4 "Space Mono", "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
-     white-space: pre-wrap;
-     overflow-wrap: anywhere;
- }
- .overview-notice {
-     display: flex;
-     width: fit-content;
-     max-width: 680px;
-     border-color: rgba(47, 124, 115, .18);
-     border-left-color: var(--accent);
-     background: rgba(47, 124, 115, .07);
-     color: var(--accent-strong);
- }
- .notice.error {
-     border-color: #fecaca;
-     border-left-color: #d92d20;
-     background: #fff5f5;
-     color: #9f1239;
- }
- .notice.ok {
-     border-color: #bbf7d0;
-     border-left-color: #16804f;
-     background: #f2fcf6;
-     color: #166534;
- }
- .notice.pending {
-     border-color: #f4d9af;
-     border-left-color: #d5883a;
-     background: #fff9ef;
-     color: #9a4f13;
- }
  .keybox {
      margin-top: 12px;
      border: 1px dashed rgba(179, 97, 27, .65);

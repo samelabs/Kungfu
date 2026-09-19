@@ -6,13 +6,13 @@ function bindLogsTypeButtons() {
             if (state.logs.type !== 'task') {
                 state.logs.taskCode = '';
             }
-            setNotice('logsNotice', t('logs.loading_logs'));
+            // loading is silent
             try {
                 await loadLogs();
                 renderLogs();
-                setNotice('logsNotice', t('logs.loaded'), 'ok');
+                // loaded silently
             } catch (error) {
-                setNotice('logsNotice', String(error), 'error');
+                showToast(noticeText(String(error)), 'error')
             }
         });
     });
@@ -24,13 +24,13 @@ function bindLogsTaskFilter() {
     taskFilter.addEventListener('change', async (event) => {
         state.logs.taskCode = String(event.currentTarget.value || '');
         state.logs.page = 1;
-        setNotice('logsNotice', t('logs.applying_filter'));
+        // filter application is silent
         try {
             await loadLogs();
             renderLogs();
-            setNotice('logsNotice', t('logs.filter_applied'), 'ok');
+            // filter result visible in table
         } catch (error) {
-            setNotice('logsNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error')
         }
     });
 }
@@ -42,13 +42,13 @@ function bindLogsPagination() {
         prevBtn.addEventListener('click', async () => {
             if (state.logs.page <= 1) return;
             state.logs.page -= 1;
-            setNotice('logsNotice', t('logs.loading_previous'));
+            // pagination load is silent
             try {
                 await loadLogs();
                 renderLogs();
-                setNotice('logsNotice', t('logs.page_loaded'), 'ok');
+                // page load is silent
             } catch (error) {
-                setNotice('logsNotice', String(error), 'error');
+                showToast(noticeText(String(error)), 'error')
             }
         });
     }
@@ -56,13 +56,13 @@ function bindLogsPagination() {
         nextBtn.addEventListener('click', async () => {
             if (state.logs.page >= state.logs.totalPages) return;
             state.logs.page += 1;
-            setNotice('logsNotice', t('logs.loading_next'));
+            // pagination — silent
             try {
                 await loadLogs();
                 renderLogs();
-                setNotice('logsNotice', t('logs.page_loaded'), 'ok');
+                // page load is silent
             } catch (error) {
-                setNotice('logsNotice', String(error), 'error');
+                showToast(noticeText(String(error)), 'error')
             }
         });
     }

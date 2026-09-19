@@ -7,17 +7,17 @@ async function renderPage() {
             renderTasks();
         } catch (error) {
             renderTasks();
-            setNotice('taskNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error')
         }
     }
     if (SECTION === 'logs') {
         try {
             await loadLogs();
             renderLogs();
-            setNotice('logsNotice', t('logs.loaded'), 'ok');
+            // page-load facts produce no feedback (silent)
         } catch (error) {
             renderLogs();
-            setNotice('logsNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error')
         }
     }
     if (SECTION === 'store') {
@@ -25,7 +25,7 @@ async function renderPage() {
         try {
             await loadStoreProducts();
         } catch (error) {
-            setNotice('storeNotice', error, 'error');
+            showToast(noticeText(error), 'error');
         }
         renderStore();
     }
@@ -35,7 +35,7 @@ async function renderPage() {
         try {
             await loadCreditsPackages();
         } catch (error) {
-            setNotice('creditsNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error')
         }
         renderCredits();
         renderCreditsPaymentResult();
@@ -84,8 +84,7 @@ async function restoreSession() {
             return;
         }
         showApp();
-        const noticeId = SECTION === 'logs' ? 'logsNotice' : (SECTION === 'key' ? 'resetNotice' : 'overviewNotice');
-        setNotice(noticeId, error, 'error');
+        showToast(noticeText(error), 'error');
         return;
     }
 
@@ -102,8 +101,7 @@ function decorateRenderPage() {
             if (SECTION === 'overview') renderOverview();
             if (SECTION === 'key') renderKey();
         } catch (error) {
-            const noticeId = SECTION === 'key' ? 'resetNotice' : 'overviewNotice';
-            setNotice(noticeId, String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     };
 }

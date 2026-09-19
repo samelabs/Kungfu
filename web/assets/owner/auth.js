@@ -4,14 +4,14 @@ function bindLoginForm() {
         event.preventDefault();
         const data = payload(event.currentTarget);
         const error = validateCredentials(data);
-        if (error) return setNotice('loginNotice', error, 'error');
-        setNotice('loginNotice', t('auth.working'));
+        if (error) return showToast(noticeText(error), 'error');
+        // transitional: silent
         try {
             const json = await requestJson('/api/owner/session', {method: 'POST', body: JSON.stringify(data)});
-            if (!json.success) return setNotice('loginNotice', json.error || json, 'error');
+            if (!json.success) return showToast(noticeText(json.error || json), 'error');
             await activateSession();
         } catch (error) {
-            setNotice('loginNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     });
 }
@@ -22,16 +22,16 @@ function bindRegisterForm() {
         event.preventDefault();
         const data = payload(event.currentTarget);
         const error = validateCredentials(data, true);
-        if (error) return setNotice('registerNotice', error, 'error');
-        setNotice('registerNotice', t('auth.working'));
+        if (error) return showToast(noticeText(error), 'error');
+        // transitional: silent
         try {
             const json = await requestJson('/api/register', {method: 'POST', body: JSON.stringify(data)});
-            if (!json.success) return setNotice('registerNotice', json.error || json, 'error');
+            if (!json.success) return showToast(noticeText(json.error || json), 'error');
             // ONE-TIME disclosure: display the raw key from the
             // registration response on THIS page. No /api/key
             // recovery flow, no storage. Navigation destroys it.
             state.newKeyOnce = json.data.key || '';
-            const box = qs('#newKeyBox') || qs('#registerNotice');
+            const box = qs('#newKeyBox');
             const continueBtn = document.createElement('button');
             continueBtn.type = 'button';
             continueBtn.className = 'btn primary';
@@ -52,10 +52,10 @@ function bindRegisterForm() {
                 copyBtn.type = 'button';
                 copyBtn.className = 'btn';
                 copyBtn.id = 'copyNewKeyBtn';
-                copyBtn.textContent = t('owner.key.copy_new');
+                copyBtn.textContent = t('key.copy_new');
                 copyBtn.addEventListener('click', async () => {
                     await navigator.clipboard.writeText(state.newKeyOnce);
-                    setNotice('registerNotice', t('auth.key_copied'), 'ok');
+                    showToast(noticeText(t('auth.key_copied')), 'ok');
                 });
                 keyLine.after(copyBtn);
             }
@@ -64,12 +64,12 @@ function bindRegisterForm() {
                 // here (not before disclosure) and the raw key is gone.
                 state.newKeyOnce = '';
                 const sessionJson = await requestJson('/api/owner/session', {method: 'POST', body: JSON.stringify({name: data.name, password: data.password})});
-                if (!sessionJson.success) return setNotice('registerNotice', sessionJson.error || sessionJson, 'error');
+                if (!sessionJson.success) return showToast(noticeText(sessionJson.error || sessionJson), 'error');
                 await activateSession();
             });
-            setNotice('registerNotice', t('auth.registered_key_below'), 'ok');
+            showToast(noticeText(t('auth.registered_key_below')), 'ok');
         } catch (error) {
-            setNotice('registerNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     });
 }
@@ -80,19 +80,19 @@ function bindPasswordForm() {
         event.preventDefault();
         const data = payload(event.currentTarget);
         const error = validatePassword(data.password) || validatePassword(data.new_password, 'new_password');
-        if (error) return setNotice('passwordNotice', error, 'error');
-        if (data.password === data.new_password) return setNotice('passwordNotice', t('auth.new_password_diff'), 'error');
-        setNotice('passwordNotice', t('auth.working'));
+        if (error) return showToast(noticeText(error), 'error');
+        if (data.password === data.new_password) return showToast(noticeText(t('auth.new_password_diff')), 'error');
+        // transitional: silent
         try {
             const json = await requestJson('/api/change-password', {
                 method: 'POST',
                 body: JSON.stringify({password: data.password, new_password: data.new_password})
             });
-            if (!json.success) return setNotice('passwordNotice', json.error || json, 'error');
+            if (!json.success) return showToast(noticeText(json.error || json), 'error');
             event.currentTarget.reset();
-            setNotice('passwordNotice', t('auth.password_changed'), 'ok');
+            showToast(noticeText(t('auth.password_changed')), 'ok');
         } catch (error) {
-            setNotice('passwordNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     });
 }
@@ -107,20 +107,20 @@ function bindResetKey() {
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const currentKey = (new FormData(form).get('current_key') || '').trim();
-        if (!currentKey) return setNotice('resetNotice', t('auth.reset_key_required'), 'error');
-        setNotice('resetNotice', t('auth.resetting_key'));
+        if (!currentKey) return showToast(noticeText(t('auth.reset_key_required')), 'error');
+        // transitional: silent
         try {
             const json = await requestJson('/api/reset-key', {
                 method: 'POST',
                 body: JSON.stringify({current_key: currentKey})
             });
-            if (!json.success) return setNotice('resetNotice', json.error || json, 'error');
+            if (!json.success) return showToast(noticeText(json.error || json), 'error');
             state.newKeyOnce = json.data.new_key || '';
             form.reset();
             renderKey();
-            setNotice('resetNotice', t('auth.key_reset'), 'ok');
+            showToast(noticeText(t('auth.key_reset')), 'ok');
         } catch (error) {
-            setNotice('resetNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     });
 }
@@ -133,7 +133,7 @@ function bindCopyNewKey() {
     btn.addEventListener('click', async () => {
         if (!state.newKeyOnce) return;
         await navigator.clipboard.writeText(state.newKeyOnce);
-        setNotice('resetNotice', t('auth.key_copied'), 'ok');
+        showToast(noticeText(t('auth.key_copied')), 'ok');
     });
 }
 
@@ -143,9 +143,9 @@ function bindReload() {
         try {
             await loadAccount();
             renderOverview();
-            setNotice('overviewNotice', t('auth.reloaded'), 'ok');
+            showToast(noticeText(t('auth.reloaded')), 'ok');
         } catch (error) {
-            setNotice('overviewNotice', String(error), 'error');
+            showToast(noticeText(String(error)), 'error');
         }
     });
 }

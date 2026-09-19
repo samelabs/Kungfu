@@ -1,6 +1,6 @@
 async function loadStoreProducts() {
     const json = await requestJson('/api/owner/store/products', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('owner.store.load_failed')));
+    if (!json.success) throw new Error(noticeText(json.error || t('store.load_failed')));
     state.store.products = json.data.products || [];
 }
 
@@ -20,7 +20,7 @@ async function redeemStoreProduct(productCode) {
         method: 'POST',
         body: JSON.stringify({product_code: productCode, request_key: requestKey})
     });
-    if (!json.success) throw new Error(noticeText(json.error || t('owner.store.redeem_failed')));
+    if (!json.success) throw new Error(noticeText(json.error || t('store.redeem_failed')));
     state.store.lastRedemption = json.data.redemption || null;
     return state.store.lastRedemption;
 }
@@ -38,9 +38,9 @@ function bindStoreHandlers() {
         btn.disabled = true;
         try {
             await redeemStoreProduct(code);
-            setNotice('storeNotice', t('owner.store.result_created'), 'ok');
+            showToast(noticeText(t('store.result_created')), 'ok');
         } catch (error) {
-            setNotice('storeNotice', error, 'error');
+            showToast(noticeText(error), 'error');
         } finally {
             // Balance is refreshed from the server fact either way.
             try { await loadAccount(); } catch (_) { /* keep server-fact refresh best-effort */ }
