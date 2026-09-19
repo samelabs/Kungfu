@@ -15,6 +15,8 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"kungfu.md/internal/config"
+	"kungfu.md/internal/mcpserver"
+	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 )
@@ -105,6 +107,19 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// identity/balance API and is not a probe alias.
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
+
+	// -- MCP surface (v1.3 M1): official SDK streamable HTTP handler,
+	// stateless, protocol 2026-07-28 only. Routed under the existing
+	// security-header / panic / deadline middleware — no second
+	// timeout or lifecycle owner. Trusted client IP flows from the
+	// existing proxy mechanism into MCP rate limiting.
+	r.Handle("/mcp", mcpserver.Handler(mcpserver.Deps{
+		Pool:        s.Pool,
+		RateLimiter: s.RateLimiter,
+		ClientIP: func(r *http.Request) string {
+			return middleware.GetClientIP(r, s.TrustedProxies)
+		},
+	}))
 
 	// -- API routes: Agent (X-Bot-Key auth) --
 	r.Post("/api/register", s.handleRegister)

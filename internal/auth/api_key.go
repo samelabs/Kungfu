@@ -89,26 +89,49 @@ func ExtractAPIKeyFromHeader(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-Bot-Key"))
 }
 
-// VerifyBotAuth authenticates a request via X-Bot-Key header.
-// Returns the Bot if valid, or an AppError if not.
-func VerifyBotAuth(ctx context.Context, lookupFn BotLookupFunc, r *http.Request) (*model.Bot, error) {
-	key := ExtractAPIKeyFromHeader(r)
-	if key == "" {
-		return nil, apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
-	}
+// invalidKeyErr is the single canonical Agent-key auth failure. Every
+// raw-key failure mode (missing/malformed/unknown/disabled) surfaces
+// the SAME error so callers cannot enumerate keys.
+func invalidKeyErr() error {
+	return apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
+}
 
-	if !ValidateKeyFormat(key) {
-		return nil, apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
+// VerifyAgentKey is the ONE raw Agent-key verification authority
+// shared by REST (X-Bot-Key) and MCP (Bearer):
+//
+//	raw key → exact format validation → SHA-256 digest →
+//	active-bot lookup by digest → bot identity
+//
+// The raw credential never crosses into the lookup; the repository
+// receives only the hash. Key error semantics are identical for both
+// transports.
+func VerifyAgentKey(ctx context.Context, rawKey string, lookupFn BotLookupFunc) (*model.Bot, error) {
+	if rawKey == "" || !ValidateKeyFormat(rawKey) {
+		return nil, invalidKeyErr()
 	}
-
-	// The raw credential stops here: only its SHA-256 digest crosses
-	// into the repository lookup.
-	bot, err := lookupFn(ctx, HashAgentKey(key))
+	bot, err := lookupFn(ctx, HashAgentKey(rawKey))
 	if err != nil || bot == nil {
-		return nil, apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
+		return nil, invalidKeyErr()
 	}
-
 	return bot, nil
+}
+
+// VerifyBotAuth authenticates a request via X-Bot-Key header and
+// delegates to the shared raw-key verifier.
+func VerifyBotAuth(ctx context.Context, lookupFn BotLookupFunc, r *http.Request) (*model.Bot, error) {
+	return VerifyAgentKey(ctx, ExtractAPIKeyFromHeader(r), lookupFn)
+}
+
+// ExtractBearerToken extracts the token from an Authorization: Bearer
+// header (RFC 6750), the MCP transport's credential shape. Returns ""
+// when absent or not Bearer.
+func ExtractBearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		return strings.TrimSpace(h[len(prefix):])
+	}
+	return ""
 }
 
 // MaybeUpdateLastActive updates last_active_at with 10% probability (sampling)

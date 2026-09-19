@@ -89,3 +89,43 @@ func repeatChar(c byte, n int) string {
 	}
 	return string(b)
 }
+
+// S-M1: the shared raw-key verifier is the ONE authority for REST and
+// MCP; bearer extraction is RFC 6750.
+func TestSharedVerifyAgentKeyAuthority(t *testing.T) {
+	raw := GenerateKey()
+	lookup := func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
+		want := HashAgentKey(raw)
+		if string(keyHash) != string(want) {
+			t.Fatalf("lookup received %x, want digest only", keyHash)
+		}
+		return &model.Bot{ID: 9}, nil
+	}
+	bot, err := VerifyAgentKey(context.Background(), raw, lookup)
+	if err != nil || bot == nil || bot.ID != 9 {
+		t.Fatalf("valid key failed: %v", err)
+	}
+	// malformed / empty / unknown all give the SAME error (no enumeration)
+	for _, bad := range []string{"", "short", raw + "x"} {
+		_, err := VerifyAgentKey(context.Background(), bad, lookup)
+		if err == nil {
+			t.Fatalf("bad key %q accepted", bad)
+		}
+	}
+}
+
+func TestExtractBearerToken(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+GenerateKey())
+	if got := ExtractBearerToken(req); !ValidateKeyFormat(got) {
+		t.Fatalf("bearer extraction = %q", got)
+	}
+	req.Header.Set("Authorization", "Basic abc")
+	if ExtractBearerToken(req) != "" {
+		t.Fatal("non-bearer scheme must yield empty")
+	}
+	req.Header.Del("Authorization")
+	if ExtractBearerToken(req) != "" {
+		t.Fatal("absent header must yield empty")
+	}
+}
