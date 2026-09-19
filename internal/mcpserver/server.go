@@ -183,10 +183,12 @@ type registerOutput struct {
 }
 
 // addAccountTools registers the two M1 tools. account_register is
-// public (bootstrap); account_status is authenticated via the outer
-// middleware and resolves identity from the verified credential — the
-// tool itself re-verifies so it can NEVER be reached with another
-// bot's identity.
+// public (bootstrap); account_status resolves identity from the
+// credential the official SDK Bearer middleware already verified
+// (RequireBearerToken → auth.VerifyAgentKey → verified bot stored in
+// TokenInfo). The tool does NOT re-verify the key; it resolves that
+// verified identity and reads through the shared account-status
+// service.
 func addAccountTools(s *mcp.Server, deps Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "account_register",

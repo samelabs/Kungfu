@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -760,22 +759,33 @@ func m1CallRegisterRaw(t *testing.T, srv *httptest.Server, name string) (int, st
 // not contain direct SQL / Credits mutation constructs. The MCP layer
 // is a protocol adapter only.
 func TestM1McpserverHasNoRepositoryDependency(t *testing.T) {
-	files, err := filepath.Glob("server.go")
-	if err != nil || len(files) == 0 {
-		// test runs with the package dir as cwd
-		entries, derr := os.ReadDir(".")
-		if derr != nil {
-			t.Fatal(derr)
-		}
-		files = files[:0]
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
-				files = append(files, e.Name())
-			}
+	// Unconditional directory enumeration: every current AND future
+	// production .go file in this package enters the guard. (The test
+	// binary runs with the package directory as cwd.)
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
+			files = append(files, e.Name())
 		}
 	}
 	if len(files) == 0 {
-		t.Fatal("no production sources found")
+		t.Fatal("no production Go sources found — guard must scan real files")
+	}
+	// The discovered set must include the current production files
+	// (sanity check that enumeration works; do NOT lock the total
+	// count — M2 will legitimately add production files).
+	found := map[string]bool{}
+	for _, f := range files {
+		found[f] = true
+	}
+	for _, must := range []string{"server.go", "errors.go"} {
+		if !found[must] {
+			t.Fatalf("guard enumeration missed production file %s (scanned: %v)", must, files)
+		}
 	}
 	forbiddenTokens := []string{
 		"kungfu.md/internal/repository",
