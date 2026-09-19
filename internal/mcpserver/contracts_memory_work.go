@@ -1,45 +1,50 @@
 package mcpserver
 
+// M2 typed MCP output contracts. These DTOs describe TRANSPORT output
+// only: each is an exact projection of facts already returned by the
+// existing services — nothing invented, nothing dropped. When a
+// REQUIRED fact is missing or has the wrong type in a service result,
+// the projection fails safely with INTERNAL_ERROR instead of
+// manufacturing a misleading zero value. Optional/nullable facts
+// (e.g. *string description) are preserved as they are.
+
 import (
 	"fmt"
 
 	"kungfu.md/internal/service"
 )
 
-// M2 typed MCP output contracts. These DTOs describe TRANSPORT output
-// only: each is a safe projection of an already-produced service
-// result. No business decisions, no re-queries, no economic
-// recalculation live here. When a service result cannot possibly be
-// projected, the projection fails with INTERNAL_ERROR.
+// ---- memory DTOs ----
 
-// ---- memory ----
-
-// MemoryItem projects one item of the service memory-list result.
+// MemoryItem carries the exact list-service facts (no checksum — the
+// list service does not provide it).
 type MemoryItem struct {
 	Code        string   `json:"code"`
 	Title       string   `json:"title"`
 	Tags        []string `json:"tags"`
-	Description string   `json:"description"`
-	Checksum    string   `json:"checksum"`
+	Description *string  `json:"description"`
 	Visibility  string   `json:"visibility"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
 }
 
-// MemoryListOutput projects service.ListKungfusForBot.
+// MemoryListOutput projects service.ListKungfusForBot including its
+// meta block (total/returned/offset/has_more).
 type MemoryListOutput struct {
-	Items   []MemoryItem `json:"kungfus"`
-	Total   int          `json:"total"`
-	HasMore bool         `json:"has_more"`
-	Offset  int          `json:"offset"`
+	Items    []MemoryItem `json:"kungfus"`
+	Total    int          `json:"total"`
+	Returned int          `json:"returned"`
+	Offset   int          `json:"offset"`
+	HasMore  bool         `json:"has_more"`
 }
 
-// MemoryGetOutput projects service.GetKungfuForBot (detail).
+// MemoryGetOutput projects service.GetKungfuForBot (detail, has
+// content+checksum).
 type MemoryGetOutput struct {
 	Code        string   `json:"code"`
 	Title       string   `json:"title"`
 	Tags        []string `json:"tags"`
-	Description string   `json:"description"`
+	Description *string  `json:"description"`
 	Content     string   `json:"content"`
 	Checksum    string   `json:"checksum"`
 	Visibility  string   `json:"visibility"`
@@ -47,7 +52,7 @@ type MemoryGetOutput struct {
 	UpdatedAt   string   `json:"updated_at"`
 }
 
-// MemoryPutOutput projects service.Push.
+// MemoryPutOutput projects service.Push (already a typed service result).
 type MemoryPutOutput struct {
 	Code       string `json:"code"`
 	Title      string `json:"title"`
@@ -60,43 +65,43 @@ type MemoryPutOutput struct {
 type MemoryVisibilityOutput struct {
 	Code       string `json:"code"`
 	Visibility string `json:"visibility"`
+	Message    string `json:"message"`
 }
 
-// MemoryDeleteOutput projects service.Delete.
+// MemoryDeleteOutput projects the REAL service.Delete result. There is
+// no invented "deleted" flag — successful tool completion IS the
+// success fact.
 type MemoryDeleteOutput struct {
 	Code    string `json:"code"`
-	Deleted bool   `json:"deleted"`
+	Title   string `json:"title"`
+	Message string `json:"message"`
 }
 
-// ---- work ----
+// ---- work DTOs ----
 
-// WorkItem projects one item of the service open-task board.
+// WorkItem carries exactly the Agent board facts (agentTaskDetail):
+// no budget, no postapi, no owner identity.
 type WorkItem struct {
 	Code         string  `json:"code"`
 	Title        string  `json:"title"`
 	Requirements string  `json:"requirements"`
-	Budget       float64 `json:"budget"`
 	Price        float64 `json:"price"`
+	Pinned       int     `json:"pinned"`
 	Status       string  `json:"status"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
-// WorkListOutput projects service.ListOpenTasks.
+// WorkListOutput projects service.ListOpenTasks. The service meta
+// provides total+returned only — no invented has_more.
 type WorkListOutput struct {
-	Items   []WorkItem `json:"tasks"`
-	Total   int        `json:"total"`
-	HasMore bool       `json:"has_more"`
+	Items    []WorkItem `json:"tasks"`
+	Total    int        `json:"total"`
+	Returned int        `json:"returned"`
 }
 
-// WorkGetOutput projects service.GetOpenTask. The open board does not
-// expose owner-only facts (postapi/budget); the projection carries
-// only what the service produced.
-type WorkGetOutput struct {
-	Code         string  `json:"code"`
-	Title        string  `json:"title"`
-	Requirements string  `json:"requirements"`
-	Price        float64 `json:"price"`
-	Status       string  `json:"status"`
-}
+// WorkGetOutput exposes the same public Agent work facts as the list.
+type WorkGetOutput WorkItem
 
 // WorkSubmitOutput projects service.Submit (delivery + settlement facts).
 type WorkSubmitOutput struct {
@@ -118,7 +123,7 @@ type WorkSubmitBillOutput struct {
 	Balance float64 `json:"balance"`
 }
 
-// WorkPublishOutput projects service.CreateTask.
+// WorkPublishOutput projects the service.CreateTask result.
 type WorkPublishOutput struct {
 	Code   string  `json:"code"`
 	Title  string  `json:"title"`
@@ -127,241 +132,397 @@ type WorkPublishOutput struct {
 	Price  float64 `json:"price"`
 }
 
-// ---- safe projection helpers ----
-// Each helper converts the service's already-produced
-// map[string]interface{} into the typed MCP projection. A shape that
-// cannot be projected is an INTERNAL_ERROR, never a panic and never a
-// silently wrong value.
+// ---- safe local extraction helpers ----
+// req* helpers: required facts. Missing/wrong type => error (caller
+// maps to INTERNAL_ERROR). opt* helpers: optional/nullable facts,
+// preserved legitimately.
 
-func mapStr(m map[string]interface{}, k string) string {
-	if v, ok := m[k].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func mapFloat(m map[string]interface{}, k string) float64 {
-	switch v := m[k].(type) {
-	case float64:
-		return v
-	case int:
-		return float64(v)
-	case int64:
-		return float64(v)
-	}
-	return 0
-}
-
-func mapInt(m map[string]interface{}, k string) int {
-	switch v := m[k].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	}
-	return 0
-}
-
-func mapBool(m map[string]interface{}, k string) bool {
-	if v, ok := m[k].(bool); ok {
-		return v
-	}
-	return false
-}
-
-func mapStrSlice(m map[string]interface{}, k string) []string {
-	raw, ok := m[k].([]interface{})
+func reqString(m map[string]interface{}, k string) (string, error) {
+	v, ok := m[k]
 	if !ok {
-		return []string{}
+		return "", fmt.Errorf("projection: missing required field %q", k)
 	}
-	out := make([]string, 0, len(raw))
-	for _, e := range raw {
-		if s, ok := e.(string); ok {
+	switch t := v.(type) {
+	case string:
+		return t, nil
+	case *string:
+		if t == nil {
+			return "", fmt.Errorf("projection: required field %q is nil", k)
+		}
+		return *t, nil
+	}
+	return "", fmt.Errorf("projection: field %q has wrong type %T", k, v)
+}
+
+func optStringPtr(m map[string]interface{}, k string) *string {
+	switch t := m[k].(type) {
+	case nil:
+		return nil
+	case string:
+		return &t
+	case *string:
+		return t
+	}
+	return nil
+}
+
+func reqStrings(m map[string]interface{}, k string) ([]string, error) {
+	switch t := m[k].(type) {
+	case []string:
+		return t, nil
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			s, ok := e.(string)
+			if !ok {
+				return nil, fmt.Errorf("projection: field %q contains non-string", k)
+			}
 			out = append(out, s)
 		}
+		return out, nil
 	}
-	return out
+	if _, exists := m[k]; !exists {
+		return nil, fmt.Errorf("projection: missing required field %q", k)
+	}
+	return nil, fmt.Errorf("projection: field %q has wrong type %T", k, m[k])
 }
 
-// timeVal renders the service timestamp fields as transport strings.
-func timeVal(m map[string]interface{}, k string) string {
-	switch v := m[k].(type) {
-	case string:
-		return v
-	case nil:
-		return ""
-	default:
-		return fmtSprint(v)
+func reqFloat(m map[string]interface{}, k string) (float64, error) {
+	switch t := m[k].(type) {
+	case float64:
+		return t, nil
+	case int:
+		return float64(t), nil
+	case int64:
+		return float64(t), nil
 	}
+	if _, exists := m[k]; !exists {
+		return 0, fmt.Errorf("projection: missing required field %q", k)
+	}
+	return 0, fmt.Errorf("projection: field %q has wrong type %T", k, m[k])
 }
 
-func fmtSprint(v interface{}) string { return fmt.Sprintf("%v", v) }
+func reqInt(m map[string]interface{}, k string) (int, error) {
+	switch t := m[k].(type) {
+	case int:
+		return t, nil
+	case int64:
+		return int(t), nil
+	case float64:
+		return int(t), nil
+	}
+	if _, exists := m[k]; !exists {
+		return 0, fmt.Errorf("projection: missing required field %q", k)
+	}
+	return 0, fmt.Errorf("projection: field %q has wrong type %T", k, m[k])
+}
 
-// ---- projections: service result (map) -> typed MCP output ----
+// ---- projections: service result -> typed MCP output ----
 
-func projectMemoryList(result map[string]interface{}) MemoryListOutput {
+func projectMemoryList(result map[string]interface{}) (MemoryListOutput, error) {
 	out := MemoryListOutput{Items: []MemoryItem{}}
-	appendItem := func(e interface{}) {
+	projectItem := func(m map[string]interface{}) (MemoryItem, error) {
+		code, err := reqString(m, "code")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		title, err := reqString(m, "title")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		tags, err := reqStrings(m, "tags")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		visibility, err := reqString(m, "visibility")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		createdAt, err := reqString(m, "created_at")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		updatedAt, err := reqString(m, "updated_at")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		return MemoryItem{
+			Code:        code,
+			Title:       title,
+			Tags:        tags,
+			Description: optStringPtr(m, "description"),
+			Visibility:  visibility,
+			CreatedAt:   createdAt,
+			UpdatedAt:   updatedAt,
+		}, nil
+	}
+	appendRaw := func(e interface{}) error {
 		m, ok := e.(map[string]interface{})
 		if !ok {
-			return
+			return fmt.Errorf("projection: list item is %T, want map", e)
 		}
-		out.Items = append(out.Items, MemoryItem{
-			Code:        mapStr(m, "code"),
-			Title:       mapStr(m, "title"),
-			Tags:        mapStrSlice(m, "tags"),
-			Description: mapStr(m, "description"),
-			Checksum:    mapStr(m, "checksum"),
-			Visibility:  mapStr(m, "visibility"),
-			CreatedAt:   timeVal(m, "created_at"),
-			UpdatedAt:   timeVal(m, "updated_at"),
-		})
+		item, err := projectItem(m)
+		if err != nil {
+			return err
+		}
+		out.Items = append(out.Items, item)
+		return nil
 	}
 	switch raw := result["kungfus"].(type) {
 	case []interface{}:
 		for _, e := range raw {
-			appendItem(e)
+			if err := appendRaw(e); err != nil {
+				return MemoryListOutput{}, err
+			}
 		}
 	case []map[string]interface{}:
 		for _, e := range raw {
-			appendItem(map[string]interface{}(e))
+			if err := appendRaw(map[string]interface{}(e)); err != nil {
+				return MemoryListOutput{}, err
+			}
 		}
+	default:
+		return MemoryListOutput{}, fmt.Errorf("projection: kungfus list has wrong type %T", result["kungfus"])
 	}
-	if meta, ok := result["meta"].(map[string]interface{}); ok {
-		out.Total = mapInt(meta, "total")
-		out.HasMore = mapBool(meta, "has_more")
-		out.Offset = mapInt(meta, "offset")
+	meta, ok := result["meta"].(map[string]interface{})
+	if !ok {
+		return MemoryListOutput{}, fmt.Errorf("projection: missing meta block")
 	}
-	return out
+	var err error
+	if out.Total, err = reqInt(meta, "total"); err != nil {
+		return MemoryListOutput{}, err
+	}
+	if out.Returned, err = reqInt(meta, "returned"); err != nil {
+		return MemoryListOutput{}, err
+	}
+	if out.Offset, err = reqInt(meta, "offset"); err != nil {
+		return MemoryListOutput{}, err
+	}
+	hasMore, ok := meta["has_more"].(bool)
+	if !ok {
+		return MemoryListOutput{}, fmt.Errorf("projection: meta.has_more missing or wrong type")
+	}
+	out.HasMore = hasMore
+	return out, nil
 }
 
-func projectMemoryGet(result map[string]interface{}) MemoryGetOutput {
-	return MemoryGetOutput{
-		Code:        mapStr(result, "code"),
-		Title:       mapStr(result, "title"),
-		Tags:        mapStrSlice(result, "tags"),
-		Description: mapStr(result, "description"),
-		Content:     mapStr(result, "content"),
-		Checksum:    mapStr(result, "checksum"),
-		Visibility:  mapStr(result, "visibility"),
-		CreatedAt:   timeVal(result, "created_at"),
-		UpdatedAt:   timeVal(result, "updated_at"),
+func projectMemoryGet(result map[string]interface{}) (MemoryGetOutput, error) {
+	var out MemoryGetOutput
+	var err error
+	if out.Code, err = reqString(result, "code"); err != nil {
+		return out, err
 	}
+	if out.Title, err = reqString(result, "title"); err != nil {
+		return out, err
+	}
+	if out.Tags, err = reqStrings(result, "tags"); err != nil {
+		return out, err
+	}
+	if out.Content, err = reqString(result, "content"); err != nil {
+		return out, err
+	}
+	if out.Checksum, err = reqString(result, "checksum"); err != nil {
+		return out, err
+	}
+	if out.Visibility, err = reqString(result, "visibility"); err != nil {
+		return out, err
+	}
+	if out.CreatedAt, err = reqString(result, "created_at"); err != nil {
+		return out, err
+	}
+	if out.UpdatedAt, err = reqString(result, "updated_at"); err != nil {
+		return out, err
+	}
+	out.Description = optStringPtr(result, "description")
+	return out, nil
 }
 
-func projectVisibility(result map[string]interface{}) MemoryVisibilityOutput {
-	return MemoryVisibilityOutput{
-		Code:       mapStr(result, "code"),
-		Visibility: mapStr(result, "visibility"),
+func projectVisibility(result map[string]interface{}) (MemoryVisibilityOutput, error) {
+	var out MemoryVisibilityOutput
+	var err error
+	if out.Code, err = reqString(result, "code"); err != nil {
+		return out, err
 	}
+	if out.Visibility, err = reqString(result, "visibility"); err != nil {
+		return out, err
+	}
+	if out.Message, err = reqString(result, "message"); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
-func projectDelete(result map[string]interface{}) MemoryDeleteOutput {
-	deleted := mapBool(result, "deleted")
-	if !deleted {
-		if _, hasErr := result["error"]; hasErr {
-			deleted = false
-		}
+func projectDelete(result map[string]interface{}) (MemoryDeleteOutput, error) {
+	var out MemoryDeleteOutput
+	var err error
+	if out.Code, err = reqString(result, "code"); err != nil {
+		return out, err
 	}
-	return MemoryDeleteOutput{
-		Code:    mapStr(result, "code"),
-		Deleted: deleted,
+	if out.Title, err = reqString(result, "title"); err != nil {
+		return out, err
 	}
+	if out.Message, err = reqString(result, "message"); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
-func projectWorkList(result map[string]interface{}) WorkListOutput {
+func projectWorkList(result map[string]interface{}) (WorkListOutput, error) {
 	out := WorkListOutput{Items: []WorkItem{}}
-	appendTask := func(e interface{}) {
+	projectTask := func(m map[string]interface{}) (WorkItem, error) {
+		var it WorkItem
+		var err error
+		if it.Code, err = reqString(m, "code"); err != nil {
+			return it, err
+		}
+		if it.Title, err = reqString(m, "title"); err != nil {
+			return it, err
+		}
+		if it.Requirements, err = reqString(m, "requirements"); err != nil {
+			return it, err
+		}
+		if it.Price, err = reqFloat(m, "price"); err != nil {
+			return it, err
+		}
+		if it.Pinned, err = reqInt(m, "pinned"); err != nil {
+			return it, err
+		}
+		if it.Status, err = reqString(m, "status"); err != nil {
+			return it, err
+		}
+		if it.CreatedAt, err = reqString(m, "created_at"); err != nil {
+			return it, err
+		}
+		if it.UpdatedAt, err = reqString(m, "updated_at"); err != nil {
+			return it, err
+		}
+		return it, nil
+	}
+	appendRaw := func(e interface{}) error {
 		m, ok := e.(map[string]interface{})
 		if !ok {
-			return
+			return fmt.Errorf("projection: task item is %T, want map", e)
 		}
-		out.Items = append(out.Items, WorkItem{
-			Code:         mapStr(m, "code"),
-			Title:        mapStr(m, "title"),
-			Requirements: mapStr(m, "requirements"),
-			Budget:       mapFloat(m, "budget"),
-			Price:        mapFloat(m, "price"),
-			Status:       mapStr(m, "status"),
-		})
+		it, err := projectTask(m)
+		if err != nil {
+			return err
+		}
+		out.Items = append(out.Items, it)
+		return nil
 	}
 	switch raw := result["tasks"].(type) {
 	case []interface{}:
 		for _, e := range raw {
-			appendTask(e)
+			if err := appendRaw(e); err != nil {
+				return WorkListOutput{}, err
+			}
 		}
 	case []map[string]interface{}:
 		for _, e := range raw {
-			appendTask(map[string]interface{}(e))
+			if err := appendRaw(map[string]interface{}(e)); err != nil {
+				return WorkListOutput{}, err
+			}
 		}
+	default:
+		return WorkListOutput{}, fmt.Errorf("projection: tasks list has wrong type %T", result["tasks"])
 	}
-	if meta, ok := result["meta"].(map[string]interface{}); ok {
-		out.Total = mapInt(meta, "total")
-		out.HasMore = mapBool(meta, "has_more")
+	meta, ok := result["meta"].(map[string]interface{})
+	if !ok {
+		return WorkListOutput{}, fmt.Errorf("projection: missing meta block")
 	}
-	return out
+	var err error
+	if out.Total, err = reqInt(meta, "total"); err != nil {
+		return WorkListOutput{}, err
+	}
+	if out.Returned, err = reqInt(meta, "returned"); err != nil {
+		return WorkListOutput{}, err
+	}
+	return out, nil
 }
 
-func projectWorkGet(result map[string]interface{}) WorkGetOutput {
-	// service nests the detail under "task"; budget/postapi are owner
-	// facts the open board does not expose — the projection carries
-	// only what the service produced.
+func projectWorkGet(result map[string]interface{}) (WorkGetOutput, error) {
+	// service nests the detail under "task"
 	m := result
 	if t, ok := result["task"].(map[string]interface{}); ok {
 		m = t
 	}
-	return WorkGetOutput{
-		Code:         mapStr(m, "code"),
-		Title:        mapStr(m, "title"),
-		Requirements: mapStr(m, "requirements"),
-		Price:        mapFloat(m, "price"),
-		Status:       mapStr(m, "status"),
+	var out WorkGetOutput
+	var err error
+	if out.Code, err = reqString(m, "code"); err != nil {
+		return out, err
 	}
+	if out.Title, err = reqString(m, "title"); err != nil {
+		return out, err
+	}
+	if out.Requirements, err = reqString(m, "requirements"); err != nil {
+		return out, err
+	}
+	if out.Price, err = reqFloat(m, "price"); err != nil {
+		return out, err
+	}
+	if out.Pinned, err = reqInt(m, "pinned"); err != nil {
+		return out, err
+	}
+	if out.Status, err = reqString(m, "status"); err != nil {
+		return out, err
+	}
+	if out.CreatedAt, err = reqString(m, "created_at"); err != nil {
+		return out, err
+	}
+	if out.UpdatedAt, err = reqString(m, "updated_at"); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
-func projectWorkSubmit(result *service.TaskSubmitResult) WorkSubmitOutput {
-	return WorkSubmitOutput{
-		TaskCode: result.TaskCode,
-		Post: WorkSubmitPostOutput{
-			Delivered:    mapBool(result.Post, "delivered"),
-			ResponseCode: mapInt(result.Post, "response_code"),
-		},
-		Billing: WorkSubmitBillOutput{
-			Reward:  mapFloat(result.Billing, "reward"),
-			Balance: mapFloat(result.Billing, "balance"),
-		},
+func projectWorkSubmit(result *service.TaskSubmitResult) (WorkSubmitOutput, error) {
+	out := WorkSubmitOutput{TaskCode: result.TaskCode}
+	var err error
+	delivered, ok := result.Post["delivered"].(bool)
+	if !ok {
+		return out, fmt.Errorf("projection: post.delivered missing or wrong type")
 	}
+	out.Post.Delivered = delivered
+	if out.Post.ResponseCode, err = reqInt(result.Post, "response_code"); err != nil {
+		return out, err
+	}
+	if out.Billing.Reward, err = reqFloat(result.Billing, "reward"); err != nil {
+		return out, err
+	}
+	if out.Billing.Balance, err = reqFloat(result.Billing, "balance"); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
-func projectWorkPublish(result map[string]interface{}) WorkPublishOutput {
-	out := WorkPublishOutput{
-		Code:   mapStr(result, "code"),
-		Title:  mapStr(result, "title"),
-		Status: mapStr(result, "status"),
-		Budget: mapFloat(result, "budget"),
-		Price:  mapFloat(result, "price"),
+func projectWorkPublish(result map[string]interface{}) (WorkPublishOutput, error) {
+	// service nests under "task"
+	m := result
+	if t, ok := result["task"].(map[string]interface{}); ok {
+		m = t
 	}
-	if out.Code == "" {
-		// service nests under "task"
-		if t, ok := result["task"].(map[string]interface{}); ok {
-			if out.Code == "" {
-				out.Code = mapStr(t, "code")
-			}
-			if out.Title == "" {
-				out.Title = mapStr(t, "title")
-			}
-			if out.Status == "" {
-				out.Status = mapStr(t, "status")
-			}
-			if out.Budget == 0 {
-				out.Budget = mapFloat(t, "budget")
-			}
-			if out.Price == 0 {
-				out.Price = mapFloat(t, "price")
-			}
-		}
+	var out WorkPublishOutput
+	var err error
+	if out.Code, err = reqString(m, "code"); err != nil {
+		return out, err
 	}
-	return out
+	if out.Title, err = reqString(m, "title"); err != nil {
+		return out, err
+	}
+	if out.Status, err = reqString(m, "status"); err != nil {
+		return out, err
+	}
+	if out.Budget, err = reqFloat(m, "budget"); err != nil {
+		return out, err
+	}
+	if out.Price, err = reqFloat(m, "price"); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// mapProjErr converts any projection failure into the safe
+// INTERNAL_ERROR tool error.
+func mapProjErr(err error) error {
+	return &toolError{httpStatus: 500, code: "INTERNAL_ERROR", message: "An internal error occurred"}
 }

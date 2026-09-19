@@ -591,3 +591,216 @@ func TestM2ToolSchemaContract(t *testing.T) {
 		}
 	}
 }
+
+// ---- M2 closure: exact service-contract projections ----
+
+// m2Typed calls a tool and decodes structuredContent into out.
+func m2Typed(t *testing.T, ts mcpTestServer, key, tool string, args map[string]interface{}, out interface{}) {
+	t.Helper()
+	sc, body := m2CallTool(t, ts, key, tool, args)
+	if sc != 200 || toolFailed(body) {
+		t.Fatalf("%s: %d %s", tool, sc, extractJSON(body)[:min(400, len(extractJSON(body)))])
+	}
+	var env struct {
+		Result struct {
+			StructuredContent json.RawMessage `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(extractJSON(body)), &env); err != nil {
+		t.Fatalf("%s parse: %v", tool, err)
+	}
+	if len(env.Result.StructuredContent) == 0 {
+		t.Fatalf("%s: no structuredContent: %s", tool, body)
+	}
+	if err := json.Unmarshal(env.Result.StructuredContent, out); err != nil {
+		t.Fatalf("%s typed decode: %v (raw %s)", tool, err, env.Result.StructuredContent)
+	}
+}
+
+func TestM2MemoryProjectionExactServiceFacts(t *testing.T) {
+	pool, ts := m2Setup(t)
+	_, keyA, _ := m2Bot(t, pool, ts.srv, "cj")
+	long := "Closure test memory content deliberately longer than fifty characters for projection."
+
+	// create WITH description
+	var put MemoryPutOutput
+	m2Typed(t, ts, keyA, "memory_put", map[string]interface{}{
+		"title": "closure mem", "tags": []string{"alpha", "beta"},
+		"description": "described item", "content": long,
+	}, &put)
+	if put.Code == "" || put.Action != "created" {
+		t.Fatalf("put: %+v", put)
+	}
+
+	// list: tags exact, description preserved, NO checksum
+	var list MemoryListOutput
+	m2Typed(t, ts, keyA, "memory_list", map[string]interface{}{}, &list)
+	var found *MemoryItem
+	for i := range list.Items {
+		if list.Items[i].Code == put.Code {
+			found = &list.Items[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("created memory missing from list: %+v", list)
+	}
+	if len(found.Tags) != 2 || found.Tags[0] != "alpha" || found.Tags[1] != "beta" {
+		t.Fatalf("list tags not exactly preserved: %v", found.Tags)
+	}
+	if found.Description == nil || *found.Description != "described item" {
+		t.Fatalf("list description lost: %v", found.Description)
+	}
+	listRaw, _ := json.Marshal(list)
+	if strings.Contains(string(listRaw), "checksum") {
+		t.Fatalf("list output contains checksum (service list does not provide it): %s", listRaw)
+	}
+
+	// get: tags exact, description preserved, checksum present (detail has it)
+	var get MemoryGetOutput
+	m2Typed(t, ts, keyA, "memory_get", map[string]interface{}{"code": put.Code}, &get)
+	if len(get.Tags) != 2 || get.Tags[0] != "alpha" || get.Tags[1] != "beta" {
+		t.Fatalf("get tags not exactly preserved: %v", get.Tags)
+	}
+	if get.Description == nil || *get.Description != "described item" {
+		t.Fatalf("get description lost: %v", get.Description)
+	}
+	if get.Checksum == "" {
+		t.Fatal("get detail missing checksum (service detail provides it)")
+	}
+
+	// nil description remains valid (no description on update-create path)
+	var put2 MemoryPutOutput
+	m2Typed(t, ts, keyA, "memory_put", map[string]interface{}{
+		"title": "closure nodesc", "tags": []string{"solo"}, "content": long + " v2",
+	}, &put2)
+	var get2 MemoryGetOutput
+	m2Typed(t, ts, keyA, "memory_get", map[string]interface{}{"code": put2.Code}, &get2)
+	if get2.Description != nil && *get2.Description != "" {
+		t.Fatalf("empty description should stay nil/empty: %v", get2.Description)
+	}
+
+	// delete: real service facts only — code/title/message, NO deleted flag
+	var del MemoryDeleteOutput
+	m2Typed(t, ts, keyA, "memory_delete", map[string]interface{}{"code": put2.Code}, &del)
+	if del.Code != put2.Code || del.Title != "closure nodesc" || del.Message == "" {
+		t.Fatalf("delete projection: %+v", del)
+	}
+	delRaw, _ := json.Marshal(del)
+	if strings.Contains(string(delRaw), "deleted") {
+		t.Fatalf("delete output contains invented 'deleted' flag: %s", delRaw)
+	}
+}
+
+func TestM2WorkProjectionExactServiceFacts(t *testing.T) {
+	pool, ts := m2Setup(t)
+	_, keyPub, botPub := m2Bot(t, pool, ts.srv, "wk")
+	_, keyB, _ := m2Bot(t, pool, ts.srv, "wb")
+	txCtx := context.Background()
+	if _, err := pool.Exec(txCtx, "UPDATE tb_bots SET balance = 5000 WHERE id = $1", botPub); err != nil {
+		t.Fatal(err)
+	}
+
+	var pub WorkPublishOutput
+	m2Typed(t, ts, keyPub, "work_publish", map[string]interface{}{
+		"title": "closure work", "requirements": "req text",
+		"postapi": "https://example.test/hook", "budget": 1500, "price": 100, "open_now": true,
+	}, &pub)
+	if pub.Code == "" || pub.Status != "open" {
+		t.Fatalf("publish: %+v", pub)
+	}
+
+	// work_list item: exactly the board facts, no budget/postapi/owner
+	var list WorkListOutput
+	m2Typed(t, ts, keyB, "work_list", map[string]interface{}{}, &list)
+	var item *WorkItem
+	for i := range list.Items {
+		if list.Items[i].Code == pub.Code {
+			item = &list.Items[i]
+		}
+	}
+	if item == nil {
+		t.Fatalf("published work missing from list: %+v", list)
+	}
+	if item.Title != "closure work" || item.Requirements != "req text" || item.Price != 100 || item.Status != "open" {
+		t.Fatalf("list item facts: %+v", item)
+	}
+	rawItem, _ := json.Marshal(item)
+	for _, forbidden := range []string{"budget", "postapi", "bot_id", "owner_id"} {
+		if strings.Contains(string(rawItem), forbidden) {
+			t.Fatalf("work list item exposes %s: %s", forbidden, rawItem)
+		}
+	}
+	// meta: total+returned, no has_more
+	if list.Total < 1 || list.Returned < 1 {
+		t.Fatalf("list meta: %+v", list)
+	}
+	rawList, _ := json.Marshal(list)
+	if strings.Contains(string(rawList), "has_more") {
+		t.Fatalf("work list meta exposes invented has_more: %s", rawList)
+	}
+
+	// work_get: same facts
+	var get WorkGetOutput
+	m2Typed(t, ts, keyB, "work_get", map[string]interface{}{"code": pub.Code}, &get)
+	if get.Code != pub.Code || get.Title != "closure work" || get.Pinned != 0 {
+		t.Fatalf("get facts: %+v", get)
+	}
+	rawGet, _ := json.Marshal(get)
+	for _, forbidden := range []string{"budget", "postapi", "bot_id", "owner_id"} {
+		if strings.Contains(string(rawGet), forbidden) {
+			t.Fatalf("work get exposes %s: %s", forbidden, rawGet)
+		}
+	}
+}
+
+// Malformed required facts fail safely: the projection can never
+// manufacture a successful zero-value DTO.
+func TestM2MalformedProjectionFailsSafely(t *testing.T) {
+	// memory list missing meta
+	if _, err := projectMemoryList(map[string]interface{}{"kungfus": []interface{}{}}); err == nil {
+		t.Fatal("missing meta accepted")
+	}
+	// list item missing required title
+	bad := map[string]interface{}{
+		"kungfus": []interface{}{map[string]interface{}{"code": "x"}},
+		"meta":    map[string]interface{}{"total": 1, "returned": 1, "offset": 0, "has_more": false},
+	}
+	if _, err := projectMemoryList(bad); err == nil {
+		t.Fatal("item missing title accepted")
+	}
+	// tags wrong type
+	badTags := map[string]interface{}{
+		"kungfus": []interface{}{map[string]interface{}{"code": "x", "title": "t", "tags": "not-a-slice"}},
+		"meta":    map[string]interface{}{"total": 1, "returned": 1, "offset": 0, "has_more": false},
+	}
+	if _, err := projectMemoryList(badTags); err == nil {
+		t.Fatal("wrong-type tags accepted")
+	}
+	// get missing content
+	if _, err := projectMemoryGet(map[string]interface{}{"code": "x", "title": "t", "tags": []string{}, "checksum": "c", "visibility": "public", "created_at": "1", "updated_at": "1"}); err == nil {
+		t.Fatal("get missing content accepted")
+	}
+	// delete missing message
+	if _, err := projectDelete(map[string]interface{}{"code": "x", "title": "t"}); err == nil {
+		t.Fatal("delete missing message accepted")
+	}
+	// work list item missing status
+	badTask := map[string]interface{}{
+		"tasks": []interface{}{map[string]interface{}{"code": "x", "title": "t", "requirements": "r", "price": 1.0, "pinned": 0, "created_at": "1", "updated_at": "1"}},
+		"meta":  map[string]interface{}{"total": 1, "returned": 1},
+	}
+	if _, err := projectWorkList(badTask); err == nil {
+		t.Fatal("task missing status accepted")
+	}
+	// work list invented has_more is NOT read: meta without returned fails
+	noRet := map[string]interface{}{"tasks": []interface{}{}, "meta": map[string]interface{}{"total": 0}}
+	if _, err := projectWorkList(noRet); err == nil {
+		t.Fatal("meta missing returned accepted")
+	}
+	// error shape is the safe INTERNAL_ERROR mapping
+	err := mapProjErr(nil)
+	te, ok := err.(*toolError)
+	if !ok || te.httpStatus != 500 || te.code != "INTERNAL_ERROR" {
+		t.Fatalf("projection error mapping: %+v", err)
+	}
+}

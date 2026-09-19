@@ -56,7 +56,11 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryListOutput{}, mapAppError(err)
 		}
-		return nil, projectMemoryList(result), nil
+		out, perr := projectMemoryList(result)
+		if perr != nil {
+			return nil, MemoryListOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -80,7 +84,11 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryGetOutput{}, mapAppError(err)
 		}
-		return nil, projectMemoryGet(result), nil
+		out, perr := projectMemoryGet(result)
+		if perr != nil {
+			return nil, MemoryGetOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -157,7 +165,11 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryVisibilityOutput{}, mapAppError(err)
 		}
-		return nil, projectVisibility(result), nil
+		out, perr := projectVisibility(result)
+		if perr != nil {
+			return nil, MemoryVisibilityOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -179,7 +191,11 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryVisibilityOutput{}, mapAppError(err)
 		}
-		return nil, projectVisibility(result), nil
+		out, perr := projectVisibility(result)
+		if perr != nil {
+			return nil, MemoryVisibilityOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -200,7 +216,11 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryDeleteOutput{}, mapAppError(err)
 		}
-		return nil, projectDelete(result), nil
+		out, perr := projectDelete(result)
+		if perr != nil {
+			return nil, MemoryDeleteOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 }
 
@@ -220,7 +240,11 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkListOutput{}, mapAppError(err)
 		}
-		return nil, projectWorkList(result), nil
+		out, perr := projectWorkList(result)
+		if perr != nil {
+			return nil, WorkListOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -240,7 +264,11 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkGetOutput{}, mapAppError(err)
 		}
-		return nil, projectWorkGet(result), nil
+		out, perr := projectWorkGet(result)
+		if perr != nil {
+			return nil, WorkGetOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -270,7 +298,11 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkSubmitOutput{}, mapAppError(err)
 		}
-		return nil, projectWorkSubmit(result), nil
+		out, perr := projectWorkSubmit(result)
+		if perr != nil {
+			return nil, WorkSubmitOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -312,7 +344,11 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkPublishOutput{}, mapAppError(err)
 		}
-		return nil, projectWorkPublish(result), nil
+		out, perr := projectWorkPublish(result)
+		if perr != nil {
+			return nil, WorkPublishOutput{}, mapProjErr(perr)
+		}
+		return nil, out, nil
 	})
 }
 
