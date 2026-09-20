@@ -22,6 +22,8 @@ import (
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
+
+	"bytes"
 )
 
 // Server holds all dependencies.
@@ -344,6 +346,40 @@ func parseJSONBodyRequired(r *http.Request, requireObject bool, emptyMessage str
 		return nil, &parseError{msg: emptyMessage}
 	}
 
+	return data, nil
+}
+
+// parseJSONBodyRequiredNumbers is parseJSONBodyRequired with
+// json.Decoder.UseNumber(): every JSON number decodes into json.Number
+// (the exact source text) instead of float64. Credit-bearing public
+// boundaries MUST use this variant — float64 silently corrupts integer
+// values above 2^53 (9007199254740993 would become 9007199254740992
+// before validation could see it). All other field semantics identical.
+func parseJSONBodyRequiredNumbers(r *http.Request, requireObject bool, emptyMessage string) (map[string]interface{}, error) {
+	// Cap body at 256KB to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(nil, r.Body, 262144)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, &parseError{msg: emptyMessage}
+	}
+
+	if len(body) == 0 {
+		if requireObject {
+			return nil, &parseError{msg: emptyMessage}
+		}
+		return map[string]interface{}{}, nil
+	}
+
+	var data map[string]interface{}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&data); err != nil {
+		return nil, &parseError{msg: emptyMessage}
+	}
+
+	if requireObject && data == nil {
+		return nil, &parseError{msg: emptyMessage}
+	}
 	return data, nil
 }
 

@@ -11,6 +11,8 @@ import (
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/service"
 	"strings"
+
+	"encoding/json"
 )
 
 // Kungfu list pagination defaults — server-owned (no global config coupling).
@@ -481,6 +483,13 @@ func parseCredits(v interface{}) (int64, bool, bool) {
 	switch t := v.(type) {
 	case nil:
 		return 0, false, true
+	case json.Number:
+		// Lossless path (body parsed with UseNumber): the exact source
+		// text. Int64() rejects fractions and >int64 range alike.
+		if n, err := t.Int64(); err == nil {
+			return n, true, true
+		}
+		return 0, true, false
 	case float64:
 		if t != float64(int64(t)) {
 			return 0, true, false
@@ -516,7 +525,7 @@ func (s *Server) handleOwnerTaskCreate(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	input, err := parseJSONBodyRequired(r, true, "Request body must be valid JSON object")
+	input, err := parseJSONBodyRequiredNumbers(r, true, "Request body must be valid JSON object")
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
@@ -592,7 +601,7 @@ func (s *Server) handleOwnerTaskAddBudget(w http.ResponseWriter, r *http.Request
 		handleAppError(w, err)
 		return
 	}
-	input, err := parseJSONBodyRequired(r, true, "Request body must be valid JSON object")
+	input, err := parseJSONBodyRequiredNumbers(r, true, "Request body must be valid JSON object")
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
@@ -640,7 +649,7 @@ func (s *Server) handleOwnerTaskEdit(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	input, err := parseJSONBodyRequired(r, true, "Request body must be valid JSON object")
+	input, err := parseJSONBodyRequiredNumbers(r, true, "Request body must be valid JSON object")
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return

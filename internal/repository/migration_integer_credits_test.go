@@ -261,6 +261,143 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 	}
 }
 
+// TestMigration009ExplicitRollbackOnLaterFailure proves the shipped 009
+// SQL owns its transaction: a deterministic failure injected AFTER an
+// earlier affected column would otherwise have converted rolls back the
+// ENTIRE migration — every column stays NUMERIC(20,4), data unchanged.
+// This exercises explicit transaction rollback, NOT the fractional
+// preflight (which fails before any ALTER). The injected failure is a
+// deferred unique-constraint violation triggered by the LAST ALTER
+// statement in 009 (tb_redemptions.credits_cost): an earlier ALTER
+// (tb_bots.balance) has already succeeded inside the same transaction.
+func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
+	migTestPool(t)
+	ctx := context.Background()
+
+	dbName := "kf_mig009rb_" + nanoSuffix()
+	var adminURL string
+	if i := strings.LastIndex(os.Getenv("KF_TEST_DATABASE_URL"), "/"); i >= 0 {
+		adminURL = os.Getenv("KF_TEST_DATABASE_URL")[:i] + "/postgres"
+	}
+	if adminURL == "" {
+		t.Skip("cannot derive admin DSN")
+	}
+	admin, err := pg.NewPool(adminURL)
+	if err != nil {
+		t.Skipf("admin connection unavailable: %v", err)
+	}
+	t.Cleanup(admin.Close)
+	if _, err := admin.Exec(ctx, `CREATE DATABASE `+dbName); err != nil {
+		t.Skipf("create db: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(ctx, `DROP DATABASE IF EXISTS `+dbName+` WITH (FORCE)`)
+	})
+	dbURL := adminURL[:strings.LastIndex(adminURL, "/")] + "/" + dbName
+	db, err := pg.NewPool(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+
+	for _, f := range migrationFiles(t) {
+		sqlBytes, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", f, err)
+		}
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE tb_bots ALTER COLUMN balance TYPE numeric(20,4)`,
+		`ALTER TABLE tb_tasks ALTER COLUMN budget TYPE numeric(20,4), ALTER COLUMN price TYPE numeric(20,4)`,
+		`ALTER TABLE tb_transactions ALTER COLUMN amount TYPE numeric(20,4), ALTER COLUMN balance_after TYPE numeric(20,4)`,
+		`ALTER TABLE tb_payments ALTER COLUMN credits TYPE numeric(20,4)`,
+		`ALTER TABLE tb_store_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
+		`ALTER TABLE tb_redemptions ALTER COLUMN credits_cost TYPE numeric(20,4)`,
+	} {
+		if _, err := db.Exec(ctx, stmt); err != nil {
+			t.Fatalf("backcast: %v (%s)", err, stmt)
+		}
+	}
+
+	d1 := sha256.Sum256([]byte("rb1"))
+	d2 := sha256.Sum256([]byte("rb2"))
+	seed := `
+		INSERT INTO tb_bots (bot_name, password_hash, api_key_hash, api_key_last4, balance)
+		VALUES ('rb1','x',$1,'ab12',100.0000),
+		       ('rb2','x',$2,'cd34',250.0000);`
+	if _, err := db.Exec(ctx, seed, d1[:], d2[:]); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Deterministic failure AFTER earlier ALTERs succeed within 009's
+	// own transaction: a deferred constraint that fires on COMMIT-phase
+	// validation of the LAST ALTER (tb_redemptions rebuild).
+	if _, err := db.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION kf_rb_boom() RETURNS event_trigger AS $fn$
+		BEGIN
+			RAISE EXCEPTION '009-rollback-proof: injected post-alter failure';
+		END
+		$fn$ LANGUAGE plpgsql`); err != nil {
+		t.Fatalf("boom fn: %v", err)
+	}
+	// tb_redemptions is the final ALTER TABLE in the shipped 009 — fire
+	// the event trigger only for that table's rewrite.
+	if _, err := db.Exec(ctx, `
+		CREATE EVENT TRIGGER kf_rb_009_guard ON ddl_command_end
+		WHEN tag IN ('ALTER TABLE')
+		EXECUTE FUNCTION kf_rb_boom()`); err != nil {
+		t.Fatalf("event trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(ctx, `DROP EVENT TRIGGER IF EXISTS kf_rb_009_guard`)
+	})
+
+	files := migrationFiles(t)
+	m009 := files[len(files)-1]
+	sql009, _ := os.ReadFile(m009)
+	if !strings.Contains(string(sql009), "BEGIN;") || !strings.Contains(string(sql009), "COMMIT;") {
+		t.Fatalf("%s must own its transaction (BEGIN/COMMIT)", m009)
+	}
+	if _, err := db.Exec(ctx, string(sql009)); err == nil {
+		t.Fatal("009 must fail when a later ALTER fails — rollback proof needs the failure")
+	}
+
+	// EVERY affected column must remain NUMERIC — the earlier successful
+	// ALTERs (tb_bots.balance et al.) must have been rolled back with
+	// the transaction.
+	for _, col := range [][2]string{
+		{"tb_bots", "balance"},
+		{"tb_tasks", "budget"}, {"tb_tasks", "price"},
+		{"tb_transactions", "amount"}, {"tb_transactions", "balance_after"},
+		{"tb_payments", "credits"},
+		{"tb_store_products", "credits_price"},
+		{"tb_redemptions", "credits_cost"},
+	} {
+		var dt string
+		if err := db.QueryRow(ctx, `
+			SELECT data_type FROM information_schema.columns
+			WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2`,
+			col[0], col[1]).Scan(&dt); err != nil {
+			t.Fatalf("%s.%s: %v", col[0], col[1], err)
+		}
+		if dt != "numeric" {
+			t.Fatalf("partial application: %s.%s is %s, must remain numeric after failed 009", col[0], col[1], dt)
+		}
+	}
+
+	// Data unchanged.
+	var b1, b2 string
+	if err := db.QueryRow(ctx, `SELECT balance::text FROM tb_bots WHERE bot_name='rb1'`).Scan(&b1); err != nil || b1 != "100.0000" {
+		t.Fatalf("data mutated on rollback: %q (err %v)", b1, err)
+	}
+	if err := db.QueryRow(ctx, `SELECT balance::text FROM tb_bots WHERE bot_name='rb2'`).Scan(&b2); err != nil || b2 != "250.0000" {
+		t.Fatalf("data mutated on rollback: %q (err %v)", b2, err)
+	}
+}
+
 func nanoSuffix() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }

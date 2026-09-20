@@ -4,8 +4,11 @@
 -- Fiat stays integer minor units (amount_minor etc.) — untouched.
 --
 -- Fail-closed contract:
---   * runs inside a transaction (caller pipes with
---     ON_ERROR_STOP; any error aborts everything);
+--   * THIS FILE owns its transaction: BEGIN ... COMMIT. A failure at
+--     ANY point (preflight OR a later ALTER) rolls back the ENTIRE
+--     migration — never a partially converted schema. Atomicity does
+--     NOT depend on ON_ERROR_STOP, on the caller, or on the driver
+--     wrapping the file in an implicit transaction.
 --   * every affected column is checked for fractional values
 --     BEFORE any type conversion — a single non-integral
 --     historical value aborts the migration (no ROUND,
@@ -17,6 +20,8 @@
 --   * safe on the fresh-install chain where 001-003 already
 --     create these columns as BIGINT (no-op).
 -- ============================================================
+
+BEGIN;
 
 -- Fail closed on fractional historical data. COALESCE keeps NULL
 -- impossible (all columns are NOT NULL), but the check stays cheap
@@ -81,3 +86,5 @@ ALTER TABLE tb_store_products
 ALTER TABLE tb_redemptions
     ALTER COLUMN credits_cost TYPE BIGINT
         USING (credits_cost :: numeric(20,0) :: bigint);
+
+COMMIT;

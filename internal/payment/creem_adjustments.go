@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/bits"
 	"strings"
 
@@ -232,9 +233,13 @@ func trimTo(s string, n int) *string {
 //	target_reversed = floor(C * R / P)        (partial refund)
 //	R == P          -> target_reversed = C    (full refund: exact)
 //
-// Integer arithmetic with overflow protection — never float64. Cumulative
-// FLOOR prevents fractional credits AND prevents over-clawback before a
-// full refund (monotone non-decreasing in R, never exceeding C).
+// Pure 128-bit integer arithmetic — never float64, never a lossy
+// uint64→int64 intermediate cast. C*R is computed as a full (hi, lo)
+// 128-bit product via bits.Mul64 and divided by P as a 128-bit
+// dividend via bits.Div64, so correctness does not depend on the
+// product fitting in 64 bits. Cumulative FLOOR prevents fractional
+// credits AND prevents over-clawback before a full refund (monotone
+// non-decreasing in R, never exceeding C).
 func reversalTarget(credits int64, refundedMinor, paidMinor int64) (int64, error) {
 	if paidMinor <= 0 {
 		return 0, fmt.Errorf("reversal: amount_paid %d not positive", paidMinor)
@@ -248,14 +253,17 @@ func reversalTarget(credits int64, refundedMinor, paidMinor int64) (int64, error
 	if refundedMinor == paidMinor {
 		return credits, nil // full refund: exactly the original grant
 	}
-	// product := credits * refundedMinor, computed as a 128-bit product
-	// (bits.Mul64) so an overflow is detected exactly, never wrapped.
+	// Full 128-bit product C*R (both non-negative here), divided as a
+	// 128-bit dividend by the 64-bit denominator.
 	hi, lo := bits.Mul64(uint64(credits), uint64(refundedMinor))
-	if hi != 0 {
-		return 0, fmt.Errorf("reversal: proportional product overflows int64 (credits=%d refunded=%d)", credits, refundedMinor)
+	quo, _ := bits.Div64(hi, lo, uint64(paidMinor)) // full 128÷64; remainder discarded = floor
+	// quotient must fit int64: its unsigned 64-bit form must not exceed
+	// MaxInt64. (C ≤ MaxInt64 and R < P bound the mathematical quotient,
+	// but verify, never assume.)
+	if quo > uint64(math.MaxInt64) {
+		return 0, fmt.Errorf("reversal: proportional quotient overflows int64 (credits=%d refunded=%d paid=%d)", credits, refundedMinor, paidMinor)
 	}
-	prod := int64(lo) // credits>0, refunded>=0 → prod in [0, MaxInt64]
-	return prod / paidMinor, nil
+	return int64(quo), nil
 }
 
 // adjustmentBasis is the canonical provider-transaction basis persisted

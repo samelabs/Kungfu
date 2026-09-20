@@ -84,7 +84,7 @@ func (s *Server) handleAdminStoreProductsList(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleAdminStoreProductsCreate(w http.ResponseWriter, r *http.Request) {
-	input, err := parseAdminJSONBody(r)
+	input, err := parseAdminJSONBodyNumbers(r)
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
@@ -154,7 +154,7 @@ func (s *Server) handleAdminStoreProductGet(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAdminStoreProductPatch(w http.ResponseWriter, r *http.Request) {
-	input, err := parseAdminJSONBody(r)
+	input, err := parseAdminJSONBodyNumbers(r)
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
@@ -392,12 +392,19 @@ func pageParams(pageStr, sizeStr string) (int, int) {
 // jsonCredits extracts a whole-integer Credits value from a decoded
 // JSON field. Fractional numbers fail closed (never rounded).
 func jsonCredits(v interface{}) (int64, bool) {
-	f, ok := v.(float64)
-	if !ok {
+	switch t := v.(type) {
+	case json.Number:
+		// Lossless path (body parsed with UseNumber): exact source text.
+		if n, err := t.Int64(); err == nil {
+			return n, true
+		}
+		return 0, false
+	case float64:
+		if t != float64(int64(t)) {
+			return 0, false
+		}
+		return int64(t), true
+	default:
 		return 0, false
 	}
-	if f != float64(int64(f)) {
-		return 0, false
-	}
-	return int64(f), true
 }
