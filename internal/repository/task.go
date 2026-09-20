@@ -22,20 +22,20 @@ import (
 // When alias is empty the columns are unqualified; otherwise they are prefixed with "alias.".
 func openBudgetWhereClause(alias string, minBudget int64) string {
 	if alias == "" {
-		return "status = 'open' AND price > 0 AND budget >= $1 AND budget >= price"
+		return "status = 'open' AND price > 0 AND (budget - reserved_budget) >= $1 AND (budget - reserved_budget) >= price"
 	}
 	return alias + ".status = 'open' AND " + alias + ".price > 0 AND " +
-		alias + ".budget >= $1 AND " + alias + ".budget >= " + alias + ".price"
+		"(" + alias + ".budget - " + alias + ".reserved_budget) >= $1 AND (" + alias + ".budget - " + alias + ".reserved_budget) >= " + alias + ".price"
 }
 
 // openBudgetWhereClauseWithParam is openBudgetWhereClause with an explicit
 // placeholder token for the min budget parameter.
 func openBudgetWhereClauseWithParam(alias, param string) string {
 	if alias == "" {
-		return "status = 'open' AND price > 0 AND budget >= " + param + " AND budget >= price"
+		return "status = 'open' AND price > 0 AND (budget - reserved_budget) >= " + param + " AND (budget - reserved_budget) >= price"
 	}
 	return alias + ".status = 'open' AND " + alias + ".price > 0 AND " +
-		alias + ".budget >= " + param + " AND " + alias + ".budget >= " + alias + ".price"
+		"(" + alias + ".budget - " + alias + ".reserved_budget) >= " + param + " AND (" + alias + ".budget - " + alias + ".reserved_budget) >= " + alias + ".price"
 }
 
 // -- 1. countOpenTasks --

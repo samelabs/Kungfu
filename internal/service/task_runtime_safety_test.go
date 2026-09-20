@@ -59,7 +59,7 @@ func TestSubmitGateFailureNoPoolDeadlockMaxConns1(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := Submit(ctx, pool, code, agent, map[string]interface{}{"a": 1})
+	_, err := Submit(ctx, pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	if err == nil {
 		t.Fatal("unfundable task must be rejected")
 	}
@@ -93,7 +93,7 @@ func TestTestTaskGateFailureNoPoolDeadlockMaxConns1(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := TestTaskDeliver(ctx, pool, owner, code, map[string]interface{}{"a": 1})
+	_, err := TestTaskDeliver(ctx, pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	if err == nil {
 		t.Fatal("malformed postapi must be rejected")
 	}
@@ -140,7 +140,7 @@ func TestTaskLogRedactionOwnerTestPayload(t *testing.T) {
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1500)
 	key := rawAPIKey()
 
-	if _, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{
+	if _, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{
 		"content": "do work with " + key,
 	}); err != nil {
 		t.Fatalf("owner test: %v", err)
@@ -180,7 +180,7 @@ func TestTaskLogRedactionResponseBody(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1500)
-	res, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	res, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("owner test: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestUTF8TaskLogPersistence(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1500)
-	res, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	res, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("owner test: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestInvalidUTF8ResponsePersistsValidLog(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1500)
-	res, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	res, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("invalid-utf8 response must not change delivery semantics: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestSubmitLogRedactionAcrossTruncationBoundary(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1500)
-	res, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	res, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("delivery must succeed: %v", err)
 	}

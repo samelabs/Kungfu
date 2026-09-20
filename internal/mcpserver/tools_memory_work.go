@@ -281,8 +281,9 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 			OpenWorldHint:   boolPtr(true), // performs the existing PostAPI delivery
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
-		Code    string                 `json:"code"`
-		Payload map[string]interface{} `json:"payload" jsonschema:"your task result body"`
+		Code       string                 `json:"code"`
+		Payload    map[string]interface{} `json:"payload" jsonschema:"your task result body"`
+		RequestKey string                 `json:"request_key" jsonschema:"client-generated stable idempotency key (1-128 ASCII chars A-Z a-z 0-9 . _ ~ -); reuse the SAME key to retry an unresolved submission"`
 	}) (*mcp.CallToolResult, WorkSubmitOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {
@@ -294,7 +295,7 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		// The payload is the Agent's result body, passed as-is to the
 		// existing Submit authority. delivery.BuildPayload (inside the
 		// service) remains the sole component that adds task_code.
-		result, err := service.Submit(ctx, deps.Pool, in.Code, bot.ID, in.Payload)
+		result, err := service.Submit(ctx, deps.Pool, in.Code, bot.ID, in.RequestKey, in.Payload)
 		if err != nil {
 			return nil, WorkSubmitOutput{}, mapAppError(err)
 		}

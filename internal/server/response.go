@@ -132,3 +132,18 @@ func InvalidJSON(w http.ResponseWriter, message string) {
 func MissingField(w http.ResponseWriter, field string) {
 	ErrorResponse(w, 400, "MISSING_FIELD", "Missing required field: "+field, nil)
 }
+
+// AcceptedResponse sends a 202 success JSON response — used for durable
+// submissions accepted but not yet terminally resolved (delivery in
+// progress, uncertain remote outcome). The payload carries the durable
+// submission identity and state; it never fabricates settlement facts.
+func AcceptedResponse(w http.ResponseWriter, data interface{}, message string) {
+	resp := map[string]interface{}{
+		"success":     true,
+		"data":        data,
+		"message":     message,
+		"timestamp":   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		"api_version": apiVersion(),
+	}
+	sendJSON(w, resp, 202)
+}

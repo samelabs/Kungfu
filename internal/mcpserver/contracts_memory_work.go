@@ -103,11 +103,15 @@ type WorkListOutput struct {
 // WorkGetOutput exposes the same public Agent work facts as the list.
 type WorkGetOutput WorkItem
 
-// WorkSubmitOutput projects service.Submit (delivery + settlement facts).
+// WorkSubmitOutput projects service.Submit (durable submission facts).
+// Billing is present ONLY when the submission durably settled — never
+// fabricated for unsettled states.
 type WorkSubmitOutput struct {
-	TaskCode string               `json:"task_code"`
-	Post     WorkSubmitPostOutput `json:"post"`
-	Billing  WorkSubmitBillOutput `json:"billing"`
+	TaskCode     string                `json:"task_code"`
+	SubmissionID string                `json:"submission_id"`
+	State        string                `json:"state"`
+	Post         *WorkSubmitPostOutput `json:"post,omitempty"`
+	Billing      *WorkSubmitBillOutput `json:"billing,omitempty"`
 }
 
 // WorkSubmitPostOutput is the delivery fact block.
@@ -483,21 +487,30 @@ func projectWorkGet(result map[string]interface{}) (WorkGetOutput, error) {
 }
 
 func projectWorkSubmit(result *service.TaskSubmitResult) (WorkSubmitOutput, error) {
-	out := WorkSubmitOutput{TaskCode: result.TaskCode}
-	var err error
-	delivered, ok := result.Post["delivered"].(bool)
-	if !ok {
-		return out, fmt.Errorf("projection: post.delivered missing or wrong type")
+	out := WorkSubmitOutput{
+		TaskCode:     result.TaskCode,
+		SubmissionID: result.SubmissionID,
+		State:        result.State,
 	}
-	out.Post.Delivered = delivered
-	if out.Post.ResponseCode, err = reqInt(result.Post, "response_code"); err != nil {
-		return out, err
+	if result.Post != nil {
+		p := &WorkSubmitPostOutput{}
+		if delivered, ok := result.Post["delivered"].(bool); ok {
+			p.Delivered = delivered
+		}
+		if rc, err := reqInt(result.Post, "response_code"); err == nil {
+			p.ResponseCode = rc
+		}
+		out.Post = p
 	}
-	if out.Billing.Reward, err = reqInt64(result.Billing, "reward"); err != nil {
-		return out, err
-	}
-	if out.Billing.Balance, err = reqInt64(result.Billing, "balance"); err != nil {
-		return out, err
+	if result.Billing != nil {
+		b := &WorkSubmitBillOutput{}
+		if v, err := reqInt64(result.Billing, "reward"); err == nil {
+			b.Reward = v
+		}
+		if v, err := reqInt64(result.Billing, "balance"); err == nil {
+			b.Balance = v
+		}
+		out.Billing = b
 	}
 	return out, nil
 }

@@ -73,6 +73,9 @@ func tcSeedTask(t *testing.T, pool *pg.Pool, botID int64, status, postapi string
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
+		// 010: durable submission rows reference the task (FK RESTRICT) —
+		// remove them first or the task DELETE silently no-ops.
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_submissions WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)
@@ -172,7 +175,7 @@ func TestSubmitPendingTaskRejectedBeforePost(t *testing.T) {
 
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 1, 1000)
 
-	_, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	_, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	ae, ok := errors.IsAppError(err)
 	if !ok || ae.HTTPCode != 409 || ae.Code != "TASK_NOT_OPEN" {
 		t.Fatalf("want 409 TASK_NOT_OPEN, got %v", err)
@@ -192,7 +195,7 @@ func TestOwnerTestPendingTask(t *testing.T) {
 
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1000)
 
-	res, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	res, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("pending owner test must succeed: %v", err)
 	}
@@ -226,7 +229,7 @@ func TestOwnerTestPostFailureNoBudgetChange(t *testing.T) {
 	code := tcSeedTask(t, pool, owner, "pending", srv.URL, 5, 1000)
 	setOK(false)
 
-	_, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	_, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	ae, ok := errors.IsAppError(err)
 	if !ok || ae.HTTPCode != 424 {
 		t.Fatalf("want 424, got %v", err)
@@ -258,13 +261,25 @@ func TestOwnerTestSettlementFailureIsError(t *testing.T) {
 		_, _ = pool.Exec(ctx, `ALTER TABLE tb_tasks DROP CONSTRAINT IF EXISTS tc_settle_fail_chk`)
 	})
 
-	_, err := TestTaskDeliver(ctx, pool, owner, code, map[string]interface{}{"a": 1})
-	if err == nil {
-		t.Fatal("settlement failure must be an API error, not a success response")
+	res, err := TestTaskDeliver(ctx, pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
+	if err != nil {
+		t.Fatalf("durable-contract: delivered-but-settlement-failed must report its state, not error: %v", err)
 	}
-	// budget unchanged (rolled back)
+	// The remote delivery DID succeed; the settlement write failed and
+	// will be retried by recovery. The response must NOT fabricate
+	// settlement (no billing) and the durable state must be delivered.
+	if res == nil || res.State != "delivered" {
+		t.Fatalf("want state=delivered (settlement pending), got %+v", res)
+	}
+	if res.Billing != nil {
+		t.Fatalf("unsettled submission fabricated billing: %+v", res.Billing)
+	}
+	// budget unchanged (settlement rolled back atomically)
 	if budget, _ := tcBudget(t, pool, code); budget != 1000 {
 		t.Fatalf("budget = %v, want 1000 (settlement rolled back)", budget)
+	}
+	if n, _ := tcEarnCount(t, pool, owner); n != 0 {
+		t.Fatalf("earn on unsettled owner test: %d", n)
 	}
 }
 
@@ -280,7 +295,7 @@ func TestSubmitPostFailureNoSettlement(t *testing.T) {
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1000)
 	setOK(false)
 
-	_, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	_, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	ae, ok := errors.IsAppError(err)
 	if !ok || ae.HTTPCode != 424 {
 		t.Fatalf("want 424, got %v", err)
@@ -308,7 +323,7 @@ func TestSubmitSuccessAtomicSettlement(t *testing.T) {
 
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1000)
 
-	res, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	res, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -347,9 +362,15 @@ func TestSubmitBudgetWriteFailureZeroEarn(t *testing.T) {
 		_, _ = pool.Exec(ctx, `ALTER TABLE tb_tasks DROP CONSTRAINT IF EXISTS tc_budget_fail_chk`)
 	})
 
-	_, err := Submit(ctx, pool, code, agent, map[string]interface{}{"a": 1})
-	if err == nil {
-		t.Fatal("submit must fail when the budget write fails")
+	res, err := Submit(ctx, pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
+	if err != nil {
+		t.Fatalf("durable-contract: delivered-but-settlement-failed must report its state, not error: %v", err)
+	}
+	if res == nil || res.State != "delivered" {
+		t.Fatalf("want state=delivered (settlement pending), got %+v", res)
+	}
+	if res.Billing != nil {
+		t.Fatalf("unsettled submission fabricated billing: %+v", res.Billing)
 	}
 	if n, _ := tcEarnCount(t, pool, agent); n != 0 {
 		t.Fatalf("earn_task despite budget write failure: %d", n)
@@ -378,7 +399,7 @@ func TestConcurrentCloseVsSubmit(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, submitErr[0] = Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+		_, submitErr[0] = Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	}()
 	go func() {
 		defer wg.Done()
@@ -425,7 +446,7 @@ func TestConcurrentSubmitsNoOverDelivery(t *testing.T) {
 		wg.Add(1)
 		go func(i int, ag int64) {
 			defer wg.Done()
-			_, errs[i] = Submit(context.Background(), pool, code, ag, map[string]interface{}{"a": 1})
+			_, errs[i] = Submit(context.Background(), pool, code, ag, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 		}(i, ag)
 	}
 	wg.Wait()
@@ -488,7 +509,7 @@ func TestBudgetBelowPriceNotAcceptable(t *testing.T) {
 	if _, err := GetOpenTask(context.Background(), pool, code); err == nil {
 		t.Fatal("unfundable task retrievable via GetOpenTask")
 	}
-	_, err = Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	_, err = Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	ae, ok := errors.IsAppError(err)
 	if !ok || ae.HTTPCode != 409 {
 		t.Fatalf("want 409, got %v", err)
@@ -510,7 +531,7 @@ func TestAutoCloseAfterSettlement(t *testing.T) {
 	// 1000 - 5 = 995 >= 1000? No: 995 < 1000 -> auto-close.
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1000)
 
-	if _, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1}); err != nil {
+	if _, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1}); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	budget, status := tcBudget(t, pool, code)
@@ -550,7 +571,7 @@ func TestBoardGetSubmitConsistency(t *testing.T) {
 	if _, err := GetOpenTask(context.Background(), pool, okCode); err != nil {
 		t.Fatalf("fundable task not gettable: %v", err)
 	}
-	if _, err := Submit(context.Background(), pool, okCode, agent, map[string]interface{}{"a": 1}); err != nil {
+	if _, err := Submit(context.Background(), pool, okCode, agent, "k-"+fmt.Sprint(okCode), map[string]interface{}{"a": 1}); err != nil {
 		t.Fatalf("fundable task not submittable: %v", err)
 	}
 
@@ -565,7 +586,7 @@ func TestBoardGetSubmitConsistency(t *testing.T) {
 	if _, err := GetOpenTask(context.Background(), pool, pend); err == nil {
 		t.Fatal("pending task gettable")
 	}
-	if _, err := Submit(context.Background(), pool, pend, agent, map[string]interface{}{"a": 1}); err == nil {
+	if _, err := Submit(context.Background(), pool, pend, agent, "k-"+fmt.Sprint(pend), map[string]interface{}{"a": 1}); err == nil {
 		t.Fatal("pending task submittable")
 	}
 }
@@ -582,7 +603,7 @@ func TestRefundBudgetAtomic(t *testing.T) {
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1200)
 
 	// settle once -> 1195, still fundable; then close and backdate.
-	if _, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1}); err != nil {
+	if _, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1}); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	if _, err := SetTaskStatus(context.Background(), pool, owner, code, "closed"); err != nil {
@@ -650,6 +671,9 @@ func TestCreateTaskLockAtomic(t *testing.T) {
 	code := res["task"].(map[string]interface{})["code"].(string)
 	t.Cleanup(func() {
 		ctx := context.Background()
+		// 010: durable submission rows reference the task (FK RESTRICT) —
+		// remove them first or the task DELETE silently no-ops.
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_submissions WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)

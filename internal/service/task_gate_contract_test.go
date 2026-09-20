@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -36,7 +37,7 @@ func TestSubmitMalformedPostAPIRejected(t *testing.T) {
 	// valid server exists but the task points at a malformed URL instead
 	for _, bad := range []string{"not-a-url", "ftp://example.com/hook"} {
 		code := tcSeedTask(t, pool, owner, "open", bad, 5, 1500)
-		_, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+		_, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 		wantGateErr(t, err, "TASK_CONFIG_INVALID")
 		if *hits != 0 {
 			t.Fatalf("malformed postapi POSTed: %d", *hits)
@@ -81,7 +82,7 @@ func TestSubmitMaxLengthPostAPIDelivers(t *testing.T) {
 	// server (the boundary fixture targets an external host and would not
 	// be answerable by httptest).
 	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 1500)
-	res, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	res, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	if err != nil {
 		t.Fatalf("legal postapi must deliver: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestSubmitEmptyPostAPIRejected(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "open", "", 5, 1500)
-	_, err := Submit(context.Background(), pool, code, agent, map[string]interface{}{"a": 1})
+	_, err := Submit(context.Background(), pool, code, agent, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 	wantGateErr(t, err, "TASK_NOT_CONFIGURED")
 	if *hits != 0 {
 		t.Fatalf("empty postapi POSTed: %d", *hits)
@@ -119,7 +120,7 @@ func TestTestTaskMalformedPostAPIRejected(t *testing.T) {
 
 	for _, bad := range []string{"not-a-url", "gopher://example.com/hook"} {
 		code := tcSeedTask(t, pool, owner, "pending", bad, 5, 1500)
-		_, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+		_, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 		wantGateErr(t, err, "TASK_CONFIG_INVALID")
 		if *hits != 0 {
 			t.Fatalf("malformed postapi POSTed: %d", *hits)
@@ -138,7 +139,7 @@ func TestTestTaskAbnormalStatusRejected(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	code := tcSeedTask(t, pool, owner, "closed", srv.URL, 5, 1500)
-	_, err := TestTaskDeliver(context.Background(), pool, owner, code, map[string]interface{}{"a": 1})
+	_, err := TestTaskDeliver(context.Background(), pool, owner, code, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	wantGateErr(t, err, "TASK_NOT_OPEN")
 	if *hits != 0 {
 		t.Fatalf("closed task POSTed: %d", *hits)
@@ -154,7 +155,7 @@ func TestTestTaskAbnormalStatusRejected(t *testing.T) {
 		`UPDATE tb_tasks SET status = 'paused' WHERE code = $1`, abnormal); err != nil {
 		t.Fatal(err)
 	}
-	_, err = TestTaskDeliver(context.Background(), pool, owner, abnormal, map[string]interface{}{"a": 1})
+	_, err = TestTaskDeliver(context.Background(), pool, owner, abnormal, "k-"+fmt.Sprint(owner), map[string]interface{}{"a": 1})
 	wantGateErr(t, err, "TASK_NOT_OPEN")
 	if *hits != 0 {
 		t.Fatalf("abnormal-status task POSTed: %d", *hits)

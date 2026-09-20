@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +72,7 @@ func a2TestTask(t *testing.T, pool *pg.Pool, botID int64, status string, postapi
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_submissions WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_task_logs WHERE task_code = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_logs WHERE target_type = 'task' AND target_id = $1`, code)
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)
@@ -100,7 +102,7 @@ func TestSubmitTaskNotFound(t *testing.T) {
 	pr := newPostRecorder()
 	t.Cleanup(pr.server.Close)
 
-	_, err := Submit(context.Background(), pool, "nonexistent0", botID, map[string]interface{}{"a": 1})
+	_, err := Submit(context.Background(), pool, "nonexistent0", botID, "k-nonexistent0", map[string]interface{}{"a": 1})
 
 	ae, ok := errors.IsAppError(err)
 	if !ok {
@@ -123,7 +125,7 @@ func TestSubmitTaskNotOpen(t *testing.T) {
 
 	code := a2TestTask(t, pool, botID, "pending", pr.server.URL, 1.0, 10.0)
 
-	_, err := Submit(context.Background(), pool, code, botID, map[string]interface{}{"a": 1})
+	_, err := Submit(context.Background(), pool, code, botID, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 
 	ae, ok := errors.IsAppError(err)
 	if !ok {
@@ -152,7 +154,7 @@ func TestSubmitTaskDBLookupFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := Submit(ctx, pool, code, botID, map[string]interface{}{"a": 1})
+	_, err := Submit(ctx, pool, code, botID, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 
 	ae, ok := errors.IsAppError(err)
 	if !ok {
@@ -176,7 +178,7 @@ func TestSubmitOpenTaskDeliversWithDBTaskFields(t *testing.T) {
 
 	code := a2TestTask(t, pool, botID, "open", pr.server.URL, 2.0, 1000.0)
 
-	result, err := Submit(context.Background(), pool, code, botID, map[string]interface{}{"a": 1})
+	result, err := Submit(context.Background(), pool, code, botID, "k-"+fmt.Sprint(code), map[string]interface{}{"a": 1})
 
 	if err != nil {
 		t.Fatalf("open task submit failed: %v", err)

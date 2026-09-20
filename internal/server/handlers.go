@@ -8,6 +8,7 @@ import (
 	authImpl "kungfu.md/internal/auth"
 	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
+	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 
 	"encoding/json"
@@ -246,18 +247,34 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request) {
 
 	code := chi.URLParam(r, "code")
 
+	// Client idempotency contract: the caller supplies a stable
+	// Idempotency-Key so a lost-response retry resumes the SAME durable
+	// submission instead of creating a new one.
+	requestKey := r.Header.Get("Idempotency-Key")
+	if requestKey == "" {
+		MissingField(w, "Idempotency-Key header is required")
+		return
+	}
+
 	input, err := parseJSONBodyRequired(r, true, "Request body must be valid JSON object")
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
 	}
 
-	result, err := service.Submit(r.Context(), s.Pool, code, bot.ID, input)
+	result, err := service.Submit(r.Context(), s.Pool, code, bot.ID, requestKey, input)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Task submission delivered")
+	// settled -> 200 with settlement facts; non-terminal durable states
+	// (reserved/delivering/uncertain) -> 202 with the submission identity;
+	// never pretend an unresolved outcome was delivered.
+	if result.State == repository.SubStateSettled {
+		SuccessResponse(w, result, "Task submission delivered")
+		return
+	}
+	AcceptedResponse(w, result, "Task submission accepted; delivery in progress")
 }
 
 // -- Placeholder handlers for web routes and owner routes --
@@ -691,17 +708,29 @@ func (s *Server) handleTestTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := chi.URLParam(r, "code")
+
+	// Same client idempotency contract as agent submissions.
+	requestKey := r.Header.Get("Idempotency-Key")
+	if requestKey == "" {
+		MissingField(w, "Idempotency-Key header is required")
+		return
+	}
+
 	input, err := parseJSONBodyRequired(r, true, "Request body must be valid JSON object")
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
 	}
-	result, err := service.TestTaskDeliver(r.Context(), s.Pool, bot.ID, code, input)
+	result, err := service.TestTaskDeliver(r.Context(), s.Pool, bot.ID, code, requestKey, input)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Task test delivered")
+	if result.State == repository.SubStateSettled {
+		SuccessResponse(w, result, "Task test delivered")
+		return
+	}
+	AcceptedResponse(w, result, "Task test accepted; delivery in progress")
 }
 
 func (s *Server) handleOwnerLogs(w http.ResponseWriter, r *http.Request) {

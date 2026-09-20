@@ -33,7 +33,15 @@ func migrationFiles(t *testing.T) []string {
 		t.Fatalf("migrations not found: %v (%d)", err, len(files))
 	}
 	sort.Strings(files)
-	return files
+	// These are 009-mechanism tests: the chain under test ends at 009
+	// (the last file may no longer be 009 as later migrations land).
+	for i, f := range files {
+		if strings.Contains(f, "009_") {
+			return files[:i+1]
+		}
+	}
+	t.Fatalf("009 migration not found")
+	return nil
 }
 
 func migTestPool(t *testing.T) *pg.Pool {
@@ -360,6 +368,11 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 		CREATE EVENT TRIGGER kf_rb_009_guard ON ddl_command_end
 		WHEN tag IN ('ALTER TABLE')
 		EXECUTE FUNCTION kf_rb_boom()`); err != nil {
+		// Event triggers require superuser; environments running the
+		// suite as a plain role cannot exercise the rollback proof.
+		if strings.Contains(err.Error(), "permission denied to create event trigger") {
+			t.Skipf("event trigger requires superuser: %v", err)
+		}
 		t.Fatalf("event trigger: %v", err)
 	}
 	t.Cleanup(func() {

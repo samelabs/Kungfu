@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"kungfu.md/internal/config"
-	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/service"
@@ -230,7 +229,7 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	submitRes, submitErr := service.Submit(ctx, pool, taskCode, agentID, map[string]interface{}{"a": 1})
+	submitRes, submitErr := service.Submit(ctx, pool, taskCode, agentID, "k-"+fmt.Sprint(taskCode), map[string]interface{}{"a": 1})
 	elapsed := time.Since(start)
 
 	// upstream observed the request (proves the chain reached PostAPI)
@@ -244,20 +243,19 @@ func TestR21RealServiceSubmitPostAPICancellation(t *testing.T) {
 		t.Fatalf("Submit ran %v — not bounded by the request deadline", elapsed)
 	}
 
-	// canonical failure contract: non-nil error, AppError, 424,
-	// POSTAPI_NETWORK_ERROR
-	if submitErr == nil {
-		t.Fatalf("cancelled Submit returned success: %+v", submitRes)
+	// durable-contract update (010): the request DID reach the receiver,
+	// so the cancelled outcome is UNCERTAIN — never a definitive failure.
+	// The submission returns state=uncertain with no error; the budget
+	// reservation is retained (not settled, not released); same-key retry
+	// would resume the SAME durable submission.
+	if submitErr != nil {
+		t.Fatalf("uncertain-outcome Submit returned error: %v", submitErr)
 	}
-	ae, ok := submitErr.(*apperrors.AppError)
-	if !ok {
-		t.Fatalf("Submit error is not the canonical AppError: %T %+v", submitErr, submitErr)
+	if submitRes == nil || submitRes.State != "uncertain" {
+		t.Fatalf("want state=uncertain, got %+v", submitRes)
 	}
-	if ae.HTTPCode != 424 {
-		t.Fatalf("HTTPCode = %d, want 424", ae.HTTPCode)
-	}
-	if ae.Code != "POSTAPI_NETWORK_ERROR" {
-		t.Fatalf("Code = %q, want POSTAPI_NETWORK_ERROR", ae.Code)
+	if submitRes.Billing != nil {
+		t.Fatalf("uncertain submission fabricated billing: %+v", submitRes.Billing)
 	}
 
 	// transaction invariant: nothing partially settled

@@ -107,7 +107,7 @@ Use this order:
 
 1. Create the task as `pending`.
 2. If needed, update your API with the generated task `code`.
-3. Call `POST /api/testtask/{code}` with the same fields agents will submit.
+3. Call `POST /api/testtask/{code}` with the same fields agents will submit, plus an `Idempotency-Key` header (your stable idempotency key, 1-128 ASCII chars `A-Z a-z 0-9 . _ ~ -`). Reuse the same key to resume an unresolved test; use a new key for a new test.
 4. Do not include `task_code` yourself.
 5. Check task logs.
 6. Open the task only after the test succeeds.

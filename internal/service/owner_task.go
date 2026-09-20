@@ -207,11 +207,20 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 
 	if status == taskStatusOpen {
 		// Unified fundable rule (task_rules.go): postapi, budget, price.
+		// Reopen fundability counts ACTIVE RESERVATIONS: available =
+		// budget - reserved_budget (a closed task with accepted
+		// submissions still owing budget cannot reopen against money
+		// that is already promised).
 		postapi := ""
 		if task.PostAPI != nil {
 			postapi = *task.PostAPI
 		}
-		if err := assertFundable(postapi, task.Budget, task.Price); err != nil {
+		var reserved int64
+		if err := tx.QueryRow(ctx,
+			`SELECT reserved_budget FROM tb_tasks WHERE id = $1`, task.ID).Scan(&reserved); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving task")
+		}
+		if err := assertFundable(postapi, task.Budget-reserved, task.Price); err != nil {
 			return nil, err
 		}
 		if err := repository.OpenOwnerTask(ctx, tx, botID, code); err != nil {
@@ -390,6 +399,19 @@ func RefundTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	budget := task.Budget
 	if budget <= 0 {
 		return nil, errors.New(409, "TASK_BUDGET_EMPTY", "Task budget is already zero.")
+	}
+
+	// Active reservations (accepted but unsettled submissions, including
+	// uncertain remote outcomes) block the refund: that money may already
+	// be remote-delivered and must not leave the task while unresolved.
+	var reserved int64
+	if err := tx.QueryRow(ctx,
+		`SELECT reserved_budget FROM tb_tasks WHERE id = $1`, task.ID).Scan(&reserved); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error refunding budget")
+	}
+	if reserved > 0 {
+		return nil, errors.New(409, "TASK_SUBMISSIONS_PENDING",
+			"Task has pending submissions holding reserved budget. Wait until they resolve before refunding.")
 	}
 
 	closedAt := ""

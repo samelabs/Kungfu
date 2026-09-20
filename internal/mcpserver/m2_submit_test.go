@@ -92,6 +92,7 @@ func TestM2WorkSubmitPayloadAndBilling(t *testing.T) {
 
 	sc, body := m2CallTool(t, ts, keySub, "work_submit", map[string]interface{}{
 		"code": out.Code, "payload": map[string]interface{}{"answer": 42},
+		"request_key": "m2-ws-ok",
 	})
 	if sc != 200 || toolFailed(body) {
 		t.Fatalf("work_submit: %d %s", sc, body)
@@ -177,6 +178,7 @@ func TestM2WorkSubmitNetworkFailureZeroSettlement(t *testing.T) {
 
 	_, body := m2CallTool(t, ts, keySub, "work_submit", map[string]interface{}{
 		"code": out.Code, "payload": map[string]interface{}{"x": 1},
+		"request_key": "m2-ws-net",
 	})
 	if !toolFailed(body) {
 		t.Fatalf("network failure must surface an error: %s", body)
@@ -284,7 +286,7 @@ func TestM2WorkSubmitRateLimitPreserved(t *testing.T) {
 	_, key, _ := m2Bot(t, pool, srv, "sr")
 
 	args := func() map[string]interface{} {
-		return map[string]interface{}{"code": "nonexistent00", "payload": map[string]interface{}{"x": 1}}
+		return map[string]interface{}{"code": "nonexistent00", "payload": map[string]interface{}{"x": 1}, "request_key": "m2-ws-rl"}
 	}
 	sc, _ := m2CallTool(t, ts, key, "work_submit", args())
 	_ = sc // first attempt consumes the quota (task lookup comes after the gate)
