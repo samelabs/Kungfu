@@ -136,12 +136,74 @@ var specialPurpose = []specialPrefix{
 	{netip.MustParsePrefix("ff00::/8"), false, "multicast"},
 }
 
-// globalUnicastV6Base is the ONLY IPv6 range allowed when NO
-// special-purpose entry matches: the current IANA global unicast
-// allocation base 2000::/3. Every other reserved IPv6 space (e.g.
-// 4000::/4-and-beyond outside 2000::/3, deprecated site-local
-// fec0::/10) is denied — "not in the special table" is NOT public.
-var globalUnicastV6Base = netip.MustParsePrefix("2000::/3")
+// allocatedGlobalUnicastV6 is the static, centralized, read-only
+// snapshot of the IANA IPv6 Global Unicast Address Space registry
+// containing ONLY prefixes with Status = ALLOCATED. It is NOT a
+// second policy authority: the single decision function
+// policyAllowsAddr consults it AFTER the special-purpose
+// longest-prefix lookup (special-purpose always takes precedence —
+// e.g. 2001::/23 and 2002::/16 are ALLOCATED here yet denied by
+// special-purpose GR=false / N-A).
+//
+// Registry snapshot: IANA IPv6 Global Unicast Address Space,
+// Last Updated 2025-10-10 (PM-verified authoritative state at audit
+// time; no runtime IANA access). The COMPLETE set of Status =
+// ALLOCATED prefixes as listed by the registry — 36 entries; the
+// trailing RESERVED blocks (2d00::/8 … 3fff::/20) are absent BY
+// DESIGN: absence means deny.
+var allocatedGlobalUnicastV6 = []netip.Prefix{
+	// 2001::/3x subtree allocations
+	netip.MustParsePrefix("2001::/23"),      // IANA
+	netip.MustParsePrefix("2001:200::/23"),  // APNIC
+	netip.MustParsePrefix("2001:400::/23"),  // ARIN
+	netip.MustParsePrefix("2001:600::/23"),  // RIPE NCC
+	netip.MustParsePrefix("2001:800::/22"),  // RIPE NCC
+	netip.MustParsePrefix("2001:c00::/23"),  // APNIC
+	netip.MustParsePrefix("2001:e00::/23"),  // APNIC
+	netip.MustParsePrefix("2001:1200::/23"), // LACNIC
+	netip.MustParsePrefix("2001:1400::/22"), // RIPE NCC
+	netip.MustParsePrefix("2001:1800::/23"), // ARIN
+	netip.MustParsePrefix("2001:1a00::/23"), // RIPE NCC
+	netip.MustParsePrefix("2001:1c00::/22"), // RIPE NCC
+	netip.MustParsePrefix("2001:2000::/19"), // RIPE NCC
+	netip.MustParsePrefix("2001:4000::/23"), // RIPE NCC
+	netip.MustParsePrefix("2001:4200::/23"), // AFRINIC
+	netip.MustParsePrefix("2001:4400::/23"), // APNIC
+	netip.MustParsePrefix("2001:4600::/23"), // RIPE NCC
+	netip.MustParsePrefix("2001:4800::/23"), // ARIN
+	netip.MustParsePrefix("2001:4a00::/23"), // RIPE NCC
+	netip.MustParsePrefix("2001:4c00::/23"), // RIPE NCC
+	netip.MustParsePrefix("2001:5000::/20"), // RIPE NCC
+	netip.MustParsePrefix("2001:8000::/19"), // APNIC
+	netip.MustParsePrefix("2001:a000::/20"), // APNIC
+	netip.MustParsePrefix("2001:b000::/20"), // APNIC
+	netip.MustParsePrefix("2002::/16"),      // 6to4 (special-purpose precedence)
+	netip.MustParsePrefix("2003::/18"),      // RIPE NCC
+	// /12 RIR blocks
+	netip.MustParsePrefix("2400::/12"), // APNIC
+	netip.MustParsePrefix("2410::/12"), // APNIC
+	netip.MustParsePrefix("2600::/12"), // ARIN
+	netip.MustParsePrefix("2610::/23"), // ARIN
+	netip.MustParsePrefix("2620::/23"), // ARIN
+	netip.MustParsePrefix("2630::/12"), // ARIN
+	netip.MustParsePrefix("2800::/12"), // LACNIC
+	netip.MustParsePrefix("2a00::/12"), // RIPE NCC
+	netip.MustParsePrefix("2a10::/12"), // RIPE NCC
+	netip.MustParsePrefix("2c00::/12"), // AFRINIC
+}
+
+// isAllocatedGlobalUnicastV6 reports whether an IPv6 address with NO
+// special-purpose match falls inside a prefix the IANA Global Unicast
+// registry currently lists as ALLOCATED. RESERVED or unallocated
+// space (e.g. 2d00::/12 … 3fff::/12 within 2000::/3) is denied.
+func isAllocatedGlobalUnicastV6(addr netip.Addr) bool {
+	for _, p := range allocatedGlobalUnicastV6 {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
 
 // nat64WellKnown is the RFC 6052 well-known prefix; addresses inside
 // it are normalized to the embedded IPv4 address before the policy
@@ -188,17 +250,18 @@ func policyAllowsAddr(addr netip.Addr) bool {
 	}
 	if best == nil {
 		// No special-purpose match. "Not in the table" is NOT public:
-		//   IPv4 — only normal global unicast is allowed ( multicast
+		//   IPv4 — only normal global unicast is allowed (multicast
 		//          and reserved are already table-denied; unicast
-		//          outside those blocks is normal global unicast );
-		//   IPv6 — ONLY the IANA global unicast base 2000::/3 is
-		//          allowed; every other reserved address space
-		//          (4000::/4+, deprecated site-local fec0::/10, ...)
+		//          outside those blocks is normal global unicast);
+		//   IPv6 — ONLY prefixes the IANA IPv6 Global Unicast Address
+		//          Space registry (snapshot 2025-10-10) lists as
+		//          Status = ALLOCATED are allowed; RESERVED or
+		//          unallocated space — including inside 2000::/3 —
 		//          is denied.
 		if addr.Is4() {
 			return true
 		}
-		return globalUnicastV6Base.Contains(addr)
+		return isAllocatedGlobalUnicastV6(addr)
 	}
 	return best.globallyReachable
 }

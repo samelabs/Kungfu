@@ -263,6 +263,98 @@ func TestSSRF2001Slash23ParentNotShadowingExceptions(t *testing.T) {
 	}
 }
 
+// TestSSRFReservedWithin2000Slash3 proves "inside 2000::/3" is NOT
+// "currently allocated public space": /12 blocks the IANA Global
+// Unicast registry (snapshot 2025-10-10) lists as RESERVED are denied
+// even though they sit inside the historical 2000::/3 base.
+func TestSSRFReservedWithin2000Slash3(t *testing.T) {
+	reserved := []string{
+		"2d00::1", // RESERVED
+		"2e00::1", // RESERVED
+		"3000::1", // RESERVED
+		"3800::1", // RESERVED
+		"3c00::1", // RESERVED
+		"3e00::1", // RESERVED
+		"3f00::1", // RESERVED
+		"4000::1", // outside 2000::/3 entirely
+		"6000::1", // outside 2000::/3
+		"8000::1", // outside 2000::/3
+		"c000::1", // outside 2000::/3
+		"fec0::1", // deprecated site-local
+	}
+	for _, ip := range reserved {
+		a, err := netip.ParseAddr(ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", ip)
+		}
+		if policyAllowsAddr(a) {
+			t.Errorf("%s is RESERVED/unallocated space — must be denied despite 2000::/3 type", ip)
+		}
+	}
+}
+
+// TestSSRFAllocatedGlobalUnicastAllowed proves addresses inside
+// IANA-listed ALLOCATED /12 prefixes (no special-purpose match) are
+// allowed.
+func TestSSRFAllocatedGlobalUnicastAllowed(t *testing.T) {
+	allocated := []string{
+		"2003::1",              // RIPE NCC
+		"2400::1",              // APNIC
+		"2410::1",              // APNIC (inside 2400::/12)
+		"2600::1",              // ARIN
+		"2606:4700:4700::1111", // Cloudflare inside 2606::/32 (2600::/12)
+		"2610::1",              // ARIN
+		"2620:fe::fe",          // Quad9 inside 2620::/12
+		"2800::1",              // LACNIC
+		"2a00::1",              // RIPE NCC
+		"2c00::1",              // AfriNIC
+		"2001:4860:4860::8888", // Google inside 2001::/23-adjacent unicast... covered below
+	}
+	for _, ip := range allocated {
+		a, err := netip.ParseAddr(ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", ip)
+		}
+		if !policyAllowsAddr(a) {
+			t.Errorf("%s is inside an ALLOCATED global-unicast prefix — must be allowed", ip)
+		}
+	}
+}
+
+// TestSSRFSpecialPurposePrecedenceOverAllocation proves the
+// special-purpose lookup wins over the allocation registry: addresses
+// inside ALLOCATED prefixes are still denied when their most-specific
+// special-purpose entry is GR=false / N-A / deprecated, and the
+// GR=TRUE exceptions stay allowed.
+func TestSSRFSpecialPurposePrecedenceOverAllocation(t *testing.T) {
+	denied := []string{
+		"2001:db8::1", // documentation — ALLOCATED parent, special GR=false
+		"2002::1",     // 6to4 — ALLOCATED, special N/A → deny
+		"3fff::1",     // documentation /20 (RFC 9637)
+	}
+	allowed := []string{
+		"2001:1::1",     // PCP anycast /128 — GR=TRUE
+		"2001:1::2",     // TURN anycast /128 — GR=TRUE
+		"2001:1::3",     // All-DS anycast /128 — GR=TRUE
+		"2001:3::1",     // AMPRGATE /32 — GR=TRUE
+		"2001:4:112::1", // RIPE NCC RIS /48 — GR=TRUE
+		"2001:20::1",    // ORCHIDv2 /28 — GR=TRUE
+		"2001:30::1",    // ORCHID ext /28 — GR=TRUE
+	}
+	for _, ip := range denied {
+		a, _ := netip.ParseAddr(ip)
+		if policyAllowsAddr(a) {
+			t.Errorf("%s must be denied: special-purpose precedence over allocation registry", ip)
+		}
+	}
+	for _, ip := range allowed {
+		a, _ := netip.ParseAddr(ip)
+		if !policyAllowsAddr(a) {
+			t.Errorf("%s GR=TRUE exception must be allowed", ip)
+		}
+	}
+}
+
 // TestSSRFIPv4RegistryAdditions covers the 2025-10-09 IPv4 snapshot
 // entries previously missing (authoritative semantics, not just
 // default-allow coincidence).
