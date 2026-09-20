@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"time"
 )
@@ -47,25 +46,10 @@ const (
 	postAPIConnectTimeout = 5 * time.Second
 )
 
-// HTTPClient is a shared client with proper timeouts and no redirect following.
+// sharedClient is built by ssrf.go's init() on the hardened dial
+// authority (validate-then-dial, single DNS resolution). Redirects
+// forbidden; 10s total / 5s connect timeouts unchanged.
 var sharedClient *http.Client
-
-func init() {
-	sharedClient = &http.Client{
-		Timeout: postAPIRequestTimeout,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout: postAPIConnectTimeout,
-			}).DialContext,
-			MaxIdleConns:    100,
-			IdleConnTimeout: 90 * time.Second,
-		},
-		// Do NOT follow redirects — return the raw 3xx response to the caller.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
 
 // maxExistingResponseBytes is the largest byte budget any existing
 // consumer stores or displays (the 65535-byte TestTask DB log column).
