@@ -181,10 +181,9 @@ func TestSSRFIPv6PolicyMatrix(t *testing.T) {
 		{"64:ff9b:1::1", false},     // local-use NAT64 /48
 		{"100::1", false},           // discard-only /64
 		{"100:0:0:1::1", false},     // discard allocation /64
+		{"2001::1", false},          // Teredo /32 (N/A fail closed)
 		{"2001:2::1", false},        // benchmarking /48
-		{"2001:10::1", false},       // ORCHID /28
-		{"2001:20::1", false},       // ORCHIDv2 /28
-		{"2001:30::1", false},       // ORCHID ext /28
+		{"2001:10::1", false},       // ORCHID /28 (deprecated)
 		{"2001:db8::1", false},      // documentation /32
 		{"2002:c000:204::1", false}, // 6to4 /16 (embedded 192.0.2.4)
 		{"3fff::1", false},          // documentation /20
@@ -193,14 +192,94 @@ func TestSSRFIPv6PolicyMatrix(t *testing.T) {
 		{"fd12:3456::1", false},     // ULA /7
 		{"fe80::1", false},          // link-local /10
 		{"ff02::1", false},          // multicast /8
-		// globally-reachable exceptions
-		{"2001:1::1", true}, // PCP anycast /128
-		{"2001:1::2", true}, // TURN anycast /128
+		// reserved IPv6 space OUTSIDE the special table — no-match
+		// must NOT default to public (2000::/3 is the only base)
+		{"4000::1", false}, // outside 2000::/3 — reserved, denied
+		{"6000::1", false}, // outside 2000::/3 — reserved, denied
+		{"8000::1", false}, // outside 2000::/3 — reserved, denied
+		{"c000::1", false}, // outside 2000::/3 — reserved, denied
+		{"fec0::1", false}, // deprecated site-local — denied
+		// globally-reachable exceptions (snapshot 2025-10-09: TRUE)
+		{"2001:1::1", true},  // PCP anycast /128
+		{"2001:1::2", true},  // TURN anycast /128
+		{"2001:1::3", true},  // All-DS anycast /128
+		{"2001:20::1", true}, // ORCHIDv2 /28 — IANA GR=TRUE
+		{"2001:30::1", true}, // ORCHID ext /28 — IANA GR=TRUE
 		// public IPv6 allow
 		{"2001:4860:4860::8888", true}, // public DNS
-		{"2606:4700::1111", true},      // public
+		{"2606:4700:4700::1111", true}, // normal global unicast inside 2000::/3
 		{"2620:fe::fe", true},          // public
-		{"2001:3::1", true},            // just outside ORCHID ext — public
+	}
+	for _, tc := range cases {
+		a, err := netip.ParseAddr(tc.ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", tc.ip)
+		}
+		if got := policyAllowsAddr(a); got != tc.want {
+			t.Errorf("policyAllowsAddr(%s) = %v, want %v", tc.ip, got, tc.want)
+		}
+	}
+}
+
+// TestSSRF2001Slash23ParentNotShadowingExceptions proves the
+// 2001::/23 GR=false parent (IETF protocol assignments) denies its
+// non-exception space while every more-specific GR=TRUE exception of
+// the 2025-10-09 snapshot stays allowed (most-specific semantics).
+func TestSSRF2001Slash23ParentNotShadowingExceptions(t *testing.T) {
+	denied := []string{
+		"2001:5::1",   // inside 2001::/23, no exception — parent denies
+		"2001::1",     // Teredo /32 (N/A fail closed)
+		"2001:2::1",   // benchmarking /48
+		"2001:10::1",  // ORCHID /28 (deprecated)
+		"2001:db8::1", // documentation /32
+		"2002::1",     // 6to4 /16 (N/A fail closed)
+	}
+	allowed := []string{
+		"2001:1::1",     // PCP anycast /128
+		"2001:1::2",     // TURN anycast /128
+		"2001:1::3",     // All-DS anycast /128
+		"2001:3::1",     // AMPRGATE /32 — GR=TRUE
+		"2001:4:112::1", // RIPE NCC RIS /48 — GR=TRUE
+		"2001:20::1",    // ORCHIDv2 /28 — GR=TRUE
+		"2001:30::1",    // ORCHID ext /28 — GR=TRUE
+	}
+	for _, ip := range denied {
+		a, err := netip.ParseAddr(ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", ip)
+		}
+		if policyAllowsAddr(a) {
+			t.Errorf("%s inside 2001::/23 non-exception space must be denied", ip)
+		}
+	}
+	for _, ip := range allowed {
+		a, err := netip.ParseAddr(ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", ip)
+		}
+		if !policyAllowsAddr(a) {
+			t.Errorf("%s is a more-specific GR=TRUE exception — must be allowed despite 2001::/23 parent", ip)
+		}
+	}
+}
+
+// TestSSRFIPv4RegistryAdditions covers the 2025-10-09 IPv4 snapshot
+// entries previously missing (authoritative semantics, not just
+// default-allow coincidence).
+func TestSSRFIPv4RegistryAdditions(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		{"192.0.0.2", false},   // 192.0.0.0/29 DS field assignments
+		{"192.0.0.8", false},   // IPv4 dummy address /32
+		{"192.0.0.170", false}, // NAT64/DNS64 discovery
+		{"192.0.0.171", false}, // NAT64/DNS64 discovery
+		{"192.88.99.2", false}, // deprecated 6to4 relay /32
+		{"192.175.48.1", true}, // AMPRGATE /24 — GR=TRUE
+		{"192.0.0.9", true},    // PCP anycast /32 — GR=TRUE (kept)
+		{"192.0.0.10", true},   // TURN anycast /32 — GR=TRUE (kept)
+		{"192.0.0.11", false},  // inside 192.0.0.0/24 parent, no exception
 	}
 	for _, tc := range cases {
 		a, err := netip.ParseAddr(tc.ip)

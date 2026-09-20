@@ -64,9 +64,13 @@ import (
 // the registry "Globally-Reachable" flag. Registry states FALSE, N/A,
 // empty and deprecated are ALL stored false — fail closed.
 //
-// Table data synchronized against the IANA special-purpose registries
-// as of 2025-09, plus work-order-mandated additions (noted inline).
-// The table is the ONLY CIDR policy in this package.
+// Table data synchronized against:
+//
+//	IANA IPv4 Special-Purpose Address Registry — Last Updated 2025-10-09
+//	IANA IPv6 Special-Purpose Address Registry — Last Updated 2025-10-09
+//
+// (PM-verified authoritative snapshot at audit time; no runtime IANA
+// access.) The table is the ONLY CIDR policy in this package.
 type specialPrefix struct {
 	prefix            netip.Prefix
 	globallyReachable bool
@@ -74,7 +78,7 @@ type specialPrefix struct {
 }
 
 var specialPurpose = []specialPrefix{
-	// ---- IPv4 special-purpose registry ----
+	// ---- IPv4 special-purpose registry (snapshot 2025-10-09) ----
 	{netip.MustParsePrefix("0.0.0.0/8"), false, `"this network`},
 	{netip.MustParsePrefix("10.0.0.0/8"), false, "private-use"},
 	{netip.MustParsePrefix("100.64.0.0/10"), false, "shared address space (CGNAT)"},
@@ -82,44 +86,62 @@ var specialPurpose = []specialPrefix{
 	{netip.MustParsePrefix("169.254.0.0/16"), false, "link-local (incl. 169.254.169.254 metadata class)"},
 	{netip.MustParsePrefix("172.16.0.0/12"), false, "private-use"},
 	{netip.MustParsePrefix("192.0.0.0/24"), false, "IETF protocol assignments"},
-	{netip.MustParsePrefix("192.0.0.9/32"), true, "PCP anycast — GR=TRUE exception inside 192.0.0.0/24"},
-	{netip.MustParsePrefix("192.0.0.10/32"), true, "TURN anycast — GR=TRUE exception inside 192.0.0.0/24"},
+	{netip.MustParsePrefix("192.0.0.0/29"), false, "DS field assignments"},
+	{netip.MustParsePrefix("192.0.0.8/32"), false, "IPv4 dummy address"},
+	{netip.MustParsePrefix("192.0.0.9/32"), true, "Port Control Protocol Anycast — GR=TRUE"},
+	{netip.MustParsePrefix("192.0.0.10/32"), true, "Traversal Using Relays around NAT Anycast — GR=TRUE"},
+	{netip.MustParsePrefix("192.0.0.170/32"), false, "NAT64/DNS64 Discovery"},
+	{netip.MustParsePrefix("192.0.0.171/32"), false, "NAT64/DNS64 Discovery"},
 	{netip.MustParsePrefix("192.0.2.0/24"), false, "TEST-NET-1 documentation"},
-	{netip.MustParsePrefix("192.31.196.0/24"), true, "AS112 anycast"},
-	{netip.MustParsePrefix("192.52.193.0/24"), true, "AS112 anycast"},
-	{netip.MustParsePrefix("192.88.99.0/24"), false, "6to4 relay anycast (deprecated; e.g. 192.88.99.2)"},
+	{netip.MustParsePrefix("192.31.196.0/24"), true, "AS112 anycast — GR=TRUE"},
+	{netip.MustParsePrefix("192.52.193.0/24"), true, "AS112 anycast — GR=TRUE"},
+	{netip.MustParsePrefix("192.88.99.0/24"), false, "6to4 Relay Anycast (deprecated)"},
+	{netip.MustParsePrefix("192.88.99.2/32"), false, "6to4 Relay Anycast (deprecated)"},
 	{netip.MustParsePrefix("192.168.0.0/16"), false, "private-use"},
+	{netip.MustParsePrefix("192.175.48.0/24"), true, "AMPRGATE — GR=TRUE"},
 	{netip.MustParsePrefix("198.18.0.0/15"), false, "benchmarking"},
 	{netip.MustParsePrefix("198.51.100.0/24"), false, "TEST-NET-2 documentation"},
 	{netip.MustParsePrefix("203.0.113.0/24"), false, "TEST-NET-3 documentation"},
 	{netip.MustParsePrefix("224.0.0.0/4"), false, "multicast"},
-	{netip.MustParsePrefix("240.0.0.0/4"), false, "reserved / non-routable special-use"},
+	{netip.MustParsePrefix("240.0.0.0/4"), false, "reserved for future use"},
 	{netip.MustParsePrefix("255.255.255.255/32"), false, "limited broadcast"},
-	// ---- IPv6 special-purpose registry ----
+	// ---- IPv6 special-purpose registry (snapshot 2025-10-09) ----
 	{netip.MustParsePrefix("::/128"), false, "unspecified"},
 	{netip.MustParsePrefix("::1/128"), false, "loopback"},
 	// ::ffff:0:0/96 (IPv4-mapped) is UNMAPPED before lookup; the v4
 	// table applies. 64:ff9b::/96 (NAT64 well-known) is resolved to
 	// its embedded v4 address before lookup. Neither is a second
 	// policy table — both are address normalization steps.
-	{netip.MustParsePrefix("64:ff9b:1::/48"), false, "local-use NAT64 translation (RFC 8215)"},
+	{netip.MustParsePrefix("64:ff9b:1::/48"), false, "Local-Use NAT64 Translation"},
 	{netip.MustParsePrefix("100::/64"), false, "discard-only"},
-	{netip.MustParsePrefix("100:0:0:1::/64"), false, "discard-prefix allocation (work-order mandated)"},
-	{netip.MustParsePrefix("2001::/32"), false, "Teredo"},
-	{netip.MustParsePrefix("2001:1::1/128"), true, "PCP anycast — GR=TRUE"},
-	{netip.MustParsePrefix("2001:1::2/128"), true, "TURN anycast — GR=TRUE"},
+	{netip.MustParsePrefix("100:0:0:1::/64"), false, "discard-prefix allocation"},
+	{netip.MustParsePrefix("2001::/23"), false, "IETF Protocol Assignments — GR=false parent"},
+	{netip.MustParsePrefix("2001::/32"), false, "Teredo — N/A fail closed"},
+	{netip.MustParsePrefix("2001:1::1/128"), true, "Port Control Protocol Anycast — GR=TRUE"},
+	{netip.MustParsePrefix("2001:1::2/128"), true, "Traversal Using Relays around NAT Anycast — GR=TRUE"},
+	{netip.MustParsePrefix("2001:1::3/128"), true, "All-DS Anycast — GR=TRUE"},
 	{netip.MustParsePrefix("2001:2::/48"), false, "benchmarking"},
+	{netip.MustParsePrefix("2001:3::/32"), true, "AMPRGATE — GR=TRUE"},
+	{netip.MustParsePrefix("2001:4:112::/48"), true, "RIPE NCC RIS Project — GR=TRUE"},
 	{netip.MustParsePrefix("2001:10::/28"), false, "ORCHID (deprecated)"},
-	{netip.MustParsePrefix("2001:20::/28"), false, "ORCHIDv2"},
-	{netip.MustParsePrefix("2001:30::/28"), false, "ORCHID extension range (work-order mandated)"},
+	{netip.MustParsePrefix("2001:20::/28"), true, "ORCHIDv2 — GR=TRUE"},
+	{netip.MustParsePrefix("2001:30::/28"), true, "New ORCHID Format (extension) — GR=TRUE"},
 	{netip.MustParsePrefix("2001:db8::/32"), false, "documentation"},
-	{netip.MustParsePrefix("2002::/16"), false, "6to4"},
+	{netip.MustParsePrefix("2002::/16"), false, "6to4 — N/A fail closed"},
+	{netip.MustParsePrefix("2620:4f:8000::/48"), true, "Direct Delegation AS112 Service — GR=TRUE"},
 	{netip.MustParsePrefix("3fff::/20"), false, "documentation (RFC 9637)"},
-	{netip.MustParsePrefix("5f00::/16"), false, "SRv6 service (work-order mandated)"},
+	{netip.MustParsePrefix("5f00::/16"), false, "SRv6 services"},
 	{netip.MustParsePrefix("fc00::/7"), false, "unique-local (ULA)"},
 	{netip.MustParsePrefix("fe80::/10"), false, "link-local"},
 	{netip.MustParsePrefix("ff00::/8"), false, "multicast"},
 }
+
+// globalUnicastV6Base is the ONLY IPv6 range allowed when NO
+// special-purpose entry matches: the current IANA global unicast
+// allocation base 2000::/3. Every other reserved IPv6 space (e.g.
+// 4000::/4-and-beyond outside 2000::/3, deprecated site-local
+// fec0::/10) is denied — "not in the special table" is NOT public.
+var globalUnicastV6Base = netip.MustParsePrefix("2000::/3")
 
 // nat64WellKnown is the RFC 6052 well-known prefix; addresses inside
 // it are normalized to the embedded IPv4 address before the policy
@@ -165,7 +187,18 @@ func policyAllowsAddr(addr netip.Addr) bool {
 		}
 	}
 	if best == nil {
-		return true // normal global unicast
+		// No special-purpose match. "Not in the table" is NOT public:
+		//   IPv4 — only normal global unicast is allowed ( multicast
+		//          and reserved are already table-denied; unicast
+		//          outside those blocks is normal global unicast );
+		//   IPv6 — ONLY the IANA global unicast base 2000::/3 is
+		//          allowed; every other reserved address space
+		//          (4000::/4+, deprecated site-local fec0::/10, ...)
+		//          is denied.
+		if addr.Is4() {
+			return true
+		}
+		return globalUnicastV6Base.Contains(addr)
 	}
 	return best.globallyReachable
 }
