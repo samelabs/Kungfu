@@ -476,9 +476,13 @@ func (s *Server) handleOwnerTaskGet(w http.ResponseWriter, r *http.Request) {
 
 // parseCredits extracts a whole-integer Credits value from a decoded
 // JSON body field. JSON numbers decode as float64: an integral value
-// converts; a fractional value (1000.1, 1.5, 0.0001) is REJECTED —
-// never rounded. Numeric strings are accepted when exactly integral.
-// Returns (value, present, ok).
+// parseCredits extracts a whole-integer Credit value from a decoded
+// JSON field. EXACT integer parsing only — no Credit value ever passes
+// through float64 (which silently corrupts integers above 2^53).
+// json.Number (UseNumber bodies) and canonical integer strings parse
+// via strconv-grade exact integer semantics; fractional presentations
+// ("1000.5", "0.0001", "9007199254740993.0") are REJECTED — never
+// rounded, never float-converted. Returns (value, present, ok).
 func parseCredits(v interface{}) (int64, bool, bool) {
 	switch t := v.(type) {
 	case nil:
@@ -490,24 +494,16 @@ func parseCredits(v interface{}) (int64, bool, bool) {
 			return n, true, true
 		}
 		return 0, true, false
-	case float64:
-		if t != float64(int64(t)) {
-			return 0, true, false
-		}
-		return int64(t), true, true
 	case string:
 		if t == "" {
 			return 0, true, false
 		}
+		// Canonical integer strings only — strconv.ParseInt, never
+		// ParseFloat. "1000.0"-style integral decimal presentations
+		// are rejected as non-canonical rather than float-converted.
 		n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
 		if err != nil {
-			// "1000.0"-style strings are fractional presentations:
-			// parse as float once and reject anything non-integral.
-			f, ferr := strconv.ParseFloat(strings.TrimSpace(t), 64)
-			if ferr != nil || f != float64(int64(f)) {
-				return 0, true, false
-			}
-			return int64(f), true, true
+			return 0, true, false
 		}
 		return n, true, true
 	default:

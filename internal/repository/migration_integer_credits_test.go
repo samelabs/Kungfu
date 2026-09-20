@@ -262,14 +262,17 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 }
 
 // TestMigration009ExplicitRollbackOnLaterFailure proves the shipped 009
-// SQL owns its transaction: a deterministic failure injected AFTER an
-// earlier affected column would otherwise have converted rolls back the
-// ENTIRE migration — every column stays NUMERIC(20,4), data unchanged.
-// This exercises explicit transaction rollback, NOT the fractional
-// preflight (which fails before any ALTER). The injected failure is a
-// deferred unique-constraint violation triggered by the LAST ALTER
-// statement in 009 (tb_redemptions.credits_cost): an earlier ALTER
-// (tb_bots.balance) has already succeeded inside the same transaction.
+// SQL owns its transaction: a deterministic failure injected at the
+// FINAL ALTER statement (tb_redemptions.credits_cost) — after earlier
+// 009 ALTERs (tb_bots.balance, tb_tasks, tb_transactions, tb_payments,
+// tb_store_products) have already executed successfully inside the same
+// transaction — rolls back the ENTIRE migration: all 8 Credits columns
+// stay NUMERIC(20,4), seeded data unchanged. This exercises explicit
+// transaction rollback, NOT the fractional preflight (which fails
+// before any ALTER). The event trigger inspects
+// pg_event_trigger_ddl_commands() and raises ONLY when the altered
+// object is tb_redemptions; earlier ALTER TABLE commands in the same
+// 009 run complete normally.
 func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 	migTestPool(t)
 	ctx := context.Background()
@@ -332,19 +335,27 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Deterministic failure AFTER earlier ALTERs succeed within 009's
-	// own transaction: a deferred constraint that fires on COMMIT-phase
-	// validation of the LAST ALTER (tb_redemptions rebuild).
+	// Deterministic failure at the FINAL ALTER in shipped 009: the
+	// event-trigger function raises ONLY when the DDL command's target
+	// object is tb_redemptions (the last affected table in 009). The
+	// earlier ALTER TABLE commands in 009 (tb_bots, tb_tasks,
+	// tb_transactions, tb_payments, tb_store_products) run to completion
+	// inside the open transaction BEFORE the failure fires.
 	if _, err := db.Exec(ctx, `
 		CREATE OR REPLACE FUNCTION kf_rb_boom() RETURNS event_trigger AS $fn$
+		DECLARE cmd record;
 		BEGIN
-			RAISE EXCEPTION '009-rollback-proof: injected post-alter failure';
+			FOR cmd IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
+				IF cmd.command_tag = 'ALTER TABLE'
+				   AND cmd.object_type = 'table'
+				   AND cmd.object_identity = 'public.tb_redemptions' THEN
+					RAISE EXCEPTION '009-rollback-proof: injected failure at final ALTER (tb_redemptions), after earlier 009 ALTERs already executed';
+				END IF;
+			END LOOP;
 		END
 		$fn$ LANGUAGE plpgsql`); err != nil {
 		t.Fatalf("boom fn: %v", err)
 	}
-	// tb_redemptions is the final ALTER TABLE in the shipped 009 — fire
-	// the event trigger only for that table's rewrite.
 	if _, err := db.Exec(ctx, `
 		CREATE EVENT TRIGGER kf_rb_009_guard ON ddl_command_end
 		WHEN tag IN ('ALTER TABLE')

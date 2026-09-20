@@ -389,22 +389,16 @@ func pageParams(pageStr, sizeStr string) (int, int) {
 	return page, pageSize
 }
 
-// jsonCredits extracts a whole-integer Credits value from a decoded
-// JSON field. Fractional numbers fail closed (never rounded).
+// jsonCredits extracts a whole-integer Credit value. EXACT integer
+// parsing only (json.Number from UseNumber bodies) — no float64
+// compatibility path: every Credit-bearing admin endpoint parses its
+// body with UseNumber, so float64 never reaches here, and a hidden
+// alternate float mechanism is not kept.
 func jsonCredits(v interface{}) (int64, bool) {
-	switch t := v.(type) {
-	case json.Number:
-		// Lossless path (body parsed with UseNumber): exact source text.
-		if n, err := t.Int64(); err == nil {
-			return n, true
+	if n, ok := v.(json.Number); ok {
+		if v, err := n.Int64(); err == nil {
+			return v, true
 		}
-		return 0, false
-	case float64:
-		if t != float64(int64(t)) {
-			return 0, false
-		}
-		return int64(t), true
-	default:
-		return 0, false
 	}
+	return 0, false
 }

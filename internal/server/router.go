@@ -377,6 +377,14 @@ func parseJSONBodyRequiredNumbers(r *http.Request, requireObject bool, emptyMess
 		return nil, &parseError{msg: emptyMessage}
 	}
 
+	// Strict single-document semantics: after the object, only trailing
+	// whitespace may remain. A second JSON value or any trailing
+	// non-whitespace content is rejected (Decode skips whitespace and
+	// returns io.EOF exactly when nothing but whitespace remains).
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, &parseError{msg: emptyMessage}
+	}
+
 	if requireObject && data == nil {
 		return nil, &parseError{msg: emptyMessage}
 	}
