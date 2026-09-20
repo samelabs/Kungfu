@@ -1,16 +1,24 @@
 package delivery
 
-// SSRF boundary tests — no real internet access. The DNS resolver is
-// injected (fakeResolver) and the dial is observed through a fake
-// dialer seam... hardenedDialContext dials via net.Dialer, so the
-// tests exercise it at the resolver + policy level and through a
-// local loopback HTTP server address (which MUST be denied).
+// SSRF boundary tests — NO real public internet access.
+//
+// Every external edge is faked:
+//   - DNS:     fakeResolver / countingResolver (canned answers, call count)
+//   - connect: recordingDialer (records the exact literal ip:port targets)
+//
+// The only real sockets are loopback httptest servers, used strictly to
+// prove the policy REFUSES loopback (denying the local machine, not
+// reaching the public internet).
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +26,12 @@ import (
 	"time"
 )
 
-// fakeResolver returns canned addresses per host.
+// ---------------------------------------------------------------------------
+// fakes
+// ---------------------------------------------------------------------------
+
+// fakeResolver returns canned addresses per host (or a resolver error
+// for hosts mapped to nil).
 type fakeResolver map[string][]net.IPAddr
 
 func (f fakeResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
@@ -28,114 +41,16 @@ func (f fakeResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 	return nil, &net.DNSError{Err: "no such host", Name: host}
 }
 
-func ipa(ip string) net.IPAddr { return net.IPAddr{IP: net.ParseIP(ip)} }
+// errResolver always fails (resolver error path).
+type errResolver struct{ calls int }
 
-func withResolver(r netResolver, fn func()) {
-	old := resolver
-	resolver = r
-	defer func() { resolver = old }()
-	fn()
+func (e *errResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	e.calls++
+	return nil, &net.DNSError{Err: "server misbehaving", Name: host}
 }
 
-// TestSSRFLiteralIPPolicy covers the IP-literal path of the outbound
-// policy table.
-func TestSSRFLiteralIPPolicy(t *testing.T) {
-	cases := []struct {
-		ip   string
-		want bool
-	}{
-		{"8.8.8.8", true},              // public IPv4
-		{"203.0.113.7", false},         // TEST-NET-3 documentation range: denied
-		{"2001:4860:4860::8888", true}, // public IPv6
-		{"127.0.0.1", false},
-		{"::1", false},
-		{"10.1.2.3", false},
-		{"172.16.5.4", false},
-		{"192.168.1.1", false},
-		{"fc00::1", false},
-		{"fd12:3456::1", false},
-		{"169.254.169.254", false}, // metadata class
-		{"fe80::1", false},
-		{"100.64.0.1", false}, // CGNAT
-		{"0.0.0.0", false},
-		{"::", false},
-		{"224.0.0.1", false},        // multicast v4
-		{"ff02::1", false},          // multicast v6
-		{"::ffff:127.0.0.1", false}, // v4-mapped loopback
-		{"::ffff:10.0.0.1", false},  // v4-mapped private
-		{"::ffff:8.8.8.8", true},    // v4-mapped public
-	}
-	for _, tc := range cases {
-		ip := net.ParseIP(tc.ip)
-		if ip == nil {
-			t.Fatalf("bad fixture %s", tc.ip)
-		}
-		if got := policyAllowsIP(ip); got != tc.want {
-			t.Errorf("policyAllowsIP(%s) = %v, want %v", tc.ip, got, tc.want)
-		}
-	}
-}
-
-// TestSSRFHostnamePrivateDenied: DNS name resolving to a private
-// address fails closed.
-func TestSSRFHostnamePrivateDenied(t *testing.T) {
-	withResolver(fakeResolver{"evil.internal": {ipa("192.168.0.10")}}, func() {
-		_, err := hardenedDialContext(context.Background(), "tcp", "evil.internal:80")
-		if err == nil || !isIPPolicyError(err) {
-			t.Fatalf("want policy refusal, got %v", err)
-		}
-	})
-}
-
-// TestSSRFHostnameMixedFailsClosed: mixed public+private resolution
-// must refuse the WHOLE dial, not pick the public one.
-func TestSSRFHostnameMixedFailsClosed(t *testing.T) {
-	withResolver(fakeResolver{"mixed.example": {ipa("93.184.216.34"), ipa("10.0.0.9")}}, func() {
-		_, err := hardenedDialContext(context.Background(), "tcp", "mixed.example:443")
-		if err == nil || !isIPPolicyError(err) {
-			t.Fatalf("mixed resolution must fail closed, got %v", err)
-		}
-	})
-}
-
-// TestSSRFValidatedDialUsesLiteralIP: a public DNS name dials the
-// validated literal IP — the net.Dialer connect target must be the
-// IP, not the hostname (rebinding defense). Observed by intercepting
-// at the resolver and asserting the dial reaches the expected local
-// listener IP.
-func TestSSRFValidatedDialUsesLiteralIP(t *testing.T) {
-	// A real loopback listener proves the dial path executes a literal
-	// connect (and that loopback as the RESOLVED address is denied —
-	// so instead use the policy-bypassing direct-literal check below).
-	withResolver(fakeResolver{"rebind.example": {ipa("93.184.216.34")}}, func() {
-		called := false
-		old := resolver
-		resolver = old
-		// hardenedDialContext with an all-public resolution attempts a
-		// real connect to 93.184.216.34 — expect a network error (not a
-		// policy error, not a second resolution) within the connect
-		// timeout. We assert ONLY the error classification; no real
-		// traffic completes because the address is TEST-NET reserved
-		// for documentation, typically blackholed.
-		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-		defer cancel()
-		_ = called
-		conn, err := hardenedDialContext(ctx, "tcp", "rebind.example:81")
-		if conn != nil {
-			conn.Close()
-		}
-		if err != nil && isIPPolicyError(err) {
-			t.Fatalf("public validated IP must not be policy-refused: %v", err)
-		}
-		// A connect error/timeout is acceptable (no real internet in
-		// CI); the invariant is that the dial STARTED from the
-		// validated literal — proven by the resolver seam recording
-		// exactly one resolution and the dial address carrying the IP.
-	})
-}
-
-// countingResolver proves single-resolution (no re-resolution by a
-// default dialer afterwards).
+// countingResolver returns one canned answer set and counts calls
+// (single-resolution proof).
 type countingResolver struct {
 	addrs []net.IPAddr
 	calls int
@@ -146,6 +61,388 @@ func (c *countingResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 	return c.addrs, nil
 }
 
+func ipa(ip string) net.IPAddr { return net.IPAddr{IP: net.ParseIP(ip)} }
+
+// recordingDialer is the fake connect seam: it records every literal
+// target it receives (as ip:port strings) and answers per scripted
+// failures. It structurally CANNOT receive a hostname — the interface
+// takes netip.AddrPort only.
+type recordingDialer struct {
+	targets []string
+	// failTargets: literal targets ("ip:port") whose dial must fail.
+	failTargets map[string]bool
+	conn        net.Conn // returned conn (nil-safe: a stub conn)
+}
+
+func (r *recordingDialer) DialContext(ctx context.Context, network string, target netip.AddrPort) (net.Conn, error) {
+	t := target.String()
+	r.targets = append(r.targets, t)
+	if r.failTargets[t] {
+		return nil, &net.OpError{Op: "dial", Net: network, Err: fmt.Errorf("connection refused (scripted)")}
+	}
+	return r.conn, nil
+}
+
+// stubConn satisfies net.Conn minimally.
+type stubConn struct{}
+
+func (stubConn) Read(b []byte) (int, error)         { return 0, nil }
+func (stubConn) Write(b []byte) (int, error)        { return 0, nil }
+func (stubConn) Close() error                       { return nil }
+func (stubConn) LocalAddr() net.Addr                { return nil }
+func (stubConn) RemoteAddr() net.Addr               { return nil }
+func (stubConn) SetDeadline(t time.Time) error      { return nil }
+func (stubConn) SetReadDeadline(t time.Time) error  { return nil }
+func (stubConn) SetWriteDeadline(t time.Time) error { return nil }
+
+func withResolver(r netResolver, fn func()) {
+	old := resolver
+	resolver = r
+	defer func() { resolver = old }()
+	fn()
+}
+
+func withDialer(d netDialer, fn func()) {
+	old := dialer
+	dialer = d
+	defer func() { dialer = old }()
+	fn()
+}
+
+// ---------------------------------------------------------------------------
+// 1. IPv4 policy matrix
+// ---------------------------------------------------------------------------
+
+func TestSSRFIPv4PolicyMatrix(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		// mandated non-global coverage
+		{"0.0.0.0", false},         // 0.0.0.0/8 unspecified block
+		{"0.1.2.3", false},         // 0.0.0.0/8
+		{"10.0.0.1", false},        // 10/8 private
+		{"100.64.0.1", false},      // 100.64/10 CGNAT
+		{"100.127.255.254", false}, // CGNAT upper edge
+		{"127.0.0.1", false},       // 127/8 loopback
+		{"127.255.255.254", false}, // loopback edge
+		{"169.254.0.1", false},     // link-local
+		{"169.254.169.254", false}, // metadata class
+		{"172.16.0.1", false},      // 172.16/12 private
+		{"172.31.255.254", false},  // private edge
+		{"192.0.0.1", false},       // 192.0.0.0/24 special-use
+		{"192.0.2.7", false},       // TEST-NET-1
+		{"192.88.99.2", false},     // deprecated 6to4 relay
+		{"192.168.1.1", false},     // 192.168/16 private
+		{"198.18.0.1", false},      // benchmarking 198.18/15
+		{"198.19.255.254", false},  // benchmarking edge
+		{"198.51.100.7", false},    // TEST-NET-2
+		{"203.0.113.7", false},     // TEST-NET-3
+		{"224.0.0.1", false},       // multicast 224/4
+		{"239.255.255.254", false}, // multicast edge
+		{"240.0.0.1", false},       // reserved 240/4
+		{"255.255.255.255", false}, // limited broadcast
+		// globally-reachable exceptions (most-specific semantics)
+		{"192.0.0.9", true},    // PCP anycast inside 192.0.0.0/24
+		{"192.0.0.10", true},   // TURN anycast inside 192.0.0.0/24
+		{"192.31.196.1", true}, // AS112
+		{"192.52.193.1", true}, // AS112
+		// public IPv4 allow
+		{"8.8.8.8", true},         // public
+		{"1.1.1.1", true},         // public
+		{"203.0.114.1", true},     // right after TEST-NET-3 — public
+		{"198.20.0.1", true},      // right after benchmarking — public
+		{"191.255.0.1", true},     // public
+		{"223.255.255.254", true}, // last unicast before multicast — public
+	}
+	for _, tc := range cases {
+		a, err := netip.ParseAddr(tc.ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", tc.ip)
+		}
+		if got := policyAllowsAddr(a); got != tc.want {
+			t.Errorf("policyAllowsAddr(%s) = %v, want %v", tc.ip, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 2. IPv6 policy matrix
+// ---------------------------------------------------------------------------
+
+func TestSSRFIPv6PolicyMatrix(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		// mandated non-global/special coverage
+		{"::", false},               // unspecified /128
+		{"::1", false},              // loopback /128
+		{"64:ff9b:1::1", false},     // local-use NAT64 /48
+		{"100::1", false},           // discard-only /64
+		{"100:0:0:1::1", false},     // discard allocation /64
+		{"2001:2::1", false},        // benchmarking /48
+		{"2001:10::1", false},       // ORCHID /28
+		{"2001:20::1", false},       // ORCHIDv2 /28
+		{"2001:30::1", false},       // ORCHID ext /28
+		{"2001:db8::1", false},      // documentation /32
+		{"2002:c000:204::1", false}, // 6to4 /16 (embedded 192.0.2.4)
+		{"3fff::1", false},          // documentation /20
+		{"5f00::1", false},          // SRv6 /16
+		{"fc00::1", false},          // ULA /7
+		{"fd12:3456::1", false},     // ULA /7
+		{"fe80::1", false},          // link-local /10
+		{"ff02::1", false},          // multicast /8
+		// globally-reachable exceptions
+		{"2001:1::1", true}, // PCP anycast /128
+		{"2001:1::2", true}, // TURN anycast /128
+		// public IPv6 allow
+		{"2001:4860:4860::8888", true}, // public DNS
+		{"2606:4700::1111", true},      // public
+		{"2620:fe::fe", true},          // public
+		{"2001:3::1", true},            // just outside ORCHID ext — public
+	}
+	for _, tc := range cases {
+		a, err := netip.ParseAddr(tc.ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", tc.ip)
+		}
+		if got := policyAllowsAddr(a); got != tc.want {
+			t.Errorf("policyAllowsAddr(%s) = %v, want %v", tc.ip, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3. IPv4-mapped normalization (+ NAT64 well-known)
+// ---------------------------------------------------------------------------
+
+func TestSSRFIPv4MappedNormalization(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		{"::ffff:127.0.0.1", false},       // mapped loopback denied
+		{"::ffff:10.0.0.1", false},        // mapped private denied
+		{"::ffff:169.254.169.254", false}, // mapped metadata denied
+		{"::ffff:192.0.2.1", false},       // mapped TEST-NET denied
+		{"::ffff:0.0.0.0", false},         // mapped unspecified denied
+		{"::ffff:8.8.8.8", true},          // mapped public allowed
+		{"64:ff9b::0808:0808", true},      // NAT64 of 8.8.8.8 allowed
+		{"64:ff9b::7f00:0001", false},     // NAT64 of 127.0.0.1 denied
+	}
+	for _, tc := range cases {
+		a, err := netip.ParseAddr(tc.ip)
+		if err != nil {
+			t.Fatalf("bad fixture %s", tc.ip)
+		}
+		if got := policyAllowsAddr(a); got != tc.want {
+			t.Errorf("policyAllowsAddr(%s) = %v, want %v", tc.ip, got, tc.want)
+		}
+	}
+	// Unmap equivalence: mapped form must classify identically to the
+	// plain v4 form.
+	for _, pair := range [][2]string{{"::ffff:8.8.8.8", "8.8.8.8"}, {"::ffff:10.1.2.3", "10.1.2.3"}} {
+		m, _ := netip.ParseAddr(pair[0])
+		p, _ := netip.ParseAddr(pair[1])
+		if policyAllowsAddr(m) != policyAllowsAddr(p) {
+			t.Errorf("%s and %s must classify identically", pair[0], pair[1])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4. most-specific special-range semantics
+// ---------------------------------------------------------------------------
+
+func TestSSRFMostSpecificSpecialRange(t *testing.T) {
+	// A globally-reachable exception MORE SPECIFIC than a special-use
+	// parent must be allowed, while its siblings stay denied.
+	allow, err := netip.ParseAddr("192.0.0.9") // PCP anycast /32
+	if err != nil {
+		t.Fatal(err)
+	}
+	deny, err := netip.ParseAddr("192.0.0.8") // sibling inside 192.0.0.0/24
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !policyAllowsAddr(allow) {
+		t.Fatal("192.0.0.9 (GR=TRUE /32 inside special-use /24) must be allowed — most-specific match")
+	}
+	if policyAllowsAddr(deny) {
+		t.Fatal("192.0.0.8 (GR=FALSE inside 192.0.0.0/24) must be denied")
+	}
+	// A non-globally-reachable prefix MORE SPECIFIC than the global
+	// unicast default must be denied (documentation inside 2000::/3).
+	doc, err := netip.ParseAddr("2001:db8::1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policyAllowsAddr(doc) {
+		t.Fatal("2001:db8::1 (GR=FALSE /32 more specific than global unicast default) must be denied")
+	}
+	// v6 boundary precision: 2001::1 sits inside Teredo 2001::/32
+	// (GR=FALSE) and must be denied; 2001:1::1 is the PCP anycast
+	// /128 exception (GR=TRUE) and must be allowed; 2001:1::3 is
+	// ordinary global unicast (no special entry) — default allow.
+	for ip, want := range map[string]bool{"2001:1::1": true, "2001::1": false, "2001:1::3": true} {
+		a, _ := netip.ParseAddr(ip)
+		if got := policyAllowsAddr(a); got != want {
+			t.Errorf("%s = %v, want %v", ip, got, want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 5. hostname paths: private / mixed / empty / resolver error
+// ---------------------------------------------------------------------------
+
+func TestSSRFHostnamePrivateDenied(t *testing.T) {
+	withResolver(fakeResolver{"evil.internal": {ipa("192.168.0.10")}}, func() {
+		_, err := hardenedDialContext(context.Background(), "tcp", "evil.internal:80")
+		if err == nil || !isIPPolicyError(err) {
+			t.Fatalf("want policy refusal, got %v", err)
+		}
+	})
+}
+
+func TestSSRFHostnameMixedFailsClosed(t *testing.T) {
+	withResolver(fakeResolver{"mixed.example": {ipa("93.184.216.34"), ipa("10.0.0.9")}}, func() {
+		_, err := hardenedDialContext(context.Background(), "tcp", "mixed.example:443")
+		if err == nil || !isIPPolicyError(err) {
+			t.Fatalf("mixed resolution must fail closed, got %v", err)
+		}
+	})
+}
+
+func TestSSRFHostnameZeroDNSResultFailsClosed(t *testing.T) {
+	withResolver(fakeResolver{"empty.example": {}}, func() {
+		_, err := hardenedDialContext(context.Background(), "tcp", "empty.example:80")
+		if err == nil || !isIPPolicyError(err) {
+			t.Fatalf("zero-address resolution must fail closed, got %v", err)
+		}
+	})
+}
+
+func TestSSRFResolverErrorFailsClosed(t *testing.T) {
+	er := &errResolver{}
+	withResolver(er, func() {
+		_, err := hardenedDialContext(context.Background(), "tcp", "broken.example:80")
+		if err == nil || isIPPolicyError(err) {
+			t.Fatalf("resolver error must surface as dial failure, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "postapi dns resolve") {
+			t.Fatalf("error must be classified as dns resolve failure: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 6. dial seam: literal-IP-only + single resolution + fallback
+// ---------------------------------------------------------------------------
+
+// TestSSRFValidatedDialUsesLiteralIP — rewritten proof:
+//
+//	hostname example.test:443, resolver returns two test IPs
+//	(203.0.114.10, 2001:4860:4860::10 — both allowed); the dialer must
+//	receive ONLY "203.0.114.10:443" style literals and NEVER
+//	"example.test:443"; resolver called exactly once.
+func TestSSRFValidatedDialUsesLiteralIP(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10"), ipa("2001:4860:4860::10")}}
+	rd := &recordingDialer{conn: stubConn{}}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			conn, err := hardenedDialContext(context.Background(), "tcp", "example.test:443")
+			if err != nil {
+				t.Fatalf("dial must succeed through fakes: %v", err)
+			}
+			if conn == nil {
+				t.Fatal("expected a conn from the fake dialer")
+			}
+		})
+	})
+	if len(rd.targets) == 0 {
+		t.Fatal("dialer was never called")
+	}
+	for _, target := range rd.targets {
+		host, _, err := net.SplitHostPort(target)
+		if err != nil {
+			t.Fatalf("dial target %q is not ip:port", target)
+		}
+		if _, perr := netip.ParseAddr(host); perr != nil {
+			t.Fatalf("dialer received NON-literal target %q (must be IP only)", target)
+		}
+		if strings.Contains(target, "example.test") {
+			t.Fatalf("dialer received the HOSTNAME %q — rebinding hole", target)
+		}
+	}
+	if rd.targets[0] != "203.0.114.10:443" {
+		t.Fatalf("first dial target = %q, want 203.0.114.10:443", rd.targets[0])
+	}
+	if cr.calls != 1 {
+		t.Fatalf("resolver called %d times, want exactly 1", cr.calls)
+	}
+}
+
+// TestSSRFMultiIPFallbackWithoutReResolution: first validated literal
+// dial fails (scripted), second succeeds; resolver still called once;
+// both dial targets are validated literals.
+func TestSSRFMultiIPFallbackWithoutReResolution(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10"), ipa("203.0.114.11")}}
+	rd := &recordingDialer{
+		conn:        stubConn{},
+		failTargets: map[string]bool{"203.0.114.10:443": true},
+	}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			conn, err := hardenedDialContext(context.Background(), "tcp", "fallback.test:443")
+			if err != nil {
+				t.Fatalf("fallback to second validated IP must succeed: %v", err)
+			}
+			if conn == nil {
+				t.Fatal("expected a conn from the fake dialer")
+			}
+		})
+	})
+	if len(rd.targets) != 2 {
+		t.Fatalf("dial attempts = %d (%v), want 2 (first fail then fallback)", len(rd.targets), rd.targets)
+	}
+	if rd.targets[0] != "203.0.114.10:443" || rd.targets[1] != "203.0.114.11:443" {
+		t.Fatalf("dial sequence = %v, want [203.0.114.10:443 203.0.114.11:443]", rd.targets)
+	}
+	if cr.calls != 1 {
+		t.Fatalf("resolver called %d times during fallback, want exactly 1 (no re-resolution)", cr.calls)
+	}
+}
+
+// TestSSRFMultiIPAllFailNoReResolution: all validated IPs failing
+// surfaces the LAST connect error; resolver still exactly once.
+func TestSSRFMultiIPAllFailNoReResolution(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10"), ipa("203.0.114.11")}}
+	rd := &recordingDialer{
+		failTargets: map[string]bool{"203.0.114.10:443": true, "203.0.114.11:443": true},
+	}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			conn, err := hardenedDialContext(context.Background(), "tcp", "allfail.test:443")
+			if err == nil || conn != nil {
+				t.Fatal("all-fail must yield an error, not a conn")
+			}
+			if isIPPolicyError(err) {
+				t.Fatalf("all-fail must be a connect error, not a policy error: %v", err)
+			}
+		})
+	})
+	if cr.calls != 1 {
+		t.Fatalf("resolver called %d times, want exactly 1", cr.calls)
+	}
+	if len(rd.targets) != 2 {
+		t.Fatalf("dial attempts = %d, want 2", len(rd.targets))
+	}
+}
+
+// TestSSRFSingleDNSResolution (loopback-resolution refusal still
+// resolves exactly once).
 func TestSSRFSingleDNSResolution(t *testing.T) {
 	cr := &countingResolver{addrs: []net.IPAddr{ipa("127.0.0.1")}}
 	withResolver(cr, func() {
@@ -159,9 +456,151 @@ func TestSSRFSingleDNSResolution(t *testing.T) {
 	}
 }
 
-// TestSSRFLoopbackServerDenied: a REAL local httptest server (running
-// on loopback) must be unreachable through PostJSON — the transport
-// authority refuses the loopback literal before any HTTP happens.
+// TestSSRFLiteralHostNeverResolves: an IP-literal target must not
+// touch the resolver at all.
+func TestSSRFLiteralHostNeverResolves(t *testing.T) {
+	cr := &countingResolver{}
+	rd := &recordingDialer{conn: stubConn{}}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			_, err := hardenedDialContext(context.Background(), "tcp", "203.0.114.10:443")
+			if err != nil {
+				t.Fatalf("public literal must dial: %v", err)
+			}
+		})
+	})
+	if cr.calls != 0 {
+		t.Fatalf("resolver called %d times for an IP literal, want 0", cr.calls)
+	}
+	if len(rd.targets) != 1 || rd.targets[0] != "203.0.114.10:443" {
+		t.Fatalf("dial targets = %v, want exactly [203.0.114.10:443]", rd.targets)
+	}
+}
+
+// TestSSRFDNSResultDedupe: duplicate resolver answers collapse.
+func TestSSRFDNSResultDedupe(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10"), ipa("203.0.114.10"), ipa("203.0.114.11")}}
+	rd := &recordingDialer{
+		conn:        stubConn{},
+		failTargets: map[string]bool{"203.0.114.10:443": true},
+	}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			_, err := hardenedDialContext(context.Background(), "tcp", "dupe.test:443")
+			if err != nil {
+				t.Fatalf("deduped fallback must succeed: %v", err)
+			}
+		})
+	})
+	if len(rd.targets) != 2 {
+		t.Fatalf("dial attempts = %d (%v), want 2 (duplicate removed)", len(rd.targets), rd.targets)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 7. Host header / TLS SNI authority stays the original hostname
+// ---------------------------------------------------------------------------
+
+// hostRecorderConn is a fake net.Conn that records every byte the
+// real http.Transport writes to the "connection" — proving ON THE WIRE
+// that the Host header authority is the original URL hostname, not an
+// IP rewrite.
+type hostRecorderConn struct {
+	written bytes.Buffer
+}
+
+func (c *hostRecorderConn) Read(b []byte) (int, error)  { return 0, io.EOF }
+func (c *hostRecorderConn) Write(b []byte) (int, error) { return c.written.Write(b) }
+func (c *hostRecorderConn) Close() error                { return nil }
+func (c *hostRecorderConn) LocalAddr() net.Addr         { return nil }
+func (c *hostRecorderConn) RemoteAddr() net.Addr        { return nil }
+func (c *hostRecorderConn) SetDeadline(t time.Time) error {
+	return nil
+}
+func (c *hostRecorderConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *hostRecorderConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// TestSSRFHostAuthorityUnchangedAtTransportLevel proves, at the wire
+// level of the REAL http.Transport, that the request carries Host
+// "example.test:8080" (original URL authority) while the TCP connect
+// target (observed at the dial seam) is the validated literal IP only.
+// The SSRF defense lives ONLY in the dial seam — never in a URL rewrite.
+func TestSSRFHostAuthorityUnchangedAtTransportLevel(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10")}}
+	rd := &recordingDialer{conn: &hostRecorderConn{}}
+
+	orig := sharedClient
+	sharedClient = newHardenedClient()
+	t.Cleanup(func() { sharedClient = orig })
+
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			res := PostJSON(context.Background(), "http://example.test:8080/hook", []byte(`{}`), AgentSubmitErrorConfig())
+			_ = res // transport errors against the fake conn are fine
+		})
+	})
+
+	wire := rd.conn.(*hostRecorderConn).written.String()
+	if !strings.Contains(wire, "Host: example.test:8080\r\n") {
+		t.Fatalf("wire Host header missing/rewritten — got wire: %q", wire)
+	}
+	if strings.Contains(wire, "Host: 203.0.114.10") {
+		t.Fatalf("Host header was rewritten to the dial IP — URL authority must stay the hostname. wire: %q", wire)
+	}
+	if strings.Contains(wire, "POST /hook HTTP/1.1") != true {
+		t.Fatalf("request line must address the original path. wire: %q", wire)
+	}
+	if len(rd.targets) != 1 || rd.targets[0] != "203.0.114.10:8080" {
+		t.Fatalf("dial targets = %v, want [203.0.114.10:8080] — literal connect only", rd.targets)
+	}
+	if cr.calls != 1 {
+		t.Fatalf("resolver called %d times, want exactly 1", cr.calls)
+	}
+}
+
+// TestSSRFTLSSNIFromOriginalHostname proves the https URL hostname
+// (hence TLS SNI) stays the original name while the connect target is
+// the validated literal.
+func TestSSRFTLSSNIFromOriginalHostname(t *testing.T) {
+	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10")}}
+	rd := &recordingDialer{conn: stubConn{}}
+	withResolver(cr, func() {
+		withDialer(rd, func() {
+			// TLS handshake would fail against a stubConn; assert at
+			// the dial/URL layer instead: URL hostname unchanged by
+			// policy (mechanism: http.Transport keeps req.URL.Hostname()
+			// as SNI; dial seam only replaces the connect target).
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://sni.test:443/x", strings.NewReader("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if req.URL.Hostname() != "sni.test" {
+				t.Fatalf("URL hostname = %q, want sni.test (SNI source)", req.URL.Hostname())
+			}
+			conn, derr := hardenedDialContext(context.Background(), "tcp", "sni.test:443")
+			if derr != nil {
+				t.Fatalf("dial must use the fake: %v", derr)
+			}
+			if conn == nil {
+				t.Fatal("expected fake conn")
+			}
+		})
+	})
+	if len(rd.targets) != 1 || rd.targets[0] != "203.0.114.10:443" {
+		t.Fatalf("dial targets = %v, want [203.0.114.10:443]", rd.targets)
+	}
+	// SNI authority still derives from URL hostname — the dial target
+	// carries the IP, the URL does not.
+	if cr.calls != 1 {
+		t.Fatalf("resolver called %d times, want 1", cr.calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. loopback PostJSON deny (local-only socket; proves refusal of the
+//    local machine, not public connectivity)
+// ---------------------------------------------------------------------------
+
 func TestSSRFLoopbackServerDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
@@ -176,15 +615,12 @@ func TestSSRFLoopbackServerDenied(t *testing.T) {
 	}
 }
 
-// TestSSRFRedirectStillForbidden + timeout contract: policy change
-// must not loosen redirect/timeout behavior. (Loopback denial makes a
-// real redirect test impossible without internet; assert the client
-// configuration instead.)
-func TestSSRFClientContractUnchanged(t *testing.T) {
+// ---------------------------------------------------------------------------
+// 9. transport contract: redirect / timeouts / bounded read
+// ---------------------------------------------------------------------------
+
+func TestSSRFRedirectStillForbidden(t *testing.T) {
 	c := newHardenedClient()
-	if c.Timeout != 10*time.Second {
-		t.Fatalf("total timeout = %v, want 10s", c.Timeout)
-	}
 	if c.CheckRedirect == nil {
 		t.Fatal("CheckRedirect must exist (redirects forbidden)")
 	}
@@ -192,9 +628,27 @@ func TestSSRFClientContractUnchanged(t *testing.T) {
 	if err := c.CheckRedirect(req, nil); err != http.ErrUseLastResponse {
 		t.Fatal("redirects must not be followed")
 	}
+}
+
+func TestSSRFTimeoutContractUnchanged(t *testing.T) {
+	c := newHardenedClient()
+	if c.Timeout != 10*time.Second {
+		t.Fatalf("total timeout = %v, want 10s", c.Timeout)
+	}
 	tr, ok := c.Transport.(*http.Transport)
 	if !ok || tr.DialContext == nil {
 		t.Fatal("transport must carry the hardened dial authority")
+	}
+	if postAPIRequestTimeout != 10*time.Second || postAPIConnectTimeout != 5*time.Second {
+		t.Fatalf("timeout constants drifted: total=%v connect=%v", postAPIRequestTimeout, postAPIConnectTimeout)
+	}
+	// The production dial seam carries the 5s connect timeout.
+	dd, ok := dialer.(defaultNetDialer)
+	if !ok {
+		t.Fatal("production dialer must be defaultNetDialer in non-test context")
+	}
+	if dd.d.Timeout != 5*time.Second {
+		t.Fatalf("connect timeout = %v, want 5s", dd.d.Timeout)
 	}
 }
 
@@ -210,9 +664,11 @@ func TestSSRFPolicyErrorMessage(t *testing.T) {
 	}
 }
 
-// TestSSRFLoopbackBypassNeverInProduction: AllowLoopbackForTest must
-// never be referenced from production code — the SSRF boundary stays
-// closed in the shipped binary.
+// ---------------------------------------------------------------------------
+// 10. test-only loopback bypass guards (bypass NOT used by any core
+//     SSRF proof above)
+// ---------------------------------------------------------------------------
+
 func TestSSRFLoopbackBypassNeverInProduction(t *testing.T) {
 	var prodFiles []string
 	err := filepath.Walk("../..", func(path string, info os.FileInfo, err error) error {
@@ -247,14 +703,36 @@ func TestSSRFLoopbackBypassNeverInProduction(t *testing.T) {
 	}
 }
 
-// TestSSRFLoopbackBypassRestoresPolicy proves the bypass closes.
 func TestSSRFLoopbackBypassRestoresPolicy(t *testing.T) {
 	restore := AllowLoopbackForTest()
-	if !policyAllowsIP(net.ParseIP("127.0.0.1")) {
+	a, _ := netip.ParseAddr("127.0.0.1")
+	if !policyAllowsAddr(a) {
 		t.Fatal("bypass must allow loopback")
 	}
 	restore()
-	if policyAllowsIP(net.ParseIP("127.0.0.1")) {
+	if policyAllowsAddr(a) {
 		t.Fatal("restore must re-deny loopback")
 	}
 }
+
+// TestSSRFCoreTestsNeverUsedBypass is a source-level guard: the core
+// SSRF proof file must not enable the loopback bypass (public policy
+// is proven without it). The pattern is assembled at runtime so this
+// count does not count its own literal.
+func TestSSRFCoreTestsNeverUsedBypass(t *testing.T) {
+	b, err := os.ReadFile("ssrf_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	pattern := "AllowLoopback" + "ForTest" + "()"
+	n := strings.Count(src, pattern)
+	if n != 1 {
+		t.Fatalf("ssrf_test.go calls %s %d times, want exactly 1 (the restore-policy guard only)", pattern, n)
+	}
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
