@@ -23,7 +23,7 @@ type PaymentSpec struct {
 	ProviderOrderID   *string
 	AmountMinor       int64
 	Currency          string
-	Credits           float64
+	Credits           int64
 }
 
 // CreatePendingPayment inserts a pending payment fact. Validation (positive

@@ -1,9 +1,9 @@
 package model
 
 // Task represents a row from tb_tasks.
-// All numeric and timestamp fields use Go-native types (float64, string)
-// for simpler business logic. The repository layer handles type conversion
-// from PostgreSQL's pgtype.Numeric and time.Time.
+// Credits fields (budget, price) are whole integer units (int64).
+// Timestamp fields use canonical strings; the repository layer handles
+// conversion from PostgreSQL time.Time.
 type Task struct {
 	ID           int64   `db:"id" json:"-"`
 	Code         string  `db:"code" json:"code"`
@@ -11,8 +11,8 @@ type Task struct {
 	Title        string  `db:"title" json:"title"`
 	Requirements string  `db:"requirements" json:"requirements"`
 	PostAPI      *string `db:"postapi" json:"-"`
-	Budget       float64 `db:"budget" json:"budget"`
-	Price        float64 `db:"price" json:"price"`
+	Budget       int64   `db:"budget" json:"budget"`
+	Price        int64   `db:"price" json:"price"`
 	Pinned       bool    `db:"pinned" json:"pinned"`
 	Status       string  `db:"status" json:"status"`
 	ReviewNote   *string `db:"review_note" json:"-"`

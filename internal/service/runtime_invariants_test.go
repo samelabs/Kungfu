@@ -1,12 +1,11 @@
 package service
 
-// Runtime invariant tests: non-finite economic inputs are rejected by the
-// application layer (never relying on a DB error happening to fire), and
-// PostAPI responses are read bounded. Real PostgreSQL.
+// Runtime invariant tests: invalid integer economic inputs are rejected
+// by the application layer (never relying on a DB error happening to
+// fire), and PostAPI responses are read bounded. Real PostgreSQL.
 
 import (
 	"context"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,20 +16,22 @@ import (
 	"kungfu.md/internal/store"
 )
 
-// -- Task inputs: NaN/Inf price/budget rejected, no task, no ledger --
+// -- Task inputs: invalid integer price/budget rejected, no task, no ledger --
+// (NaN/Inf are structurally impossible with int64 fields; the boundary
+// rejection now lives at the HTTP/MCP parse layer, tested there.)
 
-func TestCreateTaskNonFiniteRejected(t *testing.T) {
+func TestCreateTaskInvalidEconomicsRejected(t *testing.T) {
 	pool := a5TestPool(t)
 
 	cases := []struct {
 		name   string
-		price  float64
-		budget float64
+		price  int64
+		budget int64
 	}{
-		{"price NaN", math.NaN(), 1500},
-		{"budget NaN", 1, math.NaN()},
-		{"price +Inf", math.Inf(1), 1500},
-		{"budget -Inf", 1, math.Inf(-1)},
+		{"price zero", 0, 1500},
+		{"price negative", -1, 1500},
+		{"budget negative", 1, -1500},
+		{"budget below minimum", 1, 999},
 	}
 	for _, tc := range cases {
 		botID := a5TestBotWithBalance(t, pool, 5000)
@@ -56,8 +57,8 @@ func TestCreateTaskNonFiniteRejected(t *testing.T) {
 	}
 }
 
-// AddTaskBudget NaN → rejected, balance unchanged, budget unchanged.
-func TestAddTaskBudgetNonFiniteRejected(t *testing.T) {
+// AddTaskBudget non-positive → rejected, balance unchanged, budget unchanged.
+func TestAddTaskBudgetNonPositiveRejected(t *testing.T) {
 	pool := a5TestPool(t)
 	botID := a5TestBotWithBalance(t, pool, 5000)
 
@@ -76,47 +77,49 @@ func TestAddTaskBudgetNonFiniteRejected(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code=$1`, code)
 	})
 
-	var budgetBefore float64
+	var budgetBefore int64
 	_ = pool.QueryRow(context.Background(),
-		`SELECT budget::float8 FROM tb_tasks WHERE code=$1`, code).Scan(&budgetBefore)
+		`SELECT budget FROM tb_tasks WHERE code=$1`, code).Scan(&budgetBefore)
 
-	if _, err := AddTaskBudget(context.Background(), pool, botID, code, math.NaN()); err == nil {
-		t.Fatal("NaN budget amount accepted")
+	for _, amount := range []int64{0, -5} {
+		if _, err := AddTaskBudget(context.Background(), pool, botID, code, amount); err == nil {
+			t.Fatalf("budget amount %d accepted", amount)
+		}
 	}
 
-	var budgetAfter float64
+	var budgetAfter int64
 	_ = pool.QueryRow(context.Background(),
-		`SELECT budget::float8 FROM tb_tasks WHERE code=$1`, code).Scan(&budgetAfter)
+		`SELECT budget FROM tb_tasks WHERE code=$1`, code).Scan(&budgetAfter)
 	if budgetAfter != budgetBefore {
-		t.Fatalf("budget changed on NaN add: %v -> %v", budgetBefore, budgetAfter)
+		t.Fatalf("budget changed on invalid add: %v -> %v", budgetBefore, budgetAfter)
 	}
-	var bal float64
+	var bal int64
 	_ = pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
 	if bal != 3800 { // 5000 - 1200 locked at create
-		t.Fatalf("balance changed on NaN add: %v", bal)
+		t.Fatalf("balance changed on invalid add: %v", bal)
 	}
 }
 
-// fundable() gate: non-finite never fundable (unit-level proof).
-func TestFundableNonFiniteFalse(t *testing.T) {
-	for _, tc := range [][2]float64{
-		{math.NaN(), 1}, {1500, math.NaN()},
-		{math.Inf(1), 1}, {1500, math.Inf(1)},
-		{math.Inf(-1), 1}, {1500, math.Inf(-1)},
+// fundable() gate: invalid integers never fundable (unit-level proof).
+func TestFundableInvalidPairsFalse(t *testing.T) {
+	for _, tc := range [][2]int64{
+		{0, 1}, {1500, 0}, {-1, 1}, {1500, -1},
+		{1, 999},     // below MinOpenBudget
+		{1500, 2000}, // budget < price
 	} {
 		if fundable(tc[0], tc[1]) {
-			t.Fatalf("fundable(%v, %v) must be false", tc[0], tc[1])
+			t.Fatalf("fundable(%d, %d) must be false", tc[0], tc[1])
 		}
 	}
 	if !fundable(1500, 1) {
-		t.Fatal("finite fundable pair rejected")
+		t.Fatal("legal fundable pair rejected")
 	}
 }
 
-// ValidatePrice: non-finite → existing PRICE_INVALID rule.
-func TestValidatePriceNonFinite(t *testing.T) {
-	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+// ValidatePrice: non-positive → existing PRICE_INVALID rule.
+func TestValidatePriceNonPositive(t *testing.T) {
+	for _, v := range []int64{0, -1} {
 		rule := ValidatePrice(v)
 		want := RaiseRule("PRICE_INVALID")
 		// The same existing rule (HTTP code + external code) fires for
@@ -129,10 +132,10 @@ func TestValidatePriceNonFinite(t *testing.T) {
 
 // -- Payment / Store last-line input defense --
 
-func TestPaymentSpecNonFiniteCreditsRejected(t *testing.T) {
+func TestPaymentSpecNonPositiveCreditsRejected(t *testing.T) {
 	pool := a5TestPool(t)
 	botID := a5TestBotWithBalance(t, pool, 100)
-	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+	for _, v := range []int64{0, -5} {
 		_, err := payment.CreatePendingPayment(context.Background(), pool, botID, payment.PaymentSpec{
 			Provider: "manual", AmountMinor: 1000, Currency: "USD", Credits: v,
 		})
@@ -148,9 +151,9 @@ func TestPaymentSpecNonFiniteCreditsRejected(t *testing.T) {
 	}
 }
 
-func TestStoreProductNonFinitePriceRejected(t *testing.T) {
+func TestStoreProductNonPositivePriceRejected(t *testing.T) {
 	pool := a5TestPool(t)
-	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+	for _, v := range []int64{0, -3} {
 		_, err := store.CreateProduct(context.Background(), pool, store.ProductInput{
 			Title: "Finite Product", CreditsPrice: v,
 		})

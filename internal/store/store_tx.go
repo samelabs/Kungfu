@@ -20,7 +20,6 @@ package store
 import (
 	"context"
 	stderrors "errors"
-	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -54,7 +53,7 @@ type ProductOutcome struct {
 type ProductPatch struct {
 	Title        *string
 	Description  *string
-	CreditsPrice *float64
+	CreditsPrice *int64
 }
 
 // -- product Tx primitives --
@@ -71,11 +70,8 @@ func CreateProductTx(ctx context.Context, pool *pg.Pool, tx pgx.Tx, in ProductIn
 	if utf8.RuneCountInString(in.Description) > 500 {
 		return nil, errors.New(400, "INVALID_DESCRIPTION", "Description must be at most 500 chars")
 	}
-	if math.IsNaN(in.CreditsPrice) || math.IsInf(in.CreditsPrice, 0) {
-		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a finite number")
-	}
 	if in.CreditsPrice <= 0 {
-		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be greater than zero")
+		return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a positive whole integer")
 	}
 
 	var desc *string
@@ -121,11 +117,8 @@ func UpdateProductTx(ctx context.Context, tx pgx.Tx, code string, patch ProductP
 		return nil, errors.New(400, "INVALID_DESCRIPTION", "Description must be at most 500 chars")
 	}
 	if patch.CreditsPrice != nil {
-		if math.IsNaN(*patch.CreditsPrice) || math.IsInf(*patch.CreditsPrice, 0) {
-			return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a finite number")
-		}
 		if *patch.CreditsPrice <= 0 {
-			return nil, errors.New(400, "INVALID_PRICE", "Credits price must be greater than zero")
+			return nil, errors.New(400, "INVALID_PRICE", "Credits price must be a positive whole integer")
 		}
 	}
 

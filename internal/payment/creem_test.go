@@ -126,10 +126,10 @@ func crSeedBot(t *testing.T, pool *pg.Pool) int64 {
 	return botID
 }
 
-func crGrants(t *testing.T, pool *pg.Pool, code string) (int, float64) {
+func crGrants(t *testing.T, pool *pg.Pool, code string) (int, int64) {
 	t.Helper()
 	var n int
-	var sum float64
+	var sum int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount),0) FROM tb_transactions
 		 WHERE ref_type='payment' AND ref_id=$1 AND type='grant_payment'`, code).Scan(&n, &sum); err != nil {
@@ -138,11 +138,11 @@ func crGrants(t *testing.T, pool *pg.Pool, code string) (int, float64) {
 	return n, sum
 }
 
-func crBalance(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func crBalance(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	_ = pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&b)
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&b)
 	return b
 }
 

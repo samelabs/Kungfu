@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net"
 	"net/url"
 	"os"
@@ -68,9 +67,9 @@ type Config struct {
 // CreemPackage is one fixed Kungfu credits package backed by exactly one
 // Creem onetime product.
 type CreemPackage struct {
-	Code      string  `json:"code"`
-	ProductID string  `json:"product_id"`
-	Credits   float64 `json:"credits"`
+	Code      string `json:"code"`
+	ProductID string `json:"product_id"`
+	Credits   int64  `json:"credits"`
 }
 
 // CreemEnabled reports whether the Creem payment runtime is fully
@@ -208,11 +207,24 @@ func loadCreemConfig(cfg *Config) error {
 
 	// Fixed packages: valid JSON array, >=1 package, unique codes AND
 	// unique product ids (one fiat product must never map to two credit
-	// entitlements), finite positive credits.
+	// entitlements), whole positive integer credits — fractional credits
+	// are rejected ({"credits": 1000.5} fails Load).
 	rawPkgs := strings.TrimSpace(envStr("CREEM_PACKAGES_JSON", ""))
-	var packages []CreemPackage
-	if err := json.Unmarshal([]byte(rawPkgs), &packages); err != nil {
+	var rawNumbers []struct {
+		Code      string      `json:"code"`
+		ProductID string      `json:"product_id"`
+		Credits   json.Number `json:"credits"`
+	}
+	if err := json.Unmarshal([]byte(rawPkgs), &rawNumbers); err != nil {
 		return fmt.Errorf("CREEM_PACKAGES_JSON must be a valid JSON array: %w", err)
+	}
+	packages := make([]CreemPackage, 0, len(rawNumbers))
+	for _, rn := range rawNumbers {
+		credits, err := rn.Credits.Int64()
+		if err != nil {
+			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q credits must be a whole integer", rn.Code)
+		}
+		packages = append(packages, CreemPackage{Code: rn.Code, ProductID: rn.ProductID, Credits: credits})
 	}
 	if len(packages) == 0 {
 		return fmt.Errorf("CREEM_PACKAGES_JSON must define at least one package")
@@ -226,8 +238,8 @@ func loadCreemConfig(cfg *Config) error {
 		if pkg.ProductID == "" {
 			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q product_id must not be empty", pkg.Code)
 		}
-		if math.IsNaN(pkg.Credits) || math.IsInf(pkg.Credits, 0) || pkg.Credits <= 0 {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q credits must be a finite positive number", pkg.Code)
+		if pkg.Credits <= 0 {
+			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q credits must be a positive whole integer", pkg.Code)
 		}
 		if _, dup := cfg.CreemPackages[pkg.Code]; dup {
 			return fmt.Errorf("CREEM_PACKAGES_JSON: duplicate package code %q", pkg.Code)

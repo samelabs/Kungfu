@@ -315,12 +315,12 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 			OpenWorldHint:   boolPtr(false), // publish itself sends nothing outbound
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
-		Title        string  `json:"title"`
-		Requirements string  `json:"requirements"`
-		PostAPI      string  `json:"postapi" jsonschema:"HTTP or HTTPS URL that receives completed work results"`
-		Budget       float64 `json:"budget"`
-		Price        float64 `json:"price" jsonschema:"credits paid per successful submission"`
-		OpenNow      bool    `json:"open_now" jsonschema:"open immediately (fundable) or keep pending"`
+		Title        string `json:"title"`
+		Requirements string `json:"requirements"`
+		PostAPI      string `json:"postapi" jsonschema:"HTTP or HTTPS URL that receives completed work results"`
+		Budget       int64  `json:"budget" jsonschema:"whole-credit task budget (integer, minimum 1000)"`
+		Price        int64  `json:"price" jsonschema:"whole credits paid per successful submission (integer)"`
+		OpenNow      bool   `json:"open_now" jsonschema:"open immediately (fundable) or keep pending"`
 	}) (*mcp.CallToolResult, WorkPublishOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {

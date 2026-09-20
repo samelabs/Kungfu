@@ -12,7 +12,7 @@ const (
 
 // Payment is a single row of tb_payments.
 // Monetary amount is stored as integer minor units (amount_minor, e.g. cents);
-// credits uses NUMERIC(20,4) like the rest of the ledger.
+// credits is a whole integer count (BIGINT), like the rest of the ledger.
 // ProviderProductID is the creation-time snapshot of the provider product
 // backing this payment — the webhook reconciles against it, never against
 // the current package configuration. NULL for legacy/manual payments.
@@ -25,7 +25,7 @@ type Payment struct {
 	ProviderOrderID   *string    `db:"provider_order_id" json:"provider_order_id,omitempty"`
 	AmountMinor       int64      `db:"amount_minor" json:"amount_minor"`
 	Currency          string     `db:"currency" json:"currency"`
-	Credits           float64    `db:"credits" json:"credits"`
+	Credits           int64      `db:"credits" json:"credits"`
 	Status            string     `db:"status" json:"status"`
 	CreatedAt         time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time  `db:"updated_at" json:"updated_at"`

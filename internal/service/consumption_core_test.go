@@ -48,9 +48,9 @@ func TestPublicGetBalanceZeroSucceeds(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("reader ledger rows = %d, want 0", n)
 	}
-	var balance float64
+	var balance int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 0 {
@@ -147,12 +147,12 @@ func TestUpdateListOwnerGetNoRegressions(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("ledger rows = %d, want 0 (all storage ops free)", n)
 	}
-	var balance float64
+	var balance int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 10.0 {
+	if balance != int64(10) {
 		t.Fatalf("balance = %v, want 10 (untouched)", balance)
 	}
 }

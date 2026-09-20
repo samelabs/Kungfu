@@ -289,7 +289,7 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 
 	var balBefore float64
 	_ = s.Pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balBefore)
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balBefore)
 	if balBefore != 1000 {
 		t.Fatalf("seed balance = %v, want 1000", balBefore)
 	}
@@ -325,10 +325,10 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 		t.Fatalf("adjustment rows = %d, want 1", adjN)
 	}
 	// A2: the 540/1080 cumulative refund authorizes reversal of
-	// round4(1000*540/1080)=500 — exactly one reverse_payment row.
+	// full refund 1080/1080 → exactly 1000 reversed (500 remaining) — one reverse_payment row.
 	var balAfter float64
 	_ = s.Pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balAfter)
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balAfter)
 	if balAfter != 500 {
 		t.Fatalf("balance = %v, want 500 (grant 1000 − reversal 500)", balAfter)
 	}
@@ -438,9 +438,9 @@ func TestCreemE2EPackageFlow(t *testing.T) {
 		t.Fatalf("webhook = %d %s", rec2.Code, rec2.Body.String())
 	}
 
-	var bal float64
+	var bal int64
 	_ = s.Pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
 	if bal != 5000 {
 		t.Fatalf("balance = %v, want 5000", bal)
 	}

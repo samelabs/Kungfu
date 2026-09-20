@@ -31,7 +31,7 @@ var (
 type StoreProductInput struct {
 	Title        string
 	Description  *string
-	CreditsPrice float64
+	CreditsPrice int64
 }
 
 // CreateStoreProduct inserts an active product row.
@@ -314,7 +314,7 @@ func LockStoreProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model
 // UpdateStoreProduct writes the editable columns (title, description,
 // credits_price) of a locked product row and returns the fresh row.
 // code/id/created_at/status are never touched here.
-func UpdateStoreProduct(ctx context.Context, tx pgx.Tx, id int64, title string, description *string, creditsPrice float64) (*model.StoreProduct, error) {
+func UpdateStoreProduct(ctx context.Context, tx pgx.Tx, id int64, title string, description *string, creditsPrice int64) (*model.StoreProduct, error) {
 	row := tx.QueryRow(ctx, `
 		UPDATE tb_store_products
 		SET title = $2, description = $3, credits_price = $4, updated_at = NOW()

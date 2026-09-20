@@ -21,7 +21,7 @@ type storeProductDTO struct {
 	Code         string  `json:"code"`
 	Title        string  `json:"title"`
 	Description  *string `json:"description,omitempty"`
-	CreditsPrice float64 `json:"credits_price"`
+	CreditsPrice int64   `json:"credits_price"`
 	Status       string  `json:"status"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -32,7 +32,7 @@ type storeProductDTO struct {
 type storeRedemptionDTO struct {
 	Code            string  `json:"code"`
 	ProductTitle    string  `json:"product_title"`
-	CreditsCost     float64 `json:"credits_cost"`
+	CreditsCost     int64   `json:"credits_cost"`
 	RequestKey      string  `json:"request_key"`
 	Status          string  `json:"status"`
 	ReviewNote      *string `json:"review_note,omitempty"`

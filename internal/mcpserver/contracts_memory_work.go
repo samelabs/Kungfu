@@ -82,14 +82,14 @@ type MemoryDeleteOutput struct {
 // WorkItem carries exactly the Agent board facts (agentTaskDetail):
 // no budget, no postapi, no owner identity.
 type WorkItem struct {
-	Code         string  `json:"code"`
-	Title        string  `json:"title"`
-	Requirements string  `json:"requirements"`
-	Price        float64 `json:"price"`
-	Pinned       int     `json:"pinned"`
-	Status       string  `json:"status"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	Code         string `json:"code"`
+	Title        string `json:"title"`
+	Requirements string `json:"requirements"`
+	Price        int64  `json:"price"` // whole Credits
+	Pinned       int    `json:"pinned"`
+	Status       string `json:"status"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // WorkListOutput projects service.ListOpenTasks. The service meta
@@ -119,17 +119,17 @@ type WorkSubmitPostOutput struct {
 // WorkSubmitBillOutput is the authoritative settlement block produced
 // by the existing Credits path — MCP never computes these values.
 type WorkSubmitBillOutput struct {
-	Reward  float64 `json:"reward"`
-	Balance float64 `json:"balance"`
+	Reward  int64 `json:"reward"`
+	Balance int64 `json:"balance"`
 }
 
 // WorkPublishOutput projects the service.CreateTask result.
 type WorkPublishOutput struct {
-	Code   string  `json:"code"`
-	Title  string  `json:"title"`
-	Status string  `json:"status"`
-	Budget float64 `json:"budget"`
-	Price  float64 `json:"price"`
+	Code   string `json:"code"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Budget int64  `json:"budget"` // whole Credits
+	Price  int64  `json:"price"`  // whole Credits
 }
 
 // ---- safe local extraction helpers ----
@@ -187,14 +187,20 @@ func reqStrings(m map[string]interface{}, k string) ([]string, error) {
 	return nil, fmt.Errorf("projection: field %q has wrong type %T", k, m[k])
 }
 
-func reqFloat(m map[string]interface{}, k string) (float64, error) {
+// reqInt64 extracts a required integer fact. JSON decoding produces
+// float64 for ALL numbers, so an integral float64 with a fractional
+// part is a projection failure (fail closed, never truncate).
+func reqInt64(m map[string]interface{}, k string) (int64, error) {
 	switch t := m[k].(type) {
-	case float64:
+	case int64:
 		return t, nil
 	case int:
-		return float64(t), nil
-	case int64:
-		return float64(t), nil
+		return int64(t), nil
+	case float64:
+		if t != float64(int64(t)) {
+			return 0, fmt.Errorf("projection: field %q is not a whole integer", k)
+		}
+		return int64(t), nil
 	}
 	if _, exists := m[k]; !exists {
 		return 0, fmt.Errorf("projection: missing required field %q", k)
@@ -381,7 +387,7 @@ func projectWorkList(result map[string]interface{}) (WorkListOutput, error) {
 		if it.Requirements, err = reqString(m, "requirements"); err != nil {
 			return it, err
 		}
-		if it.Price, err = reqFloat(m, "price"); err != nil {
+		if it.Price, err = reqInt64(m, "price"); err != nil {
 			return it, err
 		}
 		if it.Pinned, err = reqInt(m, "pinned"); err != nil {
@@ -457,7 +463,7 @@ func projectWorkGet(result map[string]interface{}) (WorkGetOutput, error) {
 	if out.Requirements, err = reqString(m, "requirements"); err != nil {
 		return out, err
 	}
-	if out.Price, err = reqFloat(m, "price"); err != nil {
+	if out.Price, err = reqInt64(m, "price"); err != nil {
 		return out, err
 	}
 	if out.Pinned, err = reqInt(m, "pinned"); err != nil {
@@ -486,10 +492,10 @@ func projectWorkSubmit(result *service.TaskSubmitResult) (WorkSubmitOutput, erro
 	if out.Post.ResponseCode, err = reqInt(result.Post, "response_code"); err != nil {
 		return out, err
 	}
-	if out.Billing.Reward, err = reqFloat(result.Billing, "reward"); err != nil {
+	if out.Billing.Reward, err = reqInt64(result.Billing, "reward"); err != nil {
 		return out, err
 	}
-	if out.Billing.Balance, err = reqFloat(result.Billing, "balance"); err != nil {
+	if out.Billing.Balance, err = reqInt64(result.Billing, "balance"); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -512,10 +518,10 @@ func projectWorkPublish(result map[string]interface{}) (WorkPublishOutput, error
 	if out.Status, err = reqString(m, "status"); err != nil {
 		return out, err
 	}
-	if out.Budget, err = reqFloat(m, "budget"); err != nil {
+	if out.Budget, err = reqInt64(m, "budget"); err != nil {
 		return out, err
 	}
-	if out.Price, err = reqFloat(m, "price"); err != nil {
+	if out.Price, err = reqInt64(m, "price"); err != nil {
 		return out, err
 	}
 	return out, nil

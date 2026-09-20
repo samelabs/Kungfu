@@ -268,10 +268,10 @@ func addAccountTools(s *mcp.Server, deps Deps) {
 }
 
 type statusOutput struct {
-	BotID   int64   `json:"bot_id"`
-	BotName string  `json:"bot_name"`
-	Balance float64 `json:"balance"`
-	Status  string  `json:"status"`
+	BotID   int64  `json:"bot_id"`
+	BotName string `json:"bot_name"`
+	Balance int64  `json:"balance"`
+	Status  string `json:"status"`
 }
 
 func boolPtr(b bool) *bool { return &b }

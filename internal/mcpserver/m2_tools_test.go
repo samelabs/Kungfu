@@ -147,8 +147,8 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 			"SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1", botID).Scan(&n)
 		return n
 	}
-	balanceOf := func(botID int64) float64 {
-		var b float64
+	balanceOf := func(botID int64) int64 {
+		var b int64
 		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&b)
 		return b
 	}
@@ -216,7 +216,7 @@ func TestM2MemoryLifecycleAndFreeEconomics(t *testing.T) {
 		t.Fatalf("READER B: public get produced %d new ledger rows (want 0)", n-txB0)
 	}
 	if b := balanceOf(botB); b != balB0 {
-		t.Fatalf("READER B: balance changed on free public get: %f -> %f", balB0, b)
+		t.Fatalf("READER B: balance changed on free public get: %d -> %d", balB0, b)
 	}
 	// owner A also unchanged
 	if n := countTx(botA); n != countTx(botA) {
@@ -322,8 +322,8 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 	_, keyB, botB := m2Bot(t, pool, ts.srv, "pb")
 
 	txCtx := context.Background()
-	balance := func(botID int64) float64 {
-		var b float64
+	balance := func(botID int64) int64 {
+		var b int64
 		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&b)
 		return b
 	}
@@ -341,16 +341,16 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 		"UPDATE tb_bots SET balance = 2000 WHERE id = $1", botA); err != nil {
 		t.Fatalf("fixture balance: %v", err)
 	}
-	var balA float64
+	var balA int64
 	pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botA).Scan(&balA)
-	budget := 1500.0
+	budget := int64(1500)
 
 	// Malicious extra identity fields are rejected at the typed-schema
 	// layer (additionalProperties=false) — they can NEVER influence
 	// ownership because they never reach the tool.
 	sc, body := m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
 		"title": "m2 task", "requirements": "do the thing",
-		"postapi": "https://example.test/hook", "budget": budget, "price": 0.5,
+		"postapi": "https://example.test/hook", "budget": budget, "price": 5,
 		"open_now": true, "bot_id": botB, "owner_id": botB,
 	})
 	if !toolFailed(body) {
@@ -359,7 +359,7 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 	// Clean publish: ownership derives ONLY from the verified credential.
 	sc, body = m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
 		"title": "m2 task", "requirements": "do the thing",
-		"postapi": "https://example.test/hook", "budget": budget, "price": 0.5,
+		"postapi": "https://example.test/hook", "budget": budget, "price": 5,
 		"open_now": true,
 	})
 	if sc != 200 || toolFailed(body) {
@@ -382,7 +382,7 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 		t.Fatalf("lock_task entries = %d, want 1", n)
 	}
 	var ltBot int64
-	var ltAmount float64
+	var ltAmount int64
 	var ltRefType *string
 	var ltRefID *string
 	err2 := pool.QueryRow(txCtx,
@@ -392,13 +392,13 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 		t.Fatalf("lock_task row: %v", err2)
 	}
 	if ltBot != botA || ltAmount != -budget || ltRefType == nil || *ltRefType != "task" || ltRefID == nil || *ltRefID != taskCode {
-		t.Fatalf("lock_task fact mismatch: bot=%d amount=%f ref_type=%v ref_id=%v (want bot=%d amount=%f ref=task/%s)",
+		t.Fatalf("lock_task fact mismatch: bot=%d amount=%d ref_type=%v ref_id=%v (want bot=%d amount=%d ref=task/%s)",
 			ltBot, ltAmount, ltRefType, ltRefID, botA, -budget, taskCode)
 	}
-	var balA2 float64
+	var balA2 int64
 	pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botA).Scan(&balA2)
-	if diff := balA - balA2; diff < budget-0.0001 || diff > budget+0.0001 {
-		t.Fatalf("balance decreased by %f, want %f", diff, budget)
+	if diff := balA - balA2; diff != budget {
+		t.Fatalf("balance decreased by %d, want %d", diff, budget)
 	}
 	if n := lockCount(botB); n != 0 {
 		t.Fatalf("botB got %d lock_task entries — ownership leaked", n)
@@ -426,7 +426,7 @@ func TestM2WorkPublishOwnershipAndEconomics(t *testing.T) {
 	before := balance(botA)
 	sc, body = m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
 		"title": "m2 broke task", "requirements": "x",
-		"postapi": "https://example.test/hook", "budget": bigBudget, "price": 0.5,
+		"postapi": "https://example.test/hook", "budget": bigBudget, "price": 5,
 		"open_now": true,
 	})
 	if !strings.Contains(body, "INSUFFICIENT_CREDITS") {
@@ -449,7 +449,7 @@ func TestM2WorkPublishValidationDelegated(t *testing.T) {
 	// non-http(s) postapi rejected by existing service
 	sc, body := m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
 		"title": "bad proto", "requirements": "x",
-		"postapi": "ftp://example.test/hook", "budget": 1, "price": 0.5, "open_now": true,
+		"postapi": "ftp://example.test/hook", "budget": 1, "price": 5, "open_now": true,
 	})
 	if !toolFailed(body) && sc < 400 {
 		t.Fatalf("ftp postapi accepted: %d %s", sc, extractJSON(body)[:min(500, len(extractJSON(body)))])
@@ -458,7 +458,7 @@ func TestM2WorkPublishValidationDelegated(t *testing.T) {
 	// negative budget: rejected by the existing service validation (out-of-range numeric, not non-finite)
 	sc, body = m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
 		"title": "bad budget", "requirements": "x",
-		"postapi": "https://example.test/hook", "budget": -5, "price": 0.5, "open_now": true,
+		"postapi": "https://example.test/hook", "budget": -5, "price": 5, "open_now": true,
 	})
 	if !toolFailed(body) && sc < 400 {
 		t.Fatalf("non-finite budget accepted: %d %.200s", sc, body)

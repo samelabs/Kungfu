@@ -45,7 +45,7 @@ func uniq() string {
 	return time.Now().Format("150405.000000000") + fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
 }
 
-func seedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
+func seedBot(t *testing.T, pool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	suffix := uniq()
 	var botID int64
@@ -63,7 +63,7 @@ func seedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	return botID
 }
 
-func seedProduct(t *testing.T, pool *pg.Pool, price float64) string {
+func seedProduct(t *testing.T, pool *pg.Pool, price int64) string {
 	t.Helper()
 	p, err := CreateProduct(context.Background(), pool, ProductInput{
 		Title:        "SR Product " + uniq(),
@@ -84,7 +84,7 @@ func redeem(t *testing.T, pool *pg.Pool, botID int64, productCode, key string) *
 	return res
 }
 
-func balanceOf(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func balanceOf(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
 	b, err := credits.Balance(context.Background(), pool, botID)
 	if err != nil {
@@ -95,10 +95,10 @@ func balanceOf(t *testing.T, pool *pg.Pool, botID int64) float64 {
 
 // ledger returns the spend/refund ledger rows for a redemption code:
 // spends, spendSum, refunds, refundSum.
-func ledger(t *testing.T, pool *pg.Pool, code string) (int, float64, int, float64) {
+func ledger(t *testing.T, pool *pg.Pool, code string) (int, int64, int, int64) {
 	t.Helper()
 	var spends, refunds int
-	var spendSum, refundSum float64
+	var spendSum, refundSum int64
 	err := pool.QueryRow(context.Background(), `
 		SELECT
 		  COUNT(*) FILTER (WHERE type = 'spend_redemption'),
@@ -620,7 +620,7 @@ func TestConcurrentStateRaces(t *testing.T) {
 			t.Fatalf("reject-vs-approve final = %s", final)
 		}
 		_, _, _, refundSum := ledger(t, pool, res.Redemption.Code)
-		wantRefunds := 0.0
+		wantRefunds := int64(0)
 		if final == "rejected" {
 			wantRefunds = 30
 		}

@@ -18,8 +18,8 @@ function renderTasks() {
                 <span class="badge ${escapeHtml(task.status)}">${escapeHtml(humanTaskStatus(task.status))}</span>
             </div>
             <div class="task-meta">
-                <span>${Number(task.price).toFixed(2)} ${escapeHtml(t('tasks.price'))}</span>
-                <span>${Number(task.budget).toFixed(2)} ${escapeHtml(t('tasks.budget'))}</span>
+                <span>${escapeHtml(String(task.price))} ${escapeHtml(t('tasks.price'))}</span>
+                <span>${escapeHtml(String(task.budget))} ${escapeHtml(t('tasks.budget'))}</span>
                 <span>${task.success_count || 0} ${escapeHtml(t('tasks.delivered'))}</span>
             </div>
         </button>
@@ -69,8 +69,8 @@ function renderTaskDetail(task) {
             </button>
         </div>
         <div class="task-detail-stats">
-            <div class="task-stat"><b>${Number(task.price).toFixed(4)}</b><span>${escapeHtml(t('tasks.price'))}</span></div>
-            <div class="task-stat"><b>${Number(task.budget).toFixed(4)}</b><span>${escapeHtml(t('tasks.budget'))}</span></div>
+            <div class="task-stat"><b>${escapeHtml(String(task.price))}</b><span>${escapeHtml(t('tasks.price'))}</span></div>
+            <div class="task-stat"><b>${escapeHtml(String(task.budget))}</b><span>${escapeHtml(t('tasks.budget'))}</span></div>
             <div class="task-stat"><b>${task.success_count || 0}</b><span>${escapeHtml(t('tasks.delivered'))}</span></div>
         </div>
         <div class="detail-box"><h3>${escapeHtml(t('tasks.requirements'))}</h3><p>${escapeHtml(task.requirements)}</p></div>
@@ -136,8 +136,8 @@ function openTaskModal(mode, task) {
                     <label>${escapeHtml(t('task_new.post_api'))}</label>
                     <input name="postapi" required maxlength="2048" placeholder="${escapeHtml(t('task_new.post_api_placeholder'))}">
                     <div class="row">
-                        <div><label>${escapeHtml(t('task_new.budget'))}</label><input name="budget" type="number" step="0.0001" min="1000" required></div>
-                        <div><label>${escapeHtml(t('task_new.price'))}</label><input name="price" type="number" step="0.0001" min="0.0001" required></div>
+                        <div><label>${escapeHtml(t('task_new.budget'))}</label><input name="budget" type="number" step="1" min="1000" required></div>
+                        <div><label>${escapeHtml(t('task_new.price'))}</label><input name="price" type="number" step="1" min="1" required></div>
                     </div>
                     <label class="checkline"><input name="open_now" type="checkbox"> ${escapeHtml(t('task_new.open_now'))}</label>
                     <div class="actions form-actions">
@@ -160,7 +160,7 @@ function openTaskModal(mode, task) {
                     <label>${escapeHtml(t('tasks.post_api'))}</label>
                     <input name="postapi" required maxlength="2048" value="${escapeHtml(task.postapi || '')}">
                     <label>${escapeHtml(t('task_new.price'))}</label>
-                    <input name="price" type="number" step="0.0001" min="0.0001" required value="${Number(task.price).toFixed(4)}">
+                    <input name="price" type="number" step="1" min="1" required value="${escapeHtml(String(task.price))}">
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('tasks.save_basics'))}</button>
                     </div>
@@ -176,7 +176,7 @@ function openTaskModal(mode, task) {
                 <form id="budgetFormModal" class="modal-form" novalidate>
                     <p class="muted">${escapeHtml(task.title)}</p>
                     <label>${escapeHtml(t('tasks.amount'))}</label>
-                    <input name="amount" type="number" step="0.0001" min="0" required autofocus>
+                    <input name="amount" type="number" step="1" min="1" required autofocus>
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('tasks.add_budget_submit'))}</button>
                     </div>

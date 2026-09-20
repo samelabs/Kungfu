@@ -71,7 +71,7 @@ func adjCounts(t *testing.T, pool *pg.Pool, code string) (adjustments, transacti
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	return
@@ -124,7 +124,7 @@ func TestRefundFactRecordedExact(t *testing.T) {
 
 	adjN, txN, bal := adjCounts(t, pool, code)
 	// A2: full-amount refund (540/1080 cumulative) authorizes reversal of
-	// round4(1000*540/1080)=500 → 1 grant + 1 reverse_payment, balance 500.
+	// full refund 1080/1080 → exactly 1000 reversed → balance 500.
 	if adjN != 1 || txN != 2 || bal != 500 {
 		t.Fatalf("adj=%d tx=%d bal=%v — want 1 fact, grant+reverse, bal 500", adjN, txN, bal)
 	}
@@ -159,8 +159,9 @@ func TestPartialRefundFact(t *testing.T) {
 		t.Fatalf("partial refund amount = %d", amount)
 	}
 	_, txN, bal := adjCounts(t, pool, code)
-	// A2: cumulative 300/1080 → reversal round4(1000*300/1080)=277.7778
-	if txN != 2 || bal != 722.2222 {
+	// A2 (integer credits): cumulative 300/1080 → reversal target
+	// floor(1000*300/1080) = 277 (cumulative FLOOR, whole credits only)
+	if txN != 2 || bal != 723 {
 		t.Fatalf("tx=%d bal=%v", txN, bal)
 	}
 }
@@ -376,7 +377,7 @@ func TestRefundFactTaxDifference1210(t *testing.T) {
 		t.Fatalf("amounts = %d/%d", amountMinor, amountPaid)
 	}
 	_, txN, bal := adjCounts(t, pool, code)
-	// A2: cumulative 605/1210 → reversal round4(1000*605/1210)=500
+	// A2: cumulative 605/1210 → reversal floor(1000*605/1210)=500
 	if txN != 2 || bal != 500 {
 		t.Fatalf("tx=%d bal=%v — want grant+reverse, bal 500", txN, bal)
 	}

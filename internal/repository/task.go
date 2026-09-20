@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"time"
 
 	"kungfu.md/internal/model"
@@ -21,7 +20,7 @@ import (
 // minBudget is passed explicitly by the task service (single rule source);
 // the repository holds no business constant of its own.
 // When alias is empty the columns are unqualified; otherwise they are prefixed with "alias.".
-func openBudgetWhereClause(alias string, minBudget float64) string {
+func openBudgetWhereClause(alias string, minBudget int64) string {
 	if alias == "" {
 		return "status = 'open' AND price > 0 AND budget >= $1 AND budget >= price"
 	}
@@ -41,7 +40,7 @@ func openBudgetWhereClauseWithParam(alias, param string) string {
 
 // -- 1. countOpenTasks --
 // CountOpenTasks returns the number of tasks currently visible on the open board.
-func CountOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) (int64, error) {
+func CountOpenTasks(ctx context.Context, q pg.Querier, minBudget int64) (int64, error) {
 	var count int64
 	err := q.QueryRow(ctx, `
 		SELECT COUNT(*) AS count
@@ -52,7 +51,7 @@ func CountOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) (int64
 
 // -- 2. listOpenTasks --
 // ListOpenTasks returns all open, fundable tasks, pinned first then newest.
-func ListOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) ([]model.Task, error) {
+func ListOpenTasks(ctx context.Context, q pg.Querier, minBudget int64) ([]model.Task, error) {
 	rows, err := q.Query(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
 		       review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
@@ -80,7 +79,7 @@ func ListOpenTasks(ctx context.Context, q pg.Querier, minBudget float64) ([]mode
 
 // -- 3. findOpenTaskByCode --
 // FindOpenTaskByCode returns the open, fundable task with the given code, or nil.
-func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string, minBudget float64) (*model.Task, error) {
+func FindOpenTaskByCode(ctx context.Context, q pg.Querier, code string, minBudget int64) (*model.Task, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, requirements, postapi, budget, price, pinned, status,
 		       review_note, created_at, updated_at, reviewed_at, opened_at, closed_at
@@ -254,7 +253,7 @@ func FindTaskByCode(ctx context.Context, q pg.Querier, code string) (*model.Task
 // TaskBudgetStatus holds the id, budget, and status projection used by budget operations.
 type TaskBudgetStatus struct {
 	ID     int64
-	Budget float64
+	Budget int64
 	Status string
 }
 
@@ -265,8 +264,8 @@ type TaskForUpdate struct {
 	Code    string
 	BotID   int64
 	PostAPI *string
-	Budget  float64
-	Price   float64
+	Budget  int64
+	Price   int64
 	Status  string
 }
 
@@ -397,8 +396,8 @@ type NewTaskInput struct {
 	Title        string
 	Requirements string
 	PostAPI      *string
-	Budget       float64
-	Price        float64
+	Budget       int64
+	Price        int64
 	Pinned       bool
 	Status       string
 	OpenedAt     *string
@@ -438,7 +437,7 @@ func CloseOwnerTask(ctx context.Context, q pg.Querier, botID int64, code string)
 
 // -- 16. addOwnerTaskBudget --
 // AddOwnerTaskBudget increments a task's budget by the given amount.
-func AddOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code string, amount float64) error {
+func AddOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code string, amount int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks SET budget = budget + $1, updated_at = NOW()
 		WHERE code = $2 AND bot_id = $3`, amount, code, botID)
@@ -456,7 +455,7 @@ func ClearOwnerTaskBudget(ctx context.Context, q pg.Querier, botID int64, code s
 
 // -- 18. updateOwnerTaskBasics --
 // UpdateOwnerTaskBasics updates the editable basics: title, requirements, postapi, price.
-func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code, title, requirements string, postAPI *string, price float64) error {
+func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code, title, requirements string, postAPI *string, price int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
 		SET title = $1, requirements = $2, postapi = $3, price = $4, updated_at = NOW()
@@ -467,7 +466,7 @@ func UpdateOwnerTaskBasics(ctx context.Context, q pg.Querier, botID int64, code,
 
 // -- 18b. updateTaskBudgetAndStatus --
 // UpdateTaskBudgetAndStatus sets budget/status and conditionally stamps closed_at.
-func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budget float64, status string, shouldClose bool) error {
+func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budget int64, status string, shouldClose bool) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
 		SET budget = $1,
@@ -485,7 +484,7 @@ func UpdateTaskBudgetAndStatus(ctx context.Context, q pg.Querier, id int64, budg
 // or below price). minBudget is passed explicitly by the task service. PostgreSQL
 // evaluates the RHS expression (budget - $1) once per reference, so it is safe to
 // repeat in the CASE.
-func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64, price, minBudget float64) error {
+func DecrementTaskBudgetForDelivery(ctx context.Context, q pg.Querier, id int64, price, minBudget int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_tasks
 		SET budget = budget - $1,
@@ -518,8 +517,6 @@ type rowScanner interface {
 func scanTaskWithStats(tw *TaskWithStats, s rowScanner) error {
 	var (
 		botID      int32
-		budget     pgtype.Numeric
-		price      pgtype.Numeric
 		createdAt  time.Time
 		updatedAt  time.Time
 		reviewedAt *time.Time
@@ -528,7 +525,7 @@ func scanTaskWithStats(tw *TaskWithStats, s rowScanner) error {
 	)
 	if err := s.Scan(
 		&tw.ID, &tw.Code, &botID, &tw.Title, &tw.Requirements, &tw.PostAPI,
-		&budget, &price, &tw.Pinned, &tw.Status, &tw.ReviewNote,
+		&tw.Budget, &tw.Price, &tw.Pinned, &tw.Status, &tw.ReviewNote,
 		&createdAt, &updatedAt, &reviewedAt, &openedAt, &closedAt,
 		&tw.LogCount, &tw.SuccessCount, &tw.FailureCount,
 	); err != nil {
@@ -536,12 +533,6 @@ func scanTaskWithStats(tw *TaskWithStats, s rowScanner) error {
 	}
 
 	tw.BotID = int64(botID)
-	if bf, err := budget.Float64Value(); err == nil {
-		tw.Budget = bf.Float64
-	}
-	if pf, err := price.Float64Value(); err == nil {
-		tw.Price = pf.Float64
-	}
 	tw.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 	tw.UpdatedAt = updatedAt.Format("2006-01-02 15:04:05")
 	if closedAt != nil {
@@ -565,8 +556,6 @@ func scanTaskWithStats(tw *TaskWithStats, s rowScanner) error {
 func scanTask(t *model.Task, s rowScanner) error {
 	var (
 		botID      int32
-		budget     pgtype.Numeric
-		price      pgtype.Numeric
 		createdAt  time.Time
 		updatedAt  time.Time
 		reviewedAt *time.Time
@@ -575,19 +564,13 @@ func scanTask(t *model.Task, s rowScanner) error {
 	)
 	if err := s.Scan(
 		&t.ID, &t.Code, &botID, &t.Title, &t.Requirements, &t.PostAPI,
-		&budget, &price, &t.Pinned, &t.Status, &t.ReviewNote,
+		&t.Budget, &t.Price, &t.Pinned, &t.Status, &t.ReviewNote,
 		&createdAt, &updatedAt, &reviewedAt, &openedAt, &closedAt,
 	); err != nil {
 		return err
 	}
 
 	t.BotID = int64(botID)
-	if bf, err := budget.Float64Value(); err == nil {
-		t.Budget = bf.Float64
-	}
-	if pf, err := price.Float64Value(); err == nil {
-		t.Price = pf.Float64
-	}
 	t.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 	t.UpdatedAt = updatedAt.Format("2006-01-02 15:04:05")
 	if closedAt != nil {
@@ -612,14 +595,14 @@ type HomepageTask struct {
 	Title        string
 	Pinned       bool
 	Requirements string
-	Price        float64
-	Budget       float64
+	Price        int64
+	Budget       int64
 	SuccessCount int64
 }
 
 // QueryHomepageTasks returns up to 8 open tasks for the homepage board.
 // minBudget is passed explicitly by the caller (task rule source).
-func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget float64) ([]HomepageTask, error) {
+func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget int64) ([]HomepageTask, error) {
 	rows, err := q.Query(ctx, `
 		SELECT t.code, t.title, t.pinned, t.requirements, t.price, t.budget,
 		       COALESCE(ls.success_count, 0) AS success_count
@@ -641,12 +624,9 @@ func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget float64) ([
 	var tasks []HomepageTask
 	for rows.Next() {
 		var t HomepageTask
-		var price, budget pgtype.Numeric
-		if err := rows.Scan(&t.Code, &t.Title, &t.Pinned, &t.Requirements, &price, &budget, &t.SuccessCount); err != nil {
+		if err := rows.Scan(&t.Code, &t.Title, &t.Pinned, &t.Requirements, &t.Price, &t.Budget, &t.SuccessCount); err != nil {
 			return nil, err
 		}
-		t.Price = numericToFloat(price)
-		t.Budget = numericToFloat(budget)
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()

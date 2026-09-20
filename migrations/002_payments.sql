@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS tb_payments (
     provider_order_id VARCHAR(64) DEFAULT NULL,
     amount_minor     BIGINT      NOT NULL,
     currency         CHAR(3)     NOT NULL,
-    credits          NUMERIC(20,4) NOT NULL,
+    credits          BIGINT      NOT NULL,
     status           VARCHAR(10) NOT NULL DEFAULT 'pending',
     created_at       TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,

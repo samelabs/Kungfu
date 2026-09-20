@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"math"
 
 	"kungfu.md/internal/errors"
 )
@@ -65,7 +64,7 @@ func (e *TaskCheckError) ToAppError() *errors.AppError {
 }
 
 // RunTaskCheck validates postapi and price, then calls the budget checker.
-func RunTaskCheck(postapi string, price float64, budgetChecker func() *TaskCheckError) *TaskCheckError {
+func RunTaskCheck(postapi string, price int64, budgetChecker func() *TaskCheckError) *TaskCheckError {
 	if e := ValidatePostapi(postapi, 2048); e != nil {
 		return e
 	}
@@ -97,10 +96,9 @@ func ValidatePostapi(postapi string, maxLength int) *TaskCheckError {
 	return nil
 }
 
-// ValidatePrice validates that price is a finite positive number.
-// A non-finite persisted price lands on the existing PRICE_INVALID rule.
-func ValidatePrice(price float64) *TaskCheckError {
-	if math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 {
+// ValidatePrice validates that price is a positive whole credit amount.
+func ValidatePrice(price int64) *TaskCheckError {
+	if price <= 0 {
 		return RaiseRule("PRICE_INVALID")
 	}
 	return nil

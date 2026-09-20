@@ -28,7 +28,7 @@ type submitOutputs struct {
 }
 
 // publishOut captures the typed work_publish result code.
-func m2Publish(t *testing.T, ts mcpTestServer, key, title, postapi string, budget, price float64, openNow bool) WorkPublishOutput {
+func m2Publish(t *testing.T, ts mcpTestServer, key, title, postapi string, budget, price int64, openNow bool) WorkPublishOutput {
 	t.Helper()
 	sc, body := m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
 		"title": title, "requirements": "r", "postapi": postapi,
@@ -83,8 +83,8 @@ func TestM2WorkSubmitPayloadAndBilling(t *testing.T) {
 
 	out := m2Publish(t, ts, keyPub, "m2 payload task "+fmt.Sprint(time.Now().UnixNano()), postSrv.URL, 1500, 100, true)
 
-	bal := func(botID int64) float64 {
-		var b float64
+	bal := func(botID int64) int64 {
+		var b int64
 		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&b)
 		return b
 	}
@@ -128,14 +128,14 @@ func TestM2WorkSubmitPayloadAndBilling(t *testing.T) {
 		t.Fatalf("post.response_code = %d, want 200", so.Post.ResponseCode)
 	}
 	if so.Billing.Reward != 100 {
-		t.Fatalf("billing.reward = %f, want 100 (task price)", so.Billing.Reward)
+		t.Fatalf("billing.reward = %d, want 100 (task price)", so.Billing.Reward)
 	}
 	dbBal := bal(botSub)
 	if so.Billing.Balance != dbBal {
-		t.Fatalf("billing.balance = %f, want DB balance %f", so.Billing.Balance, dbBal)
+		t.Fatalf("billing.balance = %d, want DB balance %d", so.Billing.Balance, dbBal)
 	}
-	if diff := dbBal - subBefore; diff < 100-0.0001 || diff > 100+0.0001 {
-		t.Fatalf("submitter balance delta = %f, want 100", diff)
+	if diff := dbBal - subBefore; diff != 100 {
+		t.Fatalf("submitter balance delta = %d, want 100", diff)
 	}
 }
 
@@ -163,8 +163,8 @@ func TestM2WorkSubmitNetworkFailureZeroSettlement(t *testing.T) {
 
 	out := m2Publish(t, ts, keyPub, "m2 dead post "+fmt.Sprint(time.Now().UnixNano()), deadURL, 1500, 100, true)
 
-	snap := func() (float64, float64, float64, int) {
-		var budget, pubB, subB float64
+	snap := func() (int64, int64, int64, int) {
+		var budget, pubB, subB int64
 		var earn int
 		pool.QueryRow(txCtx, "SELECT budget FROM tb_tasks WHERE code=$1", out.Code).Scan(&budget)
 		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botPub).Scan(&pubB)
@@ -184,13 +184,13 @@ func TestM2WorkSubmitNetworkFailureZeroSettlement(t *testing.T) {
 
 	b1, p1, s1, e1 := snap()
 	if b1 != b0 {
-		t.Fatalf("budget changed on network failure: %f -> %f", b0, b1)
+		t.Fatalf("budget changed on network failure: %d -> %d", b0, b1)
 	}
 	if p1 != p0 {
-		t.Fatalf("publisher balance changed after its publish lock: %f -> %f", p0, p1)
+		t.Fatalf("publisher balance changed after its publish lock: %d -> %d", p0, p1)
 	}
 	if s1 != s0 {
-		t.Fatalf("submitter balance changed on network failure: %f -> %f", s0, s1)
+		t.Fatalf("submitter balance changed on network failure: %d -> %d", s0, s1)
 	}
 	if e1 != e0 {
 		t.Fatalf("earn_task row appeared on network failure: %d -> %d", e0, e1)

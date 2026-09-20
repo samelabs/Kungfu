@@ -59,7 +59,7 @@ func a2CleanupBotArtifacts(pool *pg.Pool, botID int64) {
 }
 
 // a2TestTask inserts a task and cleans it up.
-func a2TestTask(t *testing.T, pool *pg.Pool, botID int64, status string, postapi string, price, budget float64) string {
+func a2TestTask(t *testing.T, pool *pg.Pool, botID int64, status string, postapi string, price, budget int64) string {
 	t.Helper()
 	code := "a2" + strings.ReplaceAll(time.Now().Format("150405.0000"), ".", "")
 	_, err := pool.Exec(context.Background(),
@@ -188,16 +188,16 @@ func TestSubmitOpenTaskDeliversWithDBTaskFields(t *testing.T) {
 		t.Fatalf("result task code = %s, want %s", result.TaskCode, code)
 	}
 	// Reward price comes from the freshly queried DB row, not caller input.
-	if result.Billing["reward"] != 2.0 {
+	if result.Billing["reward"] != int64(2) {
 		t.Fatalf("reward = %v, want 2.0 (price from DB row)", result.Billing["reward"])
 	}
 	// Settlement applied: budget decremented by price.
-	var budget float64
+	var budget int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT budget FROM tb_tasks WHERE code = $1`, code).Scan(&budget); err != nil {
 		t.Fatalf("read budget: %v", err)
 	}
-	if budget != 998.0 {
+	if budget != int64(998) {
 		t.Fatalf("budget = %v, want 998.0 (1000 - 2)", budget)
 	}
 }

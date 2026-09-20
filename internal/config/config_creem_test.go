@@ -72,6 +72,9 @@ func TestCreemPackagesValidation(t *testing.T) {
 		{"negative credits", `[{"code":"a","product_id":"p","credits":-5}]`},
 		{"duplicate code", `[{"code":"a","product_id":"p1","credits":1},{"code":"a","product_id":"p2","credits":2}]`},
 		{"duplicate product", `[{"code":"a","product_id":"p","credits":1},{"code":"b","product_id":"p","credits":2}]`},
+		{"fractional credits", `[{"code":"a","product_id":"p","credits":1000.5}]`},
+		{"tiny fractional credits", `[{"code":"a","product_id":"p","credits":0.0001}]`},
+		{"exponent credits", `[{"code":"a","product_id":"p","credits":1e3}]`},
 	}
 	for _, tc := range cases {
 		setFullCreem(t, tc.json)

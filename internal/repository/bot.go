@@ -6,19 +6,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 )
-
-// numericToFloat converts pgtype.Numeric to float64 safely.
-func numericToFloat(n pgtype.Numeric) float64 {
-	if f, err := n.Float64Value(); err == nil {
-		return f.Float64
-	}
-	return 0
-}
 
 // timeToStr converts time.Time to the canonical timestamp string format ("2006-01-02 15:04:05").
 func timeToStr(t time.Time) string {

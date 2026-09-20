@@ -43,7 +43,7 @@ func mustGetPayment(t *testing.T, pool *pg.Pool, code string) *model.Payment {
 
 // rev2SeedPaidPayment completes a starter checkout (1000 credits) and
 // optionally spends credits so the balance can go negative.
-func rev2SeedPaidPayment(t *testing.T, pool *pg.Pool, fc *fakeCreem, botID int64, spend float64) string {
+func rev2SeedPaidPayment(t *testing.T, pool *pg.Pool, fc *fakeCreem, botID int64, spend int64) string {
 	t.Helper()
 	code := adjSeedPaidPayment(t, pool, fc, botID)
 	if spend > 0 {
@@ -104,7 +104,7 @@ func TestReversalFullRefundNegativeBalance(t *testing.T) {
 	if b := crBalance(t, pool, botID); b != -900 {
 		t.Fatalf("balance = %v, want -900", b)
 	}
-	var sum float64
+	var sum int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT SUM(amount) FROM tb_transactions WHERE ref_type='payment' AND ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestReversalMultiplePartial(t *testing.T) {
 		rev2RefundEventBasis(t, pool, code, order, 1210, 605, r605, basis)); err != nil {
 		t.Fatal(err)
 	}
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT SUM(amount) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum)
 	if sum != -500 {
@@ -184,7 +184,7 @@ func TestReversalFullAfterPartial(t *testing.T) {
 		rev2RefundEventBasis(t, pool, code, order, 1210, 1210, full, basis)); err != nil {
 		t.Fatal(err)
 	}
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT SUM(amount) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum)
 	if sum != -1000 {
@@ -210,7 +210,7 @@ func TestReversalDuplicateOneEffect(t *testing.T) {
 		t.Fatalf("redelivery: %v", err)
 	}
 	var facts int
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id WHERE p.code=$1`, code).Scan(&facts)
 	_ = pool.QueryRow(context.Background(),
@@ -273,7 +273,7 @@ func TestReversalDisputeThenRefundSingleReversal(t *testing.T) {
 	if b := crBalance(t, pool, botID); b != 0 {
 		t.Fatalf("second full event double-reversed: %v", b)
 	}
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT SUM(amount) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum)
 	if sum != -1000 {
@@ -338,7 +338,7 @@ func TestReversalInconsistentBasisRejected(t *testing.T) {
 	}
 
 	var facts int
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id WHERE p.code=$1`, code).Scan(&facts)
 	_ = pool.QueryRow(context.Background(),
@@ -437,7 +437,7 @@ func TestReversalConcurrentNoOverReverse(t *testing.T) {
 		}
 	}
 
-	var sum float64
+	var sum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT SUM(amount) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum)
 	if sum != -500 {
@@ -509,13 +509,13 @@ func TestReversalHistoricalMultiBasisFailsClosed(t *testing.T) {
 
 			var factsAfter int
 			var revCount int
-			var bal float64
+			var bal int64
 			_ = pool.QueryRow(context.Background(),
 				`SELECT COUNT(*) FROM tb_payment_adjustments WHERE payment_id=$1`, p.ID).Scan(&factsAfter)
 			_ = pool.QueryRow(context.Background(),
 				`SELECT COUNT(*) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&revCount)
 			_ = pool.QueryRow(context.Background(),
-				`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
+				`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&bal)
 			if factsAfter != 2 || revCount != 0 || bal != 1000 {
 				t.Fatalf("facts=%d rev=%d bal=%v — must stay untouched", factsAfter, revCount, bal)
 			}

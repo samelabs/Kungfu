@@ -7,7 +7,6 @@ package credits
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -37,7 +36,7 @@ func revUnique() string {
 	return fmt.Sprintf("%d_%d", time.Now().UnixNano(), atomic.AddInt64(&revSeq, 1))
 }
 
-func revSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
+func revSeedBot(t *testing.T, pool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	var botID int64
 	suffix := revUnique()
@@ -54,11 +53,11 @@ func revSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	return botID
 }
 
-func revBalance(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func revBalance(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&b); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&b); err != nil {
 		t.Fatal(err)
 	}
 	return b
@@ -112,7 +111,7 @@ func TestAuthoritativeReversalAllowsNegative(t *testing.T) {
 	if b := revBalance(t, pool, botID); b != -10 {
 		t.Fatalf("balance = %v", b)
 	}
-	var amount, balAfter float64
+	var amount, balAfter int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT amount, balance_after FROM tb_transactions WHERE bot_id=$1`, botID).Scan(&amount, &balAfter); err != nil {
 		t.Fatal(err)
@@ -152,12 +151,13 @@ func TestOrdinaryDebitFromNegativeRejected(t *testing.T) {
 	}
 }
 
-// NaN/Inf and non-negative authoritative reversals are rejected
+// Zero and positive authoritative reversals are rejected (a reversal is
+// strictly negative whole credits; NaN/Inf are structurally impossible).
 func TestAuthoritativeReversalInputGates(t *testing.T) {
 	pool := revTestPool(t)
 	botID := revSeedBot(t, pool, 100)
 
-	for _, amount := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, 10} {
+	for _, amount := range []int64{0, 10} {
 		if _, err := RecordAuthoritativeReversal(context.Background(), pool, nil,
 			botID, "reverse_test", amount, refPtr("test"), refPtr("r5")); err == nil {
 			t.Fatalf("amount %v must be rejected", amount)

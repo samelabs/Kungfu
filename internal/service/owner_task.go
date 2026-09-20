@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"kungfu.md/internal/credits"
-	"math"
 	"strings"
 	"time"
 
@@ -87,8 +86,8 @@ type CreateTaskInput struct {
 	Title        string
 	Requirements string
 	PostAPI      string
-	Budget       float64
-	Price        float64
+	Budget       int64
+	Price        int64
 	OpenNow      bool
 }
 
@@ -97,8 +96,8 @@ func CreateTask(ctx context.Context, pool *pg.Pool, botID int64, cfg *OwnerTaskC
 	title := strings.TrimSpace(input.Title)
 	requirements := strings.TrimSpace(input.Requirements)
 	postapi := strings.TrimSpace(input.PostAPI)
-	budget := roundMoney(input.Budget)
-	price := roundMoney(input.Price)
+	budget := input.Budget
+	price := input.Price
 	openNow := input.OpenNow
 
 	// Validate basics + budget
@@ -242,11 +241,9 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 }
 
 // AddTaskBudget adds budget to a task, locking additional credits.
-func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string, amount float64) (map[string]interface{}, error) {
-	amount = roundMoney(amount)
-	if math.IsNaN(amount) || math.IsInf(amount, 0) {
-		return nil, errors.New(400, "INVALID_AMOUNT", "Budget amount must be a finite number")
-	}
+// amount is whole integer Credits; fractional input is rejected at the
+// HTTP/MCP boundary (parseCredits).
+func AddTaskBudget(ctx context.Context, pool *pg.Pool, botID int64, code string, amount int64) (map[string]interface{}, error) {
 	if amount <= 0 {
 		return nil, errors.New(400, "INVALID_AMOUNT", "Budget amount must be greater than zero")
 	}
@@ -298,7 +295,7 @@ type UpdateTaskBasicsInput struct {
 	Title        *string
 	Requirements *string
 	PostAPI      *string
-	Price        *float64
+	Price        *int64
 }
 
 // UpdateTaskBasics edits the basic fields of a closed task.
@@ -339,7 +336,7 @@ func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code stri
 	}
 	price := task.Price
 	if input.Price != nil {
-		price = roundMoney(*input.Price)
+		price = *input.Price
 	}
 
 	if err := validateTaskBasics(title, requirements, postapi, price, cfg); err != nil {
@@ -453,7 +450,7 @@ func canRefundBudget(closedAt string) bool {
 }
 
 // validateTaskBasics formats log entries for the owner dashboard.
-func validateTaskBasics(title, requirements, postapi string, price float64, cfg *OwnerTaskConfig) error {
+func validateTaskBasics(title, requirements, postapi string, price int64, cfg *OwnerTaskConfig) error {
 	if title == "" {
 		return errors.New(400, "MISSING_FIELD", "Missing required field: title")
 	}
@@ -473,20 +470,15 @@ func validateTaskBasics(title, requirements, postapi string, price float64, cfg 
 	if err := validatePostapiField(postapi); err != nil {
 		return err
 	}
-	if math.IsNaN(price) || math.IsInf(price, 0) {
-		return errors.New(400, "INVALID_PRICE", "Price must be a finite number")
-	}
 	if price <= 0 {
 		return errors.New(400, "INVALID_PRICE", "Price must be greater than zero")
 	}
 	return nil
 }
 
-// validateBudget
-func validateBudget(budget float64) error {
-	if math.IsNaN(budget) || math.IsInf(budget, 0) {
-		return errors.New(400, "INVALID_BUDGET", "Budget must be a finite number")
-	}
+// validateBudget — whole integer Credits only (fractional input is
+// rejected earlier at the public boundary; the int64 type is the guard).
+func validateBudget(budget int64) error {
 	if budget <= 0 {
 		return errors.New(400, "INVALID_BUDGET", "Budget must be greater than zero")
 	}
@@ -519,11 +511,6 @@ func validatePostapiField(postapi string) error {
 }
 
 // assertFundable lives in task_rules.go (single rule source).
-
-// roundMoney)
-func roundMoney(v float64) float64 {
-	return math.Round(v*10000) / 10000
-}
 
 // isInsufficientCredits checks if the error is the 402 INSUFFICIENT_CREDITS error.
 func isInsufficientCredits(err error) bool {

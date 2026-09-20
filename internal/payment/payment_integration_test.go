@@ -39,7 +39,7 @@ func testPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-func seedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
+func seedBot(t *testing.T, pool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	suffix := time.Now().Format("150405.000000000") + fmt.Sprintf("%d", time.Now().UnixNano()%1000)
 	var botID int64
@@ -57,7 +57,7 @@ func seedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	return botID
 }
 
-func seedPayment(t *testing.T, pool *pg.Pool, botID int64, amount float64) *string {
+func seedPayment(t *testing.T, pool *pg.Pool, botID int64, amount int64) *string {
 	t.Helper()
 	p, err := CreatePendingPayment(context.Background(), pool, botID, PaymentSpec{
 		Provider:        "manual",
@@ -76,10 +76,10 @@ func strPtr(s string) *string { return &s }
 
 // grantCount returns how many grant_payment ledger rows exist for a payment
 // code and their total amount (read-only query; tests may read the ledger).
-func grantCount(t *testing.T, pool *pg.Pool, code string) (int, float64) {
+func grantCount(t *testing.T, pool *pg.Pool, code string) (int, int64) {
 	t.Helper()
 	var n int
-	var sum float64
+	var sum int64
 	err := pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount), 0)
 		 FROM tb_transactions WHERE ref_type = 'payment' AND ref_id = $1`, code).
@@ -90,7 +90,7 @@ func grantCount(t *testing.T, pool *pg.Pool, code string) (int, float64) {
 	return n, sum
 }
 
-func balanceOf(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func balanceOf(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
 	b, err := credits.Balance(context.Background(), pool, botID)
 	if err != nil {

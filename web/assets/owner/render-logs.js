@@ -10,7 +10,7 @@ function renderLogs() {
 
     if (summary) {
         if (state.logs.type === 'credits') {
-            summary.textContent = t('logs.balance_summary', {balance: state.logs.balance.toFixed(4), total: state.logs.total});
+            summary.textContent = t('logs.balance_summary', {balance: state.logs.balance, total: state.logs.total});
         } else if (state.logs.type === 'agent') {
             summary.textContent = t('logs.agent_summary', {total: state.logs.total});
         } else {
@@ -65,8 +65,8 @@ function renderLogs() {
                         <tr>
                             <td>${row.id}</td>
                             <td>${escapeHtml(row.type)}</td>
-                            <td>${Number(row.amount).toFixed(4)}</td>
-                            <td>${Number(row.balance_after).toFixed(4)}</td>
+                            <td>${escapeHtml(String(row.amount))}</td>
+                            <td>${escapeHtml(String(row.balance_after))}</td>
                             <td>${escapeHtml([row.ref_type, row.ref_id].filter(Boolean).join(':') || '-')}</td>
                             <td>${escapeHtml(row.created_at)}</td>
                         </tr>

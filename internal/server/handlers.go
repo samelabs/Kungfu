@@ -10,6 +10,7 @@ import (
 	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/service"
+	"strings"
 )
 
 // Kungfu list pagination defaults — server-owned (no global config coupling).
@@ -471,6 +472,40 @@ func (s *Server) handleOwnerTaskGet(w http.ResponseWriter, r *http.Request) {
 	SuccessResponse(w, result, "")
 }
 
+// parseCredits extracts a whole-integer Credits value from a decoded
+// JSON body field. JSON numbers decode as float64: an integral value
+// converts; a fractional value (1000.1, 1.5, 0.0001) is REJECTED —
+// never rounded. Numeric strings are accepted when exactly integral.
+// Returns (value, present, ok).
+func parseCredits(v interface{}) (int64, bool, bool) {
+	switch t := v.(type) {
+	case nil:
+		return 0, false, true
+	case float64:
+		if t != float64(int64(t)) {
+			return 0, true, false
+		}
+		return int64(t), true, true
+	case string:
+		if t == "" {
+			return 0, true, false
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
+		if err != nil {
+			// "1000.0"-style strings are fractional presentations:
+			// parse as float once and reject anything non-integral.
+			f, ferr := strconv.ParseFloat(strings.TrimSpace(t), 64)
+			if ferr != nil || f != float64(int64(f)) {
+				return 0, true, false
+			}
+			return int64(f), true, true
+		}
+		return n, true, true
+	default:
+		return 0, true, false
+	}
+}
+
 func (s *Server) handleOwnerTaskCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
@@ -492,17 +527,17 @@ func (s *Server) handleOwnerTaskCreate(w http.ResponseWriter, r *http.Request) {
 		Requirements: getStr(input["requirements"]),
 		PostAPI:      getStr(input["postapi"]),
 	}
-	if f, ok := input["budget"].(float64); ok {
-		ctInput.Budget = f
+	if v, present, ok := parseCredits(input["budget"]); !ok {
+		ErrorResponse(w, 400, "INVALID_BUDGET", "Budget must be a whole number of credits", nil)
+		return
+	} else if present {
+		ctInput.Budget = v
 	}
-	if s, ok := input["budget"].(string); ok {
-		ctInput.Budget, _ = strconv.ParseFloat(s, 64)
-	}
-	if f, ok := input["price"].(float64); ok {
-		ctInput.Price = f
-	}
-	if s, ok := input["price"].(string); ok {
-		ctInput.Price, _ = strconv.ParseFloat(s, 64)
+	if v, present, ok := parseCredits(input["price"]); !ok {
+		ErrorResponse(w, 400, "INVALID_PRICE", "Price must be a whole number of credits", nil)
+		return
+	} else if present {
+		ctInput.Price = v
 	}
 	if b, ok := input["open_now"].(bool); ok {
 		ctInput.OpenNow = b
@@ -563,13 +598,11 @@ func (s *Server) handleOwnerTaskAddBudget(w http.ResponseWriter, r *http.Request
 		return
 	}
 	code := chi.URLParam(r, "code")
-	amountStr, _ := input["amount"].(string)
-	if amountStr == "" {
-		if f, ok := input["amount"].(float64); ok {
-			amountStr = strconv.FormatFloat(f, 'f', -1, 64)
-		}
+	amount, present, ok := parseCredits(input["amount"])
+	if !ok || !present {
+		ErrorResponse(w, 400, "INVALID_AMOUNT", "Budget amount must be a whole number of credits", nil)
+		return
 	}
-	amount, _ := strconv.ParseFloat(amountStr, 64)
 	result, err := service.AddTaskBudget(r.Context(), s.Pool, bot.ID, code, amount)
 	if err != nil {
 		handleAppError(w, err)
@@ -627,12 +660,11 @@ func (s *Server) handleOwnerTaskEdit(w http.ResponseWriter, r *http.Request) {
 		s := getStr(v)
 		utInput.PostAPI = &s
 	}
-	if v, ok := input["price"]; ok {
-		var f float64
-		if fv, ok := v.(float64); ok {
-			f = fv
-		} else if sv, ok := v.(string); ok {
-			f, _ = strconv.ParseFloat(sv, 64)
+	if v, present := input["price"]; present {
+		f, _, ok := parseCredits(v)
+		if !ok {
+			ErrorResponse(w, 400, "INVALID_PRICE", "Price must be a whole number of credits", nil)
+			return
 		}
 		utInput.Price = &f
 	}

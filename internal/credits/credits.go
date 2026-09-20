@@ -2,6 +2,10 @@
 // transactions, balance reads, the insufficient-credit invariant, and the
 // DB transaction / row-lock mechanism behind them.
 //
+// Credits are WHOLE INTEGER units (int64). There is no fractional credit
+// anywhere in this package: NaN/Inf are structurally impossible, and the
+// numeric hazards are overflow and division — both guarded explicitly.
+//
 // Boundary rules:
 //   - this package is the ONLY place that writes tb_bots.balance or inserts
 //     into tb_transactions;
@@ -25,9 +29,24 @@ import (
 	"kungfu.md/internal/pg"
 )
 
-// ErrNonFinite is returned when a credit amount or balance is NaN/±Inf —
-// the final hard gate before any balance mutation or ledger insert.
-var ErrNonFinite = fmt.Errorf("non-finite credit value")
+// maxBalance is the largest representable balance. Balance storage is
+// BIGINT; the guard below this constant keeps newBalance provably inside
+// int64 so the ledger row can never be written with an overflowed value.
+const maxBalance = math.MaxInt64
+
+// errOverflow reports an integer Credits operation that would leave the
+// int64 range. It fails closed BEFORE any mutation.
+var errOverflow = fmt.Errorf("credit amount overflows int64")
+
+// checkAdd reports whether a + b stays inside int64 without overflow.
+func checkAdd(a, b int64) (int64, error) {
+	s := a + b
+	// Overflow changes the sign relationship between operands and result.
+	if (b > 0 && s < a) || (b < 0 && s > a) {
+		return 0, errOverflow
+	}
+	return s, nil
+}
 
 // Record records a credit transaction and updates the bot's balance — the
 // single balance-mutation primitive for ordinary flows.
@@ -44,7 +63,7 @@ var ErrNonFinite = fmt.Errorf("non-finite credit value")
 // 402 INSUFFICIENT_CREDITS contract. Authoritative negative-balance
 // capability lives ONLY in RecordAuthoritativeReversal.
 func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
-	txnType string, amount float64, refType, refID *string) (float64, error) {
+	txnType string, amount int64, refType, refID *string) (int64, error) {
 
 	// Ordinary debit gate: a negative amount may never make the balance
 	// negative. Positive amounts always pass (debt offset).
@@ -56,20 +75,17 @@ func Record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 }
 
 // RecordAuthoritativeReversal is the NARROW exceptional primitive backing
-// Payment authoritative reversal: it must be a negative, finite amount and
+// Payment authoritative reversal: it must be a strictly negative amount and
 // is allowed to drive the balance BELOW zero (debt), because a provider
 // refund/dispute claws back credits the provider has already returned in
 // fiat. Production callers are restricted to internal/payment (see the
 // architecture guard test); no boolean capability switch is exposed to
 // business domains.
 func RecordAuthoritativeReversal(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
-	txnType string, amount float64, refType, refID *string) (float64, error) {
+	txnType string, amount int64, refType, refID *string) (int64, error) {
 
-	if math.IsNaN(amount) || math.IsInf(amount, 0) {
-		return 0, ErrNonFinite
-	}
 	if amount >= 0 {
-		return 0, fmt.Errorf("authoritative reversal requires a negative amount, got %v", amount)
+		return 0, fmt.Errorf("authoritative reversal requires a negative amount, got %d", amount)
 	}
 	return record(ctx, pool, tx, botID, txnType, amount, refType, refID, true)
 }
@@ -79,13 +95,7 @@ func RecordAuthoritativeReversal(ctx context.Context, pool *pg.Pool, tx pgx.Tx, 
 // package: false = reject a resulting negative balance (ordinary debit
 // contract), true = allow it (authoritative reversal only).
 func record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
-	txnType string, amount float64, refType, refID *string, allowNegative bool) (float64, error) {
-
-	// Finite invariant — the final hard gate: NaN/±Inf never reaches a
-	// balance UPDATE or a ledger INSERT.
-	if math.IsNaN(amount) || math.IsInf(amount, 0) {
-		return 0, ErrNonFinite
-	}
+	txnType string, amount int64, refType, refID *string, allowNegative bool) (int64, error) {
 
 	useTx, startedNew, err := pool.BeginOrUse(ctx, tx)
 	if err != nil {
@@ -100,24 +110,23 @@ func record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 		}
 	}()
 
-	var currentBalance float64
+	var currentBalance int64
 	err = useTx.QueryRow(ctx,
 		`SELECT balance FROM tb_bots WHERE id = $1 FOR UPDATE`, botID).Scan(&currentBalance)
 	if err != nil {
 		return 0, fmt.Errorf("bot not found")
 	}
-	if math.IsNaN(currentBalance) || math.IsInf(currentBalance, 0) {
-		return 0, ErrNonFinite
-	}
 
-	newBalance := currentBalance + amount
-	if math.IsNaN(newBalance) || math.IsInf(newBalance, 0) {
-		return 0, ErrNonFinite
+	newBalance, err := checkAdd(currentBalance, amount)
+	if err != nil {
+		// Integer overflow guard — fails closed before any mutation.
+		return 0, errors.New(500, "CREDIT_OVERFLOW",
+			"Credit operation would overflow the ledger range")
 	}
 
 	if newBalance < 0 && !allowNegative {
 		return 0, errors.New(402, "INSUFFICIENT_CREDITS",
-			fmt.Sprintf("Insufficient credits. Need %v, have %v", absFloat(amount), currentBalance))
+			fmt.Sprintf("Insufficient credits. Need %d, have %d", absInt(amount), currentBalance))
 	}
 
 	_, err = useTx.Exec(ctx,
@@ -146,23 +155,20 @@ func record(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 // Balance returns the current balance without modifying it. Errors propagate:
 // a DB failure or a missing bot returns an error (never a fake 0). A genuine
 // zero balance returns (0, nil).
-func Balance(ctx context.Context, q pg.Querier, botID int64) (float64, error) {
-	var balance float64
+func Balance(ctx context.Context, q pg.Querier, botID int64) (int64, error) {
+	var balance int64
 	err := q.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&balance)
 	if err != nil {
 		return 0, err
 	}
-	if math.IsNaN(balance) || math.IsInf(balance, 0) {
-		return 0, ErrNonFinite
-	}
 	return balance, nil
 }
 
-func absFloat(f float64) float64 {
-	if f < 0 {
-		return -f
+func absInt(i int64) int64 {
+	if i < 0 {
+		return -i
 	}
-	return f
+	return i
 }
 
 // SumAmountByTypeRef returns the SUM of transaction amounts for one bot
@@ -170,20 +176,18 @@ func absFloat(f float64) float64 {
 // for other domains to read aggregate ledger facts about their own
 // references — they never query tb_transactions directly. Works with a
 // pool or a caller-owned transaction (querier), so payment reversal can
-// read it INSIDE its locked transaction.
+// read it INSIDE its locked transaction. A SUM that leaves the int64
+// range fails closed instead of wrapping.
 func SumAmountByTypeRef(ctx context.Context, q pg.Querier, botID int64,
-	txnType string, refType, refID string) (float64, error) {
+	txnType string, refType, refID string) (int64, error) {
 
-	var sum float64
+	var sum int64
 	err := q.QueryRow(ctx, `
 		SELECT COALESCE(SUM(amount), 0) FROM tb_transactions
 		WHERE bot_id = $1 AND type = $2 AND ref_type = $3 AND ref_id = $4`,
 		botID, txnType, refType, refID).Scan(&sum)
 	if err != nil {
 		return 0, fmt.Errorf("sum transactions: %w", err)
-	}
-	if math.IsNaN(sum) || math.IsInf(sum, 0) {
-		return 0, ErrNonFinite
 	}
 	return sum, nil
 }

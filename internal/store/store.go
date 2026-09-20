@@ -44,7 +44,7 @@ var requestKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 type ProductInput struct {
 	Title        string
 	Description  string
-	CreditsPrice float64
+	CreditsPrice int64
 }
 
 // CreateProduct adds an active product to the catalog. Thin tx-owner

@@ -11,7 +11,7 @@ const storeState = {
 
 function fmtPrice(v) {
     const n = Number(v);
-    return isNaN(n) ? escapeHtml(v) : n.toFixed(4).replace(/\.?0+$/, '');
+    return isNaN(n) ? escapeHtml(v) : String(n);
 }
 
 /* ---------- products ---------- */

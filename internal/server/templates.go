@@ -160,8 +160,8 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
 		}
 		title := html.EscapeString(t.Title)
 		req := html.EscapeString(truncateStr(t.Requirements, 180))
-		reward := formatFloat(t.Price)
-		budget := formatFloat(t.Budget)
+		reward := formatCredits(t.Price)
+		budget := formatCredits(t.Budget)
 
 		b.WriteString(`<div class="task-item` + recClass + `" data-recommended-label="` + recommendedLabel + `">`)
 		b.WriteString(`<div class="task-title">` + title + `</div>`)
@@ -556,8 +556,8 @@ func ownerTaskNewHTML(d *tmplData) string {
         <label>` + d.T("owner.task_new.post_api") + `</label>
         <input name="postapi" required maxlength="2048" placeholder="` + d.T("owner.task_new.post_api_placeholder") + `">
         <div class="row">
-            <div><label>` + d.T("owner.task_new.budget") + `</label><input name="budget" type="number" step="0.0001" min="1000" required></div>
-            <div><label>` + d.T("owner.task_new.price") + `</label><input name="price" type="number" step="0.0001" min="0.0001" required></div>
+            <div><label>` + d.T("owner.task_new.budget") + `</label><input name="budget" type="number" step="1" min="1000" required></div>
+            <div><label>` + d.T("owner.task_new.price") + `</label><input name="price" type="number" step="1" min="1" required></div>
         </div>
         <label class="checkline"><input name="open_now" type="checkbox"> ` + d.T("owner.task_new.open_now") + `</label>
         <div class="actions form-actions">
@@ -625,8 +625,9 @@ func truncateStr(s string, max int) string {
 	return s[:max] + "..."
 }
 
-func formatFloat(f float64) string {
-	return strconv.FormatFloat(f, 'f', -1, 64)
+// formatCredits renders whole integer Credits (no decimals, ever).
+func formatCredits(c int64) string {
+	return strconv.FormatInt(c, 10)
 }
 
 func intToStr(n int64) string {

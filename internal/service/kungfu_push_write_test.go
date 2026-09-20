@@ -147,11 +147,11 @@ func TestPushCreateRepositoryWriteFailure(t *testing.T) {
 	}
 }
 
-func getTestBalance(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func getTestBalance(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
+		`SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
 	return b

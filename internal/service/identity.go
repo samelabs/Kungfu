@@ -151,7 +151,7 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 type AgentAccountStatus struct {
 	BotID   int64
 	BotName string
-	Balance float64
+	Balance int64
 	Status  string
 }
 

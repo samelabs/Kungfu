@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
@@ -49,19 +48,15 @@ func ListCreditLogs(ctx context.Context, q pg.Querier, botID int64, pageSize, of
 	var items []model.Transaction
 	for rows.Next() {
 		var (
-			t            model.Transaction
-			botID        int32
-			amount       pgtype.Numeric
-			balanceAfter pgtype.Numeric
-			createdAt    time.Time
+			t         model.Transaction
+			botID     int32
+			createdAt time.Time
 		)
-		if err := rows.Scan(&t.ID, &botID, &t.Type, &amount, &balanceAfter,
+		if err := rows.Scan(&t.ID, &botID, &t.Type, &t.Amount, &t.BalanceAfter,
 			&t.RefType, &t.RefID, &createdAt); err != nil {
 			return nil, err
 		}
 		t.BotID = int64(botID)
-		t.Amount = numericToFloat(amount)
-		t.BalanceAfter = numericToFloat(balanceAfter)
 		t.CreatedAt = timeToStr(createdAt)
 		items = append(items, t)
 	}

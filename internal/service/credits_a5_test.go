@@ -53,23 +53,23 @@ func TestRegistrationGenesisLedger(t *testing.T) {
 
 	ctx := context.Background()
 	var botID int64
-	var balance float64
+	var balance int64
 	if err := pool.QueryRow(ctx,
-		`SELECT id, balance::float8 FROM tb_bots WHERE bot_name = $1`, name).
+		`SELECT id, balance FROM tb_bots WHERE bot_name = $1`, name).
 		Scan(&botID, &balance); err != nil {
 		t.Fatalf("bot not found: %v", err)
 	}
 	t.Cleanup(func() { a5CleanupBot(t, pool, botID) })
 
-	if balance != 66.0 {
+	if balance != int64(66) {
 		t.Fatalf("DB balance = %v, want 66", balance)
 	}
 
 	var n int
-	var amount, balanceAfter float64
+	var amount, balanceAfter int64
 	var txnType string
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*), MIN(amount)::float8, MIN(balance_after)::float8, MIN(type)
+		SELECT COUNT(*), MIN(amount), MIN(balance_after), MIN(type)
 		FROM tb_transactions WHERE bot_id = $1`, botID).
 		Scan(&n, &amount, &balanceAfter, &txnType); err != nil {
 		t.Fatalf("ledger query: %v", err)
@@ -80,10 +80,10 @@ func TestRegistrationGenesisLedger(t *testing.T) {
 	if txnType != "grant_signup" {
 		t.Fatalf("txn type = %s, want grant_signup", txnType)
 	}
-	if amount != 66.0 {
+	if amount != int64(66) {
 		t.Fatalf("amount = %v, want +66", amount)
 	}
-	if balanceAfter != 66.0 {
+	if balanceAfter != int64(66) {
 		t.Fatalf("balance_after = %v, want 66", balanceAfter)
 	}
 }
@@ -109,8 +109,8 @@ func TestKungfuCreateIsFree(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	var balance float64
-	if err := pool.QueryRow(ctx, `SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+	var balance int64
+	if err := pool.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 0 {
@@ -149,11 +149,11 @@ func TestTaskPathStillUsesCreditsPrimitive(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	var balance float64
-	if err := pool.QueryRow(ctx, `SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+	var balance int64
+	if err := pool.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 500.0 {
+	if balance != int64(500) {
 		t.Fatalf("balance = %v, want 500 (2000 - 1500 locked)", balance)
 	}
 	var n int

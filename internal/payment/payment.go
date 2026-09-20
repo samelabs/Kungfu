@@ -18,7 +18,6 @@ package payment
 import (
 	"context"
 	"fmt"
-	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -50,7 +49,7 @@ type PaymentSpec struct {
 	ProviderOrderID   *string // optional at creation; set by the provider adapter
 	AmountMinor       int64   // fiat, integer minor units (e.g. cents)
 	Currency          string  // ISO 4217, uppercase
-	Credits           float64 // credits granted on paid
+	Credits           int64   // whole credits granted on paid
 }
 
 // CreatePendingPayment records a pending payment fact for a bot.
@@ -199,11 +198,8 @@ func validateSpec(spec PaymentSpec) error {
 	if spec.AmountMinor <= 0 {
 		return errors.New(400, "INVALID_AMOUNT", "Amount must be greater than zero")
 	}
-	if math.IsNaN(spec.Credits) || math.IsInf(spec.Credits, 0) {
-		return errors.New(400, "INVALID_CREDITS", "Credits must be a finite number")
-	}
 	if spec.Credits <= 0 {
-		return errors.New(400, "INVALID_CREDITS", "Credits must be greater than zero")
+		return errors.New(400, "INVALID_CREDITS", "Credits must be a positive whole integer")
 	}
 	if spec.ProviderOrderID != nil {
 		oid := *spec.ProviderOrderID

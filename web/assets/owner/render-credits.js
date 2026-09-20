@@ -7,9 +7,10 @@
 function creditsFormatAmount(amountMinor, currency) {
     if (typeof amountMinor !== 'number' || !Number.isFinite(amountMinor)) return '';
     const cur = (currency || '').toUpperCase();
+    // Fiat presentation: EXACTLY two decimals — never suppress .00
+    // (1000 minor -> "10.00", 1999 -> "19.99", 1 -> "0.01").
     const major = amountMinor / 100;
-    const formatted = Number.isInteger(major) ? String(major) : major.toFixed(2);
-    return `${formatted} ${cur}`;
+    return `${major.toFixed(2)} ${cur}`;
 }
 
 function renderCredits() {

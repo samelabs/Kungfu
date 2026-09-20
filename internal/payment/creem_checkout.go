@@ -31,9 +31,9 @@ type CreemRuntime struct {
 // config layer defines CreemPackage; this alias keeps the runtime
 // decoupled from config types).
 type CreemPackageSpec = struct {
-	Code      string  `json:"code"`
-	ProductID string  `json:"product_id"`
-	Credits   float64 `json:"credits"`
+	Code      string `json:"code"`
+	ProductID string `json:"product_id"`
+	Credits   int64  `json:"credits"`
 }
 
 // CheckoutResult is the owner-facing outcome of StartCreemCheckout.
@@ -282,11 +282,11 @@ func ReconcileCreemCompletion(ctx context.Context, pool *pg.Pool, rt *CreemRunti
 // never sees product_id, keys, or success_url — only what the owner
 // needs to choose a package.
 type OwnerCreditsPackage struct {
-	Code        string  `json:"code"`
-	Name        string  `json:"name"`         // live Creem product name
-	AmountMinor int64   `json:"amount_minor"` // live Creem product price
-	Currency    string  `json:"currency"`     // live Creem product currency
-	Credits     float64 `json:"credits"`      // server package config
+	Code        string `json:"code"`
+	Name        string `json:"name"`         // live Creem product name
+	AmountMinor int64  `json:"amount_minor"` // live Creem product price
+	Currency    string `json:"currency"`     // live Creem product currency
+	Credits     int64  `json:"credits"`      // server package config (whole credits)
 }
 
 // ListCreemPackages resolves the full read-only catalog: for every

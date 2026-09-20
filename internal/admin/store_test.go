@@ -22,7 +22,7 @@ import (
 )
 
 // b2SeedBot creates a bot with a balance for redemption flows.
-func b2SeedBot(t *testing.T, dbPool *pg.Pool, balance float64) int64 {
+func b2SeedBot(t *testing.T, dbPool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	var id int64
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -43,7 +43,7 @@ func b2SeedBot(t *testing.T, dbPool *pg.Pool, balance float64) int64 {
 }
 
 // b2SeedRedemption creates a pending_review redemption with its spend.
-func b2SeedRedemption(t *testing.T, dbPool *pg.Pool, botID int64, price float64) string {
+func b2SeedRedemption(t *testing.T, dbPool *pg.Pool, botID int64, price int64) string {
 	t.Helper()
 	p, err := store.CreateProduct(context.Background(), dbPool, store.ProductInput{
 		Title: "B2 Prod " + time.Now().Format("150405.000000000"), CreditsPrice: price,
@@ -59,9 +59,9 @@ func b2SeedRedemption(t *testing.T, dbPool *pg.Pool, botID int64, price float64)
 	return res.Redemption.Code
 }
 
-func b2Balance(t *testing.T, dbPool *pg.Pool, botID int64) float64 {
+func b2Balance(t *testing.T, dbPool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := dbPool.QueryRow(context.Background(),
 		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&b); err != nil {
 		t.Fatalf("balance: %v", err)
@@ -114,7 +114,7 @@ func TestB2SuperadminFullStoreFlow(t *testing.T) {
 
 	// create → edit → deactivate → activate
 	created, err := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{
-		Title: "Flow Item", Description: "first", CreditsPrice: 12.5,
+		Title: "Flow Item", Description: "first", CreditsPrice: 12,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -123,14 +123,14 @@ func TestB2SuperadminFullStoreFlow(t *testing.T) {
 		t.Fatalf("new product status = %s", created.Status)
 	}
 	newTitle := "Flow Item v2"
-	newPrice := 15.0
+	newPrice := int64(15)
 	updated, err := UpdateStoreProduct(ctx, dbPool, root, created.Code, store.ProductPatch{
 		Title: &newTitle, CreditsPrice: &newPrice,
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated.Title != "Flow Item v2" || updated.CreditsPrice != 15.0 || updated.Description == nil || *updated.Description != "first" {
+	if updated.Title != "Flow Item v2" || updated.CreditsPrice != 15 || updated.Description == nil || *updated.Description != "first" {
 		t.Fatalf("partial patch broken: %+v", updated)
 	}
 	off, err := SetStoreProductStatus(ctx, dbPool, root, created.Code, "inactive")
@@ -149,7 +149,7 @@ func TestB2SuperadminFullStoreFlow(t *testing.T) {
 
 	// redemption full cycle: approve → fulfill
 	botID := b2SeedBot(t, dbPool, 100)
-	code := b2SeedRedemption(t, dbPool, botID, 12.5)
+	code := b2SeedRedemption(t, dbPool, botID, 12)
 	oc, err := ApproveStoreRedemption(ctx, dbPool, root, code, "ok")
 	if err != nil || !oc.Transitioned || oc.After.Status != "approved" {
 		t.Fatalf("approve: %v %+v", err, oc)
@@ -339,7 +339,7 @@ func TestB2ConcurrentEditVsRedeemSnapshotIntegrity(t *testing.T) {
 	const racers = 8
 	var wg sync.WaitGroup
 	errs := make(chan error, racers)
-	newTitle, newPrice := "New Title", 20.0
+	newTitle, newPrice := "New Title", int64(20)
 
 	start := make(chan struct{})
 	for i := 0; i < racers; i++ {
@@ -376,7 +376,7 @@ func TestB2ConcurrentEditVsRedeemSnapshotIntegrity(t *testing.T) {
 	defer rows.Close()
 	for rows.Next() {
 		var title string
-		var cost float64
+		var cost int64
 		if err := rows.Scan(&title, &cost); err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +419,7 @@ func TestB2StoreAuditFacts(t *testing.T) {
 		t.Fatalf("create audit target = %s, want code %s", targetID, created.Code)
 	}
 	_ = json.Unmarshal(afterBytes, &after)
-	if after["title"] != "Audit Item" || after["credits_price"] != 5.0 || after["status"] != "active" {
+	if after["title"] != "Audit Item" || int64(after["credits_price"].(float64)) != 5 || after["status"] != "active" {
 		t.Fatalf("create audit facts: %v", after)
 	}
 
@@ -442,7 +442,7 @@ func TestB2StoreAuditFacts(t *testing.T) {
 	if b4["title"] != "Audit Item" || af["title"] != "Audit Item v2" {
 		t.Fatalf("update audit before/after: %v → %v", b4, af)
 	}
-	if af["credits_price"] != 5.0 || af["status"] != "active" {
+	if int64(af["credits_price"].(float64)) != 5 || af["status"] != "active" {
 		t.Fatalf("update audit must carry full snapshot: %v", af)
 	}
 
@@ -467,7 +467,7 @@ func TestB2StoreAuditFacts(t *testing.T) {
 	if before2["status"] != "pending_review" || after3["status"] != "rejected" {
 		t.Fatalf("reject audit states: %v → %v", before2, after3)
 	}
-	if before2["code"] != code || after3["credits_cost"] != 5.0 {
+	if before2["code"] != code || int64(after3["credits_cost"].(float64)) != 5 {
 		t.Fatalf("reject audit facts incomplete: %v %v", before2, after3)
 	}
 	if meta["transitioned"] != true {

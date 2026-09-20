@@ -113,9 +113,9 @@ func (s *Server) handleAdminStoreProductsCreate(w http.ResponseWriter, r *http.R
 		MissingField(w, "title, credits_price")
 		return
 	}
-	price, ok := jsonFloat(priceV)
+	price, ok := jsonCredits(priceV)
 	if !ok {
-		ErrorResponse(w, 400, "INVALID_PRICE", "credits_price must be a number", nil)
+		ErrorResponse(w, 400, "INVALID_PRICE", "credits_price must be a whole number", nil)
 		return
 	}
 	description := ""
@@ -187,9 +187,9 @@ func (s *Server) handleAdminStoreProductPatch(w http.ResponseWriter, r *http.Req
 		provided++
 	}
 	if v, exists := input["credits_price"]; exists {
-		fv, ok := jsonFloat(v)
+		fv, ok := jsonCredits(v)
 		if !ok {
-			ErrorResponse(w, 400, "INVALID_PRICE", "credits_price must be a number", nil)
+			ErrorResponse(w, 400, "INVALID_PRICE", "credits_price must be a whole number", nil)
 			return
 		}
 		patch.CreditsPrice = &fv
@@ -389,7 +389,15 @@ func pageParams(pageStr, sizeStr string) (int, int) {
 	return page, pageSize
 }
 
-func jsonFloat(v interface{}) (float64, bool) {
+// jsonCredits extracts a whole-integer Credits value from a decoded
+// JSON field. Fractional numbers fail closed (never rounded).
+func jsonCredits(v interface{}) (int64, bool) {
 	f, ok := v.(float64)
-	return f, ok
+	if !ok {
+		return 0, false
+	}
+	if f != float64(int64(f)) {
+		return 0, false
+	}
+	return int64(f), true
 }

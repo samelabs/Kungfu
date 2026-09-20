@@ -243,7 +243,7 @@ func adminStoreProductsHTML() string {
             <label for="storeNewDesc">Description (optional)</label>
             <input id="storeNewDesc" type="text" maxlength="500" autocomplete="off">
             <label for="storeNewPrice">Credits price</label>
-            <input id="storeNewPrice" type="number" step="any" min="0.0001" required autocomplete="off">
+            <input id="storeNewPrice" type="number" step="1" min="1" required autocomplete="off">
             <button class="btn primary" type="submit">Create</button>
             <p class="notice" id="storeProductCreateNotice" hidden></p>
         </form>

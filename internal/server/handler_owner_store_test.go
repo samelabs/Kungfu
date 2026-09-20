@@ -35,7 +35,7 @@ func storeOwnerCookie(t *testing.T, s *Server, botID int64) *http.Cookie {
 	return parseSetCookie(t, w.Header().Get("Set-Cookie"))
 }
 
-func storeSeedProduct(t *testing.T, s *Server, price float64) string {
+func storeSeedProduct(t *testing.T, s *Server, price int64) string {
 	t.Helper()
 	p, err := store.CreateProduct(context.Background(), s.Pool, store.ProductInput{
 		Title:        fmt.Sprintf("SE Product %d", time.Now().UnixNano()),
@@ -75,20 +75,20 @@ func storeDo(t *testing.T, router http.Handler, cookie *http.Cookie, method, pat
 	return rec, parsed
 }
 
-func storeBotBalance(t *testing.T, s *Server, botID int64) float64 {
+func storeBotBalance(t *testing.T, s *Server, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := s.Pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
+		`SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
 		t.Fatal(err)
 	}
 	return b
 }
 
-func storeSpendCount(t *testing.T, s *Server, botID int64, refID string) (int, float64) {
+func storeSpendCount(t *testing.T, s *Server, botID int64, refID string) (int, int64) {
 	t.Helper()
 	var n int
-	var sum float64
+	var sum int64
 	if err := s.Pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount),0) FROM tb_transactions
 		 WHERE bot_id = $1 AND type = 'spend_redemption' AND ref_id = $2`, botID, refID).Scan(&n, &sum); err != nil {
@@ -156,7 +156,7 @@ func TestStoreProductsActiveOnly(t *testing.T) {
 }
 
 // seedStoreBot creates an independent bot (balance-controlled) + cookie.
-func seedStoreBot(t *testing.T, s *Server, balance float64) (int64, *http.Cookie) {
+func seedStoreBot(t *testing.T, s *Server, balance int64) (int64, *http.Cookie) {
 	t.Helper()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	var botID int64

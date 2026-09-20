@@ -7,7 +7,7 @@ type Bot struct {
 	APIKeyLast4  string  `db:"api_key_last4" json:"-"`
 	PasswordHash string  `db:"password_hash" json:"-"`
 	KeyIssuedAt  *string `db:"key_issued_at" json:"key_issued_at,omitempty"`
-	Balance      float64 `db:"balance" json:"balance"`
+	Balance      int64   `db:"balance" json:"balance"`
 	RegisterIP   *string `db:"register_ip" json:"register_ip,omitempty"`
 	Status       string  `db:"status" json:"status"`
 	LastActiveAt *string `db:"last_active_at" json:"last_active_at,omitempty"`

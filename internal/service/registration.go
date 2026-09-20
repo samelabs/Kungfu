@@ -15,7 +15,7 @@ import (
 )
 
 // SignupGrant is the credit amount granted to a freshly registered bot.
-const SignupGrant = 66.0
+const SignupGrant = 66
 
 // RegistrationResult is the return value of Register.
 type RegistrationResult struct {

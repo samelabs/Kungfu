@@ -36,7 +36,7 @@ func tcTestPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-func tcSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
+func tcSeedBot(t *testing.T, pool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	suffix := time.Now().Format("150405.000000000") + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
 	var botID int64
@@ -54,7 +54,7 @@ func tcSeedBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	return botID
 }
 
-func tcSeedTask(t *testing.T, pool *pg.Pool, botID int64, status, postapi string, price, budget float64) string {
+func tcSeedTask(t *testing.T, pool *pg.Pool, botID int64, status, postapi string, price, budget int64) string {
 	t.Helper()
 	code := "tc" + strings.ReplaceAll(time.Now().Format("150405.000000000"), ".", "") +
 		fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
@@ -80,9 +80,9 @@ func tcSeedTask(t *testing.T, pool *pg.Pool, botID int64, status, postapi string
 	return code
 }
 
-func tcBudget(t *testing.T, pool *pg.Pool, code string) (float64, string) {
+func tcBudget(t *testing.T, pool *pg.Pool, code string) (int64, string) {
 	t.Helper()
-	var budget float64
+	var budget int64
 	var status string
 	if err := pool.QueryRow(context.Background(),
 		`SELECT budget, status FROM tb_tasks WHERE code = $1`, code).Scan(&budget, &status); err != nil {
@@ -91,10 +91,10 @@ func tcBudget(t *testing.T, pool *pg.Pool, code string) (float64, string) {
 	return budget, status
 }
 
-func tcEarnCount(t *testing.T, pool *pg.Pool, botID int64) (int, float64) {
+func tcEarnCount(t *testing.T, pool *pg.Pool, botID int64) (int, int64) {
 	t.Helper()
 	var n int
-	var sum float64
+	var sum int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount),0) FROM tb_transactions
 		 WHERE bot_id = $1 AND type = 'earn_task'`, botID).Scan(&n, &sum); err != nil {
@@ -103,11 +103,11 @@ func tcEarnCount(t *testing.T, pool *pg.Pool, botID int64) (int, float64) {
 	return n, sum
 }
 
-func tcBalance(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func tcBalance(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
+		`SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
 		t.Fatal(err)
 	}
 	return b
@@ -321,7 +321,7 @@ func TestSubmitSuccessAtomicSettlement(t *testing.T) {
 	if b := tcBalance(t, pool, agent); b != 5 {
 		t.Fatalf("agent balance = %v, want 5", b)
 	}
-	if res.Billing["reward"] != 5.0 {
+	if res.Billing["reward"] != int64(5) {
 		t.Fatalf("reward = %v", res.Billing["reward"])
 	}
 }
@@ -451,7 +451,7 @@ func TestConcurrentSubmitsNoOverDelivery(t *testing.T) {
 	if budget != 600 || status != "closed" {
 		t.Fatalf("final = %v/%s, want 600/closed", budget, status)
 	}
-	totalEarn := 0.0
+	totalEarn := int64(0)
 	for _, ag := range agents {
 		n, sum := tcEarnCount(t, pool, ag)
 		if n > 1 {
@@ -606,7 +606,7 @@ func TestRefundBudgetAtomic(t *testing.T) {
 		t.Fatalf("balance = %v, want %v (+1195 refund)", after, before+1195)
 	}
 	var n int
-	var sum float64
+	var sum int64
 	if err := pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount),0) FROM tb_transactions
 		 WHERE bot_id = $1 AND type = 'refund_task'`, owner).Scan(&n, &sum); err != nil {
@@ -655,7 +655,7 @@ func TestCreateTaskLockAtomic(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM tb_tasks WHERE code = $1`, code)
 	})
 	var lockN int
-	var lockSum float64
+	var lockSum int64
 	_ = pool.QueryRow(context.Background(),
 		`SELECT COUNT(*), COALESCE(SUM(amount),0) FROM tb_transactions
 		 WHERE bot_id = $1 AND type = 'lock_task'`, owner).Scan(&lockN, &lockSum)

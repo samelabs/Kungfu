@@ -136,7 +136,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 
 	// create product
 	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
-		`{"title":"HTTP Item","description":"via http","credits_price":7.25}`)
+		`{"title":"HTTP Item","description":"via http","credits_price":7}`)
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -148,7 +148,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	if created.Data.Code == "" || created.Data.Status != "active" || created.Data.Price != 7.25 {
+	if created.Data.Code == "" || created.Data.Status != "active" || created.Data.Price != 7 {
 		t.Fatalf("create response: %s", rec.Body.String())
 	}
 
@@ -165,7 +165,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &patched)
-	if patched.Data.Title != "HTTP Item v2" || patched.Data.Description == nil || *patched.Data.Description != "via http" || patched.Data.Price != 7.25 {
+	if patched.Data.Title != "HTTP Item v2" || patched.Data.Description == nil || *patched.Data.Description != "via http" || patched.Data.Price != 7 {
 		t.Fatalf("partial patch broken: %s", rec.Body.String())
 	}
 
@@ -220,10 +220,10 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 			INSERT INTO tb_redemptions (code, bot_id, product_id, product_title, credits_cost, request_key)
 			VALUES (substr(md5(random()::text), 1, 12), $1,
 				(SELECT id FROM tb_store_products WHERE code=$2),
-				(SELECT title FROM tb_store_products WHERE code=$2), 7.25, $3)
+				(SELECT title FROM tb_store_products WHERE code=$2), 7, $3)
 			RETURNING code)
 		INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
-		SELECT $1, 'spend_redemption', -7.25, 42.75, 'redemption', ins.code, NOW() FROM ins
+		SELECT $1, 'spend_redemption', -7, 42, 'redemption', ins.code, NOW() FROM ins
 		RETURNING (SELECT code FROM ins)`, botID, created.Data.Code, "rk"+suffix).Scan(&code); err != nil {
 		t.Fatalf("seed redemption: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 
 	// seed: product + bot + pending redemption (with spend)
 	rec = e.mutateJSON(t, "POST", "/api/admin/store/products",
-		`{"title":"MO Item","credits_price":9.5}`)
+		`{"title":"MO Item","credits_price":9}`)
 	if rec.Code != 200 {
 		t.Fatalf("product: %d", rec.Code)
 	}
@@ -371,11 +371,11 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &prod)
 	var botID int64
 	suffix := fmt.Sprint(time.Now().UnixNano())
-	// balance starts at 90.5 = 100 − 9.5 spend (the seed ledger row
+	// balance starts at 91 = 100 − 9 spend (the seed ledger row
 	// below records the spend; the reject must refund back to 100)
 	if err := e.s.Pool.QueryRow(ctx, `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
-		VALUES ($1, $2, $3, 'x', 'active', 90.5) RETURNING id`,
+		VALUES ($1, $2, $3, 'x', 'active', 91) RETURNING id`,
 		"mobot_"+suffix, s61SeedKeyHash("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix))), s61SeedLast4("kf_live_"+suffix+strings.Repeat("a", 64-len(suffix)))).Scan(&botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
@@ -390,10 +390,10 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 			INSERT INTO tb_redemptions (code, bot_id, product_id, product_title, credits_cost, request_key)
 			VALUES (substr(md5(random()::text), 1, 12), $1,
 				(SELECT id FROM tb_store_products WHERE code=$2),
-				(SELECT title FROM tb_store_products WHERE code=$2), 9.5, $3)
+				(SELECT title FROM tb_store_products WHERE code=$2), 9, $3)
 			RETURNING code)
 		INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
-		SELECT $1, 'spend_redemption', -9.5, 90.5, 'redemption', ins.code, NOW() FROM ins
+		SELECT $1, 'spend_redemption', -9, 91, 'redemption', ins.code, NOW() FROM ins
 		RETURNING (SELECT code FROM ins)`, botID, prod.Data.Code, "rk"+suffix).Scan(&redCode); err != nil {
 		t.Fatalf("seed redemption: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &tr)
-	if tr.Data.Code != redCode || tr.Data.Status != "rejected" || tr.Data.Cost != 9.5 {
+	if tr.Data.Code != redCode || tr.Data.Status != "rejected" || tr.Data.Cost != 9 {
 		t.Fatalf("transition response is not the committed After state: %s", rec.Body.String())
 	}
 

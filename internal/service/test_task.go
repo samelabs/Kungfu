@@ -174,7 +174,7 @@ func TestTaskDeliver(ctx context.Context, pool *pg.Pool, botID int64, code strin
 // testSettleLockedTask decrements the budget for a successful owner test,
 // with no credit award. pending stays pending; open auto-closes when the
 // remainder can no longer fund one more delivery.
-func testSettleLockedTask(ctx context.Context, tx pgQuerier, task *repository.TaskForUpdate, price float64) (float64, bool, error) {
+func testSettleLockedTask(ctx context.Context, tx pgQuerier, task *repository.TaskForUpdate, price int64) (int64, bool, error) {
 	nextBudget := task.Budget - price
 	mustClose := false
 	nextStatus := task.Status

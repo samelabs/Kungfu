@@ -40,7 +40,7 @@ const (
 // the ledger type booked. Ledger types keep their historical names so the
 // existing statement stays continuous — no data migration.
 type policy struct {
-	amount  float64
+	amount  int64
 	txnType string
 	errCode string
 	errMsg  string

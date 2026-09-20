@@ -88,7 +88,7 @@ func TestSubmitMaxLengthPostAPIDelivers(t *testing.T) {
 	if *hits != 1 {
 		t.Fatalf("POST hits = %d, want 1", *hits)
 	}
-	if res.Billing["reward"] != 5.0 {
+	if res.Billing["reward"] != int64(5) {
 		t.Fatalf("reward = %v", res.Billing["reward"])
 	}
 }

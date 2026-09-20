@@ -32,7 +32,7 @@ func a7TestPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-func a7TestBot(t *testing.T, pool *pg.Pool, balance float64) (int64, string, string) {
+func a7TestBot(t *testing.T, pool *pg.Pool, balance int64) (int64, string, string) {
 	t.Helper()
 	suffix := time.Now().Format("150405.000000000")
 	name := "a7id_" + suffix
@@ -102,7 +102,7 @@ func TestAccountOverviewComposesCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("overview: %v", err)
 	}
-	if res["balance"] != 42.0 {
+	if res["balance"] != int64(42) {
 		t.Fatalf("overview balance = %v, want 42", res["balance"])
 	}
 }
@@ -132,7 +132,7 @@ func TestCurrentOwnerKeyComposesCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("key: %v", err)
 	}
-	if res["balance"] != 13.0 {
+	if res["balance"] != int64(13) {
 		t.Fatalf("key balance = %v, want 13", res["balance"])
 	}
 
@@ -164,12 +164,12 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 	})
 
 	// Push is free: balance unchanged.
-	var balance float64
+	var balance int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, botID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
-	if balance != 5.0 {
+	if balance != int64(5) {
 		t.Fatalf("balance = %v, want 5 (create is free)", balance)
 	}
 
@@ -189,7 +189,7 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 	if _, has := detail["balance"]; has {
 		t.Fatal("owner get response carries balance — storage contract must not")
 	}
-	if balance != 5.0 {
+	if balance != int64(5) {
 		t.Fatalf("owner get charged: balance = %v, want 5", balance)
 	}
 
@@ -230,9 +230,9 @@ func TestPublicKungfuGetIsFree(t *testing.T) {
 		t.Fatal("public get response carries balance — storage contract must not")
 	}
 
-	var balance float64
+	var balance int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
+		`SELECT balance FROM tb_bots WHERE id=$1`, readerID).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 0 {

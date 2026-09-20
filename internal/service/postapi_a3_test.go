@@ -124,7 +124,7 @@ func a3TestPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-func a3TestBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
+func a3TestBot(t *testing.T, pool *pg.Pool, balance int64) int64 {
 	t.Helper()
 	suffix := time.Now().Format("150405.000000000")
 	var botID int64
@@ -147,11 +147,11 @@ func a3TestBot(t *testing.T, pool *pg.Pool, balance float64) int64 {
 	return botID
 }
 
-func a3Balance(t *testing.T, pool *pg.Pool, botID int64) float64 {
+func a3Balance(t *testing.T, pool *pg.Pool, botID int64) int64 {
 	t.Helper()
-	var b float64
+	var b int64
 	if err := pool.QueryRow(context.Background(),
-		`SELECT balance::float8 FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
+		`SELECT balance FROM tb_bots WHERE id = $1`, botID).Scan(&b); err != nil {
 		t.Fatalf("balance: %v", err)
 	}
 	return b

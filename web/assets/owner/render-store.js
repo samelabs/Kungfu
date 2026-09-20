@@ -13,7 +13,7 @@ function renderStore() {
     const balanceEl = qs('#storeBalance');
     if (balanceEl) {
         const balance = state.account && state.account.balance != null ? Number(state.account.balance) : null;
-        balanceEl.textContent = balance != null ? balance.toFixed(4) : '—';
+        balanceEl.textContent = balance != null ? String(balance) : '—';
     }
 
     const wrap = qs('#storeProducts');

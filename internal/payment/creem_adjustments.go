@@ -12,7 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"math/bits"
 	"strings"
 
 	"kungfu.md/internal/credits"
@@ -226,10 +226,36 @@ func trimTo(s string, n int) *string {
 
 // -- persistence (idempotent, row-locked) --
 
-// round4 mirrors the NUMERIC(20,4) ledger precision: values are rounded
-// to 4 decimal places at the reversal computation boundary.
-func round4(x float64) float64 {
-	return math.Round(x*10000) / 10000
+// reversalTarget computes the cumulative whole-credit reversal target
+// for original credits C, cumulative refunded minor R, and paid minor P:
+//
+//	target_reversed = floor(C * R / P)        (partial refund)
+//	R == P          -> target_reversed = C    (full refund: exact)
+//
+// Integer arithmetic with overflow protection — never float64. Cumulative
+// FLOOR prevents fractional credits AND prevents over-clawback before a
+// full refund (monotone non-decreasing in R, never exceeding C).
+func reversalTarget(credits int64, refundedMinor, paidMinor int64) (int64, error) {
+	if paidMinor <= 0 {
+		return 0, fmt.Errorf("reversal: amount_paid %d not positive", paidMinor)
+	}
+	if refundedMinor < 0 || refundedMinor > paidMinor {
+		return 0, fmt.Errorf("reversal: refunded %d outside [0, %d]", refundedMinor, paidMinor)
+	}
+	if credits <= 0 {
+		return 0, fmt.Errorf("reversal: original credits %d not positive", credits)
+	}
+	if refundedMinor == paidMinor {
+		return credits, nil // full refund: exactly the original grant
+	}
+	// product := credits * refundedMinor, computed as a 128-bit product
+	// (bits.Mul64) so an overflow is detected exactly, never wrapped.
+	hi, lo := bits.Mul64(uint64(credits), uint64(refundedMinor))
+	if hi != 0 {
+		return 0, fmt.Errorf("reversal: proportional product overflows int64 (credits=%d refunded=%d)", credits, refundedMinor)
+	}
+	prod := int64(lo) // credits>0, refunded>=0 → prod in [0, MaxInt64]
+	return prod / paidMinor, nil
 }
 
 // adjustmentBasis is the canonical provider-transaction basis persisted
@@ -310,9 +336,9 @@ func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, inc
 //	Assert adjustment basis consistency
 //	INSERT adjustment fact ON CONFLICT DO NOTHING
 //	Read persisted facts: MAX(refunded_amount), canonical basis
-//	target = round4(credits * MAX_refunded / amount_paid)   [R==P → C]
+//	target = floor(credits * MAX_refunded / amount_paid)   [R==P → C]
 //	already_reversed = -SUM(reverse_payment ledger for this payment)
-//	delta = round4(target - already_reversed)
+//	delta = target - already_reversed (whole credits)
 //	if delta > 0 → credits.RecordAuthoritativeReversal(-delta)
 //	COMMIT
 //
@@ -372,9 +398,10 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 	}
 
 	// Target cumulative reversal. R == P → exactly the original credits.
-	target := p.Credits
-	if maxRefunded != basis.amountPaid {
-		target = round4(p.Credits * float64(maxRefunded) / float64(basis.amountPaid))
+	// Integer cumulative FLOOR otherwise (see reversalTarget).
+	target, err := reversalTarget(p.Credits, maxRefunded, basis.amountPaid)
+	if err != nil {
+		return false, err
 	}
 
 	// Already reversed, from the Credits ledger (never a direct
@@ -384,14 +411,14 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 		return false, fmt.Errorf("ledger read: %w", err)
 	}
 	if sum > 0 {
-		return false, fmt.Errorf("reconciliation: reverse_payment ledger sum %v is positive", sum)
+		return false, fmt.Errorf("reconciliation: reverse_payment ledger sum %d is positive", sum)
 	}
 	alreadyReversed := -sum
 	if alreadyReversed < 0 || alreadyReversed > p.Credits {
-		return false, fmt.Errorf("reconciliation: already_reversed %v outside [0, %v]", alreadyReversed, p.Credits)
+		return false, fmt.Errorf("reconciliation: already_reversed %d outside [0, %d]", alreadyReversed, p.Credits)
 	}
 
-	if delta := round4(target - alreadyReversed); delta > 0 {
+	if delta := target - alreadyReversed; delta > 0 {
 		refType := "payment"
 		if _, err := credits.RecordAuthoritativeReversal(ctx, pool, tx, p.BotID,
 			"reverse_payment", -delta, &refType, &p.Code); err != nil {

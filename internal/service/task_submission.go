@@ -164,7 +164,7 @@ func Submit(ctx context.Context, pool *pg.Pool, taskCode string, botID int64, in
 // is already locked by the caller. A budget write failure returns an
 // error — earn_task can never land without the budget write succeeding.
 func settleLockedTask(ctx context.Context, pool *pg.Pool, tx pgx.Tx,
-	task *repository.TaskForUpdate, botID int64, price float64) (float64, error) {
+	task *repository.TaskForUpdate, botID int64, price int64) (int64, error) {
 
 	// Decrement budget with conditional auto-close (repository takes the
 	// minimum threshold explicitly; the unified rule also closes when the
