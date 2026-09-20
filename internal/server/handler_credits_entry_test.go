@@ -19,7 +19,8 @@ import (
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/i18n"
 
-	"bytes")
+	"bytes"
+)
 
 // i18nLocaleURLForTest wraps the production locale URL helper used by
 // the nav so the active-state assertion matches the rendered href.
@@ -134,11 +135,11 @@ func TestPackagesAPIProjection(t *testing.T) {
 	var out struct {
 		Data struct {
 			Packages []struct {
-				Code        string   `json:"code"`
-				Name        string   `json:"name"`
-				AmountMinor string   `json:"amount_minor"`
-				Currency    string   `json:"currency"`
-				Credits     string   `json:"credits"`
+				Code        string `json:"code"`
+				Name        string `json:"name"`
+				AmountMinor string `json:"amount_minor"`
+				Currency    string `json:"currency"`
+				Credits     string `json:"credits"`
 			} `json:"packages"`
 		} `json:"data"`
 	}

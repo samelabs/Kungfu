@@ -142,9 +142,9 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	}
 	var created struct {
 		Data struct {
-			Code   string  `json:"code"`
-			Status string  `json:"status"`
-			Price  string  `json:"credits_price"`
+			Code   string `json:"code"`
+			Status string `json:"status"`
+			Price  string `json:"credits_price"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
