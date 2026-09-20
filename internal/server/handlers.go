@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -10,7 +9,6 @@ import (
 	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/service"
-	"strings"
 
 	"encoding/json"
 )
@@ -381,7 +379,10 @@ func (s *Server) handleKey(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Key retrieved")
+	// Same browser economic wire authority as /api/account: the owner
+	// browser must never meet a JSON numeric balance (int64 > 2^53
+	// corrupts in JS Number). One converter, no second helper.
+	SuccessResponse(w, ownerOverviewWire(result), "Key retrieved")
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -495,17 +496,14 @@ func parseCredits(v interface{}) (int64, bool, bool) {
 		}
 		return 0, true, false
 	case string:
-		if t == "" {
-			return 0, true, false
+		// The ONE canonical parser (shared with jsonCredits): no
+		// trim, no float, no coercion. The browser may trim user
+		// input once as UX normalization before sending; non-canonical
+		// wire input is rejected here, never silently repaired.
+		if n, err := parseCanonicalEconInt(t); err == nil {
+			return n, true, true
 		}
-		// Canonical integer strings only — strconv.ParseInt, never
-		// ParseFloat. "1000.0"-style integral decimal presentations
-		// are rejected as non-canonical rather than float-converted.
-		n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
-		if err != nil {
-			return 0, true, false
-		}
-		return n, true, true
+		return 0, true, false
 	default:
 		return 0, true, false
 	}

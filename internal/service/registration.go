@@ -21,7 +21,7 @@ const SignupGrant = 66
 type RegistrationResult struct {
 	BotName string `json:"bot_name"`
 	Key     string `json:"key"`
-	Balance int    `json:"balance"`
+	Balance int64  `json:"balance"`
 	Message string `json:"message"`
 }
 
@@ -96,7 +96,11 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}
 
-	if _, err := credits.Record(ctx, pool, tx, botID, "grant_signup", SignupGrant, nil, nil); err != nil {
+	// credits.Record returns the resulting balance of the SAME
+	// transaction that grants signup credits — the authoritative
+	// committed balance, not a second invented fact.
+	balance, err := credits.Record(ctx, pool, tx, botID, "grant_signup", SignupGrant, nil, nil)
+	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}
 
@@ -111,7 +115,7 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 	return &RegistrationResult{
 		BotName: name,
 		Key:     rawKey,
-		Balance: 0, // API returns 0; the 66-credit bonus is in the DB
+		Balance: balance, // committed balance produced by the grant tx
 		Message: "Registration successful. Give only the key to agents; keep the password for human key management.",
 	}, nil
 }

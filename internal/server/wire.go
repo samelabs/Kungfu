@@ -20,12 +20,54 @@ package server
 // The browser must preserve/display/send these strings verbatim; all
 // business validation stays with the server authority.
 
-import "strconv"
+import (
+	"errors"
+	"strconv"
+)
 
 // econString converts an authoritative economic int64 into the
 // canonical decimal string for browser-facing responses.
 func econString(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+// parseCanonicalEconInt is the ONE canonical decimal integer string
+// parser for the server package — no trim, no float fallback, no
+// leading zeros, no exponent, no '+', no '-0'. Both parseCredits
+// (owner boundaries) and jsonCredits (admin boundaries) reuse it, so
+// there are not two string-integer rules. Syntax/range only: sign
+// BUSINESS rules stay with the domain authority.
+//
+// Canonical form: optional '-', then "0" or [1-9][0-9]*.
+func parseCanonicalEconInt(s string) (int64, error) {
+	if s == "" {
+		return 0, errors.New("empty")
+	}
+	neg := s[0] == '-'
+	body := s
+	if neg {
+		body = s[1:]
+	}
+	if body == "" {
+		return 0, errors.New("bare sign")
+	}
+	// no leading zero unless the whole body is "0"; "-0" rejected
+	if len(body) > 1 && body[0] == '0' {
+		return 0, errors.New("leading zero")
+	}
+	if body == "0" && neg {
+		return 0, errors.New("negative zero")
+	}
+	for i := 0; i < len(body); i++ {
+		if body[i] < '0' || body[i] > '9' {
+			return 0, errors.New("non-digit")
+		}
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, errors.New("out of int64 range")
+	}
+	return n, nil
 }
 
 // ownerOverviewWire maps the AccountOverview service result to the

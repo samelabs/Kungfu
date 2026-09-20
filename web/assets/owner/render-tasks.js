@@ -215,8 +215,15 @@ function bindCreateSubmit(form, overlay) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = payload(form);
-        // canonical integer client check; server remains the authority
-        if (!/^-?(0|[1-9][0-9]*)$/.test(String(data.budget).trim()) || BigInt(data.budget) < 1000n) return showToast(noticeText(t('tasks.create_budget_min')), 'error'); return;
+        // Canonical integer client check; server remains the authority.
+        // Invalid budget: toast + STOP. Valid budget: fall through to
+        // open_now + POST (the trailing unconditional return bug is gone).
+        const budgetStr = String(data.budget).trim();
+        if (!/^-?(0|[1-9][0-9]*)$/.test(budgetStr) || BigInt(budgetStr) < 1000n) {
+            showToast(noticeText(t('tasks.create_budget_min')), 'error');
+            return;
+        }
+        data.budget = budgetStr; // canonical integer string on the wire
         data.open_now = form.elements.open_now.checked;
         // creating — silent
         try {

@@ -47,8 +47,8 @@ func TestRegistrationGenesisLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if res.Balance != 0 {
-		t.Fatalf("API balance = %d, want 0 (visible contract unchanged)", res.Balance)
+	if res.Balance != 66 {
+		t.Fatalf("API balance = %d, want committed 66 (same-tx authoritative balance)", res.Balance)
 	}
 
 	ctx := context.Background()

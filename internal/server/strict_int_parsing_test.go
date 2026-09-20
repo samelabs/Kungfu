@@ -69,7 +69,7 @@ func TestParseCreditsExactIntegerStringsOnly(t *testing.T) {
 		{"0.0001", 0, true, false},
 		{"9007199254740993.0", 0, true, false}, // integral presentation still rejected — never float-converted
 		{"", 0, true, false},
-		{" 42 ", 42, true, true}, // whitespace-trimmed canonical integer
+		{" 42 ", 0, true, false}, // non-canonical: server never trims wire input (browser trims once as UX before sending)
 		{nil, 0, false, true},
 		{jsonNum(t, "9007199254740993"), 9007199254740993, true, true},
 		{jsonNum(t, "1000.5"), 0, true, false},
