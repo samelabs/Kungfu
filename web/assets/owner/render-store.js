@@ -12,8 +12,9 @@ function storeStatusText(status) {
 function renderStore() {
     const balanceEl = qs('#storeBalance');
     if (balanceEl) {
-        const balance = state.account && state.account.balance != null ? Number(state.account.balance) : null;
-        balanceEl.textContent = balance != null ? String(balance) : '—';
+        // balance is a canonical decimal string — verbatim display.
+        const balance = state.account && state.account.balance != null ? String(state.account.balance) : null;
+        balanceEl.textContent = balance != null ? balance : '—';
     }
 
     const wrap = qs('#storeProducts');
@@ -26,7 +27,7 @@ function renderStore() {
                     <div class="store-product-body">
                         <div class="store-product-title">${escapeHtml(p.title)}</div>
                         ${p.description ? `<div class="muted store-product-desc">${escapeHtml(p.description)}</div>` : ''}
-                        <div class="store-product-price">${escapeHtml(t('store.price', {price: Number(p.credits_price)}))}</div>
+                        <div class="store-product-price">${escapeHtml(t('store.price', {price: p.credits_price}))}</div>
                     </div>
                     <button class="btn primary" type="button" data-redeem-code="${escapeHtml(p.code)}">${escapeHtml(t('store.redeem'))}</button>
                 </div>`).join('');
@@ -52,7 +53,7 @@ function renderRedemptionResult() {
         ${createdFlag ? `<p class="muted">${escapeHtml(createdFlag)}</p>` : ''}
         <div class="store-result-grid">
             <span class="muted">${escapeHtml(t('store.code'))}</span><span class="mono">${escapeHtml(r.code || '')}</span>
-            <span class="muted">${escapeHtml(r.product_title || '')}</span><span>${escapeHtml(String(Number(r.credits_cost)))}</span>
+            <span class="muted">${escapeHtml(r.product_title || '')}</span><span>${escapeHtml(String(r.credits_cost))}</span>
             <span class="muted">${escapeHtml(t('store.status'))}</span><span>${escapeHtml(storeStatusText(r.status))}</span>
         </div>`;
 }

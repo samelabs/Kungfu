@@ -59,7 +59,9 @@ async function loadLogs() {
     state.logs.total = Number(json.data.pagination?.total || 0);
     state.logs.totalPages = Number(json.data.pagination?.total_pages || 1);
     state.logs.page = Number(json.data.pagination?.page || state.logs.page);
-    state.logs.balance = Number(json.data.balance || 0);
+    // balance is a canonical decimal string (economic integer wire
+    // contract) — preserved verbatim, never Number()-converted.
+    state.logs.balance = typeof json.data.balance === 'string' ? json.data.balance : String(json.data.balance || 0);
     if (Array.isArray(json.data.tasks)) {
         state.logs.tasks = json.data.tasks;
     }

@@ -93,9 +93,9 @@ func (s *Server) handleOwnerPaymentCheckout(w http.ResponseWriter, r *http.Reque
 		"payment": map[string]interface{}{
 			"code":         res.Payment.Code,
 			"status":       res.Payment.Status,
-			"amount_minor": res.Payment.AmountMinor,
+			"amount_minor": econString(res.Payment.AmountMinor),
 			"currency":     res.Payment.Currency,
-			"credits":      res.Payment.Credits,
+			"credits":      econString(res.Payment.Credits),
 		},
 		"checkout_url": res.CheckoutURL,
 	}, "Checkout created")
@@ -214,9 +214,9 @@ func (s *Server) handleOwnerPaymentGet(w http.ResponseWriter, r *http.Request) {
 			"code":         p.Code,
 			"provider":     p.Provider,
 			"status":       p.Status,
-			"amount_minor": p.AmountMinor,
+			"amount_minor": econString(p.AmountMinor),
 			"currency":     p.Currency,
-			"credits":      p.Credits,
+			"credits":      econString(p.Credits),
 			"created_at":   p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			"paid_at":      paidAt,
 		},
@@ -248,5 +248,15 @@ func (s *Server) handleOwnerPaymentPackages(w http.ResponseWriter, r *http.Reque
 		handleAppError(w, errors.New(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Could not load the payment catalog"))
 		return
 	}
-	SuccessResponse(w, map[string]interface{}{"packages": pkgs}, "")
+	pkgsWire := make([]map[string]interface{}, 0, len(pkgs))
+	for i := range pkgs {
+		pkgsWire = append(pkgsWire, map[string]interface{}{
+			"code":         pkgs[i].Code,
+			"name":         pkgs[i].Name,
+			"amount_minor": econString(pkgs[i].AmountMinor),
+			"currency":     pkgs[i].Currency,
+			"credits":      econString(pkgs[i].Credits),
+		})
+	}
+	SuccessResponse(w, map[string]interface{}{"packages": pkgsWire}, "")
 }

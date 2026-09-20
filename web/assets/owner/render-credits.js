@@ -4,21 +4,28 @@
 // Every dynamic value reaching innerHTML goes through escapeHtml,
 // matching the Store renderer style.
 
+// Format an authoritative fiat minor-unit integer (canonical decimal
+// STRING on the wire — never routed through JS Number) with EXACTLY
+// two decimals: "1000" -> "10.00 USD", "1999" -> "19.99", "1" -> "0.01".
+// Sign handled at the string level.
 function creditsFormatAmount(amountMinor, currency) {
-    if (typeof amountMinor !== 'number' || !Number.isFinite(amountMinor)) return '';
+    if (typeof amountMinor !== 'string' || !/^-?(0|[1-9][0-9]*)$/.test(amountMinor)) return '';
     const cur = (currency || '').toUpperCase();
-    // Fiat presentation: EXACTLY two decimals — never suppress .00
-    // (1000 minor -> "10.00", 1999 -> "19.99", 1 -> "0.01").
-    const major = amountMinor / 100;
-    return `${major.toFixed(2)} ${cur}`;
+    const neg = amountMinor.startsWith('-');
+    const digits = neg ? amountMinor.slice(1) : amountMinor;
+    const padded = digits.padStart(3, '0');
+    const text = padded.slice(0, -2) + '.' + padded.slice(-2);
+    return (neg ? '-' : '') + text + ' ' + cur;
 }
 
 function renderCredits() {
     const wrap = qs('#creditsPackages');
     if (!wrap) return;
     const balanceEl = qs('#creditsBalance');
-    if (balanceEl && state.account && typeof state.account.balance === 'number') {
-        balanceEl.textContent = state.account.balance;
+    // balance arrives as a canonical decimal string (economic integer
+    // wire contract) — displayed verbatim, no Number() conversion.
+    if (balanceEl && state.account && state.account.balance != null) {
+        balanceEl.textContent = String(state.account.balance);
     }
     const pkgs = (state.credits && state.credits.packages) || [];
     if (!state.credits || !state.credits.loaded) {

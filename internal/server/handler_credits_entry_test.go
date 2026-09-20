@@ -18,7 +18,8 @@ import (
 
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/i18n"
-)
+
+	"bytes")
 
 // i18nLocaleURLForTest wraps the production locale URL helper used by
 // the nav so the active-state assertion matches the rendered href.
@@ -133,15 +134,17 @@ func TestPackagesAPIProjection(t *testing.T) {
 	var out struct {
 		Data struct {
 			Packages []struct {
-				Code        string  `json:"code"`
-				Name        string  `json:"name"`
-				AmountMinor int64   `json:"amount_minor"`
-				Currency    string  `json:"currency"`
-				Credits     float64 `json:"credits"`
+				Code        string   `json:"code"`
+				Name        string   `json:"name"`
+				AmountMinor string   `json:"amount_minor"`
+				Currency    string   `json:"currency"`
+				Credits     string   `json:"credits"`
 			} `json:"packages"`
 		} `json:"data"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	decO := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
+	decO.UseNumber()
+	_ = decO.Decode(&out)
 	pkgs := out.Data.Packages
 	if len(pkgs) != 2 {
 		t.Fatalf("packages = %d", len(pkgs))
@@ -155,11 +158,11 @@ func TestPackagesAPIProjection(t *testing.T) {
 		byCode[p.Code] = i
 	}
 	st := pkgs[byCode["starter"]]
-	if st.Name != "Starter" || st.AmountMinor != 1000 || st.Currency != "USD" || st.Credits != 1000 {
+	if st.Name != "Starter" || st.AmountMinor != "1000" || st.Currency != "USD" || st.Credits != "1000" {
 		t.Fatalf("starter = %+v", st)
 	}
 	sd := pkgs[byCode["standard"]]
-	if sd.AmountMinor != 400 || sd.Credits != 500 {
+	if sd.AmountMinor != "400" || sd.Credits != "500" {
 		t.Fatalf("standard = %+v", sd)
 	}
 

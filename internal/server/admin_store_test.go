@@ -144,11 +144,11 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 		Data struct {
 			Code   string  `json:"code"`
 			Status string  `json:"status"`
-			Price  float64 `json:"credits_price"`
+			Price  string  `json:"credits_price"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	if created.Data.Code == "" || created.Data.Status != "active" || created.Data.Price != 7 {
+	if created.Data.Code == "" || created.Data.Status != "active" || created.Data.Price != "7" {
 		t.Fatalf("create response: %s", rec.Body.String())
 	}
 
@@ -161,11 +161,11 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 		Data struct {
 			Title       string  `json:"title"`
 			Description *string `json:"description"`
-			Price       float64 `json:"credits_price"`
+			Price       string  `json:"credits_price"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &patched)
-	if patched.Data.Title != "HTTP Item v2" || patched.Data.Description == nil || *patched.Data.Description != "via http" || patched.Data.Price != 7 {
+	if patched.Data.Title != "HTTP Item v2" || patched.Data.Description == nil || *patched.Data.Description != "via http" || patched.Data.Price != "7" {
 		t.Fatalf("partial patch broken: %s", rec.Body.String())
 	}
 
@@ -418,13 +418,13 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	}
 	var tr struct {
 		Data struct {
-			Code   string  `json:"code"`
-			Status string  `json:"status"`
-			Cost   float64 `json:"credits_cost"`
+			Code   string `json:"code"`
+			Status string `json:"status"`
+			Cost   string `json:"credits_cost"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &tr)
-	if tr.Data.Code != redCode || tr.Data.Status != "rejected" || tr.Data.Cost != 9 {
+	if tr.Data.Code != redCode || tr.Data.Status != "rejected" || tr.Data.Cost != "9" {
 		t.Fatalf("transition response is not the committed After state: %s", rec.Body.String())
 	}
 
@@ -519,12 +519,14 @@ func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 			t.Fatalf("%s description: %d, want 400", name, rec.Code)
 		}
 	}
-	// missing title / price → 400
+	// missing title / price → 400. NOTE: a canonical decimal integer
+	// STRING for credits_price is now VALID wire input (browser write
+	// contract) — the "wrong type" case is a fractional string.
 	for name, body := range map[string]string{
 		"missing title":    `{"credits_price":2}`,
 		"title wrong type": `{"title":5,"credits_price":2}`,
 		"missing price":    `{"title":"X"}`,
-		"price wrong type": `{"title":"X","credits_price":"2"}`,
+		"price fractional": `{"title":"X","credits_price":"2.5"}`,
 	} {
 		rec := e.mutateJSON(t, "POST", "/api/admin/store/products", body)
 		if rec.Code != 400 {

@@ -144,7 +144,7 @@ func TestOwnerTaskCreateAcceptsIntegerCredits(t *testing.T) {
 	if task == nil {
 		t.Fatalf("no task in response: %v", out)
 	}
-	if task["budget"] != float64(1500) || task["price"] != float64(100) {
+	if task["budget"] != "1500" || task["price"] != "100" {
 		t.Fatalf("integer task economics: %v", task)
 	}
 }

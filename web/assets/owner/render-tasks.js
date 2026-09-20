@@ -45,7 +45,10 @@ async function selectTask(code) {
 function renderTaskDetail(task) {
     const isClosed = task.status === 'closed';
     const isOpen = task.status === 'open';
-    const canRefund = isClosed && Number(task.budget) > 0 && refundReady(task.closed_at);
+    // budget is a canonical decimal string; compare without Number()
+    // (BigInt only for the >0 test — never stringified back).
+    const budgetStr = String(task.budget);
+    const canRefund = isClosed && /^-?[0-9]+$/.test(budgetStr) && BigInt(budgetStr) > 0n && refundReady(task.closed_at);
 
     qs('#taskDetail').innerHTML = `
         <div class="task-detail-head">
@@ -212,7 +215,8 @@ function bindCreateSubmit(form, overlay) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = payload(form);
-        if (Number(data.budget) < 1000) return showToast(noticeText(t('tasks.create_budget_min')), 'error'); return;
+        // canonical integer client check; server remains the authority
+        if (!/^-?(0|[1-9][0-9]*)$/.test(String(data.budget).trim()) || BigInt(data.budget) < 1000n) return showToast(noticeText(t('tasks.create_budget_min')), 'error'); return;
         data.open_now = form.elements.open_now.checked;
         // creating — silent
         try {

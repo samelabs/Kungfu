@@ -163,16 +163,16 @@ func TestCheckoutClientTamperImmunity(t *testing.T) {
 	var out struct {
 		Data struct {
 			Payment struct {
-				AmountMinor int64   `json:"amount_minor"`
-				Credits     float64 `json:"credits"`
-				Currency    string  `json:"currency"`
-				Code        string  `json:"code"`
+				AmountMinor string `json:"amount_minor"`
+				Credits     string `json:"credits"`
+				Currency    string `json:"currency"`
+				Code        string `json:"code"`
 			} `json:"payment"`
 			CheckoutURL string `json:"checkout_url"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out.Data.Payment.AmountMinor != 1000 || out.Data.Payment.Credits != 1000 || out.Data.Payment.Currency != "USD" {
+	if out.Data.Payment.AmountMinor != "1000" || out.Data.Payment.Credits != "1000" || out.Data.Payment.Currency != "USD" {
 		t.Fatalf("tampered facts: %+v", out.Data.Payment)
 	}
 	if !strings.HasPrefix(out.Data.CheckoutURL, "https://checkout.fake.io/") {
@@ -406,15 +406,15 @@ func TestCreemE2EPackageFlow(t *testing.T) {
 	var out struct {
 		Data struct {
 			Payment struct {
-				Code        string  `json:"code"`
-				AmountMinor int64   `json:"amount_minor"`
-				Credits     float64 `json:"credits"`
+				Code        string `json:"code"`
+				AmountMinor string `json:"amount_minor"`
+				Credits     string `json:"credits"`
 			} `json:"payment"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	pc := out.Data.Payment
-	if pc.AmountMinor != 4000 || pc.Credits != 5000 {
+	if pc.AmountMinor != "4000" || pc.Credits != "5000" {
 		t.Fatalf("standard facts = %+v", pc)
 	}
 

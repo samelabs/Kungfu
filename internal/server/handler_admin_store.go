@@ -23,11 +23,14 @@ func adminStoreProductDTO(p *model.StoreProduct) map[string]interface{} {
 		desc = *p.Description
 	}
 	return map[string]interface{}{
-		"id":            p.ID,
-		"code":          p.Code,
-		"title":         p.Title,
+		"id":    p.ID,
+		"code":  p.Code,
+		"title": p.Title,
+		// credits_price: authoritative whole-credit integer on the
+		// wire as a canonical decimal STRING — the admin browser must
+		// never route it through JS Number (int64 corruption boundary).
+		"credits_price": econString(p.CreditsPrice),
 		"description":   desc,
-		"credits_price": p.CreditsPrice,
 		"status":        p.Status,
 		"created_at":    p.CreatedAt,
 		"updated_at":    p.UpdatedAt,
@@ -41,7 +44,7 @@ func adminStoreRedemptionDTO(r *model.Redemption) map[string]interface{} {
 		"bot_id":           r.BotID,
 		"product_id":       r.ProductID,
 		"product_title":    r.ProductTitle,
-		"credits_cost":     r.CreditsCost,
+		"credits_cost":     econString(r.CreditsCost),
 		"request_key":      r.RequestKey,
 		"status":           r.Status,
 		"review_note":      nullableStringJSON(r.ReviewNote),
@@ -390,14 +393,25 @@ func pageParams(pageStr, sizeStr string) (int, int) {
 }
 
 // jsonCredits extracts a whole-integer Credit value. EXACT integer
-// parsing only (json.Number from UseNumber bodies) — no float64
-// compatibility path: every Credit-bearing admin endpoint parses its
-// body with UseNumber, so float64 never reaches here, and a hidden
-// alternate float mechanism is not kept.
+// parsing only — no float64 path ever. Accepted wire forms:
+//   - json.Number (bodies parsed with UseNumber): Int64() on the
+//     exact source text;
+//   - canonical decimal integer STRING ("9007199254740993") parsed
+//     with strconv.ParseInt — this is the browser write contract
+//     (economic integers travel as strings so JS Number never
+//     corrupts them). Fractional presentations and >int64 reject.
 func jsonCredits(v interface{}) (int64, bool) {
-	if n, ok := v.(json.Number); ok {
-		if v, err := n.Int64(); err == nil {
-			return v, true
+	switch t := v.(type) {
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return n, true
+		}
+	case string:
+		if t == "" {
+			return 0, false
+		}
+		if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil {
+			return n, true
 		}
 	}
 	return 0, false

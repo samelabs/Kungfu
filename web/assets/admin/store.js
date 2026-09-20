@@ -9,9 +9,19 @@ const storeState = {
     redemptions: {items: [], page: 1, pageSize: 20, total: 0, filters: {status: 'all', bot_id: '', q: ''}}
 };
 
+// Economic integers arrive as canonical decimal STRINGS from the
+// server. They are preserved verbatim for display and writeback —
+// NEVER routed through JS Number (int64 corruption boundary:
+// 9007199254740993 would become 9007199254740992).
 function fmtPrice(v) {
-    const n = Number(v);
-    return isNaN(n) ? escapeHtml(v) : String(n);
+    return escapeHtml(String(v));
+}
+
+// Canonical integer check for user input: optional '-', digits, no
+// leading zero (except "0"). No exponent, no decimal point, no '+'.
+const RE_CANON_INT = /^-?(0|[1-9][0-9]*)$/;
+function canonicalInt(s) {
+    return typeof s === 'string' && RE_CANON_INT.test(s.trim()) ? s.trim() : null;
 }
 
 /* ---------- products ---------- */
@@ -106,8 +116,10 @@ async function bindStoreProductsEvents() {
                     const desc = window.prompt('Description (empty clears):', p && p.description ? p.description : '');
                     if (desc !== null && desc !== (p && p.description ? p.description : '')) body.description = desc;
                     const priceStr = window.prompt('Credits price:', p ? String(p.credits_price) : '');
-                    if (priceStr !== null && priceStr !== '' && Number(priceStr) !== (p ? p.credits_price : null)) {
-                        body.credits_price = Number(priceStr);
+                    if (priceStr !== null && priceStr !== '' && priceStr.trim() !== String(p ? p.credits_price : '')) {
+                        const ci = canonicalInt(priceStr);
+                        if (ci === null) { window.alert('Credits price must be a whole integer (no decimals).'); return; }
+                        body.credits_price = ci; // canonical integer string preserved exactly
                     }
                     if (!Object.keys(body).length) return;
                     const json = await adminMutate(`/api/admin/store/products/${code}`, 'PATCH', body);
@@ -126,10 +138,15 @@ async function bindStoreProductsEvents() {
         createForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
+                const priceInput = canonicalInt(document.getElementById('storeNewPrice').value);
+                if (priceInput === null) {
+                    setNotice('storeProductCreateNotice', 'Credits price must be a whole integer (no decimals).', 'error');
+                    return;
+                }
                 const json = await adminMutate('/api/admin/store/products', 'POST', {
                     title: document.getElementById('storeNewTitle').value.trim(),
                     description: document.getElementById('storeNewDesc').value.trim(),
-                    credits_price: Number(document.getElementById('storeNewPrice').value)
+                    credits_price: priceInput // canonical integer string preserved exactly
                 });
                 if (!json.success) throw new Error(apiError(json));
                 setNotice('storeProductCreateNotice', 'Product created', 'ok');

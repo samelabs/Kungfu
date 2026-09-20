@@ -196,7 +196,7 @@ func TestStoreRedeemCreatesPendingAndSpends(t *testing.T) {
 	if created, ok := r["created"].(bool); !ok || !created {
 		t.Fatalf("created = %v", r["created"])
 	}
-	if r["credits_cost"] != float64(40) {
+	if r["credits_cost"] != "40" { // canonical decimal string wire contract
 		t.Fatalf("credits_cost = %v", r["credits_cost"])
 	}
 	if got := storeBotBalance(t, s, botID); got != 60 {

@@ -18,21 +18,26 @@ import (
 
 // storeProductDTO is the external product contract: no internal numeric id.
 type storeProductDTO struct {
-	Code         string  `json:"code"`
+	Code string `json:"code"`
+	// CreditsPrice is the authoritative whole-credit integer, on the
+	// wire as a canonical decimal STRING: JS Number cannot hold the
+	// full int64 range, so the browser never converts it.
+	CreditsPrice string  `json:"credits_price"`
 	Title        string  `json:"title"`
-	Description  *string `json:"description,omitempty"`
-	CreditsPrice int64   `json:"credits_price"`
 	Status       string  `json:"status"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
+	Description  *string `json:"description,omitempty"`
 }
 
 // storeRedemptionDTO is the external redemption contract: no internal
 // numeric id, no product_id, no bot_id.
 type storeRedemptionDTO struct {
-	Code            string  `json:"code"`
+	Code string `json:"code"`
+	// CreditsCost: canonical decimal string on the wire (see
+	// storeProductDTO.CreditsPrice).
+	CreditsCost     string  `json:"credits_cost"`
 	ProductTitle    string  `json:"product_title"`
-	CreditsCost     int64   `json:"credits_cost"`
 	RequestKey      string  `json:"request_key"`
 	Status          string  `json:"status"`
 	ReviewNote      *string `json:"review_note,omitempty"`
@@ -50,7 +55,7 @@ func productToDTO(p *model.StoreProduct) storeProductDTO {
 		Code:         p.Code,
 		Title:        p.Title,
 		Description:  p.Description,
-		CreditsPrice: p.CreditsPrice,
+		CreditsPrice: econString(p.CreditsPrice),
 		Status:       p.Status,
 		CreatedAt:    p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:    p.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -61,7 +66,7 @@ func redemptionToDTO(r *model.Redemption) storeRedemptionDTO {
 	dto := storeRedemptionDTO{
 		Code:         r.Code,
 		ProductTitle: r.ProductTitle,
-		CreditsCost:  r.CreditsCost,
+		CreditsCost:  econString(r.CreditsCost),
 		RequestKey:   r.RequestKey,
 		Status:       r.Status,
 		CreatedAt:    r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),

@@ -363,7 +363,7 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "")
+	SuccessResponse(w, ownerOverviewWire(result), "")
 }
 
 func (s *Server) handleKey(w http.ResponseWriter, r *http.Request) {
@@ -452,7 +452,7 @@ func (s *Server) handleOwnerTasksList(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "")
+	SuccessResponse(w, ownerTasksWire(result), "")
 }
 
 func (s *Server) handleOwnerTaskGet(w http.ResponseWriter, r *http.Request) {
@@ -471,7 +471,7 @@ func (s *Server) handleOwnerTaskGet(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "")
+	SuccessResponse(w, ownerTasksWire(result), "")
 }
 
 // parseCredits extracts a whole-integer Credits value from a decoded
@@ -553,7 +553,7 @@ func (s *Server) handleOwnerTaskCreate(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Task created")
+	SuccessResponse(w, ownerTasksWire(result), "Task created")
 }
 
 func (s *Server) handleOwnerTaskOpen(w http.ResponseWriter, r *http.Request) {
@@ -584,7 +584,7 @@ func (s *Server) ownerTaskStatus(w http.ResponseWriter, r *http.Request, status 
 	if status == "closed" {
 		msg = "Task closed"
 	}
-	SuccessResponse(w, result, msg)
+	SuccessResponse(w, ownerTasksWire(result), msg)
 }
 
 func (s *Server) handleOwnerTaskAddBudget(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +613,7 @@ func (s *Server) handleOwnerTaskAddBudget(w http.ResponseWriter, r *http.Request
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Budget added")
+	SuccessResponse(w, ownerTasksWire(result), "Budget added")
 }
 
 func (s *Server) handleOwnerTaskRefund(w http.ResponseWriter, r *http.Request) {
@@ -632,7 +632,7 @@ func (s *Server) handleOwnerTaskRefund(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Budget refunded")
+	SuccessResponse(w, ownerTasksWire(result), "Budget refunded")
 }
 
 func (s *Server) handleOwnerTaskEdit(w http.ResponseWriter, r *http.Request) {
@@ -679,7 +679,7 @@ func (s *Server) handleOwnerTaskEdit(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "Task updated")
+	SuccessResponse(w, ownerTasksWire(result), "Task updated")
 }
 
 func (s *Server) handleTestTask(w http.ResponseWriter, r *http.Request) {
@@ -741,7 +741,7 @@ func (s *Server) handleOwnerLogs(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, result, "")
+	SuccessResponse(w, ownerLogsWire(result), "")
 }
 
 // handleAppError sends the appropriate error response for an AppError.
