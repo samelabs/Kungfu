@@ -169,7 +169,12 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 		// reverse_payment ledger by the provider refunded-amount ratio
 		// (may drive the balance negative). Ordinary spends still cannot
 		// cross zero; only this reversal path can.
-		if err := payment.HandleCreemAdjustmentEvent(r.Context(), s.Pool, &ev); err != nil {
+		rt := s.creemRuntime()
+		if rt == nil {
+			ErrorResponse(w, http.StatusServiceUnavailable, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server", nil)
+			return
+		}
+		if err := payment.HandleCreemAdjustmentEvent(r.Context(), s.Pool, rt, &ev); err != nil {
 			log.Printf("creem webhook %s reconciliation failed: event=%s err=%v", ev.EventType, ev.ID, err)
 			ErrorResponse(w, http.StatusBadRequest, "RECONCILIATION_FAILED", "Adjustment facts did not reconcile", nil)
 			return

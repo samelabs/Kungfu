@@ -32,11 +32,12 @@ type fakeCreem struct {
 	checkouts      []CreateCheckoutInput
 	checkoutStatus int
 	checkoutBody   string
+	txns           map[string]*CreemTransactionEntity
 }
 
 func newFakeCreem(t *testing.T, products ...CreemProduct) *fakeCreem {
 	t.Helper()
-	fc := &fakeCreem{products: map[string]CreemProduct{}}
+	fc := &fakeCreem{products: map[string]CreemProduct{}, txns: map[string]*CreemTransactionEntity{}}
 	for _, p := range products {
 		fc.products[p.ID] = p
 	}
@@ -72,9 +73,45 @@ func newFakeCreem(t *testing.T, products ...CreemProduct) *fakeCreem {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	})
+	// Official: GET /v1/transactions?transaction_id={id}, x-api-key
+	// header, TransactionEntity direct shape. Enforces the official wire
+	// contract (no extra query params, no other methods).
+	mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(405)
+			return
+		}
+		q := r.URL.Query()
+		if len(q) != 1 || q.Get("transaction_id") == "" {
+			w.WriteHeader(400)
+			return
+		}
+		if r.Header.Get("x-api-key") == "" {
+			w.WriteHeader(401)
+			return
+		}
+		fc.mu.Lock()
+		txn, ok := fc.txns[q.Get("transaction_id")]
+		fc.mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(txn)
+	})
 	fc.server = httptest.NewServer(mux)
 	t.Cleanup(fc.server.Close)
 	return fc
+}
+
+// setTxn registers an authoritative transaction served by the fake
+// GET /v1/transactions endpoint.
+func (fc *fakeCreem) setTxn(txn *CreemTransactionEntity) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.txns[txn.ID] = txn
 }
 
 func pkgProducts() []CreemProduct {

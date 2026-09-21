@@ -27,35 +27,35 @@ import (
 
 // -- minimal Creem fact structures --
 
-// CreemTransactionFact is the shared transaction block inside refund and
-// dispute objects. amount_paid is the actually-charged fiat (may include
-// tax) and is deliberately NOT required to equal payment.amount_minor.
-type CreemTransactionFact struct {
-	ID             string `json:"id"`
-	Amount         int64  `json:"amount"`
-	AmountPaid     int64  `json:"amount_paid"`
-	Currency       string `json:"currency"`
-	Status         string `json:"status"`
-	RefundedAmount *int64 `json:"refunded_amount"`
-	Order          string `json:"order"`
-}
-
-// CreemRefundObject is the refund.created payload.
+// CreemRefundObject is the refund.created payload — ONLY the fields the
+// official webhook schema guarantees. The embedded transaction block is
+// an IDENTIFIER, never an economic authority: cumulative refunded_amount
+// and amount_paid come from the authoritative TransactionEntity fetched
+// via GET /v1/transactions.
 type CreemRefundObject struct {
-	ID             string                `json:"id"`
-	Status         string                `json:"status"`
-	RefundAmount   int64                 `json:"refund_amount"`
-	RefundCurrency string                `json:"refund_currency"`
-	Reason         string                `json:"reason"`
-	Transaction    *CreemTransactionFact `json:"transaction"`
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	RefundAmount int64  `json:"refund_amount"`
+	Reason       string `json:"reason"`
+	// TransactionBlock carries only the provider transaction ID (the
+	// schema guarantees id; other members are not relied upon).
+	TransactionBlock *struct {
+		ID string `json:"id"`
+	} `json:"transaction"`
 }
 
-// CreemDisputeObject is the dispute.created payload.
+// CreemDisputeObject is the dispute.created payload — only guaranteed
+// fields. The dispute amount semantics (tax-inclusive chargeback amount)
+// are display facts; the reversal authority is the authoritative
+// transaction's refunded_amount (Creem records chargebacks there with
+// transaction.status="chargeback").
 type CreemDisputeObject struct {
-	ID          string                `json:"id"`
-	Amount      int64                 `json:"amount"`
-	Currency    string                `json:"currency"`
-	Transaction *CreemTransactionFact `json:"transaction"`
+	ID     string `json:"id"`
+	Amount int64  `json:"amount"`
+	// TransactionBlock: provider transaction ID only.
+	TransactionBlock *struct {
+		ID string `json:"id"`
+	} `json:"transaction"`
 }
 
 // PaymentAdjustmentFact is the validated, reconciled fact ready to persist.
@@ -63,14 +63,15 @@ type PaymentAdjustmentFact = model.PaymentAdjustmentFact
 
 // -- reconciliation --
 
-// reconcileAdjustmentTransaction verifies the shared transaction fact
-// against the paid payment snapshot: the provider order binding and the
-// order-level amount/currency must match; amount_paid is only required
-// positive (it may include tax, so equality with payment.amount_minor is
-// NOT enforced).
-func reconcileAdjustmentTransaction(txn *CreemTransactionFact, p *model.Payment) error {
+// reconcileAuthoritativeTransaction verifies the authoritative
+// TransactionEntity (GET /v1/transactions) against the paid payment
+// snapshot: the provider order binding and the order-level
+// amount/currency must match; amount_paid must be present and positive
+// (it may include tax, so equality with payment.amount_minor is NOT
+// enforced); refunded_amount must be present for a reversal basis.
+func reconcileAuthoritativeTransaction(txn *CreemTransactionEntity, p *model.Payment) error {
 	if txn == nil {
-		return fmt.Errorf("transaction fact missing")
+		return fmt.Errorf("authoritative transaction missing")
 	}
 	if txn.ID == "" {
 		return fmt.Errorf("transaction.id empty")
@@ -90,18 +91,34 @@ func reconcileAdjustmentTransaction(txn *CreemTransactionFact, p *model.Payment)
 	if txn.Currency != p.Currency {
 		return fmt.Errorf("transaction.currency %q != payment currency %q", txn.Currency, p.Currency)
 	}
-	if txn.AmountPaid <= 0 {
-		return fmt.Errorf("transaction.amount_paid %d not positive", txn.AmountPaid)
+	if txn.AmountPaid == nil || *txn.AmountPaid <= 0 {
+		return fmt.Errorf("transaction.amount_paid missing or not positive")
 	}
 	return nil
 }
 
-// buildRefundFact validates a refund.created object and reconciles it
-// with the payment. Refund-specific rules: status must be "succeeded",
-// the refund must not exceed what was actually paid, and the provider's
-// cumulative refunded_amount must cover it without exceeding amount_paid.
-func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, p *model.Payment) (*PaymentAdjustmentFact, error) {
-	if err := reconcileAdjustmentTransaction(obj.Transaction, p); err != nil {
+// requireRefundedBasis is the refund-specific gate: the cumulative
+// refunded amount must be present. Disputes do not require it — a
+// dispute with no refund movement is stored as a durable fact with
+// zero reversal contribution.
+func requireRefundedBasis(txn *CreemTransactionEntity) error {
+	if txn.RefundedAmount == nil {
+		return fmt.Errorf("transaction.refunded_amount missing")
+	}
+	return nil
+}
+
+// buildRefundFact validates a refund.created webhook object RECONCILED
+// with the authoritative transaction. The webhook contributes the refund
+// identity and its nominal refund_amount; every economic field
+// (amount_paid, cumulative refunded_amount) comes from the authoritative
+// TransactionEntity. refund_amount is cross-checked against the
+// authoritative cumulative refunded amount.
+func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, txn *CreemTransactionEntity, p *model.Payment) (*PaymentAdjustmentFact, error) {
+	if err := reconcileAuthoritativeTransaction(txn, p); err != nil {
+		return nil, err
+	}
+	if err := requireRefundedBasis(txn); err != nil {
 		return nil, err
 	}
 	if obj.ID == "" {
@@ -113,20 +130,13 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, p *model.Pay
 	if obj.RefundAmount <= 0 {
 		return nil, fmt.Errorf("refund_amount %d not positive", obj.RefundAmount)
 	}
-	if obj.RefundCurrency != obj.Transaction.Currency {
-		return nil, fmt.Errorf("refund_currency %q != transaction currency %q", obj.RefundCurrency, obj.Transaction.Currency)
+	if *txn.RefundedAmount < obj.RefundAmount {
+		return nil, fmt.Errorf("authoritative refunded_amount %d < refund_amount %d",
+			*txn.RefundedAmount, obj.RefundAmount)
 	}
-	if obj.RefundAmount > obj.Transaction.AmountPaid {
-		return nil, fmt.Errorf("refund_amount %d exceeds amount_paid %d", obj.RefundAmount, obj.Transaction.AmountPaid)
-	}
-	if obj.Transaction.RefundedAmount == nil {
-		return nil, fmt.Errorf("transaction.refunded_amount missing")
-	}
-	if *obj.Transaction.RefundedAmount < obj.RefundAmount {
-		return nil, fmt.Errorf("refunded_amount %d < refund_amount %d", *obj.Transaction.RefundedAmount, obj.RefundAmount)
-	}
-	if *obj.Transaction.RefundedAmount > obj.Transaction.AmountPaid {
-		return nil, fmt.Errorf("refunded_amount %d exceeds amount_paid %d", *obj.Transaction.RefundedAmount, obj.Transaction.AmountPaid)
+	if *txn.RefundedAmount > *txn.AmountPaid {
+		return nil, fmt.Errorf("authoritative refunded_amount %d exceeds amount_paid %d",
+			*txn.RefundedAmount, *txn.AmountPaid)
 	}
 	pc, err := providerCreatedAt(ev)
 	if err != nil {
@@ -139,25 +149,31 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, p *model.Pay
 		Kind:                   "refund",
 		Provider:               "creem",
 		ProviderObjectID:       obj.ID,
-		ProviderTransactionID:  obj.Transaction.ID,
-		ProviderOrderID:        obj.Transaction.Order,
+		ProviderTransactionID:  txn.ID,
+		ProviderOrderID:        txn.Order,
 		AmountMinor:            obj.RefundAmount,
-		Currency:               obj.RefundCurrency,
-		TransactionAmountMinor: obj.Transaction.Amount,
-		AmountPaidMinor:        obj.Transaction.AmountPaid,
-		RefundedAmountMinor:    obj.Transaction.RefundedAmount,
+		Currency:               txn.Currency,
+		TransactionAmountMinor: txn.Amount,
+		AmountPaidMinor:        *txn.AmountPaid,
+		RefundedAmountMinor:    txn.RefundedAmount,
 		ObjectStatus:           &status,
-		TransactionStatus:      &obj.Transaction.Status,
+		TransactionStatus:      &txn.Status,
 		Reason:                 reason,
 		ProviderCreatedAt:      pc,
 	}, nil
 }
 
-// buildDisputeFact validates a dispute.created object. The transaction
-// status is only required non-empty and stored verbatim — no hardcoded
-// chargeback vocabulary, provider representations differ.
-func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, p *model.Payment) (*PaymentAdjustmentFact, error) {
-	if err := reconcileAdjustmentTransaction(obj.Transaction, p); err != nil {
+// buildDisputeFact validates a dispute.created webhook object reconciled
+// with the authoritative transaction. Dispute semantics (single rule):
+// Creem records the clawback on the transaction itself — the dispute
+// event is the TRIGGER, the authoritative transaction's cumulative
+// refunded_amount (with status "chargeback") is the REVERSAL AUTHORITY.
+// If the authoritative transaction shows no refund movement yet, the
+// dispute is stored as a durable fact with zero reversal contribution —
+// a later refund event (or the chargeback settling into refunded_amount)
+// advances the reversal through the same cumulative path.
+func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *CreemTransactionEntity, p *model.Payment) (*PaymentAdjustmentFact, error) {
+	if err := reconcileAuthoritativeTransaction(txn, p); err != nil {
 		return nil, err
 	}
 	if obj.ID == "" {
@@ -166,19 +182,20 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, p *model.P
 	if obj.Amount <= 0 {
 		return nil, fmt.Errorf("dispute.amount %d not positive", obj.Amount)
 	}
-	if obj.Currency != obj.Transaction.Currency {
-		return nil, fmt.Errorf("dispute.currency %q != transaction currency %q", obj.Currency, obj.Transaction.Currency)
+	if txn.Status == "" {
+		return nil, fmt.Errorf("authoritative transaction.status empty")
 	}
-	if obj.Transaction.Status == "" {
-		return nil, fmt.Errorf("dispute transaction.status empty")
+	if txn.RefundedAmount == nil {
+		// No refund movement on the authoritative transaction: durable
+		// provider fact, zero reversal contribution. A later event whose
+		// authoritative basis shows refund movement advances the
+		// cumulative reversal through the same single path.
+		zero := int64(0)
+		txn.RefundedAmount = &zero
 	}
-	// refunded_amount gate: nil → durable fact, no reversal target
-	// contribution; non-nil must be within [0, amount_paid].
-	if obj.Transaction.RefundedAmount != nil {
-		if *obj.Transaction.RefundedAmount < 0 || *obj.Transaction.RefundedAmount > obj.Transaction.AmountPaid {
-			return nil, fmt.Errorf("dispute refunded_amount %d outside [0, %d]",
-				*obj.Transaction.RefundedAmount, obj.Transaction.AmountPaid)
-		}
+	if *txn.RefundedAmount < 0 || *txn.RefundedAmount > *txn.AmountPaid {
+		return nil, fmt.Errorf("authoritative refunded_amount %d outside [0, %d]",
+			*txn.RefundedAmount, *txn.AmountPaid)
 	}
 	pc, err := providerCreatedAt(ev)
 	if err != nil {
@@ -190,15 +207,15 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, p *model.P
 		Kind:                   "dispute",
 		Provider:               "creem",
 		ProviderObjectID:       obj.ID,
-		ProviderTransactionID:  obj.Transaction.ID,
-		ProviderOrderID:        obj.Transaction.Order,
+		ProviderTransactionID:  txn.ID,
+		ProviderOrderID:        txn.Order,
 		AmountMinor:            obj.Amount,
-		Currency:               obj.Currency,
-		TransactionAmountMinor: obj.Transaction.Amount,
-		AmountPaidMinor:        obj.Transaction.AmountPaid,
-		RefundedAmountMinor:    obj.Transaction.RefundedAmount,
+		Currency:               txn.Currency,
+		TransactionAmountMinor: txn.Amount,
+		AmountPaidMinor:        *txn.AmountPaid,
+		RefundedAmountMinor:    txn.RefundedAmount,
 		ObjectStatus:           nilStatus,
-		TransactionStatus:      &obj.Transaction.Status,
+		TransactionStatus:      &txn.Status,
 		Reason:                 nil,
 		ProviderCreatedAt:      pc,
 	}, nil
@@ -441,22 +458,30 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 	return inserted, nil
 }
 
-// HandleCreemAdjustmentEvent is the webhook entry: parse, reconcile
-// against the payment found by provider order binding, persist the
-// durable fact, and advance the cumulative authoritative Credits
-// reversal. The payment remains paid.
-func HandleCreemAdjustmentEvent(ctx context.Context, pool *pg.Pool, ev *CreemWebhookEvent) error {
+// HandleCreemAdjustmentEvent is the webhook entry: parse the guaranteed
+// webhook fields, resolve the payment, fetch the AUTHORITATIVE
+// transaction via the official API, and only then reconcile, persist the
+// durable fact, and advance the cumulative Credits reversal.
+//
+// Ambiguity discipline: a definitive 4xx from the provider lookup fails
+// the reconciliation (Creem retries; nothing is mutated); a network/5xx
+// ambiguity ALSO mutates nothing — Credits are never adjusted on
+// ambiguous provider state.
+func HandleCreemAdjustmentEvent(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, ev *CreemWebhookEvent) error {
 	switch ev.EventType {
 	case "refund.created":
 		var obj CreemRefundObject
 		if err := json.Unmarshal(ev.Object, &obj); err != nil {
 			return fmt.Errorf("refund object decode: %w", err)
 		}
-		p, err := findPaymentByProviderOrder(ctx, pool, obj.Transaction)
+		if obj.TransactionBlock == nil || obj.TransactionBlock.ID == "" {
+			return fmt.Errorf("refund transaction.id missing (guaranteed field absent)")
+		}
+		txn, p, err := authoritativePaymentTransaction(ctx, pool, rt, obj.TransactionBlock.ID)
 		if err != nil {
 			return err
 		}
-		fact, err := buildRefundFact(ev, &obj, p)
+		fact, err := buildRefundFact(ev, &obj, txn, p)
 		if err != nil {
 			return err
 		}
@@ -468,11 +493,14 @@ func HandleCreemAdjustmentEvent(ctx context.Context, pool *pg.Pool, ev *CreemWeb
 		if err := json.Unmarshal(ev.Object, &obj); err != nil {
 			return fmt.Errorf("dispute object decode: %w", err)
 		}
-		p, err := findPaymentByProviderOrder(ctx, pool, obj.Transaction)
+		if obj.TransactionBlock == nil || obj.TransactionBlock.ID == "" {
+			return fmt.Errorf("dispute transaction.id missing (guaranteed field absent)")
+		}
+		txn, p, err := authoritativePaymentTransaction(ctx, pool, rt, obj.TransactionBlock.ID)
 		if err != nil {
 			return err
 		}
-		fact, err := buildDisputeFact(ev, &obj, p)
+		fact, err := buildDisputeFact(ev, &obj, txn, p)
 		if err != nil {
 			return err
 		}
@@ -484,13 +512,33 @@ func HandleCreemAdjustmentEvent(ctx context.Context, pool *pg.Pool, ev *CreemWeb
 	}
 }
 
-// findPaymentByProviderOrder resolves the payment via the provider order
-// binding (provider = creem, provider_order_id = transaction.order).
-func findPaymentByProviderOrder(ctx context.Context, pool *pg.Pool, txn *CreemTransactionFact) (*model.Payment, error) {
-	if txn == nil || txn.Order == "" {
+// authoritativePaymentTransaction fetches the provider's authoritative
+// transaction and resolves the local paid payment through its order
+// binding. The webhook's transaction block is used ONLY for the ID.
+func authoritativePaymentTransaction(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, transactionID string) (*CreemTransactionEntity, *model.Payment, error) {
+	if rt == nil || rt.Client == nil {
+		return nil, nil, errors.New(503, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server")
+	}
+	txn, err := rt.Client.GetTransaction(ctx, transactionID)
+	if err != nil {
+		// Definitive (4xx) or ambiguous (network/5xx): either way NO
+		// local mutation happens — fail the webhook; Creem retries.
+		return nil, nil, fmt.Errorf("authoritative transaction lookup failed: %w", err)
+	}
+	p, err := findPaymentByProviderOrderID(ctx, pool, txn.Order)
+	if err != nil {
+		return nil, nil, err
+	}
+	return txn, p, nil
+}
+
+// findPaymentByProviderOrderID resolves the payment via the provider
+// order binding (provider = creem, provider_order_id).
+func findPaymentByProviderOrderID(ctx context.Context, pool *pg.Pool, orderID string) (*model.Payment, error) {
+	if orderID == "" {
 		return nil, errors.New(400, "RECONCILIATION_FAILED", "Transaction order missing")
 	}
-	p, err := repository.FindPaymentByProviderOrder(ctx, pool, "creem", txn.Order)
+	p, err := repository.FindPaymentByProviderOrder(ctx, pool, "creem", orderID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load payment")
 	}

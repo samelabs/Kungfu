@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ const cfpWebhookSecret = "whsec_http_cfp"
 
 // newCfpFake builds a fake Creem implementing the official endpoints for
 // two packages: prod_a (starter, 1000 minor) and prod_b (standard, 4000).
-func newCfpFake(t *testing.T) *httptest.Server {
+func newCfpFake(t *testing.T) *cfpFake {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/products/", func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +44,21 @@ func newCfpFake(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(prod))
 	})
+	var mu sync.Mutex
+	txns := map[string]string{} // txn id → authoritative JSON
+	mux.HandleFunc("/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("transaction_id")
+		mu.Lock()
+		body, ok := txns[id]
+		mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
 	mux.HandleFunc("/v1/checkouts", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			ProductID string `json:"product_id"`
@@ -57,7 +73,21 @@ func newCfpFake(t *testing.T) *httptest.Server {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv
+	return &cfpFake{srv: srv, txns: txns, mu: &mu}
+}
+
+// cfpFake wraps the fake Creem server with its txn registry.
+type cfpFake struct {
+	srv  *httptest.Server
+	txns map[string]string
+	mu   *sync.Mutex
+}
+
+// setTxn registers an authoritative transaction JSON.
+func (f *cfpFake) setTxn(id, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.txns[id] = body
 }
 
 func cfpServer(t *testing.T, fakeURL string) *Server {
@@ -73,6 +103,11 @@ func cfpServer(t *testing.T, fakeURL string) *Server {
 	}
 	s.creemBaseOverride = fakeURL
 	return s
+}
+
+func cfpServer2(t *testing.T, f *cfpFake) *Server {
+	t.Helper()
+	return cfpServer(t, f.srv.URL)
 }
 
 func cfpBot(t *testing.T, s *Server) int64 {
@@ -129,7 +164,7 @@ func TestCheckoutDisabled503(t *testing.T) {
 
 // requires owner session
 func TestCheckoutRequiresAuth(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/owner/payments/checkout", bytes.NewBufferString(`{"package":"starter"}`))
@@ -143,7 +178,7 @@ func TestCheckoutRequiresAuth(t *testing.T) {
 // THE tamper proof: hostile client fields alongside a valid package code
 // cannot alter any fact — the struct has no fields for them.
 func TestCheckoutClientTamperImmunity(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 	botID := cfpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
@@ -200,7 +235,7 @@ func TestCheckoutClientTamperImmunity(t *testing.T) {
 
 // unknown package → 400 INVALID_PACKAGE
 func TestCheckoutUnknownPackage(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 	botID := cfpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
@@ -217,7 +252,7 @@ func TestCheckoutUnknownPackage(t *testing.T) {
 
 // webhook signature gates over the real router
 func TestWebhookBadSignature401(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 
 	payload := []byte(`{"id":"e","eventType":"checkout.completed","object":{}}`)
@@ -242,7 +277,8 @@ func TestWebhookBadSignature401(t *testing.T) {
 // then a signed refund.created → durable adjustment fact, ZERO Credits
 // mutation; mismatched facts (unknown order) → 400 RECONCILIATION_FAILED.
 func TestWebhookRefundDisputeFrozen(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	fake := newCfpFake(t)
+	s := cfpServer2(t, fake)
 	router := s.buildRouter()
 	botID := cfpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
@@ -294,18 +330,20 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 		t.Fatalf("seed balance = %v, want 1000", balBefore)
 	}
 
-	// signed refund.created matching the payment snapshot (amount_paid
-	// deliberately 1080 > 1000: tax must be accepted)
+	// signed refund.created carrying ONLY the guaranteed webhook fields;
+	// the authoritative transaction (amount_paid 1080 > 1000: tax must be
+	// accepted) lives on the provider API.
 	refunded := 540
+	txnID := fmt.Sprintf("txn_http_%d", time.Now().UnixNano())
+	fake.setTxn(txnID, fmt.Sprintf(
+		`{"id":%q,"object":"transaction","amount":1000,"amount_paid":1080,"refunded_amount":%d,"currency":"USD","status":"succeeded","order":%q,"mode":"test"}`,
+		txnID, refunded, "ord_"+pc))
 	payload, _ := json.Marshal(map[string]interface{}{
 		"id": fmt.Sprintf("evt_http_refund_%d", time.Now().UnixNano()), "eventType": "refund.created", "created_at": time.Now().Unix(),
 		"object": map[string]interface{}{
 			"id": fmt.Sprintf("ref_http_%d", time.Now().UnixNano()), "status": "succeeded",
-			"refund_amount": 540, "refund_currency": "USD", "reason": "customer request",
-			"transaction": map[string]interface{}{
-				"id": fmt.Sprintf("txn_http_%d", time.Now().UnixNano()), "amount": 1000, "amount_paid": 1080, "currency": "USD",
-				"status": "succeeded", "refunded_amount": refunded, "order": "ord_" + pc,
-			},
+			"refund_amount": 540, "reason": "customer request",
+			"transaction": map[string]interface{}{"id": txnID},
 		},
 	})
 	rec2 := httptest.NewRecorder()
@@ -390,7 +428,7 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 
 // e2e: checkout → signed webhook → paid → balance, over the real router.
 func TestCreemE2EPackageFlow(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 	botID := cfpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
@@ -457,7 +495,7 @@ func TestCreemE2EPackageFlow(t *testing.T) {
 
 // owner GET ownership: cross-bot 404
 func TestOwnerPaymentGetCrossBot404(t *testing.T) {
-	s := cfpServer(t, newCfpFake(t).URL)
+	s := cfpServer2(t, newCfpFake(t))
 	router := s.buildRouter()
 	botA, botB := cfpBot(t, s), cfpBot(t, s)
 	cookieA, cookieB := storeOwnerCookie(t, s, botA), storeOwnerCookie(t, s, botB)

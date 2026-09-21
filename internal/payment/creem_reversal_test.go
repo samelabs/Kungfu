@@ -55,37 +55,29 @@ func rev2SeedPaidPayment(t *testing.T, pool *pg.Pool, fc *fakeCreem, botID int64
 	return code
 }
 
-func rev2RefundEvent(t *testing.T, pool *pg.Pool, code, txnOrder string, amountPaid, refundAmount, refunded int64) *CreemWebhookEvent {
-	return rev2RefundEventBasis(t, pool, code, txnOrder, amountPaid, refundAmount, refunded, rev2BasisID())
+func rev2RefundEvent(t *testing.T, pool *pg.Pool, fc *fakeCreem, code, txnOrder string, amountPaid, refundAmount, refunded int64) *CreemWebhookEvent {
+	return rev2RefundEventBasis(t, pool, fc, code, txnOrder, amountPaid, refundAmount, refunded, rev2BasisID())
 }
 
-func rev2RefundEventBasis(t *testing.T, pool *pg.Pool, code, txnOrder string, amountPaid, refundAmount, refunded int64, basisID string) *CreemWebhookEvent {
+func rev2RefundEventBasis(t *testing.T, pool *pg.Pool, fc *fakeCreem, code, txnOrder string, amountPaid, refundAmount, refunded int64, basisID string) *CreemWebhookEvent {
 	t.Helper()
 	p := mustGetPayment(t, pool, code)
 	r := refunded
-	txn := &CreemTransactionFact{
-		ID: basisID, Amount: p.AmountMinor, AmountPaid: amountPaid, Currency: p.Currency,
-		Status: "succeeded", RefundedAmount: &r, Order: txnOrder,
-	}
-	obj := adjRefundObject(rev2RefundID(), txn)
+	adjTxn(fc, basisID, txnOrder, p.AmountMinor, amountPaid, p.Currency, "succeeded", &r)
+	obj := adjRefundObject(rev2RefundID(), amountPaid, basisID)
 	obj.RefundAmount = refundAmount
 	return adjEvent(rev2EventID(), "refund.created", obj)
 }
 
-func rev2DisputeEvent(t *testing.T, pool *pg.Pool, code, txnOrder string, amountPaid int64, refunded *int64) *CreemWebhookEvent {
-	return rev2DisputeEventBasis(t, pool, code, txnOrder, amountPaid, refunded, rev2BasisID())
+func rev2DisputeEvent(t *testing.T, pool *pg.Pool, fc *fakeCreem, code, txnOrder string, amountPaid int64, refunded *int64) *CreemWebhookEvent {
+	return rev2DisputeEventBasis(t, pool, fc, code, txnOrder, amountPaid, refunded, rev2BasisID())
 }
 
-func rev2DisputeEventBasis(t *testing.T, pool *pg.Pool, code, txnOrder string, amountPaid int64, refunded *int64, basisID string) *CreemWebhookEvent {
+func rev2DisputeEventBasis(t *testing.T, pool *pg.Pool, fc *fakeCreem, code, txnOrder string, amountPaid int64, refunded *int64, basisID string) *CreemWebhookEvent {
 	t.Helper()
 	p := mustGetPayment(t, pool, code)
-	return adjEvent(rev2EventID(), "dispute.created", &CreemDisputeObject{
-		ID: rev2RefundID(), Amount: amountPaid, Currency: p.Currency,
-		Transaction: &CreemTransactionFact{
-			ID: basisID, Amount: p.AmountMinor, AmountPaid: amountPaid, Currency: p.Currency,
-			Status: "under_review", RefundedAmount: refunded, Order: txnOrder,
-		},
-	})
+	adjTxn(fc, basisID, txnOrder, p.AmountMinor, amountPaid, p.Currency, "under_review", refunded)
+	return adjEvent(rev2EventID(), "dispute.created", adjDisputeObject(rev2RefundID(), amountPaid, basisID))
 }
 
 // Full refund after the user spent most credits → negative balance.
@@ -96,8 +88,8 @@ func TestReversalFullRefundNegativeBalance(t *testing.T) {
 	code := rev2SeedPaidPayment(t, pool, fc, botID, 900) // balance 100
 
 	refunded := int64(1080)
-	ev := rev2RefundEvent(t, pool, code, *mustGetPayment(t, pool, code).ProviderOrderID, 1080, 1080, refunded)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	ev := rev2RefundEvent(t, pool, fc, code, *mustGetPayment(t, pool, code).ProviderOrderID, 1080, 1080, refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatalf("full refund: %v", err)
 	}
 
@@ -126,8 +118,8 @@ func TestReversalPartialTaxRefund(t *testing.T) {
 	code := rev2SeedPaidPayment(t, pool, fc, botID, 0)
 
 	refunded := int64(605)
-	ev := rev2RefundEvent(t, pool, code, *mustGetPayment(t, pool, code).ProviderOrderID, 1210, 605, refunded)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	ev := rev2RefundEvent(t, pool, fc, code, *mustGetPayment(t, pool, code).ProviderOrderID, 1210, 605, refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatalf("partial tax refund: %v", err)
 	}
 	if b := crBalance(t, pool, botID); b != 500 {
@@ -145,13 +137,13 @@ func TestReversalMultiplePartial(t *testing.T) {
 
 	r242 := int64(242)
 	basis := rev2BasisID()
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 242, r242, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 242, r242, basis)); err != nil {
 		t.Fatal(err)
 	}
 	r605 := int64(605)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 605, r605, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 605, r605, basis)); err != nil {
 		t.Fatal(err)
 	}
 	var sum int64
@@ -175,13 +167,13 @@ func TestReversalFullAfterPartial(t *testing.T) {
 
 	basis := rev2BasisID()
 	r605 := int64(605)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 605, r605, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 605, r605, basis)); err != nil {
 		t.Fatal(err)
 	}
 	full := int64(1210)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 1210, full, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 1210, full, basis)); err != nil {
 		t.Fatal(err)
 	}
 	var sum int64
@@ -201,12 +193,12 @@ func TestReversalDuplicateOneEffect(t *testing.T) {
 	order := *mustGetPayment(t, pool, code).ProviderOrderID
 
 	r605 := int64(605)
-	ev := rev2RefundEvent(t, pool, code, order, 1210, 605, r605)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	ev := rev2RefundEvent(t, pool, fc, code, order, 1210, 605, r605)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatal(err)
 	}
 	// exact redelivery of the SAME event id
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatalf("redelivery: %v", err)
 	}
 	var facts int
@@ -233,13 +225,13 @@ func TestReversalOutOfOrderNoGiveBack(t *testing.T) {
 
 	basis := rev2BasisID()
 	r605 := int64(605)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 605, r605, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 605, r605, basis)); err != nil {
 		t.Fatal(err)
 	}
 	r242 := int64(242)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1210, 242, r242, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1210, 242, r242, basis)); err != nil {
 		t.Fatal(err)
 	}
 	if b := crBalance(t, pool, botID); b != 500 {
@@ -258,16 +250,16 @@ func TestReversalDisputeThenRefundSingleReversal(t *testing.T) {
 
 	full := int64(1080)
 	basis := rev2BasisID()
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2DisputeEventBasis(t, pool, code, order, 1080, &full, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2DisputeEventBasis(t, pool, fc, code, order, 1080, &full, basis)); err != nil {
 		t.Fatal(err)
 	}
 	if b := crBalance(t, pool, botID); b != 0 {
 		t.Fatalf("after dispute balance = %v, want 0", b)
 	}
 	// subsequent full refund event on the SAME transaction
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEventBasis(t, pool, code, order, 1080, 1080, full, basis)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEventBasis(t, pool, fc, code, order, 1080, 1080, full, basis)); err != nil {
 		t.Fatal(err)
 	}
 	if b := crBalance(t, pool, botID); b != 0 {
@@ -289,8 +281,8 @@ func TestReversalDisputeNilRefundedZeroMutation(t *testing.T) {
 	code := rev2SeedPaidPayment(t, pool, fc, botID, 0)
 	order := *mustGetPayment(t, pool, code).ProviderOrderID
 
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2DisputeEvent(t, pool, code, order, 1080, nil)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2DisputeEvent(t, pool, fc, code, order, 1080, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if b := crBalance(t, pool, botID); b != 1000 {
@@ -314,25 +306,23 @@ func TestReversalInconsistentBasisRejected(t *testing.T) {
 	order := *mustGetPayment(t, pool, code).ProviderOrderID
 
 	r605 := int64(605)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEvent(t, pool, code, order, 1210, 605, r605)); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEvent(t, pool, fc, code, order, 1210, 605, r605)); err != nil {
 		t.Fatal(err)
 	}
 
 	// different amount_paid basis
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		rev2RefundEvent(t, pool, code, order, 1300, 650, 650)); err == nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		rev2RefundEvent(t, pool, fc, code, order, 1300, 650, 650)); err == nil {
 		t.Fatal("different amount_paid must be rejected")
 	}
-	// different provider transaction id
+	// different provider transaction id: an authoritative txn with the
+	// same economics but a different id — historical basis mismatch
 	p := mustGetPayment(t, pool, code)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn_other"), Amount: p.AmountMinor, AmountPaid: 1210, Currency: p.Currency,
-		Status: "succeeded", RefundedAmount: &r605, Order: order,
-	}
-	obj := adjRefundObject(adjUnique("ref"), txn)
+	txnOther := adjTxn(fc, adjUnique("txn_other"), order, p.AmountMinor, 1210, p.Currency, "succeeded", &r605)
+	obj := adjRefundObject(adjUnique("ref"), 1210, txnOther)
 	obj.RefundAmount = 605
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
 		adjEvent(adjUnique("evt"), "refund.created", obj)); err == nil {
 		t.Fatal("different txn id must be rejected")
 	}
@@ -374,18 +364,16 @@ func TestReversalA1CatchUp(t *testing.T) {
 		t.Fatalf("pre-catchup balance = %v", b)
 	}
 
-	// redelivery: SAME object id, NEW event id, SAME txn basis
-	txn := &CreemTransactionFact{
-		ID: txnID, Amount: 1000, AmountPaid: 1210, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &r605, Order: order,
-	}
+	// redelivery: SAME object id, NEW event id, SAME txn basis — the
+	// authoritative txn with that id is registered on the fake provider
+	adjTxn(fc, txnID, order, 1000, 1210, "USD", "succeeded", &r605)
 	// look up the seeded object id
 	var objID string
 	_ = pool.QueryRow(context.Background(),
 		`SELECT provider_object_id FROM tb_payment_adjustments WHERE payment_id=$1`, p.ID).Scan(&objID)
-	obj := adjRefundObject(objID, txn)
+	obj := adjRefundObject(objID, 1210, txnID)
 	obj.RefundAmount = 605
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
 		adjEvent(adjUnique("evt_catchup"), "refund.created", obj)); err != nil {
 		t.Fatalf("catch-up: %v", err)
 	}
@@ -414,11 +402,8 @@ func TestReversalConcurrentNoOverReverse(t *testing.T) {
 	txnID := rev2BasisID()
 	mk := func(refundAmt int64, objID string) *CreemWebhookEvent {
 		r := refundAmt
-		txn := &CreemTransactionFact{
-			ID: txnID, Amount: p.AmountMinor, AmountPaid: 1210, Currency: p.Currency,
-			Status: "succeeded", RefundedAmount: &r, Order: order,
-		}
-		obj := adjRefundObject(objID, txn)
+		adjTxn(fc, txnID, order, p.AmountMinor, 1210, p.Currency, "succeeded", &r)
+		obj := adjRefundObject(objID, 1210, txnID)
 		obj.RefundAmount = refundAmt
 		return adjEvent(adjUnique("evt_cc"), "refund.created", obj)
 	}
@@ -428,7 +413,7 @@ func TestReversalConcurrentNoOverReverse(t *testing.T) {
 	errCh := make(chan error, 2)
 	for _, ev := range []*CreemWebhookEvent{ev1, ev2} {
 		go func(e *CreemWebhookEvent) {
-			errCh <- HandleCreemAdjustmentEvent(context.Background(), pool, e)
+			errCh <- HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), e)
 		}(ev)
 	}
 	for i := 0; i < 2; i++ {
@@ -502,8 +487,8 @@ func TestReversalHistoricalMultiBasisFailsClosed(t *testing.T) {
 			}
 
 			// valid event matching ONE of the historical bases
-			if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-				rev2RefundEvent(t, pool, code, order, 1210, 605, 605)); err == nil {
+			if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+				rev2RefundEvent(t, pool, fc, code, order, 1210, 605, 605)); err == nil {
 				t.Fatal("event on historically inconsistent basis must fail closed")
 			}
 

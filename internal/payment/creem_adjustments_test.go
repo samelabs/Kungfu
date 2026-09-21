@@ -47,11 +47,41 @@ func adjEvent(eventID, eventType string, object interface{}) *CreemWebhookEvent 
 	}
 }
 
-func adjRefundObject(refundID string, txn *CreemTransactionFact) *CreemRefundObject {
+// adjTxn registers an authoritative TransactionEntity on the fake
+// provider and returns its id.
+func adjTxn(fc *fakeCreem, txnID, order string, amount, amountPaid int64, currency, status string, refunded *int64) string {
+	if txnID == "" {
+		txnID = adjUnique("txn")
+	}
+	fc.setTxn(&CreemTransactionEntity{
+		ID: txnID, Object: "transaction", Amount: amount, AmountPaid: &amountPaid,
+		RefundedAmount: refunded, Currency: currency, Status: status, Order: order, Mode: "test",
+	})
+	return txnID
+}
+
+// adjRefundObject builds a refund.created object carrying ONLY the
+// officially-guaranteed fields (transaction.id included; currency/order
+// deliberately absent from the webhook).
+func adjRefundObject(refundID string, amountPaid int64, txnID string) *CreemRefundObject {
 	return &CreemRefundObject{
 		ID: refundID, Status: "succeeded",
-		RefundAmount: 540, RefundCurrency: txn.Currency,
-		Transaction: txn,
+		RefundAmount: 540,
+		TransactionBlock: &struct {
+			ID string `json:"id"`
+		}{ID: txnID},
+	}
+}
+
+// adjDisputeObject builds a dispute.created object with only guaranteed
+// fields.
+func adjDisputeObject(disputeID string, amount int64, txnID string) *CreemDisputeObject {
+	return &CreemDisputeObject{
+		ID:     disputeID,
+		Amount: amount,
+		TransactionBlock: &struct {
+			ID string `json:"id"`
+		}{ID: txnID},
 	}
 }
 
@@ -89,14 +119,13 @@ func TestRefundFactRecordedExact(t *testing.T) {
 
 	p, _ := GetPayment(context.Background(), pool, code)
 	order := *p.ProviderOrderID
-	// amount_paid includes tax: 1000 product + 80 tax = 1080
+	// amount_paid includes tax: 1000 product + 80 tax = 1080. The
+	// authoritative transaction lives on the provider API, NOT in the
+	// webhook payload.
 	refunded := int64(540)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: order,
-	}
-	ev := adjEvent(adjUnique("evt_refund"), "refund.created", adjRefundObject(adjUnique("ref"), txn))
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	txnID := adjTxn(fc, "", order, 1000, 1080, "USD", "succeeded", &refunded)
+	ev := adjEvent(adjUnique("evt_refund"), "refund.created", adjRefundObject(adjUnique("ref"), 540, txnID))
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatalf("refund: %v", err)
 	}
 
@@ -139,14 +168,11 @@ func TestPartialRefundFact(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(300)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
-	obj := adjRefundObject(adjUnique("ref"), txn)
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "succeeded", &refunded)
+	obj := adjRefundObject(adjUnique("ref"), 540, txnID)
 	obj.RefundAmount = 300 // partial
 	ev := adjEvent(adjUnique("evt_refund"), "refund.created", obj)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev); err != nil {
 		t.Fatalf("partial refund: %v", err)
 	}
 	var amount int64
@@ -176,24 +202,21 @@ func TestAdjustmentIdempotency(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(540)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "succeeded", &refunded)
 	evtID, objID := adjUnique("evt_d"), adjUnique("ref_i")
 	// 1st delivery
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(evtID, "refund.created", adjRefundObject(objID, txn))); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(evtID, "refund.created", adjRefundObject(objID, 540, txnID))); err != nil {
 		t.Fatal(err)
 	}
 	// 2nd: exact redelivery (same event id)
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(evtID, "refund.created", adjRefundObject(objID, txn))); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(evtID, "refund.created", adjRefundObject(objID, 540, txnID))); err != nil {
 		t.Fatalf("redelivery must succeed: %v", err)
 	}
 	// 3rd: same object id under a NEW event id — same unique object
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_d2"), "refund.created", adjRefundObject(objID, txn))); err != nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_d2"), "refund.created", adjRefundObject(objID, 540, txnID))); err != nil {
 		t.Fatalf("same-object new-event must succeed: %v", err)
 	}
 	adjN, _, _ := adjCounts(t, pool, code)
@@ -211,24 +234,16 @@ func TestRefundAndDisputeIndependentFacts(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(540)
-	basis := adjUnique("txn")
-	txn := &CreemTransactionFact{
-		ID: basis, Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_rf"), "refund.created", adjRefundObject(adjUnique("ref_rd"), txn))); err != nil {
+	basis := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "succeeded", &refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_rf"), "refund.created", adjRefundObject(adjUnique("ref_rd"), 540, basis))); err != nil {
 		t.Fatal(err)
 	}
-	dispute := &CreemDisputeObject{
-		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
-		Transaction: &CreemTransactionFact{
-			ID: basis, Amount: 1000, AmountPaid: 1080, Currency: "USD",
-			Status: "chargeback_open", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-		},
-	}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_ds"), "dispute.created", dispute)); err != nil {
+	// dispute: the authoritative txn status advances to chargeback_open
+	cbRefunded := int64(540)
+	adjTxn(fc, basis, *p.ProviderOrderID, 1000, 1080, "USD", "chargeback_open", &cbRefunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_ds"), "dispute.created", adjDisputeObject(adjUnique("dis"), 1080, basis))); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -265,46 +280,52 @@ func TestAdjustmentReconciliationGates(t *testing.T) {
 	code := adjSeedPaidPayment(t, pool, fc, botID)
 	p, _ := GetPayment(context.Background(), pool, code)
 
-	good := func() *CreemTransactionFact {
+	// Each case registers an authoritative transaction that is wrong in
+	// exactly one dimension (or a wrong webhook refund object) — every
+	// gate must reject with zero rows. The webhook carries only the
+	// guaranteed fields; the basis is the API transaction.
+	mkTxn := func(mutate func(t *CreemTransactionEntity)) string {
 		r := int64(540)
-		return &CreemTransactionFact{ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD", Status: "succeeded", RefundedAmount: &r, Order: *p.ProviderOrderID}
+		ap := int64(1080)
+		txn := &CreemTransactionEntity{ID: adjUnique("txn"), Object: "transaction",
+			Amount: 1000, AmountPaid: &ap, RefundedAmount: &r, Currency: "USD",
+			Status: "succeeded", Order: *p.ProviderOrderID, Mode: "test"}
+		if mutate != nil {
+			mutate(txn)
+		}
+		fc.setTxn(txn)
+		return txn.ID
 	}
 	cases := []struct {
 		name string
-		txn  *CreemTransactionFact
-		obj  func(*CreemTransactionFact) interface{}
+		txn  string
+		obj  func(txnID string) interface{}
 	}{
-		{"wrong order", func() *CreemTransactionFact { t := good(); t.Order = "ord_other"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
-		{"wrong amount", func() *CreemTransactionFact { t := good(); t.Amount = 999; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
-		{"wrong currency", func() *CreemTransactionFact { t := good(); t.Currency = "EUR"; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
-		{"amount_paid zero", func() *CreemTransactionFact { t := good(); t.AmountPaid = 0; return t }(), func(t *CreemTransactionFact) interface{} { return adjRefundObject(adjUnique("ref"), t) }},
-		{"refund not succeeded", good(), func(t *CreemTransactionFact) interface{} {
-			o := adjRefundObject(adjUnique("ref"), t)
+		{"wrong order", mkTxn(func(t *CreemTransactionEntity) { t.Order = "ord_other" }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"wrong amount", mkTxn(func(t *CreemTransactionEntity) { t.Amount = 999 }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"wrong currency", mkTxn(func(t *CreemTransactionEntity) { t.Currency = "EUR" }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"amount_paid zero", mkTxn(func(t *CreemTransactionEntity) { ap := int64(0); t.AmountPaid = &ap }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"amount_paid missing", mkTxn(func(t *CreemTransactionEntity) { t.AmountPaid = nil }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"refund not succeeded", mkTxn(nil), func(id string) interface{} {
+			o := adjRefundObject(adjUnique("ref"), 540, id)
 			o.Status = "pending"
 			return o
 		}},
-		{"refund exceeds paid", good(), func(t *CreemTransactionFact) interface{} {
-			o := adjRefundObject(adjUnique("ref"), t)
-			o.RefundAmount = t.AmountPaid + 1
+		{"refund exceeds paid", mkTxn(nil), func(id string) interface{} {
+			o := adjRefundObject(adjUnique("ref"), 540, id)
+			o.RefundAmount = 1081
 			return o
 		}},
-		{"refunded missing", good(), func(t *CreemTransactionFact) interface{} {
-			t.RefundedAmount = nil
-			return adjRefundObject(adjUnique("ref"), t)
-		}},
-		{"refunded below refund", good(), func(t *CreemTransactionFact) interface{} {
-			r := int64(1)
-			t.RefundedAmount = &r
-			return adjRefundObject(adjUnique("ref"), t)
-		}},
-		{"refunded exceeds amount_paid", good(), func(t *CreemTransactionFact) interface{} {
-			r := t.AmountPaid + 1
-			t.RefundedAmount = &r
-			return adjRefundObject(adjUnique("ref"), t)
+		{"refunded missing", mkTxn(func(t *CreemTransactionEntity) { t.RefundedAmount = nil }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"refunded below refund", mkTxn(func(t *CreemTransactionEntity) { r := int64(1); t.RefundedAmount = &r }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"refunded exceeds amount_paid", mkTxn(func(t *CreemTransactionEntity) { r := int64(1081); t.RefundedAmount = &r }), func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"txn unknown to provider", "txn_not_registered", func(id string) interface{} { return adjRefundObject(adjUnique("ref"), 540, id) }},
+		{"webhook txn id missing", mkTxn(nil), func(id string) interface{} {
+			return &CreemRefundObject{ID: adjUnique("ref"), Status: "succeeded", RefundAmount: 540}
 		}},
 	}
 	for _, tc := range cases {
-		if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+		if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
 			adjEvent(adjUnique("evt_gate"), "refund.created", tc.obj(tc.txn))); err == nil {
 			t.Fatalf("%s: must fail", tc.name)
 		}
@@ -324,9 +345,9 @@ func TestAdjustmentUnknownOrder(t *testing.T) {
 	_ = code
 
 	r := int64(10)
-	txn := &CreemTransactionFact{ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD", Status: "succeeded", RefundedAmount: &r, Order: "ord_nonexistent"}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_unk"), "refund.created", adjRefundObject(adjUnique("ref_u"), txn))); err == nil {
+	txnID := adjTxn(fc, "", "ord_nonexistent", 1000, 1080, "USD", "succeeded", &r)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_unk"), "refund.created", adjRefundObject(adjUnique("ref_u"), 540, txnID))); err == nil {
 		t.Fatal("unknown order must fail")
 	}
 }
@@ -340,9 +361,9 @@ func TestAdjustmentRequiresPaidPayment(t *testing.T) {
 	res, _ := StartCreemCheckout(context.Background(), pool, rt, botID, "starter") // stays pending
 
 	r := int64(500)
-	txn := &CreemTransactionFact{ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1000, Currency: "USD", Status: "succeeded", RefundedAmount: &r, Order: "ord_" + res.Payment.Code}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_pp"), "refund.created", adjRefundObject(adjUnique("ref_pp"), txn))); err == nil {
+	txnID := adjTxn(fc, "", "ord_"+res.Payment.Code, 1000, 1000, "USD", "succeeded", &r)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_pp"), "refund.created", adjRefundObject(adjUnique("ref_pp"), 540, txnID))); err == nil {
 		t.Fatal("pending payment must not accept adjustments")
 	}
 }
@@ -357,13 +378,10 @@ func TestRefundFactTaxDifference1210(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(605)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1210, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
-	obj := adjRefundObject(adjUnique("ref"), txn)
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1210, "USD", "succeeded", &refunded)
+	obj := adjRefundObject(adjUnique("ref"), 540, txnID)
 	obj.RefundAmount = 605
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
 		adjEvent(adjUnique("evt_refund_1210"), "refund.created", obj)); err != nil {
 		t.Fatalf("1210/605/605 must record: %v", err)
 	}
@@ -392,15 +410,9 @@ func TestDisputeFactRecordedStandalone(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(0)
-	dispute := &CreemDisputeObject{
-		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
-		Transaction: &CreemTransactionFact{
-			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-			Status: "needs_response", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-		},
-	}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_dispute"), "dispute.created", dispute)); err != nil {
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "needs_response", &refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_dispute"), "dispute.created", adjDisputeObject(adjUnique("dis"), 1080, txnID))); err != nil {
 		t.Fatalf("dispute: %v", err)
 	}
 	adjN, txN, bal := adjCounts(t, pool, code)
@@ -421,15 +433,9 @@ func TestDisputeEmptyStatusRejected(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(0)
-	dispute := &CreemDisputeObject{
-		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
-		Transaction: &CreemTransactionFact{
-			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-			Status: "", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-		},
-	}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_dispute_empty"), "dispute.created", dispute)); err == nil {
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "", &refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_dispute_empty"), "dispute.created", adjDisputeObject(adjUnique("dis"), 1080, txnID))); err == nil {
 		t.Fatal("empty dispute transaction.status must fail")
 	}
 	adjN, _, _ := adjCounts(t, pool, code)
@@ -448,28 +454,19 @@ func TestAdjustmentMissingCreatedAtRejected(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(540)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "succeeded", &refunded)
 
 	// refund with zero created_at
-	ev0 := adjEvent(adjUnique("evt_ca0"), "refund.created", adjRefundObject(adjUnique("ref"), txn))
+	ev0 := adjEvent(adjUnique("evt_ca0"), "refund.created", adjRefundObject(adjUnique("ref"), 540, txnID))
 	ev0.CreatedAt = 0
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, ev0); err == nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), ev0); err == nil {
 		t.Fatal("zero created_at refund must fail")
 	}
 	// dispute with negative created_at
-	dispute := &CreemDisputeObject{
-		ID: adjUnique("dis"), Amount: 1080, Currency: "USD",
-		Transaction: &CreemTransactionFact{
-			ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-			Status: "under_review", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-		},
-	}
-	evN := adjEvent(adjUnique("evt_can"), "dispute.created", dispute)
+	txnID2 := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "under_review", &refunded)
+	evN := adjEvent(adjUnique("evt_can"), "dispute.created", adjDisputeObject(adjUnique("dis"), 1080, txnID2))
 	evN.CreatedAt = -5
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool, evN); err == nil {
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(), evN); err == nil {
 		t.Fatal("negative created_at dispute must fail")
 	}
 	adjN, _, _ := adjCounts(t, pool, code)
@@ -488,12 +485,9 @@ func TestAdjustmentCleanupLeavesNoResidue(t *testing.T) {
 	p, _ := GetPayment(context.Background(), pool, code)
 
 	refunded := int64(540)
-	txn := &CreemTransactionFact{
-		ID: adjUnique("txn"), Amount: 1000, AmountPaid: 1080, Currency: "USD",
-		Status: "succeeded", RefundedAmount: &refunded, Order: *p.ProviderOrderID,
-	}
-	if err := HandleCreemAdjustmentEvent(context.Background(), pool,
-		adjEvent(adjUnique("evt_residue"), "refund.created", adjRefundObject(adjUnique("ref"), txn))); err != nil {
+	txnID := adjTxn(fc, "", *p.ProviderOrderID, 1000, 1080, "USD", "succeeded", &refunded)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, fc.runtime(),
+		adjEvent(adjUnique("evt_residue"), "refund.created", adjRefundObject(adjUnique("ref"), 540, txnID))); err != nil {
 		t.Fatal(err)
 	}
 

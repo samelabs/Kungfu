@@ -243,17 +243,12 @@ func (c *CreemClient) GetProduct(ctx context.Context, productID string) (*CreemP
 	if err != nil {
 		return nil, err
 	}
-	var wrapped struct {
-		Product CreemProduct `json:"product"`
-	}
-	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Product.ID != "" {
-		return &wrapped.Product, nil
-	}
-	var direct CreemProduct
-	if err := json.Unmarshal(raw, &direct); err != nil || direct.ID == "" {
+	// Official GET /v1/products/{id} returns the ProductEntity directly.
+	var product CreemProduct
+	if err := json.Unmarshal(raw, &product); err != nil || product.ID == "" {
 		return nil, fmt.Errorf("creem product response missing product id")
 	}
-	return &direct, nil
+	return &product, nil
 }
 
 // CreateCheckoutInput is the server-owned checkout request payload.
@@ -275,17 +270,51 @@ func (c *CreemClient) CreateCheckout(ctx context.Context, in CreateCheckoutInput
 	if err != nil {
 		return nil, err
 	}
-	var wrapped struct {
-		Checkout CreemCheckout `json:"checkout"`
-	}
-	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Checkout.ID != "" {
-		return &wrapped.Checkout, nil
-	}
-	var direct CreemCheckout
-	if err := json.Unmarshal(raw, &direct); err != nil || direct.ID == "" {
+	// Official POST /v1/checkouts returns the CheckoutEntity directly.
+	var checkout CreemCheckout
+	if err := json.Unmarshal(raw, &checkout); err != nil || checkout.ID == "" {
 		return nil, fmt.Errorf("creem checkout response missing id")
 	}
-	return &direct, nil
+	return &checkout, nil
+}
+
+// CreemTransactionEntity is the authoritative TransactionEntity returned
+// by GET /v1/transactions?transaction_id=... — the sole authority for
+// cumulative refunded_amount and amount_paid used by refund/dispute
+// reversal. Nullable provider fields stay pointers; the caller validates.
+type CreemTransactionEntity struct {
+	ID             string `json:"id"`
+	Object         string `json:"object"`
+	Amount         int64  `json:"amount"`
+	AmountPaid     *int64 `json:"amount_paid"`
+	RefundedAmount *int64 `json:"refunded_amount"`
+	Currency       string `json:"currency"`
+	Status         string `json:"status"`
+	Order          string `json:"order"`
+	Mode           string `json:"mode"`
+}
+
+// GetTransaction retrieves the authoritative transaction by its provider
+// ID via the official GET /v1/transactions endpoint (query parameter
+// transaction_id, x-api-key header, TransactionEntity response). One
+// request per call — no automatic retry. 4xx definitive per doRaw's
+// contract; network/5xx ambiguity is returned as an ordinary error and
+// the caller must treat it as ambiguous (no Credits mutation).
+func (c *CreemClient) GetTransaction(ctx context.Context, transactionID string) (*CreemTransactionEntity, error) {
+	if transactionID == "" {
+		return nil, fmt.Errorf("creem transaction id empty")
+	}
+	q := url.Values{}
+	q.Set("transaction_id", transactionID)
+	raw, err := c.doRaw(ctx, http.MethodGet, "/v1/transactions?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	var txn CreemTransactionEntity
+	if err := json.Unmarshal(raw, &txn); err != nil || txn.ID == "" {
+		return nil, fmt.Errorf("creem transaction response missing id")
+	}
+	return &txn, nil
 }
 
 // VerifyCreemWebhookSignature authenticates a webhook delivery:
