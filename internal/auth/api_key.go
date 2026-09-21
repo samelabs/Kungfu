@@ -96,8 +96,9 @@ func invalidKeyErr() error {
 	return apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
 }
 
-// VerifyAgentKey is the ONE raw Agent-key verification authority
-// shared by REST (X-Bot-Key) and MCP (Bearer):
+// VerifyAgentKey is the ONE raw Agent-key verification authority shared
+// by every transport (MCP Bearer; the Owner browser surface's
+// X-Bot-Key consumers):
 //
 //	raw key → exact format validation → SHA-256 digest →
 //	active-bot lookup by digest → bot identity

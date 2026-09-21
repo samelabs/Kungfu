@@ -13,7 +13,7 @@ package server
 // Canonical form: optional leading '-', then digits with no leading
 // zero (except "0" itself). No exponent, no decimal point, no '+'.
 //
-// The Agent REST API and MCP tool contracts keep numeric JSON — this
+// The MCP tool contracts keep numeric JSON — this
 // is a browser-boundary contract, not a global API change. Ordinary
 // non-economic integers (pagination, ids, statuses) are untouched.
 //

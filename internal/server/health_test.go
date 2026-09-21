@@ -148,23 +148,20 @@ func TestR4ReadyFailsClosedWhenPostgresUnavailable(t *testing.T) {
 	}
 }
 
-// TestR4BusinessPingRemainsAuthenticated: /api/ping is not a public
-// health alias after adding /healthz+/readyz.
-func TestR4BusinessPingRemainsAuthenticated(t *testing.T) {
+// TestR4AgentRESTRoutesRemoved: the former Agent REST surface
+// (/api/ping et al.) no longer exists — MCP is the only Agent
+// execution protocol. The public probes remain /healthz and /readyz.
+func TestR4AgentRESTRoutesRemoved(t *testing.T) {
 	s := &Server{
 		Config:      testConfig(),
 		Pool:        nil,
 		RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
 	}
-	rec := r4GET(r4Router(s), "/api/ping")
-	if rec.Code == 200 {
-		t.Fatal("/api/ping succeeded without X-Bot-Key")
-	}
-	env := r4Decode(t, rec)
-	if env.Success {
-		t.Fatal("/api/ping success without auth")
-	}
-	if rec.Code != 401 {
-		t.Fatalf("unauthenticated ping status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	r := r4Router(s)
+	for _, path := range []string{"/api/ping", "/api/register", "/api/kungfus", "/api/tasks"} {
+		rec := r4GET(r, path)
+		if rec.Code != 404 {
+			t.Fatalf("GET %s = %d, want 404 (Agent REST surface removed)", path, rec.Code)
+		}
 	}
 }

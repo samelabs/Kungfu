@@ -1,8 +1,8 @@
 package mcpserver
 
 // M2 memory + work tools. Pure adapter code: every tool resolves the
-// verified identity from the M1 Bearer mechanism, applies the SAME
-// RateLimiter actions as REST through the injected limiter, calls the
+// verified identity from the Bearer mechanism, applies the business
+// rate-limit authority through the injected limiter, calls the
 // EXISTING service authorities directly (no facade, no alternate
 // implementations), and projects their results into typed MCP output
 // DTOs (contracts_memory_work.go). No SQL, no Credits, no
@@ -45,7 +45,7 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryListOutput{}, err
 		}
-		if !deps.limiter().CheckAPI(bot.ID, "list") {
+		if !deps.limiter().CheckAgent(bot.ID, "list") {
 			return nil, MemoryListOutput{}, rateLimited()
 		}
 		limit := in.Limit
@@ -79,7 +79,7 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryGetOutput{}, err
 		}
-		if !deps.limiter().CheckAPI(bot.ID, "get") {
+		if !deps.limiter().CheckAgent(bot.ID, "get") {
 			return nil, MemoryGetOutput{}, rateLimited()
 		}
 		result, err := service.GetKungfuForBot(ctx, deps.Pool, bot.ID, in.Code)
@@ -113,7 +113,7 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, MemoryPutOutput{}, err
 		}
-		if !deps.limiter().CheckAPI(bot.ID, "push") {
+		if !deps.limiter().CheckAgent(bot.ID, "push") {
 			return nil, MemoryPutOutput{}, rateLimited()
 		}
 		// Adapter ONLY reshapes typed MCP input into the existing
@@ -275,12 +275,12 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "work_submit",
-		Description: "Submit your completed work result for a task. The result is delivered to the task owner's configured PostAPI endpoint.",
+		Description: "Submit your completed work result to Kungfu. Kungfu privately delivers accepted submissions to the task owner's configured receiver.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    false,
 			DestructiveHint: boolPtr(false),
 			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(true), // performs the existing PostAPI delivery
+			OpenWorldHint:   boolPtr(true), // Kungfu performs outbound delivery
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code       string                 `json:"code"`
@@ -291,7 +291,7 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkSubmitOutput{}, err
 		}
-		if !deps.limiter().CheckAPI(bot.ID, "task_submit") {
+		if !deps.limiter().CheckAgent(bot.ID, "task_submit") {
 			return nil, WorkSubmitOutput{}, rateLimited()
 		}
 		// The payload is the Agent's result body, passed as-is to the
@@ -301,8 +301,8 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		if err != nil {
 			return nil, WorkSubmitOutput{}, mapAppError(err)
 		}
-		// Terminal rejected replay: surface the SAME durable business fact
-		// as an error result (mirrors the REST 424), never a plain
+		// Terminal rejected replay: surface the durable rejected-
+		// submission fact as an error result (424), never a plain
 		// success output — no re-POST, no new reservation, no settlement.
 		if result.State == "rejected" {
 			return nil, WorkSubmitOutput{}, mapAppError(errors.New(http.StatusFailedDependency,
@@ -327,7 +327,7 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Title        string `json:"title"`
 		Requirements string `json:"requirements"`
-		PostAPI      string `json:"postapi" jsonschema:"HTTP or HTTPS URL that receives completed work results"`
+		PostAPI      string `json:"postapi" jsonschema:"private result receiver configured by the publisher (HTTP or HTTPS URL); not exposed to worker agents"`
 		Budget       int64  `json:"budget" jsonschema:"whole-credit task budget (integer, minimum 1000)"`
 		Price        int64  `json:"price" jsonschema:"whole credits paid per successful submission (integer)"`
 		OpenNow      bool   `json:"open_now" jsonschema:"open immediately (fundable) or keep pending"`

@@ -76,10 +76,14 @@ func TestS51OpenAIDescriptorIdentity(t *testing.T) {
 	}
 }
 
-// TestS51BusinessPingStillNotHealthAlias: /api/ping stays authenticated.
-func TestS51BusinessPingStillNotHealthAlias(t *testing.T) {
-	rec := s51GET(t, s51Router(), "/api/ping")
-	if rec.Code != 401 {
-		t.Fatalf("/api/ping without X-Bot-Key = %d, want 401 body=%s", rec.Code, rec.Body.String())
+// TestS51AgentRESTRoutesRemoved: the Agent REST surface is gone;
+// the Agent execution protocol is MCP-only.
+func TestS51AgentRESTRoutesRemoved(t *testing.T) {
+	r := s51Router()
+	for _, path := range []string{"/api/ping", "/api/register", "/api/kungfus", "/api/tasks"} {
+		rec := s51GET(t, r, path)
+		if rec.Code != 404 {
+			t.Fatalf("GET %s = %d, want 404 (Agent REST surface removed)", path, rec.Code)
+		}
 	}
 }

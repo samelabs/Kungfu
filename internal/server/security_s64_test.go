@@ -143,13 +143,17 @@ func TestS64OwnerReadsUnaffected(t *testing.T) {
 	}
 }
 
-// 7. Agent routes are not behind the Owner gate.
-func TestS64AgentRoutesUnaffected(t *testing.T) {
+// 7. The former Agent REST register route no longer exists at all
+// (MCP-only Agent surface); it must certainly not hit the Owner gate.
+func TestS64AgentRegisterRouteRemoved(t *testing.T) {
 	s, _, _ := s64Server(t)
 	rec := s64Mutate(t, s, nil, "POST", "/api/register",
 		"application/x-www-form-urlencoded", "name=agent01&password=secret123")
 	if rec.Code == 415 {
-		t.Fatal("Agent register must not be behind the Owner gate")
+		t.Fatal("removed register route hit the Owner gate")
+	}
+	if rec.Code != 404 {
+		t.Fatalf("POST /api/register = %d, want 404 (route removed)", rec.Code)
 	}
 }
 

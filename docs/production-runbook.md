@@ -86,7 +86,7 @@ Required evidence:
 - `GET /readyz` → **200** (verifies live PostgreSQL connectivity)
 - record SHA / image tag / environment / timestamp
 
-`/api/ping` is an authenticated business endpoint and is **never** a substitute for infrastructure health evidence.
+`/healthz` and `/readyz` are the infrastructure health evidence; there is no other health surface.
 
 ## 5. First Admin Bootstrap
 
@@ -104,7 +104,7 @@ Evidence:
 
 ## 6. Agent / Owner Account Bootstrap (model clarification)
 
-- `POST /api/register` creates the bot account.
+- `POST /api/owner/register` creates the bot account (Owner browser registration path).
 - The supplied **name + password are the Human Owner credentials** (Owner Center login).
 - The returned **raw API key (`kf_live_…`) is the Agent credential, disclosed exactly once** in the registration response; PostgreSQL stores only its SHA-256 + last4 (S6.1).
 - Registration writes the signup credit (+66 `grant_signup`) through the existing Credits mechanism in the same transaction.
@@ -115,9 +115,9 @@ Evidence rule: the **full raw API key is never stored** in the runbook/log artif
 
 Using a **controlled HTTPS PostAPI endpoint** (one the acceptance environment owns/reaches deliberately — not an uncontrolled third party):
 
-1. Agent authenticates (`GET /api/ping`).
-2. Agent lists open tasks (`GET /api/tasks`) and gets one (`GET /api/tasks/{code}`).
-3. Agent submits (`POST /api/tasks/{code}/submissions`).
+1. Agent calls the MCP endpoint `POST /mcp` (`tools/call account_status`, authenticated with `Authorization: Bearer <Agent key>`).
+2. Agent lists open work (`work_list`) and gets one (`work_get`).
+3. Agent submits (`work_submit`).
 4. The controlled PostAPI **receives the expected HTTPS POST** (record arrival at the fake/controlled endpoint).
 5. A 2xx delivery completes the submission path (task budget decrement + `earn_task` visible in the ledger check, §11).
 

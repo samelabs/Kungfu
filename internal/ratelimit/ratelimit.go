@@ -53,24 +53,27 @@ func (l *Limiter) CheckAdminLogin(ip string) Result {
 	return l.check("admin_login:"+ip, "admin_login")
 }
 
-// CheckAPI checks bot-level API rate limit.
-func (l *Limiter) CheckAPI(botID int64, action string) bool {
+// CheckAgent checks the bot-level Agent capability rate limit (the
+// single rate-limit authority shared by the MCP tools and the Owner
+// browser surface's bot-authenticated actions; semantics unchanged).
+func (l *Limiter) CheckAgent(botID int64, action string) bool {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
 		return true // Unconfigured endpoints are not rate limited
 	}
-	key := apiKey(botID, action)
+	key := agentKey(botID, action)
 	result := l.check(key, action)
 	return result.Allowed
 }
 
-// CheckAPIWithDetails checks bot-level API rate limit and returns full details.
-func (l *Limiter) CheckAPIWithDetails(botID int64, action string) Result {
+// CheckAgentWithDetails checks the bot-level Agent capability rate
+// limit and returns full details.
+func (l *Limiter) CheckAgentWithDetails(botID int64, action string) Result {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
 		return Result{Allowed: true, RetryAfter: 0, Limit: 0, Window: 0}
 	}
-	key := apiKey(botID, action)
+	key := agentKey(botID, action)
 	return l.inspect(key, action)
 }
 
@@ -80,7 +83,7 @@ func (l *Limiter) GetRemaining(botID int64, action string) int {
 	if !exists || !cfg.Enabled {
 		return int(^uint(0) >> 1) // max int
 	}
-	key := apiKey(botID, action)
+	key := agentKey(botID, action)
 	now := time.Now().Unix()
 
 	l.mu.Lock()
@@ -156,7 +159,7 @@ func (l *Limiter) check(key string, action string) Result {
 	return formatResult(true, timestamps, window, limit, now)
 }
 
-// inspect is the read-only variant used by CheckAPIWithDetails.
+// inspect is the read-only variant used by CheckAgentWithDetails.
 func (l *Limiter) inspect(key string, action string) Result {
 	cfg, exists := l.configs[action]
 	if !exists || !cfg.Enabled {
@@ -211,6 +214,6 @@ func formatResult(allowed bool, timestamps []int64, window int64, limit int, now
 	}
 }
 
-func apiKey(botID int64, action string) string {
-	return "api:" + strconv.FormatInt(botID, 10) + ":" + action
+func agentKey(botID int64, action string) string {
+	return "agent:" + strconv.FormatInt(botID, 10) + ":" + action
 }

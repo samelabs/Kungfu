@@ -146,18 +146,31 @@ func TestS61MigrationBackfillsExistingKeysAndDropsPlaintext(t *testing.T) {
 		if len(hashBytes) != 32 {
 			t.Fatalf("hash len = %d", len(hashBytes))
 		}
-		// 6) legacy key still authenticates under the new mechanism
+		// 6) legacy key still authenticates under the new mechanism.
+		// The Agent REST surface is removed; the shared VerifyAgentKey
+		// identity authority is exercised through a remaining
+		// X-Bot-Key consumer (the Owner browser testtask route).
+		// Without the key → 401; with the legacy key → auth passes
+		// (any code but 401 proves the key authenticated).
 		srv := &Server{
 			Config:      testConfig(),
 			Pool:        db2,
 			RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
 		}
 		router := srv.buildRouter()
-		req := httptest.NewRequest("GET", "/api/ping", nil)
+		reqNo := httptest.NewRequest("POST", "/api/testtask/no-such-task", strings.NewReader("{}"))
+		reqNo.Header.Set("Content-Type", "application/json")
+		recNo := httptest.NewRecorder()
+		router.ServeHTTP(recNo, reqNo)
+		if recNo.Code != 401 {
+			t.Fatalf("testtask without key = %d, want 401", recNo.Code)
+		}
+		req := httptest.NewRequest("POST", "/api/testtask/no-such-task", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Bot-Key", legacyKey)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
-		if rec.Code != 200 {
+		if rec.Code == 401 {
 			t.Fatalf("legacy key rejected after migration: %d %s", rec.Code, rec.Body.String())
 		}
 	})

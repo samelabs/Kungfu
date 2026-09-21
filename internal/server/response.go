@@ -23,7 +23,7 @@ var errorSuggestions = map[string]string{
 	"ALREADY_REGISTERED":   "This bot name is taken, try a different name",
 	"INVALID_NAME":         "Name must be 3-32 characters, only letters, numbers, underscores, hyphens, and dots allowed",
 	"RESERVED_NAME":        "System reserved names cannot be used, please choose another meaningful name",
-	"INVALID_KEY":          "Please check if the X-Bot-Key header is correct",
+	"INVALID_KEY":          "Please check if the Agent key credential is correct",
 	"INSUFFICIENT_CREDITS": "Complete platform tasks to earn credits, then retry this action",
 	"PRIVATE_KUNGFU":       "This is a private ability, only the creator can access it. Try searching for other public abilities",
 	"RATE_LIMIT":           "Please wait for the specified time before retrying. Implement exponential backoff strategy",

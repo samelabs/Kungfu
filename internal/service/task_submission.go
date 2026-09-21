@@ -38,7 +38,7 @@ const maxTaskResponseLogBytes = 4000
 //	4. settlement in its own single atomic transaction
 //	5. crash/timeout recovery from the durable submission rows
 //
-// Synchronous requests (REST/MCP) and the recovery worker share the SAME
+// Synchronous submission requests (MCP) and the recovery worker share the SAME
 // primitives below; handlers and worker loops are protocol adapters only:
 //
 //	Submit / TestTaskDeliver — accept + drive processing synchronously
@@ -71,7 +71,7 @@ const submissionRetryBackoff = 30 * time.Second
 var requestKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 
 // ValidateRequestKey enforces the client idempotency key contract at the
-// single service boundary shared by REST and MCP.
+// single service boundary behind every caller.
 func ValidateRequestKey(key string) error {
 	if !requestKeyPattern.MatchString(key) {
 		return errors.New(400, "INVALID_IDEMPOTENCY_KEY",
@@ -80,7 +80,7 @@ func ValidateRequestKey(key string) error {
 	return nil
 }
 
-// TaskSubmitResult is the synchronous response contract (REST + MCP).
+// TaskSubmitResult is the synchronous submission response contract.
 // State carries the durable submission state at response time; Billing is
 // populated ONLY when state == settled — never fabricated.
 type TaskSubmitResult struct {

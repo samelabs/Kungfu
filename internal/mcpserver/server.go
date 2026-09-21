@@ -57,8 +57,9 @@ type Deps struct {
 	Limits ContentLimits
 }
 
-// limiter returns the existing RateLimiter authority (same actions as
-// REST: list/push/get/task_submit). Never nil in production wiring.
+// limiter returns the business rate-limit authority (the single
+// limiter keyed by Agent identity and action: list/push/get/task_submit
+// et al.). Never nil in production wiring.
 func (d *Deps) limiter() *ratelimit.Limiter { return d.RateLimiter }
 
 // rateLimited is the shared 429 tool error.
@@ -81,10 +82,10 @@ func isPublicCall(method, toolName string) bool {
 	return false
 }
 
-// verifyToken is the official-sdk TokenVerifier: it runs the SAME
-// raw Agent-key authority as REST (format → SHA-256 → active-bot
-// lookup by digest) and returns a TokenInfo whose Extra carries the
-// verified bot. The raw key never reaches repository code or logs.
+// verifyToken is the official-sdk TokenVerifier: it runs the Agent
+// identity authority (format → SHA-256 → active-bot lookup by digest)
+// and returns a TokenInfo whose Extra carries the verified bot. The
+// raw key never reaches repository code or logs.
 func (d *Deps) verifyToken(ctx context.Context, token string, r *http.Request) (*mcpsdkauth.TokenInfo, error) {
 	if d.AgentLookup == nil {
 		// Fail closed: no lookup seam, no authentication.
@@ -134,7 +135,7 @@ func Handler(deps Deps) http.Handler {
 // access: explicitly public protocol calls reach the handler plainly;
 // every other call passes through the OFFICIAL SDK bearer middleware
 // (mcpsdkauth.RequireBearerToken), whose verifier runs the SAME raw Agent-
-// key authority as REST and stamps the verified bot identity into the
+// key identity authority and stamps the verified bot identity into the
 // request context — the SDK plumbs that context into tool handlers.
 // The public/private decision uses ONLY the Mcp-Method/Mcp-Name
 // headers (2026-07-28 standard), never body parsing; the SDK's own

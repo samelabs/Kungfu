@@ -76,8 +76,10 @@ func TestS65HTMLGetsBaselineSecurityHeaders(t *testing.T) {
 }
 
 // 2. Representative JSON API (unauthenticated error is still JSON).
+// The Agent REST surface is removed; the owner session endpoint is the
+// canonical unauthenticated-JSON surface.
 func TestS65APIGetsBaselineSecurityHeaders(t *testing.T) {
-	rec := s65Get(t, "/api/ping")
+	rec := s65Get(t, "/api/owner/session")
 	if rec.Code != 401 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -85,6 +87,10 @@ func TestS65APIGetsBaselineSecurityHeaders(t *testing.T) {
 		t.Fatalf("content-type = %q", rec.Header().Get("Content-Type"))
 	}
 	s65Assert(t, rec)
+	// And the former Agent REST surface is gone entirely.
+	if rec := s65Get(t, "/api/ping"); rec.Code != 404 {
+		t.Fatalf("/api/ping = %d, want 404 (removed)", rec.Code)
+	}
 }
 
 // 3. Embedded static asset.
@@ -149,7 +155,7 @@ func TestS65SingleGlobalHeaderAuthority(t *testing.T) {
 
 // 7. Content-Type ownership unchanged.
 func TestS65ExistingContentTypesRemainIntact(t *testing.T) {
-	if ct := s65Get(t, "/api/ping").Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+	if ct := s65Get(t, "/api/owner/session").Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
 		t.Fatalf("json content-type = %q", ct)
 	}
 	if ct := s65Get(t, "/llms.txt").Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {

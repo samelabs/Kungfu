@@ -25,7 +25,7 @@ function bindRegisterForm() {
         if (error) return showToast(noticeText(error), 'error');
         // transitional: silent
         try {
-            const json = await requestJson('/api/register', {method: 'POST', body: JSON.stringify(data)});
+            const json = await requestJson('/api/owner/register', {method: 'POST', body: JSON.stringify(data)});
             if (!json.success) return showToast(noticeText(json.error || json), 'error');
             // ONE-TIME disclosure: display the raw key from the
             // registration response on THIS page. No /api/key

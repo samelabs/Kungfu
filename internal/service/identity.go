@@ -146,7 +146,7 @@ func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string
 
 // AgentAccountStatus is the ONE typed agent account-status
 // composition: active bot identity + authoritative Credits balance.
-// Both REST /api/ping and MCP account_status call it — there is no
+// Both the Owner browser surface and the MCP account_status tool call it — there is no
 // second account-status mechanism. READ ONLY.
 type AgentAccountStatus struct {
 	BotID   int64
@@ -306,8 +306,8 @@ func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, bo
 	}
 
 	// Rate limit check
-	if limiter != nil && !limiter.CheckAPI(botID, "reset_key") {
-		details := limiter.CheckAPIWithDetails(botID, "reset_key")
+	if limiter != nil && !limiter.CheckAgent(botID, "reset_key") {
+		details := limiter.CheckAgentWithDetails(botID, "reset_key")
 		return nil, errors.NewRateLimitError(details.RetryAfter, details.Limit, details.Window)
 	}
 

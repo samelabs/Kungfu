@@ -5,6 +5,17 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.1] — 2026-09-21
+
+### MCP-only Agent execution surface
+
+- MCP is the single Agent execution interface; the Agent REST routes are removed
+- Agent REST handlers/wire/projection/tests deleted; shared Service/Domain authority untouched
+- Owner browser registration canonicalized to `POST /api/owner/register` (same owner-mutation gate; former `/api/register` removed)
+- Owner/Admin/webhook/healthz/readyz HTTP surfaces unchanged; Owner `X-Bot-Key` testtask consumer retained
+- Rate-limit naming made protocol-neutral: `CheckAgent`/`CheckAgentWithDetails`, `agent:<bot>:<action>` keys (semantics unchanged)
+- Discovery assets (README, llms.txt, kungfu_skill.md, openai.json) rewritten Agent-first around MCP; worker-facing copy uses the Kungfu private delivery abstraction
+
 ## [v1.3.0] — 2026-09-19
 
 ### Agent-first MCP interface

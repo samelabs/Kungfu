@@ -15,7 +15,7 @@ import (
 // Authority boundary: the ONLY writers of tb_task_submissions and of
 // tb_tasks.reserved_budget are the submission service primitives
 // (accept/reserve, claim, record-outcome, settle/release) — synchronous
-// requests and the recovery worker share them; REST/MCP handlers and
+// requests and the recovery worker share them; MCP tool handlers and
 // any worker loop never touch this SQL directly.
 
 // Submission states (010 schema CHECK contract).

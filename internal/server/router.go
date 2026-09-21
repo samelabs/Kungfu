@@ -108,8 +108,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 
 	// Infrastructure probes (public, no auth). Liveness never
 	// touches PG; readiness Pings PG via r.Context() under the
-	// existing request deadline. /api/ping remains the Agent
-	// identity/balance API and is not a probe alias.
+	// existing request deadline.
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
 
@@ -138,26 +137,10 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	}
 	r.Handle("/mcp", mcpserver.Handler(mcpDeps))
 
-	// -- API routes: Agent (X-Bot-Key auth) --
-	r.Post("/api/register", s.handleRegister)
-	r.Get("/api/ping", s.handlePing)
-
-	// Kungfu CRUD
-	r.Get("/api/kungfus", s.handleKungfuList)
-	r.Post("/api/kungfus", s.handleKungfuPush)
-	r.Get("/api/kungfus/{code}", s.handleKungfuGet)
-	r.Delete("/api/kungfus/{code}", s.handleKungfuDelete)
-	r.Post("/api/kungfus/{code}/share", s.handleKungfuShare)
-	r.Post("/api/kungfus/{code}/unshare", s.handleKungfuUnshare)
-
-	// Tasks (agent)
-	r.Get("/api/tasks", s.handleTaskList)
-	r.Get("/api/tasks/{code}", s.handleTaskGet)
-	r.Post("/api/tasks/{code}/submissions", s.handleTaskSubmit)
-
 	// -- API routes: Owner (session auth) --
 	r.Get("/api/owner/session", s.handleOwnerSessionGet)
 	r.Post("/api/owner/session", ownerMutation(s.handleOwnerSessionLogin))
+	r.Post("/api/owner/register", ownerMutation(s.handleOwnerRegister))
 	r.Delete("/api/owner/session", ownerMutation(s.handleOwnerSessionLogout))
 
 	r.Get("/api/account", s.handleAccount)
