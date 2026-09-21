@@ -194,7 +194,7 @@ If 009/010 have been forward-applied and the new application fails to start:
 
 - **Do NOT simply restart the old binary.** A binary built on old schema assumptions must never run blind against a forward-migrated database.
 - Choose, with the PM, one of:
-  1. **Coordinated DB restore + old binary**: stop everything, restore the §2.2 immediate pre-release backup, verify restore, then start the old binary against the restored old-schema database; or
+  1. **Coordinated DB restore + old binary**: stop everything, restore the §2.3 immediate pre-release backup, verify restore, then start the old binary against the restored old-schema database; or
   2. **Fix-forward**: diagnose and fix the new application, build a new exact-SHA image, re-run readiness + acceptance.
 - Record the decision, the evidence, and the final state. Partial states (009 applied, 010 not yet) follow the same rule: no old binary against a forward-migrated schema.
 
@@ -355,7 +355,7 @@ Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRE
 
 | # | Journey | PASS evidence | Environment | CI covers semantics? | Deployed evidence required? |
 |---|---|---|---|---|---|
-| D1 | Fresh boot | migrations 001→010 applied in order; container from `<sha>` image starts; `/healthz` `/readyz` 200 | deploy | yes (chain + smoke in CI) | **yes** |
+| D1 | Release identity & boot | exact accepted SHA/image deployed; existing production migration prefix 001–008 confirmed; required unapplied tail 009/010 completed per D3/D4 (no 001–008 re-run); container from `<sha>` image starts; `/healthz` `/readyz` 200 | deploy | fresh-install 001→010 chain yes (CI); existing-production cutover per D2–D5 | **yes** |
 | D2 | Cutover gates | stop-old-app-before-009 recorded; backup path + timestamp + SHA256 + `pg_restore -l` readable recorded; DB identity (`SHOW port`, `current_database()`) recorded and matching | deploy | no (operational) | **yes** |
 | D3 | Migration 009 | strict preflight PASS (no fractional data, no coercion); ALL 8 Credits economic columns BIGINT; invariants verified | deploy | conversion semantics yes | **yes** |
 | D4 | Migration 010 | applied after 009 verified; reserved-budget schema + constraints + indexes + FKs verified | deploy | schema semantics yes | **yes** |
