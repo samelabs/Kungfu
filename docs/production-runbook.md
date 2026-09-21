@@ -73,6 +73,7 @@ preflight (secret/config + public HTTP/proxy checks)
   → verify 009 (schema/invariants)
   → apply 010 (task submissions)
   → verify 010 (schema/invariants)
+  → runtime-role privilege verification (§4c)
   → start EXACT accepted new binary/image
   → readiness (/healthz /readyz)
   → controlled acceptance (§6–§15)
@@ -187,6 +188,73 @@ migration command runs.
 - admission basis: `available_budget = budget - reserved_budget`
 
 **The new application MUST NOT be started before 009 AND 010 are applied and verified.**
+
+**The new application MUST NOT be started before the §4c runtime-role
+privilege verification passes** — schema verification alone (and `/readyz`
+connectivity alone) does not prove the runtime `DB_USER` can operate the
+new/changed objects.
+
+## 4c. Runtime-Role Privilege Verification Gate (between migration verification and application start)
+
+Migration schema verification proves the schema exists — it does NOT prove
+the runtime database role can actually operate on new/changed objects. This
+gate closes that gap and MUST pass before the new application starts.
+
+Position in the sequence (authoritative):
+
+```
+migration schema verification (§3/§4)
+  → runtime-role privilege verification (this section)
+  → only then start the new application
+```
+
+`/readyz` only proves database connectivity; it can NEVER substitute for
+business-table privilege verification.
+
+Mechanism:
+
+- The runtime role is the **actually configured `DB_USER`** (from the
+  deployment's environment/secret store). Never hardcode a role name into
+  this gate as a general mechanism.
+- When migrations are executed by an operator/schema-owner role (a different
+  role than `DB_USER`), objects created by the migration are owned by that
+  operator role, and the runtime role may lack privileges on them. After the
+  migration and before starting the new application, the operator MUST
+  explicitly verify the runtime role holds the privileges the application
+  actually needs on new/changed objects.
+- Verify ACTUAL required privileges only — least privilege, derived from the
+  application's real operations and PostgreSQL authority. Do NOT grant
+  ALL PRIVILEGES as a standard, and do not over-grant just because a prior
+  incident fix once granted a wider set.
+- If a privilege is missing: the operator grants exactly the required
+  least-privilege set, then re-runs this verification. Only a passing
+  re-verification proceeds to application start. Failure → STOP.
+
+Example — current release's new table `tb_task_submissions` (application
+operations: SELECT / INSERT / UPDATE; the application never DELETEs or
+TRUNCATEs submissions):
+
+```sql
+-- run as a superuser/operator role; :runtime_role = the configured DB_USER
+SELECT has_table_privilege(:runtime_role, 'tb_task_submissions', 'SELECT') AS sel,
+       has_table_privilege(:runtime_role, 'tb_task_submissions', 'INSERT') AS ins,
+       has_table_privilege(:runtime_role, 'tb_task_submissions', 'UPDATE') AS upd;
+-- all three must be true
+```
+
+Dependent objects (identity columns / sequences):
+
+- Tables with `GENERATED ALWAYS AS IDENTITY` or `SERIAL` columns may also
+  require sequence privileges (`USAGE`) for the runtime role, depending on
+  PostgreSQL version/authority semantics. Check dependent sequences with
+  `has_sequence_privilege(:runtime_role, '<table>_id_seq', 'USAGE')` and a
+  controlled runtime-role INSERT (or defer to the actual PostgreSQL error
+  authority) — grant sequence privileges ONLY if the application truly needs
+  them. Do not mechanically widen grants for objects the application never
+  touches.
+
+Evidence: record the runtime role name (by name only, never its credential),
+the verified object/privilege matrix, and PASS/FAIL per gate.
 
 ## 4b. Rollback / Failure Semantics
 
@@ -359,7 +427,8 @@ Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRE
 | D2 | Cutover gates | stop-old-app-before-009 recorded; backup path + timestamp + SHA256 + `pg_restore -l` readable recorded; DB identity (`SHOW port`, `current_database()`) recorded and matching | deploy | no (operational) | **yes** |
 | D3 | Migration 009 | strict preflight PASS (no fractional data, no coercion); ALL 8 Credits economic columns BIGINT; invariants verified | deploy | conversion semantics yes | **yes** |
 | D4 | Migration 010 | applied after 009 verified; reserved-budget schema + constraints + indexes + FKs verified | deploy | schema semantics yes | **yes** |
-| D5 | New binary start | exact accepted SHA image starts AFTER 009+010 verified; `/healthz` `/readyz` 200 | deploy | yes (smoke in CI) | **yes** |
+| D4b | Runtime-role privileges | §4c gate: runtime role (configured DB_USER) verified to hold application-required privileges (e.g. SELECT/INSERT/UPDATE on new tables; sequences only if truly needed) on all new/changed objects; missing privileges granted least-privilege by operator then re-verified | deploy | no (operational) | **yes** |
+| D5 | New binary start | exact accepted SHA image starts AFTER 009+010 verified AND §4c privilege gate passed; `/healthz` `/readyz` 200 | deploy | yes (smoke in CI) | **yes** |
 | D6 | Rollback readiness | failure semantics acknowledged; no old binary against forward-migrated DB | deploy | no (policy) | yes (recorded acknowledgment) |
 | D7 | Graceful stop | SIGTERM → clean bounded exit | deploy | yes | yes (confirm in env) |
 | A1 | Account bootstrap | register OK; raw key disclosed once, retained masked only; `grant_signup` row exists | deploy | yes | yes |
