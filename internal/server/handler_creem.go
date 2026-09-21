@@ -41,13 +41,6 @@ func (s *Server) creemRuntime() *payment.CreemRuntime {
 	}
 }
 
-// CreemRuntime returns the validated provider runtime for background
-// reconciliation (exported for cmd/server's recovery worker); nil when
-// payments are not configured.
-func (s *Server) CreemRuntime() *payment.CreemRuntime {
-	return s.creemRuntime()
-}
-
 // handleOwnerPaymentCheckout: POST /api/owner/payments/checkout
 // Body: {"package": "starter"} — the ONLY client-controlled fact. Any
 // other client-sent field (units, amount_minor, credits, product_id,

@@ -11,11 +11,9 @@ package payment
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"math"
 	"math/bits"
-	"strconv"
 	"strings"
 
 	"kungfu.md/internal/credits"
@@ -166,14 +164,17 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, txn *CreemTr
 }
 
 // buildDisputeFact validates a dispute.created webhook object reconciled
-// with the authoritative transaction. Dispute semantics (single rule):
-// Creem records the clawback on the transaction itself — the dispute
-// event is the TRIGGER, the authoritative transaction's cumulative
-// refunded_amount (with status "chargeback") is the REVERSAL AUTHORITY.
-// If the authoritative transaction shows no refund movement yet, the
-// dispute is stored as a durable fact with zero reversal contribution —
-// a later refund event (or the chargeback settling into refunded_amount)
-// advances the reversal through the same cumulative path.
+// with the authoritative transaction. Dispute semantics (single fixed
+// business rule): a VERIFIED dispute permanently revokes the payment's
+// ENTIRE Credits entitlement. The cumulative reversal target for a
+// dispute is the original granted Credits C — NOT floor(C·r/p) and NOT
+// conditional on the provider's refunded_amount being non-zero or the
+// status reaching chargedBack. Provider reconciliation (order/amount/
+// currency binding against the paid snapshot) must still succeed first;
+// only the economic basis changes. No dispute won/lost lifecycle is
+// tracked and provider state NEVER re-grants credits afterwards: later
+// refund facts on the same payment cannot exceed C either, so no
+// positive compensation can ever be produced.
 func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *CreemTransactionEntity, p *model.Payment) (*PaymentAdjustmentFact, error) {
 	if err := reconcileAuthoritativeTransaction(txn, p); err != nil {
 		return nil, err
@@ -188,10 +189,8 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 		return nil, fmt.Errorf("authoritative transaction.status empty")
 	}
 	if txn.RefundedAmount == nil {
-		// No refund movement on the authoritative transaction: durable
-		// provider fact, zero reversal contribution. A later event whose
-		// authoritative basis shows refund movement advances the
-		// cumulative reversal through the same single path.
+		// The dispute reversal target is the entitlement itself, but the
+		// durable fact still records a real provider basis: nil → 0.
 		zero := int64(0)
 		txn.RefundedAmount = &zero
 	}
@@ -203,6 +202,12 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 	if err != nil {
 		return nil, err
 	}
+	// The durable dispute fact records a FULL economic basis
+	// (refunded == amount_paid): the entitlement is fully revoked.
+	// This keeps the single cumulative path monotonic — a later
+	// ordinary refund fact on the same payment cannot exceed the
+	// dispute's basis, so no positive compensation can occur.
+	fullBasis := *txn.AmountPaid
 	var nilStatus *string
 	return &PaymentAdjustmentFact{
 		ProviderEventID:        ev.ID,
@@ -215,7 +220,7 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 		Currency:               txn.Currency,
 		TransactionAmountMinor: txn.Amount,
 		AmountPaidMinor:        *txn.AmountPaid,
-		RefundedAmountMinor:    txn.RefundedAmount,
+		RefundedAmountMinor:    &fullBasis,
 		ObjectStatus:           nilStatus,
 		TransactionStatus:      &txn.Status,
 		Reason:                 nil,
@@ -424,11 +429,21 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 		return false, fmt.Errorf("reconciliation: refunded %d outside [0, %d]", maxRefunded, basis.amountPaid)
 	}
 
-	// Target cumulative reversal. R == P → exactly the original credits.
-	// Integer cumulative FLOOR otherwise (see reversalTarget).
-	target, err := reversalTarget(p.Credits, maxRefunded, basis.amountPaid)
-	if err != nil {
-		return false, err
+	// Target cumulative reversal.
+	//   refund fact  → floor(C * maxRefunded / amountPaid)  (R==P → C)
+	//   dispute fact → the ENTIRE original entitlement C: a verified
+	//                  dispute permanently revokes the Credits grant,
+	//                  independent of the provider's refunded_amount.
+	// Both are cumulative targets; only a positive delta writes a new
+	// reversal (below), so duplicates and overlaps stay exactly-once.
+	var target int64
+	if fact.Kind == "dispute" {
+		target = p.Credits
+	} else {
+		target, err = reversalTarget(p.Credits, maxRefunded, basis.amountPaid)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Already reversed, from the Credits ledger (never a direct
@@ -458,144 +473,6 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 		return false, fmt.Errorf("commit adjustment tx: %w", err)
 	}
 	return inserted, nil
-}
-
-// ReconcileUnresolvedDisputes re-reads, for every dispute fact that is
-// still unresolved on the authoritative transaction, the current
-// official Transaction entity and advances the SAME durable fact and the
-// SAME cumulative Credits reversal path — no second ledger, no second
-// parser, no fabricated lifecycle. Unresolved = the authoritative
-// transaction still shows no refund movement while the payment remains
-// paid: Creem exposes no dispute resolution webhook and no disputes API,
-// so the transaction's cumulative refunded_amount is the ONLY machine-
-// readable terminal economic authority (chargebacks are recorded there
-// as refund movements, per the official docs). A won dispute NEVER
-// produces a refund movement, so it converges to zero reversal by the
-// same single rule — with no fabricated "won" field.
-//
-// Recovery semantics: an ambiguous provider failure (network / 5xx)
-// leaves everything untouched and returns the error so the caller (the
-// periodic worker) retries on its own cadence; a definitive 404 for a
-// transaction ID persisted from a previous durable fact likewise skips
-// that dispute for this pass (recorded, no mutation). Each dispute is
-// re-read at most once per call; concurrency with the webhook path is
-// safe because both funnel through RecordPaymentAdjustment's payment-row
-// lock + the (provider, kind, provider_object_id) monotonic advance.
-//
-// The provider call count is bounded by the number of unresolved
-// disputes (typically 0) times one GET each.
-func ReconcileUnresolvedDisputes(ctx context.Context, pool *pg.Pool, rt *CreemRuntime) (int, error) {
-	if rt == nil || rt.Client == nil {
-		return 0, nil // payments not configured: nothing to reconcile
-	}
-	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT pa.provider_transaction_id
-		FROM tb_payment_adjustments pa
-		JOIN tb_payments p ON p.id = pa.payment_id
-		WHERE pa.kind = 'dispute'
-		  AND pa.provider = 'creem'
-		  AND p.status = 'paid'
-		  AND COALESCE(pa.refunded_amount_minor, 0) = 0`)
-	if err != nil {
-		return 0, fmt.Errorf("unresolved dispute scan: %w", err)
-	}
-	defer rows.Close()
-
-	var txnIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return 0, fmt.Errorf("unresolved dispute scan: %w", err)
-		}
-		txnIDs = append(txnIDs, id)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("unresolved dispute scan: %w", err)
-	}
-
-	reconciled := 0
-	for _, txnID := range txnIDs {
-		txn, err := rt.Client.GetTransaction(ctx, txnID)
-		if err != nil {
-			var de *ErrCreemDefinitive
-			if stderrors.As(err, &de) {
-				// Definitive failure (4xx): skip this dispute this
-				// pass. No mutation; the durable fact stays recorded.
-				continue
-			}
-			// Ambiguous provider state (network/429/5xx): mutate
-			// nothing, report — the worker's next pass retries.
-			return reconciled, fmt.Errorf("dispute reconcile: transaction %s ambiguous: %w", txnID, err)
-		}
-		if txn == nil || txn.RefundedAmount == nil || *txn.RefundedAmount <= 0 {
-			// Still unresolved (paid, no refund movement). Nothing to
-			// advance; re-check next pass.
-			continue
-		}
-		// Refund movement recorded on the authoritative transaction:
-		// advance the SAME durable fact through the SAME record path
-		// used by the webhook. ProviderEventID keys the reconcile pass
-		// (unique per (provider, event) and ignored for the (provider,
-		// kind, object) advance), so a later genuine webhook for the
-		// same dispute still reconciles identically.
-		status := "reconciled"
-		fact := &PaymentAdjustmentFact{
-			Kind:                   "dispute",
-			Provider:               "creem",
-			ProviderEventID:        "reconcile:" + txnID + ":" + strconv.FormatInt(*txn.RefundedAmount, 10),
-			ProviderObjectID:       "", // resolved below from the durable fact
-			ProviderTransactionID:  txnID,
-			ProviderOrderID:        txn.Order,
-			AmountMinor:            txn.Amount,
-			Currency:               txn.Currency,
-			TransactionAmountMinor: txn.Amount,
-			AmountPaidMinor:        *txn.AmountPaid,
-			RefundedAmountMinor:    txn.RefundedAmount,
-			ObjectStatus:           &status,
-			TransactionStatus:      &txn.Status,
-			ProviderCreatedAt:      0, // TransactionEntity carries no
-			// created_at; the durable fact already holds the webhook's
-			// provider_created_at and the upsert preserves it.
-		}
-		// Resolve the durable dispute object + payment for this
-		// transaction (the webhook's object id is the durable key).
-		objID, payID, err := disputeObjectForTransaction(ctx, pool, txnID)
-		if err != nil {
-			return reconciled, err
-		}
-		if objID == "" {
-			// No durable dispute fact for this transaction — nothing
-			// to advance (the refund.created path owns it).
-			continue
-		}
-		fact.ProviderObjectID = objID
-		fact.PaymentID = payID
-		if _, err := RecordPaymentAdjustment(ctx, pool, fact); err != nil {
-			return reconciled, fmt.Errorf("dispute reconcile: transaction %s: %w", txnID, err)
-		}
-		reconciled++
-	}
-	return reconciled, nil
-}
-
-// disputeObjectForTransaction returns the durable dispute object id and
-// payment id for a provider transaction (latest durable fact wins).
-func disputeObjectForTransaction(ctx context.Context, pool *pg.Pool, txnID string) (string, int64, error) {
-	var objID string
-	var payID int64
-	err := pool.QueryRow(ctx, `
-		SELECT pa.provider_object_id, pa.payment_id
-		FROM tb_payment_adjustments pa
-		WHERE pa.kind = 'dispute' AND pa.provider = 'creem'
-		  AND pa.provider_transaction_id = $1
-		ORDER BY pa.id DESC LIMIT 1`, txnID).Scan(&objID, &payID)
-	if err != nil {
-		if stderrors.Is(err, pgx.ErrNoRows) {
-			return "", 0, nil
-		}
-		return "", 0, fmt.Errorf("dispute object lookup: %w", err)
-	}
-	return objID, payID, nil
 }
 
 // HandleCreemAdjustmentEvent is the webhook entry: parse the guaranteed

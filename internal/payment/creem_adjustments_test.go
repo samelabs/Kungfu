@@ -401,7 +401,8 @@ func TestRefundFactTaxDifference1210(t *testing.T) {
 	}
 }
 
-// Standalone valid dispute: durable row, balance unchanged, ledger unchanged.
+// Standalone valid dispute: durable row + immediate FULL entitlement
+// revocation (fixed rule: dispute target = original granted Credits).
 func TestDisputeFactRecordedStandalone(t *testing.T) {
 	pool := crTestPool(t)
 	botID := crSeedBot(t, pool)
@@ -419,8 +420,8 @@ func TestDisputeFactRecordedStandalone(t *testing.T) {
 	if adjN != 1 {
 		t.Fatalf("dispute rows = %d", adjN)
 	}
-	if txN != 1 || bal != 1000 {
-		t.Fatalf("dispute mutated money: tx=%d bal=%v", txN, bal)
+	if txN != 2 || bal != 0 {
+		t.Fatalf("dispute must revoke entitlement: tx=%d bal=%v (want 2 rows, 0)", txN, bal)
 	}
 }
 

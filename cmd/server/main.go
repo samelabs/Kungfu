@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"kungfu.md/internal/config"
-	"kungfu.md/internal/payment"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/server"
 	"kungfu.md/internal/service"
@@ -60,7 +59,7 @@ func main() {
 	// backgroundErrors instead of dying silently.
 	recoveryStop := make(chan struct{})
 	recoveryDone := service.RunSubmissionRecoveryWorker(recoveryStop, backgroundErrors, pool,
-		service.DefaultRecoveryWorkerConfig(), disputeReconciler(srv))
+		service.DefaultRecoveryWorkerConfig())
 
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -103,13 +102,3 @@ func main() {
 type poolCloser struct{ pool *pg.Pool }
 
 func (p poolCloser) Close() error { p.pool.Close(); return nil }
-
-// disputeReconciler wires the unresolved-dispute re-read pass into the
-// existing recovery worker loop. It reuses the server's validated Creem
-// runtime (nil when payments are not configured — the pass self-
-// disables) and the payment package's single adjustment authority.
-func disputeReconciler(srv *server.Server) service.DisputeReconciler {
-	return func(ctx context.Context) (int, error) {
-		return payment.ReconcileUnresolvedDisputes(ctx, srv.Pool, srv.CreemRuntime())
-	}
-}

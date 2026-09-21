@@ -35,12 +35,6 @@ type RecoveryWorkerConfig struct {
 	Batch    int           // max submissions per scan
 }
 
-// DisputeReconciler re-reads unresolved Creem dispute transactions from
-// the authoritative Transaction API and advances the existing payment
-// adjustment + Credits reversal authority. Wired to the payment
-// package's real implementation in main; nil disables the pass.
-type DisputeReconciler func(ctx context.Context) (int, error)
-
 // DefaultRecoveryWorkerConfig: scan every 5s, 20 rows per pass.
 func DefaultRecoveryWorkerConfig() RecoveryWorkerConfig {
 	return RecoveryWorkerConfig{Interval: 5 * time.Second, Batch: 20}
@@ -65,18 +59,18 @@ func DefaultRecoveryWorkerConfig() RecoveryWorkerConfig {
 // loop then exits without starting another pass. No framework, no
 // goroutine registry — one channel.
 func RunSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
-	pool *pg.Pool, cfg RecoveryWorkerConfig, reconcileDisputes DisputeReconciler) <-chan struct{} {
+	pool *pg.Pool, cfg RecoveryWorkerConfig) <-chan struct{} {
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSubmissionRecoveryWorker(stop, failures, pool, cfg, reconcileDisputes)
+		runSubmissionRecoveryWorker(stop, failures, pool, cfg)
 	}()
 	return done
 }
 
 func runSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
-	pool *pg.Pool, cfg RecoveryWorkerConfig, reconcileDisputes DisputeReconciler) {
+	pool *pg.Pool, cfg RecoveryWorkerConfig) {
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -111,22 +105,6 @@ func runSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
 				log.Printf("[kungfu.md] submission recovery pass failed: %v", err)
 			}
 			cancel()
-
-			// Unresolved-dispute reconciliation: Creem exposes no
-			// dispute resolution webhook, so the authoritative
-			// Transaction must be re-read periodically for disputes
-			// that are still open (no refund movement recorded yet).
-			// Same pass, same stop gate, same panic boundary; each
-			// provider call is the client's own bounded GET.
-			if reconcileDisputes != nil {
-				rctx, rcancel := context.WithTimeout(context.Background(), 60*time.Second)
-				if n, err := reconcileDisputes(rctx); err != nil {
-					log.Printf("[kungfu.md] dispute reconciliation pass incomplete (ambiguous provider state, will retry): %v", err)
-				} else if n > 0 {
-					log.Printf("[kungfu.md] dispute reconciliation advanced %d dispute(s)", n)
-				}
-				rcancel()
-			}
 		}
 	}
 }

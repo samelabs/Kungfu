@@ -273,8 +273,9 @@ func TestReversalDisputeThenRefundSingleReversal(t *testing.T) {
 	}
 }
 
-// Dispute with nil refunded_amount → durable fact, zero reversal.
-func TestReversalDisputeNilRefundedZeroMutation(t *testing.T) {
+// Dispute with nil refunded_amount → durable fact + FULL entitlement
+// revocation (dispute target = C, independent of refunded_amount).
+func TestReversalDisputeNilRefundedFullRevocation(t *testing.T) {
 	pool := crTestPool(t)
 	botID := crSeedBot(t, pool)
 	fc := newFakeCreem(t, pkgProducts()...)
@@ -285,14 +286,20 @@ func TestReversalDisputeNilRefundedZeroMutation(t *testing.T) {
 		rev2DisputeEvent(t, pool, fc, code, order, 1080, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if b := crBalance(t, pool, botID); b != 1000 {
-		t.Fatalf("balance = %v, want unchanged 1000", b)
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("balance = %v, want 0 (entitlement revoked)", b)
 	}
 	var facts int
 	_ = pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id WHERE p.code=$1`, code).Scan(&facts)
 	if facts != 1 {
 		t.Fatalf("facts = %d, want 1 durable dispute", facts)
+	}
+	var revs int
+	_ = pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&revs)
+	if revs != 1 {
+		t.Fatalf("reversal rows = %d, want 1", revs)
 	}
 }
 
