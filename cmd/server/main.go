@@ -58,7 +58,7 @@ func main() {
 	// ServeLifecycle shutdown path; panics report through
 	// backgroundErrors instead of dying silently.
 	recoveryStop := make(chan struct{})
-	go service.RunSubmissionRecoveryWorker(recoveryStop, backgroundErrors, pool,
+	recoveryDone := service.RunSubmissionRecoveryWorker(recoveryStop, backgroundErrors, pool,
 		service.DefaultRecoveryWorkerConfig())
 
 	httpServer := &http.Server{
@@ -87,6 +87,7 @@ func main() {
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
 		backgroundStops:  []chan struct{}{gcStop, recoveryStop},
+		backgroundJoins:  []<-chan struct{}{recoveryDone},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

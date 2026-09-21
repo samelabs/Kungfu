@@ -49,7 +49,7 @@ type SubmissionRow struct {
 	PriceSnapshot    int64
 	ReservedAmount   int64
 	State            string
-	AttemptCount     int
+	AttemptCount     int64
 	LeaseUntil       *time.Time
 	NextAttemptAt    *time.Time
 	ResponseCode     *int
@@ -178,10 +178,21 @@ func ClaimSubmissionForDelivery(ctx context.Context, q pg.Querier, submissionID 
 	return scanSubmission(q.QueryRow(ctx, submissionSelect+` WHERE id = $1`, submissionID))
 }
 
+// ErrStaleAttempt is returned when a remote outcome write does not match
+// the CURRENT delivering attempt (a newer attempt has taken over the
+// submission). The write is a no-op: the stale attempt must not modify the
+// submission, the task budget, the reservation, or the ledger.
+var ErrStaleAttempt = errors.New("stale delivery attempt: outcome discarded")
+
 // RecordOutcomeDelivered durably marks a 2xx outcome. From this durable
-// write on, the submission is NEVER posted again. Idempotent no-op when
-// already delivered/settled.
-func RecordOutcomeDelivered(ctx context.Context, q pg.Querier, submissionID int64, responseCode int, responsePreview *string, deliveredAt time.Time) error {
+// write on, the submission is NEVER posted again.
+//
+// Attempt fencing: the write only lands when the submission is currently
+// delivering AND its attempt_count equals the claimed attempt. A stale
+// attempt (superseded by a reclaim after lease expiry) is a NO-OP — it
+// must never rewrite a terminal row (settled stays settled, rejected
+// stays rejected) nor move a row owned by a newer attempt.
+func RecordOutcomeDelivered(ctx context.Context, q pg.Querier, submissionID int64, attempt int64, responseCode int, responsePreview *string, deliveredAt time.Time) error {
 	tag, err := q.Exec(ctx, `
 		UPDATE tb_task_submissions
 		SET state = 'delivered',
@@ -192,20 +203,26 @@ func RecordOutcomeDelivered(ctx context.Context, q pg.Querier, submissionID int6
 		    last_error_code = NULL,
 		    last_error_message = NULL,
 		    updated_at = NOW()
-		WHERE id = $1 AND state IN ('delivering','delivered','settled')`,
-		submissionID, responseCode, responsePreview, deliveredAt)
+		WHERE id = $1
+		  AND state = 'delivering'
+		  AND attempt_count = $5`,
+		submissionID, responseCode, responsePreview, deliveredAt, attempt)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errors.New("submission not in a deliverable-recording state")
+		return ErrStaleAttempt
 	}
 	return nil
 }
 
 // RecordOutcomeRejected marks a definitive non-2xx outcome and releases the
 // reservation back to available budget in the same transaction. Terminal.
-func RecordOutcomeRejected(ctx context.Context, q pg.Querier, submissionID int64, taskID int64, responseCode int, responsePreview *string, errCode, errMsg string) error {
+// RecordOutcomeRejected marks a definitive non-2xx outcome and releases the
+// reservation back to available budget in the same transaction. Terminal:
+// rejected never transitions back. Attempt-fenced like the other outcome
+// writers — a stale attempt neither writes the row nor releases anything.
+func RecordOutcomeRejected(ctx context.Context, q pg.Querier, submissionID int64, taskID int64, attempt int64, responseCode int, responsePreview *string, errCode, errMsg string) error {
 	var reserved int64
 	if err := q.QueryRow(ctx,
 		`SELECT reserved_amount FROM tb_task_submissions WHERE id = $1`, submissionID).Scan(&reserved); err != nil {
@@ -221,13 +238,15 @@ func RecordOutcomeRejected(ctx context.Context, q pg.Querier, submissionID int64
 		    last_error_code = $4,
 		    last_error_message = $5,
 		    updated_at = NOW()
-		WHERE id = $1 AND state IN ('delivering','reserved')`,
-		submissionID, responseCode, responsePreview, errCode, errMsg)
+		WHERE id = $1
+		  AND state = 'delivering'
+		  AND attempt_count = $6`,
+		submissionID, responseCode, responsePreview, errCode, errMsg, attempt)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errors.New("submission not in a rejectable state")
+		return ErrStaleAttempt
 	}
 	_, err = q.Exec(ctx, `
 		UPDATE tb_tasks
@@ -238,7 +257,9 @@ func RecordOutcomeRejected(ctx context.Context, q pg.Querier, submissionID int64
 
 // RecordOutcomeUncertain marks an unknown remote outcome. Reservation is
 // RETAINED. Never treated as definitive failure; no auto-release.
-func RecordOutcomeUncertain(ctx context.Context, q pg.Querier, submissionID int64, errCode, errMsg string, nextAttemptAt time.Time) error {
+// Attempt-fenced: a stale attempt recording uncertain must not clobber a
+// newer attempt's state (including a terminal one).
+func RecordOutcomeUncertain(ctx context.Context, q pg.Querier, submissionID int64, attempt int64, errCode, errMsg string, nextAttemptAt time.Time) error {
 	tag, err := q.Exec(ctx, `
 		UPDATE tb_task_submissions
 		SET state = 'uncertain',
@@ -247,13 +268,15 @@ func RecordOutcomeUncertain(ctx context.Context, q pg.Querier, submissionID int6
 		    last_error_code = $3,
 		    last_error_message = $4,
 		    updated_at = NOW()
-		WHERE id = $1 AND state IN ('delivering','uncertain')`,
-		submissionID, nextAttemptAt, errCode, errMsg)
+		WHERE id = $1
+		  AND state = 'delivering'
+		  AND attempt_count = $5`,
+		submissionID, nextAttemptAt, errCode, errMsg, attempt)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errors.New("submission not in an uncertain-recordable state")
+		return ErrStaleAttempt
 	}
 	return nil
 }

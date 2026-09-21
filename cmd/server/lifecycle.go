@@ -36,7 +36,8 @@ type lifecycle struct {
 	shutdownBudget   time.Duration
 	signals          <-chan shutdownTrigger // OS signals (or a synthetic source in tests)
 	backgroundStops  []chan struct{}        // tickers/background loops stopped at shutdown
-	closers          []io.Closer            // resource owners closed AFTER HTTP shutdown
+	backgroundJoins  []<-chan struct{}      // worker done channels joined BEFORE closers run
+	closers          []io.Closer            // resource owners closed AFTER HTTP shutdown and worker join
 	backgroundErrors <-chan error           // fatal background-worker failures (R3.2)
 }
 
@@ -86,11 +87,19 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 				log.Printf("[kungfu.md] HTTP shutdown: %v (budget exceeded or listener error)", err)
 			}
 			// Stop background loops before closing resources; shutdown
-			// never STARTS new background work.
+			// never STARTS new background work. Closing stop makes the
+			// workers stop CLAIMING new work immediately.
 			for _, stop := range lc.backgroundStops {
 				close(stop)
 			}
-			// Close resource owners exactly once, after HTTP.
+			// JOIN the workers' in-flight passes before closing the
+			// resources they use (the PG pool): a recovery pass mid-HTTP
+			// must finish its DB writes before pool.Close(). Bounded by
+			// the worker's own pass context; never an unbounded wait.
+			for _, done := range lc.backgroundJoins {
+				<-done
+			}
+			// Close resource owners exactly once, after HTTP and workers.
 			for _, c := range lc.closers {
 				if err := c.Close(); err != nil {
 					log.Printf("[kungfu.md] resource close: %v", err)

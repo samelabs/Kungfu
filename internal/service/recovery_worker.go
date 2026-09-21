@@ -45,7 +45,31 @@ func DefaultRecoveryWorkerConfig() RecoveryWorkerConfig {
 // is recovered ONCE, and reported as a single fatal background error;
 // the runner never shuts down HTTP, never closes resources, never exits
 // the process — ServeLifecycle owns all of that.
+// RunSubmissionRecoveryWorker starts the worker and returns its done
+// channel: closed exactly once when the worker function has fully exited
+// (no claim in flight, no DB access after). Shutdown ordering contract:
+//
+//  1. close(stop) — the worker immediately stops CLAIMING new work
+//  2. HTTP graceful shutdown (in parallel, owned by ServeLifecycle)
+//  3. <-done — wait for any in-flight recovery pass to finish
+//  4. only then may the caller close the PG pool
+//
+// A pass already running when stop arrives completes (bounded by its own
+// 60s context and the delivery client's 10s per-attempt timeout); the
+// loop then exits without starting another pass. No framework, no
+// goroutine registry — one channel.
 func RunSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
+	pool *pg.Pool, cfg RecoveryWorkerConfig) <-chan struct{} {
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSubmissionRecoveryWorker(stop, failures, pool, cfg)
+	}()
+	return done
+}
+
+func runSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
 	pool *pg.Pool, cfg RecoveryWorkerConfig) {
 
 	defer func() {
@@ -65,6 +89,14 @@ func RunSubmissionRecoveryWorker(stop <-chan struct{}, failures chan<- error,
 			log.Println("[kungfu.md] submission recovery worker stopped")
 			return
 		case <-ticker.C:
+			// Claim gate: a tick racing the stop signal must not start
+			// a new pass once shutdown has been signalled.
+			select {
+			case <-stop:
+				log.Println("[kungfu.md] submission recovery worker stopped")
+				return
+			default:
+			}
 			// Worker ticks are independent of any request deadline; the
 			// HTTP attempts inside use the delivery package's own 10s
 			// client timeout as the per-attempt bound.

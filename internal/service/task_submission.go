@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	goerrors "errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -504,14 +505,20 @@ func recordDeliveredAndSettle(ctx context.Context, pool *pg.Pool,
 	if result.ResponseCode != nil {
 		rc = *result.ResponseCode
 	}
-	if err := repository.RecordOutcomeDelivered(ctx, tx, sub.ID, rc, preview, time.Now()); err != nil {
+	if err := repository.RecordOutcomeDelivered(ctx, tx, sub.ID, sub.AttemptCount, rc, preview, time.Now()); err != nil {
 		_ = pg.Rollback(tx)
+		if goerrors.Is(err, repository.ErrStaleAttempt) {
+			// A newer attempt owns this submission: our 2xx must not
+			// rewrite it (e.g. settled back to delivered). No-op.
+			return nil
+		}
 		return errors.New(500, "INTERNAL_ERROR", "Error recording delivery")
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Error recording delivery")
 	}
 
+	// Only the attempt that WON the delivered write performs settlement.
 	_, err := SettleSubmissionByCode(ctx, pool, sub.Code)
 	return err
 }
@@ -637,8 +644,11 @@ func recordRejected(ctx context.Context, pool *pg.Pool, sub *repository.Submissi
 		_ = pg.Rollback(tx)
 		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
-	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, responseCode, preview, errCode, ""); err != nil {
+	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, sub.AttemptCount, responseCode, preview, errCode, ""); err != nil {
 		_ = pg.Rollback(tx)
+		if goerrors.Is(err, repository.ErrStaleAttempt) {
+			return nil // stale attempt: no write, no release
+		}
 		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -664,8 +674,11 @@ func recordDefinitiveNotDelivered(ctx context.Context, pool *pg.Pool,
 		_ = pg.Rollback(tx)
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error recording delivery failure")
 	}
-	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, 0, nil, errCode, ""); err != nil {
+	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, sub.AttemptCount, 0, nil, errCode, ""); err != nil {
 		_ = pg.Rollback(tx)
+		if goerrors.Is(err, repository.ErrStaleAttempt) {
+			return &processOutcome{}, nil // stale attempt: no write, no release
+		}
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error recording delivery failure")
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -693,10 +706,14 @@ func recordUncertain(ctx context.Context, pool *pg.Pool,
 	if txErr != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Error recording delivery state")
 	}
-	if err := repository.RecordOutcomeUncertain(ctx, tx, sub.ID,
+	if err := repository.RecordOutcomeUncertain(ctx, tx, sub.ID, sub.AttemptCount,
 		ifEmpty(result.ErrorCode, "POSTAPI_UNCERTAIN"),
 		normalizeTruncateUTF8(result.ErrorMessage, 400, true),
 		time.Now().Add(submissionRetryBackoff)); err != nil {
+		if goerrors.Is(err, repository.ErrStaleAttempt) {
+			_ = pg.Rollback(tx)
+			return nil // stale attempt: newer attempt owns the state
+		}
 		_ = pg.Rollback(tx)
 		return errors.New(500, "INTERNAL_ERROR", "Error recording delivery state")
 	}
