@@ -1,6 +1,6 @@
 # Kungfu Production Deployment & Acceptance Runbook
 
-Status: **Stage 7 operational authority.** README stays the product/configuration contract; this document owns deployment sequencing and Stage 7 acceptance evidence.
+Status: **Operational authority for the current release.** README stays the product/configuration contract; this document owns deployment sequencing, cutover, backup, rollback policy, and acceptance evidence.
 
 Audience: the operator executing a production deployment and the PM closing commercial acceptance.
 
@@ -14,13 +14,29 @@ Every acceptance run must record:
 |---|---|
 | Git SHA | `________` (exact commit, e.g. `0109e3e…`) |
 | Image tag | `kungfu:<full-git-sha>` (immutable, built from that SHA) |
-| Migration set | `migrations/*.sql` belonging to that SHA (current baseline: **001 → 008**) |
+| Migration set | `migrations/*.sql` belonging to that SHA (current baseline: **001 → 010**) |
 | Environment identifier | `________` (e.g. prod-01) |
 | Acceptance timestamp (UTC) | `________` |
 
+Current release migration set (application order):
+
+```
+001_schema.sql
+002_payments.sql
+003_store_redemption.sql
+004_payment_provider_product.sql
+005_payment_adjustments.sql
+006_admin_foundation.sql
+007_store_admin_permissions.sql
+008_agent_key_hash.sql
+009_integer_credits.sql
+010_task_submissions.sql
+```
+
 Rules:
 - **No `latest` tag authority.** The image tag must be derived from the exact SHA.
-- **No mixed-SHA deployments**: the migration set and the image must come from the same SHA (apply migrations from the checkout first, then run the image built from that checkout — per the Stage 5 container contract).
+- **No mixed-SHA deployments**: the migration set and the image must come from the same SHA (apply migrations from the checkout first, then run the image built from that checkout).
+- **No new migrations are introduced by this runbook.**
 
 ---
 
@@ -32,53 +48,122 @@ Required values (record **presence + source only**, never values):
 |---|---|---|
 | `DB_PASS` | yes | from operator secret store |
 | `SESSION_SECRET` | yes | ≥ 32 bytes; `openssl rand -hex 32` recommended |
-| `DB_SSLMODE` | yes | exactly one of `disable\|require\|verify-ca\|verify-full` (S6.6; no default) |
+| `DB_SSLMODE` | yes | exactly one of `disable\|require\|verify-ca\|verify-full` (no default) |
 | `LISTEN_ADDR` | as applicable | container default `0.0.0.0:8090` |
-| `TRUSTED_PROXY_CIDRS` | when behind a proxy | must match the real direct proxy peer/network (S6.3) |
+| `TRUSTED_PROXY_CIDRS` | when behind a proxy | must match the real direct proxy peer/network |
 | `CREEM_API_KEY` `CREEM_WEBHOOK_SECRET` `CREEM_PACKAGES_JSON` `CREEM_MODE` `CREEM_SUCCESS_URL` | when payments enabled | all-or-none: all five set, or all five unset (payments disabled) |
 
-Evidence hygiene: record e.g. "`SESSION_SECRET` present, injected via <source>". Secret values never appear in any artifact (see §15).
+Evidence hygiene: record e.g. "`SESSION_SECRET` present, injected via <source>". Secret values never appear in any artifact (see §17).
 
 No new environment variables are introduced by this runbook.
 
-## 2. Database Pre-Flight
+## 2. Production Cutover Sequence (authoritative order)
 
-1. Apply the release SHA's `migrations/*.sql` in **filename order** with failure-stop:
+The cutover MUST proceed in exactly this order. Each gate is recorded as PASS before the next step starts. Any gate failing → **STOP** (see §4b rollback/failure semantics).
+
+```
+preflight (secret/config + DB identity + public HTTP/proxy checks)
+  → stop/drain OLD application (SIGTERM; confirm write path is down)
+  → fresh database backup (immediate pre-release)
+  → verify backup (SHA256 + pg_restore -l readable)
+  → verify target DB identity (SHOW port; SELECT current_database();)
+  → migration 009 strict preflight
+  → apply 009 (integer Credits)
+  → verify integer-credit schema/invariants
+  → apply 010 (task submissions)
+  → verify task-submission schema/invariants
+  → start EXACT accepted new binary/image
+  → readiness (/healthz /readyz)
+  → controlled acceptance (§6–§15)
+```
+
+Hard rules:
+
+- **Stop-before-009**: migration 009 MUST NOT execute while the old application can still write the production database. Stop/drain the old application first (graceful SIGTERM per §14, then confirm the process/container is terminated and no worker remains connected) BEFORE any migration command. The old application write path must be fully down before 009 runs — no exceptions.
+- **DB identity gate**: before ANY production database command (backup, migration, verification), execute and record `SHOW port;` and `SELECT current_database();`. The target must match operator expectation. A mismatch → STOP.
+- **No test/production mixing**: test environments must always address PostgreSQL explicitly at `127.0.0.1:55432`; never rely on an implicit default port for test DB commands, and never point test tooling at the production database. Production connection material is operator-supplied and recorded by identity (port + database name), never by credential in evidence.
+- **Order is unique**: 009 is applied and verified BEFORE 010; 010 is applied only after 009's verification passes; the new application starts only after both migrations are applied and verified.
+
+### 2.1 Migration application
+
+Apply the release SHA's migration files in **filename order** with failure-stop. Each file owns its transaction and fails closed; on a database that already carries an applied prefix (e.g. 001–008), the operator applies the unapplied tail of the set:
 
 ```bash
 for f in migrations/*.sql; do
-  psql "<operator-supplied connection string to the TARGET production database>"     -v ON_ERROR_STOP=1 -f "$f"
+  psql "<operator-supplied connection string to the TARGET production database>" -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
 
-Note: the placeholder is **operational psql connection material supplied by the operator**, NOT a Kungfu environment variable (Kungfu has no `DATABASE_URL` variable and this runbook introduces none). The connection must target the **same PostgreSQL database the deployment uses**, with the deployment's intended TLS posture, and its credentials are never recorded in acceptance evidence (§15).
+Note: the placeholder is **operational psql connection material supplied by the operator**, NOT a Kungfu environment variable (Kungfu has no `DATABASE_URL` variable and this runbook introduces none). The connection must target the **same PostgreSQL database the deployment uses**, with the deployment's intended TLS posture, and its credentials are never recorded in acceptance evidence (§17).
 
-2. Record the applied set — current baseline: **001_schema → 008_agent_key_hash**.
-3. Confirm persistent (non-ephemeral) PostgreSQL connectivity from the deployment environment.
+Record the applied set — current baseline: **001_schema → 010_task_submissions**.
 
-**DB_SSLMODE acceptance policy** (deployment policy only; the S6.6 application contract is unchanged):
+### 2.2 Backup gate (immediate pre-release)
 
-| Mode | Acceptance |
-|---|---|
-| `disable` | Allowed **only** for trusted local/dev/CI PostgreSQL. **NOT acceptable for a networked production database.** |
-| `verify-full` | **Preferred** production posture where the provider certificate + hostname validation are available. |
-| `verify-ca` / `require` | Acceptable **only** as an explicit, recorded deployment exception with a written reason. |
+Before executing migration 009, create a **fresh immediate pre-release backup** of the production database. Historical backups are NOT a substitute for this release's restore point.
 
-Semantics: `verify-full` remains preferred. If it is unavailable and the deployment proposes `verify-ca` or `require`, acceptance **remains blocked (DEPLOYMENT BLOCKER) UNTIL the exception and its rationale are explicitly reviewed and recorded**; once the exception is accepted, the absence of `verify-full` is no longer an unresolved blocker for that deployment. This is deployment policy only — the S6.6 application enum contract is unchanged, `disable` is never acceptable for a networked production database, and no certificate-management mechanism is invented here (operator provisions CA material per their provider).
+Record:
+- backup file path
+- creation timestamp (UTC)
+- SHA256 checksum of the backup file
+- verification that `pg_restore -l <backup>` reads the archive successfully (catalog listing captured as evidence)
 
-## 3. Public HTTP / Proxy Pre-Flight
+Backup + verification evidence must exist and be recorded BEFORE the DB identity gate and migration 009 proceed.
 
-Verify and record:
-- public DNS resolution of the service hostname
-- public HTTPS reachability (`curl -sSI https://<host>/healthz`)
-- TLS certificate validity at the public edge (issuer, expiry)
-- direct reverse-proxy topology diagram (client → edge TLS → proxy → container)
-- `TRUSTED_PROXY_CIDRS` matches the **real direct proxy peer/network** (forwarded `X-Forwarded-Proto`/`X-Forwarded-For` are honored only from that peer — S6.3)
-- Owner/Admin `Secure` cookie behavior through the trusted HTTPS boundary (login over public HTTPS sets Secure cookies; direct-HTTP spoof attempts do not)
+### 2.3 DB identity gate
 
-No HSTS. No CSP. (Deferred by Stage 6 decision.)
+Execute against the TARGET production database and record the output:
 
-## 4. Startup / Health
+```sql
+SHOW port;
+SELECT current_database();
+```
+
+Both must match the operator's intended production target. Then proceed to §2.1 (009 first).
+
+## 3. Migration 009 — Integer Credits (strict)
+
+009 is the **integer Credits strict migration**: Credits become whole integer units stored as BIGINT (fiat minor units untouched). The migration file owns its own transaction; any failure at any point rolls back the entire file atomically.
+
+**Strict preflight** (the migration itself fails closed on the same conditions — the preflight is run and recorded first):
+
+- every affected credits column holds only integral values; **a single fractional historical value aborts the migration**
+- to make the migration pass it is **forbidden** to: round, truncate, rewrite, or silently coerce existing economic data
+- preflight failure → **STOP**. The migration is not applied. The data condition is escalated to the PM; no coercion workaround exists.
+
+**Post-009 verification** (record as evidence):
+
+- target economic columns are now BIGINT:
+  - `tb_bots.balance`
+  - `tb_tasks.budget`, `tb_tasks.price`
+  - `tb_transactions.amount`, `tb_transactions.balance_after`
+  - `tb_payments.credits`
+- economic invariants hold: row counts and relationships preserved across the conversion; signs preserved (negative ledger rows / authoritative negative balances stay negative); the ledger reconciliation invariant (§13) still computes.
+
+## 4. Migration 010 — Task Submissions
+
+010 is applied **only after 009 verification passed**.
+
+**Post-010 verification** (record as evidence):
+
+- task reserved-budget schema: `tb_tasks.reserved_budget` exists (BIGINT NOT NULL DEFAULT 0) with its CHECK constraints (`reserved_budget >= 0`, `reserved_budget <= budget`)
+- durable task submissions: `tb_task_submissions` table exists with its state/recovery/bot indexes
+- required constraints and foreign keys present (`task_id → tb_tasks ON DELETE RESTRICT`, `bot_id → tb_bots ON DELETE RESTRICT`)
+- admission basis: `available_budget = budget - reserved_budget`
+
+**The new application MUST NOT be started before 009 AND 010 are applied and verified.**
+
+## 4b. Rollback / Failure Semantics
+
+If 009/010 have been forward-applied and the new application fails to start:
+
+- **Do NOT simply restart the old binary.** A binary built on old schema assumptions must never run blind against a forward-migrated database.
+- Choose, with the PM, one of:
+  1. **Coordinated DB restore + old binary**: stop everything, restore the §2.2 immediate pre-release backup, verify restore, then start the old binary against the restored old-schema database; or
+  2. **Fix-forward**: diagnose and fix the new application, build a new exact-SHA image, re-run readiness + acceptance.
+- Record the decision, the evidence, and the final state. Partial states (009 applied, 010 not yet) follow the same rule: no old binary against a forward-migrated schema.
+
+## 5. Startup / Health
 
 Required evidence:
 - container/process starts from the exact image (`docker run … kungfu:<sha>`)
@@ -88,7 +173,7 @@ Required evidence:
 
 `/healthz` and `/readyz` are the infrastructure health evidence; there is no other health surface.
 
-## 5. First Admin Bootstrap
+## 6. First Admin Bootstrap
 
 Using the **same immutable image**:
 
@@ -102,16 +187,16 @@ Evidence:
 - a second bootstrap attempt **fails closed** (record the failure)
 - password entered only via stdin
 
-## 6. Agent / Owner Account Bootstrap (model clarification)
+## 7. Agent / Owner Account Bootstrap (model clarification)
 
 - `POST /api/owner/register` creates the bot account (Owner browser registration path).
 - The supplied **name + password are the Human Owner credentials** (Owner Center login).
-- The returned **raw API key (`kf_live_…`) is the Agent credential, disclosed exactly once** in the registration response; PostgreSQL stores only its SHA-256 + last4 (S6.1).
+- The returned **raw Agent key (`kf_live_…`) is the Agent credential, disclosed exactly once** in the registration response; PostgreSQL stores only its SHA-256 + last4.
 - Registration writes the signup credit (+66 `grant_signup`) through the existing Credits mechanism in the same transaction.
 
-Evidence rule: the **full raw API key is never stored** in the runbook/log artifact. Immediately after the smoke flow, only `kf_live_****<last4>` masked form may be retained.
+Evidence rule: the **full raw Agent key is never stored** in the runbook/log artifact. Immediately after the smoke flow, only `kf_live_****<last4>` masked form may be retained.
 
-## 7. Deployed Agent Network Smoke (REQUIRED)
+## 8. Deployed Agent Network Smoke (REQUIRED — MCP only)
 
 Using a **controlled HTTPS PostAPI endpoint** (one the acceptance environment owns/reaches deliberately — not an uncontrolled third party):
 
@@ -119,20 +204,22 @@ Using a **controlled HTTPS PostAPI endpoint** (one the acceptance environment ow
 2. Agent lists open work (`work_list`) and gets one (`work_get`).
 3. Agent submits (`work_submit`).
 4. The controlled PostAPI **receives the expected HTTPS POST** (record arrival at the fake/controlled endpoint).
-5. A 2xx delivery completes the submission path (task budget decrement + `earn_task` visible in the ledger check, §11).
+5. A 2xx delivery completes the submission path (task budget decrement + `earn_task` visible in the ledger check, §13).
+
+MCP is the single Agent execution interface: `account_status`, `memory_put`/`memory_list`/`memory_get`/`memory_delete`, `work_list`/`work_get`/`work_submit`. No Agent REST, `/api/ping`, or X-Bot-Key Agent execution flow exists or may be reintroduced in acceptance.
 
 Scope note: repository CI remains the authority for failure/424 and concurrency semantics; this deployed smoke proves **real outbound network reachability only**. No new PostAPI mechanism is created.
 
-## 8. Owner Smoke (representative)
+## 9. Owner Smoke (representative)
 
 - Owner login (`POST /api/owner/session`) → account load (`GET /api/account`)
 - masked current-key view (`GET /api/key` shows `key_masked` only)
 - representative task lifecycle (create → open → close/refund, or an existing seeded test task)
 - logout (`DELETE /api/owner/session`)
 
-Raw current keys are never exposed (S6.1: not recoverable). No S6.1/S6.4 mechanism is reopened.
+Raw current keys are never exposed (not recoverable). No key-security mechanism is reopened.
 
-## 9. Admin Smoke (representative)
+## 10. Admin Smoke (representative)
 
 - admin login (`POST /api/admin/session`)
 - session principal loads (`GET /api/admin/session`)
@@ -141,42 +228,30 @@ Raw current keys are never exposed (S6.1: not recoverable). No S6.1/S6.4 mechani
 
 Destructive admin-account mutation is **not** required for smoke.
 
-## 10. Store Smoke (controlled test data)
+## 11. Store Smoke (controlled test data)
 
 Non-destructive/controlled path:
 1. Owner lists products (`GET /api/owner/store/products`).
 2. Exercise a redemption for a low-value **test product** (`POST /api/owner/store/redemptions`) in the acceptance environment.
 3. Admin observes/processes the test redemption (`GET /api/admin/store/redemptions`, then approve or reject).
-4. Economic results checked against the Credits ledger (§11): `spend_redemption` (and `refund_redemption` if rejected) rows appear; balance moves accordingly.
+4. Economic results checked against the Credits ledger (§13): `spend_redemption` (and `refund_redemption` if rejected) rows appear; balance moves accordingly.
 
 Only existing store state transitions are used; none are invented.
 
-## 11. Ledger Reconciliation Evidence (execution deferred to S7.2)
+## 12. Creem Prerequisites (documented; sandbox acceptance is a separately scheduled gate)
 
-Stage 7 acceptance must include a **read-only** reconciliation check for the acceptance bot.
-
-Invariant: `tb_bots.balance` == net authoritative ledger total of that bot's `tb_transactions`.
-
-Where acceptance exercises `grant_signup`, `lock_task`/`refund_task`, `earn_task`, `grant_payment`, `spend_redemption`/`refund_redemption`, the evidence must identify the expected row types and the computed final balance.
-
-- Credits remains the **sole** balance/transaction authority — no second balance authority is created.
-- Ledger rows are never repaired or mutated as part of acceptance.
-- The executable/query implementation belongs to **S7.2**, not this document.
-
-## 12. Creem Prerequisites (for S7.3)
-
-Documented prerequisites only — **no sandbox validation is performed in S7.1**:
+Documented prerequisites only — no sandbox validation is performed by this document:
 - `CREEM_MODE=test`
 - valid Creem API key + webhook secret (presence recorded, values never logged)
 - package catalog (`CREEM_PACKAGES_JSON`) + success URL configured
 - public HTTPS webhook endpoint reachable from Creem
 - Creem dashboard webhook configured to `POST /api/webhooks/creem`
 
-No live production charge is required at any Stage 7 point.
+No live production charge is required at any point in this runbook.
 
-## 13. Creem Sandbox Acceptance Target (executed in S7.3, not here)
+## 12b. Creem Sandbox Acceptance Target (separately scheduled gate, not this runbook)
 
-The later S7.3 acceptance must demonstrate:
+The separately scheduled Creem sandbox acceptance must demonstrate:
 1. Owner starts a test checkout
 2. Creem test payment completes
 3. a real provider webhook reaches the deployed Kungfu instance
@@ -186,15 +261,32 @@ The later S7.3 acceptance must demonstrate:
 7. Owner payment status becomes `paid`
 8. a duplicate webhook delivery does **not** duplicate the grant
 
+## 13. Ledger Reconciliation Evidence (read-only check in this runbook)
+
+Acceptance must include a **read-only** reconciliation check for the acceptance bot.
+
+Invariant: `tb_bots.balance` == net authoritative ledger total of that bot's `tb_transactions`.
+
+Where acceptance exercises `grant_signup`, `lock_task`/`refund_task`, `earn_task`, `grant_payment`, `spend_redemption`/`refund_redemption`, the evidence must identify the expected row types and the computed final balance.
+
+- Credits remains the **sole** balance/transaction authority — no second balance authority is created.
+- Ledger rows are never repaired or mutated as part of acceptance.
+
 ## 14. Graceful Shutdown
 
 Terminate the deployed container/process with SIGTERM (`docker stop -t 15`). Evidence: clean exit within the existing lifecycle budget (bounded, HTTP drained, resources closed once). No new shutdown mechanism.
 
-## 15. Acceptance Evidence Hygiene
+## 15. Public HTTP / Proxy Checks
 
-Evidence MAY include: timestamps, HTTP statuses, masked identifiers (`kf_live_****ab12`), payment/redemption/task codes, Git SHA, image tag, migration names, sanitized log excerpts.
+Verify and record:
+- public DNS resolution of the service hostname
+- public HTTPS reachability (`curl -sSI https://<host>/healthz`)
+- TLS certificate validity at the public edge (issuer, expiry)
+- direct reverse-proxy topology diagram (client → edge TLS → proxy → container)
+- `TRUSTED_PROXY_CIDRS` matches the **real direct proxy peer/network** (forwarded `X-Forwarded-Proto`/`X-Forwarded-For` are honored only from that peer)
+- Owner/Admin `Secure` cookie behavior through the trusted HTTPS boundary (login over public HTTPS sets Secure cookies; direct-HTTP spoof attempts do not)
 
-Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRET`, `DB_PASS`, Creem API key, Creem webhook secret, session cookies, CSRF tokens.
+No HSTS. No CSP. (Deferred by prior product decision.)
 
 ## 16. Blocker Classification
 
@@ -208,22 +300,42 @@ Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRE
 
 Networked-DB policy recap: `verify-full` preferred; a weaker accepted encrypted mode needs an explicit deployment exception/rationale; `disable` on networked production DB is rejected by acceptance policy (deployment-level rejection, not a new application requirement).
 
-## 17. Pass / Fail Matrix
+**DB_SSLMODE acceptance policy** (deployment policy only; the application enum contract is unchanged):
+
+| Mode | Acceptance |
+|---|---|
+| `disable` | Allowed **only** for trusted local/dev/CI PostgreSQL. **NOT acceptable for a networked production database.** |
+| `verify-full` | **Preferred** production posture where the provider certificate + hostname validation are available. |
+| `verify-ca` / `require` | Acceptable **only** as an explicit, recorded deployment exception with a written reason. |
+
+Semantics: `verify-full` remains preferred. If it is unavailable and the deployment proposes `verify-ca` or `require`, acceptance **remains blocked (DEPLOYMENT BLOCKER) UNTIL the exception and its rationale are explicitly reviewed and recorded**; once the exception is accepted, the absence of `verify-full` is no longer an unresolved blocker for that deployment.
+
+## 17. Acceptance Evidence Hygiene
+
+Evidence MAY include: timestamps, HTTP statuses, masked identifiers (`kf_live_****ab12`), payment/redemption/task codes, Git SHA, image tag, migration names, backup path + SHA256, sanitized log excerpts.
+
+Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRET`, `DB_PASS`, Creem API key, Creem webhook secret, session cookies, CSRF tokens, or any database credential.
+
+## 18. Pass / Fail Matrix
 
 | # | Journey | PASS evidence | Environment | CI covers semantics? | Deployed evidence required? |
 |---|---|---|---|---|---|
-| D1 | Fresh boot | migrations 001→008 applied in order; container from `<sha>` image starts; `/healthz` `/readyz` 200 | deploy | yes (chain + smoke in CI) | **yes** |
-| D2 | Admin bootstrap | first bootstrap OK; second fails closed; password via stdin only | deploy | yes | **yes** (one production run) |
-| D3 | Graceful stop | SIGTERM → clean bounded exit | deploy | yes | yes (confirm in env) |
+| D1 | Fresh boot | migrations 001→010 applied in order; container from `<sha>` image starts; `/healthz` `/readyz` 200 | deploy | yes (chain + smoke in CI) | **yes** |
+| D2 | Cutover gates | stop-old-app-before-009 recorded; backup path + timestamp + SHA256 + `pg_restore -l` readable recorded; DB identity (`SHOW port`, `current_database()`) recorded and matching | deploy | no (operational) | **yes** |
+| D3 | Migration 009 | strict preflight PASS (no fractional data, no coercion); economic columns BIGINT; invariants verified | deploy | conversion semantics yes | **yes** |
+| D4 | Migration 010 | applied after 009 verified; reserved-budget schema + constraints + indexes + FKs verified | deploy | schema semantics yes | **yes** |
+| D5 | New binary start | exact accepted SHA image starts AFTER 009+010 verified; `/healthz` `/readyz` 200 | deploy | yes (smoke in CI) | **yes** |
+| D6 | Rollback readiness | failure semantics acknowledged; no old binary against forward-migrated DB | deploy | no (policy) | yes (recorded acknowledgment) |
+| D7 | Graceful stop | SIGTERM → clean bounded exit | deploy | yes | yes (confirm in env) |
 | A1 | Account bootstrap | register OK; raw key disclosed once, retained masked only; `grant_signup` row exists | deploy | yes | yes |
 | A2 | MCP account status smoke | authenticated `account_status` tool call returns identity/balance (`Authorization: Bearer <Agent key>` on `/mcp`) | deploy | yes | yes |
 | A3 | MCP memory smoke | `memory_put` / `memory_list` / `memory_get` / `memory_delete` round-trip via `/mcp` | deploy | yes | yes |
 | A4 | Deployed PostAPI network smoke | controlled endpoint receives HTTPS POST; 2xx delivery completes | deploy | failure/424 semantics yes; **real network no** | **yes — REQUIRED** |
 | O1 | Owner identity smoke | login/account/masked key/logout | deploy | yes | yes |
 | O2 | Owner task smoke | create→open→close/refund with ledger rows | deploy | yes | yes |
-| O3 | Creem sandbox | — | deploy + Creem test | yes (fake provider) | **DEFERRED TO S7.3** |
+| O3 | Creem sandbox | — | deploy + Creem test | yes (fake provider) | **separately scheduled gate** |
 | O4 | Store smoke | test redemption lifecycle + admin processing + ledger check | deploy | yes | yes |
 | M1 | Admin session smoke | login/principal/logout | deploy | yes | yes |
 | M2 | RBAC/audit smoke | read-only admin view under least-privilege role | deploy | yes | yes |
 | M3 | Store governance smoke | admin processes test redemption | deploy | yes | yes |
-| E1 | Ledger reconciliation | balance == Σ ledger for acceptance bot | deploy | invariant semantics yes | **execution DEFERRED TO S7.2** |
+| E1 | Ledger reconciliation | balance == Σ ledger for acceptance bot | deploy | invariant semantics yes | yes (read-only execution per §13) |
