@@ -77,6 +77,14 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 			log.Printf("[kungfu.md] Shutdown starting (%s): budget %s", reason, lc.shutdownBudget)
 			defer close(shutdownDone)
 
+			// FIRST: stop background loops the instant shutdown is
+			// triggered — before the HTTP drain. Closing stop makes the
+			// recovery workers stop CLAIMING new work immediately; no
+			// new recovery pass may start while in-flight HTTP requests
+			// are still being drained.
+			for _, stop := range lc.backgroundStops {
+				close(stop)
+			}
 			// Bounded graceful HTTP shutdown: stops accepting new
 			// requests, waits for in-flight up to the budget.
 			sctx, cancel := context.WithTimeout(context.Background(), lc.shutdownBudget)
@@ -85,12 +93,6 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 				// Budget exhausted with connections still open —
 				// explicit handling, never a silent pass.
 				log.Printf("[kungfu.md] HTTP shutdown: %v (budget exceeded or listener error)", err)
-			}
-			// Stop background loops before closing resources; shutdown
-			// never STARTS new background work. Closing stop makes the
-			// workers stop CLAIMING new work immediately.
-			for _, stop := range lc.backgroundStops {
-				close(stop)
 			}
 			// JOIN the workers' in-flight passes before closing the
 			// resources they use (the PG pool): a recovery pass mid-HTTP

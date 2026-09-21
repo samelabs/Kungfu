@@ -232,7 +232,14 @@ func InsertPaymentAdjustment(ctx context.Context, tx pgx.Tx, f *model.PaymentAdj
 			object_status, transaction_status, reason,
 			provider_created_at
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-		ON CONFLICT DO NOTHING`,
+		ON CONFLICT (provider, kind, provider_object_id) DO UPDATE
+			SET refunded_amount_minor = EXCLUDED.refunded_amount_minor,
+			    amount_paid_minor     = EXCLUDED.amount_paid_minor,
+			    transaction_status    = EXCLUDED.transaction_status,
+			    provider_created_at   = EXCLUDED.provider_created_at
+		WHERE EXCLUDED.refunded_amount_minor IS NOT NULL
+		  AND (tb_payment_adjustments.refunded_amount_minor IS NULL
+		       OR EXCLUDED.refunded_amount_minor >= tb_payment_adjustments.refunded_amount_minor)`,
 		f.PaymentID, f.Provider, f.ProviderEventID, f.ProviderObjectID, f.Kind,
 		f.ProviderTransactionID, f.ProviderOrderID,
 		f.AmountMinor, f.Currency,

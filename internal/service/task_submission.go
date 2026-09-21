@@ -445,9 +445,16 @@ func processSubmission(ctx context.Context, pool *pg.Pool, submissionID int64,
 	case result.ResponseCode != nil:
 		// Definitive non-2xx: rejected + release reservation atomically.
 		outcome.rejected = true
-		if err := recordRejected(ctx, pool, sub, *result.ResponseCode, result.ResponseBody,
-			ifEmpty(result.ErrorCode, "TASK_POST_FAILED")); err != nil {
+		stale, err := recordRejected(ctx, pool, sub, *result.ResponseCode, result.ResponseBody,
+			ifEmpty(result.ErrorCode, "TASK_POST_FAILED"))
+		if err != nil {
 			return outcome, err
+		}
+		if stale {
+			// This attempt's rejection was fenced off — a newer attempt
+			// owns the submission. Project the CURRENT durable fact,
+			// never the stale attempt's 424.
+			return staleProjection(ctx, pool, sub, outcome)
 		}
 		return outcome, errors.NewWithDetails(424,
 			ifEmpty(result.ErrorCode, "TASK_POST_FAILED"),
@@ -472,13 +479,65 @@ func processSubmission(ctx context.Context, pool *pg.Pool, submissionID int64,
 		dctx, dcancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer dcancel()
 		if delivery.IsDefinitiveNotDelivered(result) {
-			return recordDefinitiveNotDelivered(dctx, pool, sub, result)
+			po, perr := recordDefinitiveNotDelivered(dctx, pool, sub, result)
+			if perr != nil && goerrors.Is(perr, errStaleProjection) {
+				return staleProjection(dctx, pool, sub, outcome)
+			}
+			return po, perr
 		}
 		outcome.uncertain = true
 		if err := recordUncertain(dctx, pool, sub, result); err != nil {
 			return outcome, err
 		}
 		return outcome, nil
+	}
+}
+
+// errStaleProjection signals: this attempt's outcome write was fenced
+// off; the caller must reread the durable row and project the CURRENT
+// fact instead of the stale attempt's own result.
+var errStaleProjection = goerrors.New("stale attempt: project current durable fact")
+
+// staleProjection rereads the durable submission and projects its
+// CURRENT fact. Called only after an ErrStaleAttempt fence: the newer
+// attempt owns the state and may have delivered/settled/rejected.
+func staleProjection(ctx context.Context, pool *pg.Pool,
+	staleSub *repository.SubmissionRow, outcome *processOutcome) (*processOutcome, error) {
+	current, err := repository.FindSubmissionByID(ctx, pool, staleSub.ID)
+	if err != nil || current == nil {
+		// Cannot reread: report a non-committal server error rather than
+		// fabricating any business fact.
+		return outcome, errors.New(500, "INTERNAL_ERROR", "Error reading submission state")
+	}
+	switch current.State {
+	case repository.SubStateSettled, repository.SubStateDelivered:
+		outcome.delivered = true
+		outcome.settled = current.State == repository.SubStateSettled
+		if current.State == repository.SubStateSettled {
+			return outcome, nil // submitResult replays the settled fact
+		}
+		return outcome, nil // delivered; recovery settles; result replays delivered
+	case repository.SubStateRejected:
+		outcome.rejected = true
+		errCode := "TASK_DELIVERY_FAILED"
+		if current.LastErrorCode != nil {
+			errCode = *current.LastErrorCode
+		}
+		return outcome, errors.NewWithDetails(424,
+			errCode,
+			"Task delivery failed. The submission was definitively rejected.",
+			map[string]interface{}{
+				"submission_id": current.Code,
+				"state":         repository.SubStateRejected,
+				"post": map[string]interface{}{
+					"delivered":     false,
+					"response_code": derefInt(current.ResponseCode),
+				},
+			})
+	default:
+		// reserved/delivering/uncertain under a newer attempt: in
+		// flight elsewhere — nothing changed by THIS call.
+		return &processOutcome{}, nil
 	}
 }
 
@@ -631,32 +690,35 @@ func settleIfPending(ctx context.Context, pool *pg.Pool,
 }
 
 // recordRejected: rejected + reservation release, single transaction.
-// Lock order: task then submission.
+// Lock order: task then submission. Returns stale=true when THIS
+// attempt's outcome write was fenced off (a newer attempt owns the
+// submission): nothing was written and the caller must reread the
+// durable row and project THAT fact — never the stale attempt's 424.
 func recordRejected(ctx context.Context, pool *pg.Pool, sub *repository.SubmissionRow,
-	responseCode int, responseBody *string, errCode string) error {
+	responseCode int, responseBody *string, errCode string) (stale bool, err error) {
 
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
-		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
+		return false, errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
 	preview := previewOf(responseBody)
 	if _, err := repository.FindTaskWithReservedForUpdate(ctx, tx, sub.TaskCode); err != nil {
 		_ = pg.Rollback(tx)
-		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
+		return false, errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
 	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, sub.AttemptCount, responseCode, preview, errCode, ""); err != nil {
 		_ = pg.Rollback(tx)
 		if goerrors.Is(err, repository.ErrStaleAttempt) {
-			return nil // stale attempt: no write, no release
+			return true, nil // stale attempt: no write, no release
 		}
-		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
+		return false, errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
+		return false, errors.New(500, "INTERNAL_ERROR", "Error recording rejection")
 	}
 	insertTaskEventLog(ctx, pool, sub.TaskCode, sub.BotID, "post_failed", nil, false,
 		&responseCode, responseBody, errCode, "")
-	return nil
+	return false, nil
 }
 
 // recordDefinitiveNotDelivered: provably-unsent request (SSRF refusal /
@@ -677,7 +739,9 @@ func recordDefinitiveNotDelivered(ctx context.Context, pool *pg.Pool,
 	if err := repository.RecordOutcomeRejected(ctx, tx, sub.ID, sub.TaskID, sub.AttemptCount, 0, nil, errCode, ""); err != nil {
 		_ = pg.Rollback(tx)
 		if goerrors.Is(err, repository.ErrStaleAttempt) {
-			return &processOutcome{}, nil // stale attempt: no write, no release
+			// Stale attempt fenced off — project the current durable
+			// fact (a newer attempt may already have delivered/settled).
+			return nil, errStaleProjection
 		}
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error recording delivery failure")
 	}

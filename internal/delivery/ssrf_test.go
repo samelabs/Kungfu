@@ -677,14 +677,36 @@ func TestSSRFDNSResultDedupe(t *testing.T) {
 // that the Host header authority is the original URL hostname, not an
 // IP rewrite.
 type hostRecorderConn struct {
-	written bytes.Buffer
+	written   bytes.Buffer
+	wroteOnce chan struct{} // closed on the first Write
 }
 
-func (c *hostRecorderConn) Read(b []byte) (int, error)  { return 0, io.EOF }
-func (c *hostRecorderConn) Write(b []byte) (int, error) { return c.written.Write(b) }
-func (c *hostRecorderConn) Close() error                { return nil }
-func (c *hostRecorderConn) LocalAddr() net.Addr         { return nil }
-func (c *hostRecorderConn) RemoteAddr() net.Addr        { return nil }
+func newHostRecorderConn() *hostRecorderConn {
+	return &hostRecorderConn{wroteOnce: make(chan struct{})}
+}
+
+// Read gates EOF on the first Write: the transport may probe the
+// connection BEFORE the request is written; an ungated EOF can abort
+// the write path before the wire bytes are observable (the historical
+// CI flake). Deterministic write-observation gating — no sleeps.
+func (c *hostRecorderConn) Read(b []byte) (int, error) {
+	<-c.wroteOnce
+	return 0, io.EOF
+}
+func (c *hostRecorderConn) Write(b []byte) (int, error) {
+	c.wroteOnceOnce()
+	return c.written.Write(b)
+}
+func (c *hostRecorderConn) wroteOnceOnce() {
+	select {
+	case <-c.wroteOnce:
+	default:
+		close(c.wroteOnce)
+	}
+}
+func (c *hostRecorderConn) Close() error         { return nil }
+func (c *hostRecorderConn) LocalAddr() net.Addr  { return nil }
+func (c *hostRecorderConn) RemoteAddr() net.Addr { return nil }
 func (c *hostRecorderConn) SetDeadline(t time.Time) error {
 	return nil
 }
@@ -698,7 +720,7 @@ func (c *hostRecorderConn) SetWriteDeadline(t time.Time) error { return nil }
 // The SSRF defense lives ONLY in the dial seam — never in a URL rewrite.
 func TestSSRFHostAuthorityUnchangedAtTransportLevel(t *testing.T) {
 	cr := &countingResolver{addrs: []net.IPAddr{ipa("203.0.114.10")}}
-	rd := &recordingDialer{conn: &hostRecorderConn{}}
+	rd := &recordingDialer{conn: newHostRecorderConn()}
 
 	orig := sharedClient
 	sharedClient = newHardenedClient()

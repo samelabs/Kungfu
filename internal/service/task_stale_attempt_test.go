@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/repository"
 )
 
@@ -321,4 +322,103 @@ func newHangServer(hang func(n int32) bool) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
+}
+
+// TestStaleRejectionProjectsCurrentDurableFact (service-level): when a
+// stale attempt's non-2xx is fenced off because a newer attempt owns
+// the submission, the caller must NOT receive the stale attempt's 424 —
+// it must receive the CURRENT durable fact (here: B delivered+settled
+// with its 2xx). Drives the REAL processSubmission for the stale
+// attempt's projection.
+func TestStaleRejectionProjectsCurrentDurableFact(t *testing.T) {
+	pool := tcTestPool(t)
+	owner := tcSeedBot(t, pool, 5000)
+	agent := tcSeedBot(t, pool, 0)
+
+	var hits int32
+	// call 1 (A): 500 immediately; call 2 (B): 200.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"stale five hundred"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	code := tcSeedTask(t, pool, owner, "open", srv.URL, 5, 3000)
+
+	sub, _, err := acceptSubmission(context.Background(), pool, code, agent,
+		repository.SubKindAgent, "st-p", hashPayload([]byte(`{"task_code":"`+code+`"}`)), []byte(`{"task_code":"`+code+`"}`))
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	// Attempt A claims with an ALREADY-EXPIRED lease (its result will be
+	// stale the moment B reclaims). A's HTTP (hit 1) already answered
+	// 500 — simulating the old in-flight goroutine whose non-2xx result
+	// arrives late.
+	subA, err := repository.ClaimSubmissionForDelivery(context.Background(), pool, sub.ID,
+		time.Now().Add(-time.Second), false)
+	if err != nil || subA == nil {
+		t.Fatalf("A claim: %v %v", subA, err)
+	}
+	if subA.AttemptCount != 1 {
+		t.Fatalf("A attempt = %d", subA.AttemptCount)
+	}
+	// A's HTTP hit (the stale 500) happens now, out of band.
+	if n := atomic.AddInt32(&hits, 1); n != 1 {
+		t.Fatalf("unexpected hit count %d", n)
+	}
+
+	// B reclaims (attempt 2, live lease) inside the REAL engine and
+	// delivers+settles FIRST — the classic reordering window. B's HTTP
+	// is hit 2 -> 200.
+	if _, err := processSubmission(context.Background(), pool, sub.ID,
+		delivery.AgentSubmitErrorConfig(), false); err != nil {
+		t.Fatalf("B process: %v", err)
+	}
+	var st string
+	pool.QueryRow(context.Background(),
+		`SELECT state FROM tb_task_submissions WHERE id=$1`, sub.ID).Scan(&st)
+	if st != repository.SubStateSettled {
+		t.Fatalf("B did not settle: state=%s", st)
+	}
+
+	// Now A's late non-2xx result is processed through the REAL service
+	// primitive (recordRejected) with A's stale attempt number — it must
+	// be fenced (stale=true), write nothing, release nothing, and the
+	// caller-side projection must replay the CURRENT durable fact.
+	stale, rerr := recordRejected(context.Background(), pool, subA, 500,
+		nil, "POSTAPI_REJECTED")
+	if rerr != nil || !stale {
+		t.Fatalf("stale recordRejected: stale=%v err=%v — must be fenced no-op", stale, rerr)
+	}
+	// A's projection: reread + current fact.
+	outcome, perr := staleProjection(context.Background(), pool, subA, &processOutcome{rejected: true})
+	if perr != nil {
+		t.Fatalf("stale projection must replay the CURRENT fact, got err: %v", perr)
+	}
+	if !outcome.delivered || !outcome.settled {
+		t.Fatalf("stale projection returned stale fact: %+v — must be delivered+settled", outcome)
+	}
+	// The durable row still holds B's facts.
+	pool.QueryRow(context.Background(),
+		`SELECT state FROM tb_task_submissions WHERE id=$1`, sub.ID).Scan(&st)
+	if st != repository.SubStateSettled {
+		t.Fatalf("durable state clobbered: %s", st)
+	}
+	// Exactly one earn_task, budget decremented once.
+	var earn int64
+	pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM tb_transactions WHERE type='earn_task' AND ref_id=$1`, sub.Code).Scan(&earn)
+	if earn != 1 {
+		t.Fatalf("earn_task = %d, want 1", earn)
+	}
+	budget, _ := tcBudget(t, pool, code)
+	if budget != 2995 {
+		t.Fatalf("budget = %d, want 2995 (3000-5 once)", budget)
+	}
 }
