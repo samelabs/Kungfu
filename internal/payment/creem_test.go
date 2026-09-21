@@ -33,11 +33,12 @@ type fakeCreem struct {
 	checkoutStatus int
 	checkoutBody   string
 	txns           map[string]*CreemTransactionEntity
+	ambiguousTxns  map[string]bool // deterministic 500 mode per transaction
 }
 
 func newFakeCreem(t *testing.T, products ...CreemProduct) *fakeCreem {
 	t.Helper()
-	fc := &fakeCreem{products: map[string]CreemProduct{}, txns: map[string]*CreemTransactionEntity{}}
+	fc := &fakeCreem{products: map[string]CreemProduct{}, txns: map[string]*CreemTransactionEntity{}, ambiguousTxns: map[string]bool{}}
 	for _, p := range products {
 		fc.products[p.ID] = p
 	}
@@ -92,7 +93,15 @@ func newFakeCreem(t *testing.T, products ...CreemProduct) *fakeCreem {
 		}
 		fc.mu.Lock()
 		txn, ok := fc.txns[q.Get("transaction_id")]
+		ambiguous := fc.ambiguousTxns[q.Get("transaction_id")]
 		fc.mu.Unlock()
+		if ambiguous {
+			// Deterministic provider ambiguity (5xx): the caller must
+			// treat the fact as unknowable and mutate nothing.
+			w.WriteHeader(500)
+			_, _ = w.Write([]byte(`{"error":"upstream"}`))
+			return
+		}
 		if !ok {
 			w.WriteHeader(404)
 			_, _ = w.Write([]byte(`{"error":"not found"}`))
@@ -112,6 +121,13 @@ func (fc *fakeCreem) setTxn(txn *CreemTransactionEntity) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	fc.txns[txn.ID] = txn
+}
+
+// setAmbiguous flips the deterministic 5xx mode for a transaction id.
+func (fc *fakeCreem) setAmbiguous(txnID string, on bool) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.ambiguousTxns[txnID] = on
 }
 
 func pkgProducts() []CreemProduct {
