@@ -613,7 +613,8 @@ func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget int64) ([]H
 		    GROUP BY task_code
 		) ls ON ls.task_code = t.code
 		WHERE t.status = 'open' AND t.price > 0
-		  AND t.budget >= $1 AND t.budget >= t.price
+		  AND (t.budget - t.reserved_budget) >= $1
+		  AND (t.budget - t.reserved_budget) >= t.price
 		ORDER BY t.pinned DESC, t.created_at DESC
 		LIMIT 8`, minBudget)
 	if err != nil {

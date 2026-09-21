@@ -295,7 +295,8 @@ func SettleOwnerTestSubmission(ctx context.Context, q pg.Querier, submissionID i
 // DecrementTaskBudgetOnSettle performs the task-side economic mutation of
 // settlement under the held task lock: budget -= reservedAmount,
 // reserved_budget -= reservedAmount. Auto-close (open tasks only) applies
-// the existing rule to the post-settlement state: remaining budget below
+// the existing rule to the post-settlement AVAILABLE budget
+// (budget - reserved_budget after the settlement): available below
 // MinOpenBudget or below the CURRENT task price closes the task.
 func DecrementTaskBudgetOnSettle(ctx context.Context, q pg.Querier, taskID int64, reservedAmount, minBudget int64) error {
 	_, err := q.Exec(ctx, `
@@ -303,10 +304,12 @@ func DecrementTaskBudgetOnSettle(ctx context.Context, q pg.Querier, taskID int64
 		SET budget = budget - $1,
 		    reserved_budget = reserved_budget - $1,
 		    status = CASE
-		        WHEN status = 'open' AND (budget - $1 < $2 OR budget - $1 < price)
+		        WHEN status = 'open' AND ((budget - $1) - (reserved_budget - $1) < $2
+		                                  OR (budget - $1) - (reserved_budget - $1) < price)
 		        THEN 'closed' ELSE status END,
 		    closed_at = CASE
-		        WHEN status = 'open' AND (budget - $1 < $2 OR budget - $1 < price)
+		        WHEN status = 'open' AND ((budget - $1) - (reserved_budget - $1) < $2
+		                                  OR (budget - $1) - (reserved_budget - $1) < price)
 		        THEN NOW() ELSE closed_at END,
 		    updated_at = NOW()
 		WHERE id = $3`,

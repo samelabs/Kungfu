@@ -174,6 +174,22 @@ func acceptAndProcess(ctx context.Context, pool *pg.Pool, taskCode string, botID
 	// Terminal duplicates replay the durable fact — no new POST, no new
 	// budget mutation, no new ledger row.
 	if sub.State == repository.SubStateSettled || sub.State == repository.SubStateRejected {
+		if sub.State == repository.SubStateRejected {
+			// Replay the SAME durable rejection fact: the ORIGINAL
+			// error code and response persisted on the row — never a
+			// new generic semantic.
+			errCode := ifEmpty(derefStr(sub.LastErrorCode), "TASK_POST_FAILED")
+			return sub, nil, errors.NewWithDetails(424, errCode,
+				"Task delivery failed. The submission was definitively rejected.",
+				map[string]interface{}{
+					"submission_id": sub.Code,
+					"state":         repository.SubStateRejected,
+					"post": map[string]interface{}{
+						"delivered":     false,
+						"response_code": derefInt(sub.ResponseCode),
+					},
+				})
+		}
 		return sub, nil, nil
 	}
 

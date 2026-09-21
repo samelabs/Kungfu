@@ -274,6 +274,14 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request) {
 		SuccessResponse(w, result, "Task submission delivered")
 		return
 	}
+	// Terminal rejected replay: re-present the SAME durable business fact
+	// (424) — no re-POST, no new reservation, no settlement.
+	if result.State == repository.SubStateRejected {
+		ErrorResponse(w, http.StatusFailedDependency, "TASK_DELIVERY_FAILED",
+			"Task submission delivery failed",
+			map[string]interface{}{"submission": result})
+		return
+	}
 	AcceptedResponse(w, result, "Task submission accepted; delivery in progress")
 }
 

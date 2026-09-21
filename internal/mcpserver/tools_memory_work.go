@@ -10,9 +10,11 @@ package mcpserver
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kungfu.md/internal/errors"
 	"kungfu.md/internal/service"
 )
 
@@ -298,6 +300,13 @@ func addWorkTools(s *mcp.Server, deps Deps) {
 		result, err := service.Submit(ctx, deps.Pool, in.Code, bot.ID, in.RequestKey, in.Payload)
 		if err != nil {
 			return nil, WorkSubmitOutput{}, mapAppError(err)
+		}
+		// Terminal rejected replay: surface the SAME durable business fact
+		// as an error result (mirrors the REST 424), never a plain
+		// success output — no re-POST, no new reservation, no settlement.
+		if result.State == "rejected" {
+			return nil, WorkSubmitOutput{}, mapAppError(errors.New(http.StatusFailedDependency,
+				"TASK_DELIVERY_FAILED", "Task submission delivery failed"))
 		}
 		out, perr := projectWorkSubmit(result)
 		if perr != nil {
