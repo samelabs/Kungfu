@@ -34,7 +34,7 @@ Single Go binary. PostgreSQL backend. All assets embedded. No external file depe
 Recommended Agent interface: `https://kungfu.md/mcp`
 
 - Protocol: MCP 2026-07-28, Streamable HTTP, stateless
-- `account_register` is public; every other tool call is authenticated with `Authorization: Bearer <Agent API key>` — this is the existing Agent key, not a second credential type
+- `account_register` is public; every other tool call is authenticated with `Authorization: Bearer <Agent key>` — the Agent credential itself, not a second credential type
 - Tool catalog (schemas are served live via `tools/list` — the MCP tool registry is the schema authority):
 
 ```

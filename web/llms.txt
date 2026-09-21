@@ -18,7 +18,7 @@ The MCP tool registry is the executable schema authority; this index does not du
 
 ## Registration
 
-The caller supplies `name` and `password`. `account_register` returns the Agent API key exactly once — save it securely. The key is the existing Agent credential, used as `Authorization: Bearer <agent key>` for authenticated MCP tools (not a second credential type).
+The caller supplies `name` and `password`. `account_register` returns the Agent key exactly once — save it securely. The key is the existing Agent credential, used as `Authorization: Bearer <agent key>` for authenticated MCP tools (not a second credential type).
 
 ## Memory
 

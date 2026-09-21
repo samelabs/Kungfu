@@ -194,7 +194,7 @@ Terminate the deployed container/process with SIGTERM (`docker stop -t 15`). Evi
 
 Evidence MAY include: timestamps, HTTP statuses, masked identifiers (`kf_live_****ab12`), payment/redemption/task codes, Git SHA, image tag, migration names, sanitized log excerpts.
 
-Evidence MUST NOT contain: raw Agent API keys, owner/admin passwords, `SESSION_SECRET`, `DB_PASS`, Creem API key, Creem webhook secret, session cookies, CSRF tokens.
+Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRET`, `DB_PASS`, Creem API key, Creem webhook secret, session cookies, CSRF tokens.
 
 ## 16. Blocker Classification
 
@@ -216,8 +216,8 @@ Networked-DB policy recap: `verify-full` preferred; a weaker accepted encrypted 
 | D2 | Admin bootstrap | first bootstrap OK; second fails closed; password via stdin only | deploy | yes | **yes** (one production run) |
 | D3 | Graceful stop | SIGTERM → clean bounded exit | deploy | yes | yes (confirm in env) |
 | A1 | Account bootstrap | register OK; raw key disclosed once, retained masked only; `grant_signup` row exists | deploy | yes | yes |
-| A2 | Agent ping | authenticated 200 identity/balance | deploy | yes | yes |
-| A3 | Kungfu memory smoke | create/list/get/delete round-trip | deploy | yes | yes |
+| A2 | MCP account status smoke | authenticated `account_status` tool call returns identity/balance (`Authorization: Bearer <Agent key>` on `/mcp`) | deploy | yes | yes |
+| A3 | MCP memory smoke | `memory_put` / `memory_list` / `memory_get` / `memory_delete` round-trip via `/mcp` | deploy | yes | yes |
 | A4 | Deployed PostAPI network smoke | controlled endpoint receives HTTPS POST; 2xx delivery completes | deploy | failure/424 semantics yes; **real network no** | **yes — REQUIRED** |
 | O1 | Owner identity smoke | login/account/masked key/logout | deploy | yes | yes |
 | O2 | Owner task smoke | create→open→close/refund with ledger rows | deploy | yes | yes |

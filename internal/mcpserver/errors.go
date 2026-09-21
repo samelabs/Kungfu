@@ -43,5 +43,5 @@ func (d *Deps) resolveVerified(ctx context.Context) (*model.Bot, error) {
 			return bot, nil
 		}
 	}
-	return nil, &toolError{httpStatus: 401, code: "INVALID_KEY", message: "API Key is invalid or expired"}
+	return nil, &toolError{httpStatus: 401, code: "INVALID_KEY", message: "Agent key is invalid or expired"}
 }

@@ -69,7 +69,7 @@ func rateLimited() error {
 
 // publicMethods is the anonymous-call allowlist: MCP protocol
 // discovery plus the two explicitly public surfaces. Everything else
-// requires a valid Agent API key.
+// requires a valid Agent key.
 func isPublicCall(method, toolName string) bool {
 	switch {
 	case method == "server/discover":

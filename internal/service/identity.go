@@ -164,7 +164,7 @@ func ComposeAgentAccountStatus(ctx context.Context, q pg.Querier, botID int64) (
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
 	}
 	if bot == nil {
-		return nil, errors.New(401, "INVALID_KEY", "API Key is invalid or expired")
+		return nil, errors.New(401, "INVALID_KEY", "Agent key is invalid or expired")
 	}
 	balance, balErr := credits.Balance(ctx, q, bot.ID)
 	if balErr != nil {

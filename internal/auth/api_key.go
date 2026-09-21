@@ -91,9 +91,11 @@ func ExtractAPIKeyFromHeader(r *http.Request) string {
 
 // invalidKeyErr is the single canonical Agent-key auth failure. Every
 // raw-key failure mode (missing/malformed/unknown/disabled) surfaces
-// the SAME error so callers cannot enumerate keys.
+// the SAME transport-neutral error so callers cannot enumerate keys.
+// Transport wrappers (HTTP header, MCP Bearer) own any transport-
+// specific presentation hints; the shared authority stays neutral.
 func invalidKeyErr() error {
-	return apperr.New(401, "INVALID_KEY", "API Key is invalid or expired, please use X-Bot-Key header")
+	return apperr.New(401, "INVALID_KEY", "Agent key is invalid or expired")
 }
 
 // VerifyAgentKey is the ONE raw Agent-key verification authority shared

@@ -186,6 +186,7 @@ func TestS64AllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 	src := s61Read(t, "internal/server/router.go")
 	routes := []string{
 		`r.Post("/api/owner/session", ownerMutation(`,
+		`r.Post("/api/owner/register", ownerMutation(`,
 		`r.Delete("/api/owner/session", ownerMutation(`,
 		`r.Post("/api/change-password", ownerMutation(`,
 		`r.Post("/api/reset-key", ownerMutation(`,
