@@ -234,11 +234,22 @@ Example — current release's new table `tb_task_submissions` (application
 operations: SELECT / INSERT / UPDATE; the application never DELETEs or
 TRUNCATEs submissions):
 
+Invocation (psql variable interpolation — never hand-concatenate `DB_USER`
+into SQL text):
+
+```sh
+psql "<operator production connection material>" \
+  -v ON_ERROR_STOP=1 \
+  -v runtime_role="$DB_USER" \
+  -f runtime_privilege_check.sql
+```
+
 ```sql
--- run as a superuser/operator role; :runtime_role = the configured DB_USER
-SELECT has_table_privilege(:runtime_role, 'tb_task_submissions', 'SELECT') AS sel,
-       has_table_privilege(:runtime_role, 'tb_task_submissions', 'INSERT') AS ins,
-       has_table_privilege(:runtime_role, 'tb_task_submissions', 'UPDATE') AS upd;
+-- runtime_privilege_check.sql — run as a superuser/operator role;
+-- :'runtime_role' is psql SQL-literal-safe interpolation of the configured DB_USER
+SELECT has_table_privilege(:'runtime_role', 'tb_task_submissions', 'SELECT') AS sel,
+       has_table_privilege(:'runtime_role', 'tb_task_submissions', 'INSERT') AS ins,
+       has_table_privilege(:'runtime_role', 'tb_task_submissions', 'UPDATE') AS upd;
 -- all three must be true
 ```
 
@@ -246,12 +257,17 @@ Dependent objects (identity columns / sequences):
 
 - Tables with `GENERATED ALWAYS AS IDENTITY` or `SERIAL` columns may also
   require sequence privileges (`USAGE`) for the runtime role, depending on
-  PostgreSQL version/authority semantics. Check dependent sequences with
-  `has_sequence_privilege(:runtime_role, '<table>_id_seq', 'USAGE')` and a
-  controlled runtime-role INSERT (or defer to the actual PostgreSQL error
-  authority) — grant sequence privileges ONLY if the application truly needs
-  them. Do not mechanically widen grants for objects the application never
-  touches.
+  PostgreSQL version/authority semantics. Check dependent sequences with the
+  same psql SQL-literal-safe interpolation — never a bare `:runtime_role` as a
+  function string/name argument:
+  `has_sequence_privilege(:'runtime_role', '<actual_sequence_name>', 'USAGE')`.
+  The sequence name MUST come from the actual catalog / identity dependency
+  (e.g. `pg_depend` / `pg_get_serial_sequence('tb_task_submissions','id')`),
+  not from a guessed `<table>_id_seq` convention — the catalog is the
+  authority. Also verify with a controlled runtime-role INSERT (or defer to
+  the actual PostgreSQL error authority) and grant sequence privileges ONLY
+  if the application truly needs them. Do not mechanically widen grants for
+  objects the application never touches.
 
 Evidence: record the runtime role name (by name only, never its credential),
 the verified object/privilege matrix, and PASS/FAIL per gate.
