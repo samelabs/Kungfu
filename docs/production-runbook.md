@@ -62,45 +62,82 @@ No new environment variables are introduced by this runbook.
 The cutover MUST proceed in exactly this order. Each gate is recorded as PASS before the next step starts. Any gate failing → **STOP** (see §4b rollback/failure semantics).
 
 ```
-preflight (secret/config + DB identity + public HTTP/proxy checks)
+preflight (secret/config + public HTTP/proxy checks)
   → stop/drain OLD application (SIGTERM; confirm write path is down)
-  → fresh database backup (immediate pre-release)
+  → verify production DB identity — FIRST check (backup target)
+  → fresh immediate pre-release backup
   → verify backup (SHA256 + pg_restore -l readable)
-  → verify target DB identity (SHOW port; SELECT current_database();)
+  → verify production DB identity — SECOND check (migration target)
   → migration 009 strict preflight
   → apply 009 (integer Credits)
-  → verify integer-credit schema/invariants
+  → verify 009 (schema/invariants)
   → apply 010 (task submissions)
-  → verify task-submission schema/invariants
+  → verify 010 (schema/invariants)
   → start EXACT accepted new binary/image
   → readiness (/healthz /readyz)
   → controlled acceptance (§6–§15)
 ```
 
+The first DB identity check (`SHOW port;` / `SELECT current_database();`) MUST
+execute BEFORE the backup command, so the backed-up database is exactly the
+intended production target. After backup verification completes and BEFORE the
+009 preflight, the SAME identity check is executed a second time, confirming
+the migration target. A mismatch at EITHER check → **STOP**.
+
 Hard rules:
 
 - **Stop-before-009**: migration 009 MUST NOT execute while the old application can still write the production database. Stop/drain the old application first (graceful SIGTERM per §14, then confirm the process/container is terminated and no worker remains connected) BEFORE any migration command. The old application write path must be fully down before 009 runs — no exceptions.
-- **DB identity gate**: before ANY production database command (backup, migration, verification), execute and record `SHOW port;` and `SELECT current_database();`. The target must match operator expectation. A mismatch → STOP.
+- **DB identity gate (twice)**: the identity check (`SHOW port;` + `SELECT current_database();`) runs BEFORE the backup command and AGAIN after backup verification, before the 009 preflight. The backed-up database and the migrated database must both be exactly the intended production target. A mismatch at either check → STOP.
 - **No test/production mixing**: test environments must always address PostgreSQL explicitly at `127.0.0.1:55432`; never rely on an implicit default port for test DB commands, and never point test tooling at the production database. Production connection material is operator-supplied and recorded by identity (port + database name), never by credential in evidence.
 - **Order is unique**: 009 is applied and verified BEFORE 010; 010 is applied only after 009's verification passes; the new application starts only after both migrations are applied and verified.
 
-### 2.1 Migration application
+### 2.1 Production migration execution path (existing production: applied prefix 001–008)
 
-Apply the release SHA's migration files in **filename order** with failure-stop. Each file owns its transaction and fails closed; on a database that already carries an applied prefix (e.g. 001–008), the operator applies the unapplied tail of the set:
+Current production already carries migrations **001–008 applied**. This
+cutover executes EXACTLY the unapplied tail, one file at a time, with
+verification between the two:
 
 ```bash
-for f in migrations/*.sql; do
-  psql "<operator-supplied connection string to the TARGET production database>" -v ON_ERROR_STOP=1 -f "$f"
-done
+# 009 first (after strict preflight §3 and both identity checks §2.2)
+psql "<operator-supplied production connection material>" -v ON_ERROR_STOP=1 -f migrations/009_integer_credits.sql
+# → verify 009 (§3 post-verification) — must PASS before 010
+psql "<operator-supplied production connection material>" -v ON_ERROR_STOP=1 -f migrations/010_task_submissions.sql
+# → verify 010 (§4 post-verification)
 ```
+
+- Every command uses `-v ON_ERROR_STOP=1` and operator-supplied **production**
+  connection material.
+- **The current production cutover MUST NOT re-execute 001–008** and MUST NOT
+  loop over `migrations/*.sql` as a single batch command.
+
+Fresh installation (separate path, never mixed with this cutover): a brand-new
+database installs the full set **001→010 in filename order** with the same
+failure-stop discipline. This fresh-install note does not apply to the
+existing-production cutover above.
 
 Note: the placeholder is **operational psql connection material supplied by the operator**, NOT a Kungfu environment variable (Kungfu has no `DATABASE_URL` variable and this runbook introduces none). The connection must target the **same PostgreSQL database the deployment uses**, with the deployment's intended TLS posture, and its credentials are never recorded in acceptance evidence (§17).
 
-Record the applied set — current baseline: **001_schema → 010_task_submissions**.
+Record the applied set — current baseline: **001_schema → 010_task_submissions** (existing production: 001–008 pre-applied; 009 + 010 applied by this cutover).
 
-### 2.2 Backup gate (immediate pre-release)
+### 2.2 Production DB identity gate (executed TWICE)
 
-Before executing migration 009, create a **fresh immediate pre-release backup** of the production database. Historical backups are NOT a substitute for this release's restore point.
+Execute against the TARGET production database and record the output — once
+before the backup command (backup target), and again after backup
+verification, before the 009 preflight (migration target):
+
+```sql
+SHOW port;
+SELECT current_database();
+```
+
+Both executions must match the operator's intended production target. A
+mismatch at either point → **STOP**.
+
+### 2.3 Backup gate (immediate pre-release)
+
+With the FIRST identity check passed, create a **fresh immediate pre-release
+backup** of the production database. Historical backups are NOT a substitute
+for this release's restore point.
 
 Record:
 - backup file path
@@ -108,18 +145,8 @@ Record:
 - SHA256 checksum of the backup file
 - verification that `pg_restore -l <backup>` reads the archive successfully (catalog listing captured as evidence)
 
-Backup + verification evidence must exist and be recorded BEFORE the DB identity gate and migration 009 proceed.
-
-### 2.3 DB identity gate
-
-Execute against the TARGET production database and record the output:
-
-```sql
-SHOW port;
-SELECT current_database();
-```
-
-Both must match the operator's intended production target. Then proceed to §2.1 (009 first).
+Backup verification is followed by the SECOND identity check (§2.2) before any
+migration command runs.
 
 ## 3. Migration 009 — Integer Credits (strict)
 
@@ -127,17 +154,25 @@ Both must match the operator's intended production target. Then proceed to §2.1
 
 **Strict preflight** (the migration itself fails closed on the same conditions — the preflight is run and recorded first):
 
-- every affected credits column holds only integral values; **a single fractional historical value aborts the migration**
+- every affected credits column holds only integral values; **a single fractional historical value aborts the migration**. The preflight covers the complete set of all 8 Credits economic columns:
+  - `tb_bots.balance`
+  - `tb_tasks.budget`, `tb_tasks.price`
+  - `tb_transactions.amount`, `tb_transactions.balance_after`
+  - `tb_payments.credits`
+  - `tb_store_products.credits_price`
+  - `tb_redemptions.credits_cost`
 - to make the migration pass it is **forbidden** to: round, truncate, rewrite, or silently coerce existing economic data
 - preflight failure → **STOP**. The migration is not applied. The data condition is escalated to the PM; no coercion workaround exists.
 
 **Post-009 verification** (record as evidence):
 
-- target economic columns are now BIGINT:
+- ALL 8 Credits economic columns are now BIGINT (none omitted, Store included):
   - `tb_bots.balance`
   - `tb_tasks.budget`, `tb_tasks.price`
   - `tb_transactions.amount`, `tb_transactions.balance_after`
   - `tb_payments.credits`
+  - `tb_store_products.credits_price`
+  - `tb_redemptions.credits_cost`
 - economic invariants hold: row counts and relationships preserved across the conversion; signs preserved (negative ledger rows / authoritative negative balances stay negative); the ledger reconciliation invariant (§13) still computes.
 
 ## 4. Migration 010 — Task Submissions
@@ -322,7 +357,7 @@ Evidence MUST NOT contain: raw Agent keys, owner/admin passwords, `SESSION_SECRE
 |---|---|---|---|---|---|
 | D1 | Fresh boot | migrations 001→010 applied in order; container from `<sha>` image starts; `/healthz` `/readyz` 200 | deploy | yes (chain + smoke in CI) | **yes** |
 | D2 | Cutover gates | stop-old-app-before-009 recorded; backup path + timestamp + SHA256 + `pg_restore -l` readable recorded; DB identity (`SHOW port`, `current_database()`) recorded and matching | deploy | no (operational) | **yes** |
-| D3 | Migration 009 | strict preflight PASS (no fractional data, no coercion); economic columns BIGINT; invariants verified | deploy | conversion semantics yes | **yes** |
+| D3 | Migration 009 | strict preflight PASS (no fractional data, no coercion); ALL 8 Credits economic columns BIGINT; invariants verified | deploy | conversion semantics yes | **yes** |
 | D4 | Migration 010 | applied after 009 verified; reserved-budget schema + constraints + indexes + FKs verified | deploy | schema semantics yes | **yes** |
 | D5 | New binary start | exact accepted SHA image starts AFTER 009+010 verified; `/healthz` `/readyz` 200 | deploy | yes (smoke in CI) | **yes** |
 | D6 | Rollback readiness | failure semantics acknowledged; no old binary against forward-migrated DB | deploy | no (policy) | yes (recorded acknowledgment) |
