@@ -46,9 +46,11 @@ type CreemRefundObject struct {
 
 // CreemDisputeObject is the dispute.created payload — only guaranteed
 // fields. The dispute amount semantics (tax-inclusive chargeback amount)
-// are display facts; the reversal authority is the authoritative
-// transaction's refunded_amount (Creem records chargebacks there with
-// transaction.status="chargeback").
+// are display facts. Kungfu's fixed policy: a VERIFIED dispute makes the
+// cumulative reversal target the original granted Credits C; the
+// authoritative transaction is reconciled for binding validation and its
+// refunded_amount is persisted AS RETURNED (provider-fact truth), but it
+// does not gate or scale the dispute reversal.
 type CreemDisputeObject struct {
 	ID     string `json:"id"`
 	Amount int64  `json:"amount"`
@@ -98,9 +100,9 @@ func reconcileAuthoritativeTransaction(txn *CreemTransactionEntity, p *model.Pay
 }
 
 // requireRefundedBasis is the refund-specific gate: the cumulative
-// refunded amount must be present. Disputes do not require it — a
-// dispute with no refund movement is stored as a durable fact with
-// zero reversal contribution.
+// refunded amount must be present (the proportional refund target is
+// derived from it). Disputes do not require it — the dispute reversal
+// target is the entitlement itself, independent of any refund movement.
 func requireRefundedBasis(txn *CreemTransactionEntity) error {
 	if txn.RefundedAmount == nil {
 		return fmt.Errorf("transaction.refunded_amount missing")
@@ -170,11 +172,11 @@ func buildRefundFact(ev *CreemWebhookEvent, obj *CreemRefundObject, txn *CreemTr
 // dispute is the original granted Credits C — NOT floor(C·r/p) and NOT
 // conditional on the provider's refunded_amount being non-zero or the
 // status reaching chargedBack. Provider reconciliation (order/amount/
-// currency binding against the paid snapshot) must still succeed first;
-// only the economic basis changes. No dispute won/lost lifecycle is
-// tracked and provider state NEVER re-grants credits afterwards: later
-// refund facts on the same payment cannot exceed C either, so no
-// positive compensation can ever be produced.
+// currency binding against the paid snapshot) must still succeed first.
+// No dispute won/lost lifecycle is tracked and provider state NEVER
+// re-grants credits afterwards: once a validated dispute fact is
+// persisted, the payment's cumulative target stays C on every later
+// path, so no positive compensation can ever be produced.
 func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *CreemTransactionEntity, p *model.Payment) (*PaymentAdjustmentFact, error) {
 	if err := reconcileAuthoritativeTransaction(txn, p); err != nil {
 		return nil, err
@@ -188,13 +190,8 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 	if txn.Status == "" {
 		return nil, fmt.Errorf("authoritative transaction.status empty")
 	}
-	if txn.RefundedAmount == nil {
-		// The dispute reversal target is the entitlement itself, but the
-		// durable fact still records a real provider basis: nil → 0.
-		zero := int64(0)
-		txn.RefundedAmount = &zero
-	}
-	if *txn.RefundedAmount < 0 || *txn.RefundedAmount > *txn.AmountPaid {
+	if txn.RefundedAmount != nil &&
+		(*txn.RefundedAmount < 0 || *txn.RefundedAmount > *txn.AmountPaid) {
 		return nil, fmt.Errorf("authoritative refunded_amount %d outside [0, %d]",
 			*txn.RefundedAmount, *txn.AmountPaid)
 	}
@@ -202,12 +199,13 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 	if err != nil {
 		return nil, err
 	}
-	// The durable dispute fact records a FULL economic basis
-	// (refunded == amount_paid): the entitlement is fully revoked.
-	// This keeps the single cumulative path monotonic — a later
-	// ordinary refund fact on the same payment cannot exceed the
-	// dispute's basis, so no positive compensation can occur.
-	fullBasis := *txn.AmountPaid
+	// Provider-fact truth: RefundedAmountMinor persists EXACTLY what the
+	// authoritative transaction returned — nil stays nil, 0 stays 0, a
+	// real refund movement persists as that value. No synthetic
+	// full-refund basis: the entitlement policy (target = C once a
+	// validated dispute fact exists) is derived in
+	// RecordPaymentAdjustment from the persisted facts, never encoded by
+	// rewriting the provider fact.
 	var nilStatus *string
 	return &PaymentAdjustmentFact{
 		ProviderEventID:        ev.ID,
@@ -220,7 +218,7 @@ func buildDisputeFact(ev *CreemWebhookEvent, obj *CreemDisputeObject, txn *Creem
 		Currency:               txn.Currency,
 		TransactionAmountMinor: txn.Amount,
 		AmountPaidMinor:        *txn.AmountPaid,
-		RefundedAmountMinor:    &fullBasis,
+		RefundedAmountMinor:    txn.RefundedAmount,
 		ObjectStatus:           nilStatus,
 		TransactionStatus:      &txn.Status,
 		Reason:                 nil,
@@ -308,30 +306,34 @@ type adjustmentBasis struct {
 // On success it returns the canonical basis and MAX(refunded_amount_minor)
 // computed over that SAME verified set — the denominator and the refund
 // authority can never come from different collections of rows.
-func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, incoming adjustmentBasis) (maxRefunded int64, basis adjustmentBasis, found bool, err error) {
+func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, incoming adjustmentBasis) (maxRefunded int64, basis adjustmentBasis, found, hasDispute bool, err error) {
 	rows, err := tx.Query(ctx, `
-		SELECT provider_transaction_id, amount_paid_minor, COALESCE(refunded_amount_minor, 0)
+		SELECT provider_transaction_id, amount_paid_minor, COALESCE(refunded_amount_minor, 0), kind
 		FROM tb_payment_adjustments WHERE payment_id = $1`, paymentID)
 	if err != nil {
-		return 0, adjustmentBasis{}, false, err
+		return 0, adjustmentBasis{}, false, false, err
 	}
 	defer rows.Close()
 
 	maxRefunded = 0
 	basis = adjustmentBasis{}
 	found = false
+	hasDispute = false
 	for rows.Next() {
-		var txnID string
+		var txnID, kind string
 		var paid, refunded int64
-		if err := rows.Scan(&txnID, &paid, &refunded); err != nil {
-			return 0, adjustmentBasis{}, false, err
+		if err := rows.Scan(&txnID, &paid, &refunded, &kind); err != nil {
+			return 0, adjustmentBasis{}, false, false, err
+		}
+		if kind == "dispute" {
+			hasDispute = true
 		}
 		if !found {
 			basis = adjustmentBasis{providerTransactionID: txnID, amountPaid: paid}
 			found = true
 		} else if basis.providerTransactionID != txnID || basis.amountPaid != paid {
 			// Historical multi-basis anomaly: fail closed, no guesses.
-			return 0, adjustmentBasis{}, false, fmt.Errorf(
+			return 0, adjustmentBasis{}, false, false, fmt.Errorf(
 				"reconciliation: persisted adjustment facts for payment %d span multiple provider transaction bases (%q/%d vs %q/%d)",
 				paymentID, basis.providerTransactionID, basis.amountPaid, txnID, paid)
 		}
@@ -340,22 +342,22 @@ func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, inc
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return 0, adjustmentBasis{}, false, err
+		return 0, adjustmentBasis{}, false, false, err
 	}
 	if !found {
-		return 0, adjustmentBasis{}, false, nil
+		return 0, adjustmentBasis{}, false, false, nil
 	}
 	if basis.providerTransactionID != incoming.providerTransactionID {
-		return 0, adjustmentBasis{}, false, fmt.Errorf(
+		return 0, adjustmentBasis{}, false, false, fmt.Errorf(
 			"reconciliation: incoming adjustment basis (%q) does not match canonical basis (%q) of persisted facts",
 			incoming.providerTransactionID, basis.providerTransactionID)
 	}
 	if basis.amountPaid != incoming.amountPaid {
-		return 0, adjustmentBasis{}, false, fmt.Errorf(
+		return 0, adjustmentBasis{}, false, false, fmt.Errorf(
 			"reconciliation: incoming adjustment amount_paid %d does not match canonical %d",
 			incoming.amountPaid, basis.amountPaid)
 	}
-	return maxRefunded, basis, found, nil
+	return maxRefunded, basis, found, hasDispute, nil
 }
 
 // RecordPaymentAdjustment persists one reconciled adjustment fact AND
@@ -367,8 +369,10 @@ func resolveAdjustmentFacts(ctx context.Context, tx pgx.Tx, paymentID int64, inc
 //	Confirm paid
 //	Assert adjustment basis consistency
 //	INSERT adjustment fact ON CONFLICT DO NOTHING
-//	Read persisted facts: MAX(refunded_amount), canonical basis
-//	target = floor(credits * MAX_refunded / amount_paid)   [R==P → C]
+//	Read persisted facts: MAX(refunded_amount), canonical basis,
+//	                      has any validated kind='dispute' fact
+//	target = C                          [dispute fact persisted]
+//	       = floor(credits * MAX_refunded / amount_paid)   [R==P → C]
 //	already_reversed = -SUM(reverse_payment ledger for this payment)
 //	delta = target - already_reversed (whole credits)
 //	if delta > 0 → credits.RecordAuthoritativeReversal(-delta)
@@ -405,7 +409,11 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 	// Canonical basis validation + cumulative provider authority over the
 	// SAME verified fact set (duplicates and A1-era facts included;
 	// historical multi-basis fails closed with everything rolled back).
-	maxRefunded, basis, found, err := resolveAdjustmentFacts(ctx, tx, fact.PaymentID, adjustmentBasis{
+	// hasDispute reports whether at least one validated kind='dispute'
+	// fact is DURABLY persisted for this payment — the entitlement
+	// policy derives from the persisted facts, never from the incoming
+	// event's kind alone.
+	maxRefunded, basis, found, hasDispute, err := resolveAdjustmentFacts(ctx, tx, fact.PaymentID, adjustmentBasis{
 		providerTransactionID: fact.ProviderTransactionID,
 		amountPaid:            fact.AmountPaidMinor,
 	})
@@ -429,15 +437,18 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 		return false, fmt.Errorf("reconciliation: refunded %d outside [0, %d]", maxRefunded, basis.amountPaid)
 	}
 
-	// Target cumulative reversal.
-	//   refund fact  → floor(C * maxRefunded / amountPaid)  (R==P → C)
-	//   dispute fact → the ENTIRE original entitlement C: a verified
-	//                  dispute permanently revokes the Credits grant,
-	//                  independent of the provider's refunded_amount.
-	// Both are cumulative targets; only a positive delta writes a new
-	// reversal (below), so duplicates and overlaps stay exactly-once.
+	// Target cumulative reversal, derived from the PERSISTED facts +
+	// Kungfu policy inside the payment-row-lock transaction:
+	//   hasDispute  → C (the entire entitlement: a verified dispute
+	//                 permanently revokes the Credits grant)
+	//   otherwise   → floor(C * maxRefunded / amountPaid)  (R==P → C)
+	// Because hasDispute is durable-fact derived, a later refund event
+	// or redelivery on a disputed payment keeps target = C. Cumulative
+	// targets only; a positive delta writes a new reversal (below), so
+	// duplicates and overlaps stay exactly-once and no positive
+	// compensation can occur.
 	var target int64
-	if fact.Kind == "dispute" {
+	if hasDispute {
 		target = p.Credits
 	} else {
 		target, err = reversalTarget(p.Credits, maxRefunded, basis.amountPaid)

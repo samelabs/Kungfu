@@ -281,3 +281,152 @@ func TestDisputeEntitlementOrdinaryRefundUnchanged(t *testing.T) {
 		t.Fatalf("ordinary refund rows=%d want 1", c)
 	}
 }
+
+// ---- provider-fact truthfulness + persisted-fact-derived target ----
+
+// dispFact reads the persisted adjustment row for a payment.
+func dispFact(t *testing.T, pool *pg.Pool, code string) (kind string, refunded *int64) {
+	t.Helper()
+	var k string
+	var r *int64
+	if err := pool.QueryRow(context.Background(), `
+		SELECT a.kind, a.refunded_amount_minor
+		FROM tb_payment_adjustments a JOIN tb_payments p ON p.id=a.payment_id
+		WHERE p.code=$1 ORDER BY a.id DESC LIMIT 1`, code).Scan(&k, &r); err != nil {
+		t.Fatal(err)
+	}
+	return k, r
+}
+
+// A. dispute + provider refunded = 0 → full entitlement reversal AND the
+// persisted fact keeps the provider truth refunded_amount_minor = 0.
+func TestDisputeFactTruthZeroRefundedPersisted(t *testing.T) {
+	pool, botID, fc, rt, code := dispSeed(t)
+	p, _ := GetPayment(context.Background(), pool, code)
+	zero := int64(0)
+	adjTxn(fc, "txn_t1", *p.ProviderOrderID, 1000, 1080, "USD", "paid", &zero)
+	if err := dispWebhook(t, pool, rt, "evt_t1", "dp_t1", "txn_t1"); err != nil {
+		t.Fatal(err)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("entitlement not revoked: %v", b)
+	}
+	k, r := dispFact(t, pool, code)
+	if k != "dispute" || r == nil || *r != 0 {
+		t.Fatalf("persisted fact = (%q, %v), want (dispute, 0)", k, r)
+	}
+}
+
+// B. dispute + provider refunded = nil → full entitlement reversal AND
+// persisted refunded_amount_minor IS NULL.
+func TestDisputeFactTruthNilRefundedPersisted(t *testing.T) {
+	pool, botID, fc, rt, code := dispSeed(t)
+	p, _ := GetPayment(context.Background(), pool, code)
+	adjTxn(fc, "txn_t2", *p.ProviderOrderID, 1000, 1080, "USD", "paid", nil)
+	if err := dispWebhook(t, pool, rt, "evt_t2", "dp_t2", "txn_t2"); err != nil {
+		t.Fatal(err)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("entitlement not revoked: %v", b)
+	}
+	k, r := dispFact(t, pool, code)
+	if k != "dispute" || r != nil {
+		t.Fatalf("persisted fact = (%q, %v), want (dispute, NULL)", k, r)
+	}
+}
+
+// C. dispute → later ordinary refund → cumulative reversal stays exactly
+// C; no duplicate reversal, no compensation. The target derivation uses
+// the DURABLE dispute fact, not the incoming event's kind.
+func TestDisputeThenOrdinaryRefundStaysAtC(t *testing.T) {
+	pool, botID, fc, rt, code := dispSeed(t)
+	p, _ := GetPayment(context.Background(), pool, code)
+	order := *p.ProviderOrderID
+	zero := int64(0)
+	adjTxn(fc, "txn_t3", order, 1000, 1080, "USD", "paid", &zero)
+	if err := dispWebhook(t, pool, rt, "evt_t3d", "dp_t3", "txn_t3"); err != nil {
+		t.Fatal(err)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("post-dispute balance=%v", b)
+	}
+
+	// Later full refund on the same payment: durable dispute fact exists,
+	// so the cumulative target must remain C — exactly one -1000 total,
+	// no second reversal row, no compensation.
+	full := int64(1080)
+	adjTxn(fc, "txn_t3", order, 1000, 1080, "USD", "refunded", &full)
+	raw := `{"id":"evt_t3r","eventType":"refund.created","created_at":1758000100,
+		"object":{"id":"ref_t3","status":"succeeded","refund_amount":1080,"transaction":{"id":"txn_t3"}}}`
+	var rev CreemWebhookEvent
+	_ = json.Unmarshal([]byte(raw), &rev)
+	if err := HandleCreemAdjustmentEvent(context.Background(), pool, rt, &rev); err != nil {
+		t.Fatal(err)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("post-refund balance=%v want 0 (no compensation)", b)
+	}
+	var sum int64
+	_ = pool.QueryRow(context.Background(),
+		`SELECT COALESCE(SUM(amount),0) FROM tb_transactions WHERE ref_id=$1 AND type='reverse_payment'`, code).Scan(&sum)
+	if sum != -1000 {
+		t.Fatalf("cumulative=%v want exactly -1000", sum)
+	}
+	if c := dispReversalCount(t, pool, code); c != 1 {
+		t.Fatalf("reversal rows=%d want 1", c)
+	}
+	// And the provider refund fact itself stays truthful (1080 persisted).
+	k, r := dispFact(t, pool, code)
+	if k != "refund" || r == nil || *r != 1080 {
+		t.Fatalf("refund fact = (%q, %v), want (refund, 1080)", k, r)
+	}
+}
+
+// D. durable dispute fact exists but the economic reversal was never
+// applied (e.g. crash between INSERT and ledger write is impossible in
+// one tx — but an A1-era fact predating this policy, or a fact written
+// with zero reversal under the old code, is exactly this state).
+// A subsequent valid event must converge to target C.
+func TestDisputeDurableFactConvergesLater(t *testing.T) {
+	pool, _, fc, rt, code := dispSeed(t)
+	p, _ := GetPayment(context.Background(), pool, code)
+	zero := int64(0)
+	adjTxn(fc, "txn_t4", *p.ProviderOrderID, 1000, 1080, "USD", "paid", &zero)
+
+	// Seed the durable dispute fact WITHOUT running the reversal path
+	// (simulates a pre-policy fact row / partial-history state).
+	var payID int64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM tb_payments WHERE code=$1`, code).Scan(&payID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_payment_adjustments (
+			payment_id, provider, provider_event_id, provider_object_id, kind,
+			provider_transaction_id, provider_order_id,
+			amount_minor, currency, transaction_amount_minor,
+			amount_paid_minor, refunded_amount_minor,
+			transaction_status, provider_created_at
+		) VALUES ($1,'creem','evt_t4','dp_t4','dispute','txn_t4',$2,1080,'USD',1000,1080,0,'paid',1758000000)`,
+		payID, p.ProviderOrderID); err != nil {
+		t.Fatal(err)
+	}
+	botID := p.BotID
+	if b := crBalance(t, pool, botID); b != 1000 {
+		t.Fatalf("seed state: balance=%v want 1000 (fact present, no reversal)", b)
+	}
+
+	// Subsequent valid event (the dispute object redelivered): the
+	// durable dispute fact already exists, so the derived target is C
+	// and the pending reversal converges — regardless of the fact's own
+	// zero refunded basis.
+	if err := dispWebhook(t, pool, rt, "evt_t4c", "dp_t4", "txn_t4"); err != nil {
+		t.Fatalf("same-object redelivery must reconcile: %v", err)
+	}
+	if b := crBalance(t, pool, botID); b != 0 {
+		t.Fatalf("converged balance=%v want 0", b)
+	}
+	if c := dispReversalCount(t, pool, code); c != 1 {
+		t.Fatalf("reversal rows=%d want 1", c)
+	}
+}
