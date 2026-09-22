@@ -492,17 +492,19 @@ func Test012FinanceReadsNeverMutate(t *testing.T) {
 			SELECT (SELECT COUNT(*) FROM tb_payments),
 			       (SELECT COUNT(*) FROM tb_payment_adjustments),
 			       (SELECT COUNT(*) FROM tb_transactions),
-			       (SELECT string_agg(id::text || ':' || status || ':' || amount_minor || ':' || coalesce(paid_at::text,'-'), ',' ORDER BY id) FROM tb_payments),
-			       (SELECT string_agg(id::text || ':' || amount, ',' ORDER BY id) FROM tb_transactions),
-			       (SELECT string_agg(id::text || ':' || coalesce(provider_transaction_id,'-') || ':' || amount_minor, ',' ORDER BY id) FROM tb_payment_adjustments),
-			       (SELECT string_agg(id::text || ':' || balance, ',' ORDER BY id) FROM tb_bots)`)
+			       (SELECT COALESCE(string_agg(id::text || ':' || status || ':' || amount_minor || ':' || coalesce(paid_at::text,'-'), ',' ORDER BY id), '') FROM tb_payments),
+			       (SELECT COALESCE(string_agg(id::text || ':' || coalesce(ref_type,'-') || ':' || coalesce(ref_id,'-') || ':' || amount || ':' || balance_after, ',' ORDER BY id), '') FROM tb_transactions),
+			       (SELECT COALESCE(string_agg(id::text || ':' || kind || ':' || coalesce(provider_transaction_id,'-') || ':' || amount_minor || ':' || coalesce(refunded_amount_minor,0), ',' ORDER BY id), '') FROM tb_payment_adjustments),
+			       (SELECT COALESCE(string_agg(id::text || ':' || balance, ',' ORDER BY id), '') FROM tb_bots)`)
 		if err != nil {
 			t.Fatalf("snapshot: %v", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var a, b, c, d, g, h, i string
-			_ = rows.Scan(&a, &b, &c, &d, &g, &h, &i)
+			if err := rows.Scan(&a, &b, &c, &d, &g, &h, &i); err != nil {
+				t.Fatalf("snapshot scan (fail closed): %v", err)
+			}
 			fmt.Fprintf(&out, "%s|%s|%s|%s|%s|%s|%s", a, b, c, d, g, h, i)
 		}
 		return out.String()
