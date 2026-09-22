@@ -269,13 +269,38 @@ func Test011ScopedPermissions(t *testing.T) {
 		t.Fatalf("read enable = %d, want 403", rec.Code)
 	}
 
-	// no account permissions at all: everything 403.
+	// no account permissions at all: complete 403 matrix.
 	nv := scopedLogin([]string{"admin.audit.read"})
 	if rec := nv.do(t, "GET", "/api/admin/accounts", "", false); rec.Code != 403 {
 		t.Fatalf("no-perm list = %d, want 403", rec.Code)
 	}
+	if rec := nv.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false); rec.Code != 403 {
+		t.Fatalf("no-perm detail = %d, want 403", rec.Code)
+	}
 	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", p.id), ""); rec.Code != 403 {
 		t.Fatalf("no-perm disable = %d, want 403", rec.Code)
+	}
+	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", p.id), ""); rec.Code != 403 {
+		t.Fatalf("no-perm enable = %d, want 403", rec.Code)
+	}
+
+	// manage WITHOUT read: mutations work, reads are forbidden —
+	// accounts.manage must not implicitly require accounts.read.
+	mv := scopedLogin([]string{"accounts.manage"})
+	if rec := mv.do(t, "GET", "/api/admin/accounts", "", false); rec.Code != 403 {
+		t.Fatalf("manage-only list = %d, want 403", rec.Code)
+	}
+	if rec := mv.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false); rec.Code != 403 {
+		t.Fatalf("manage-only detail = %d, want 403", rec.Code)
+	}
+	// Real mutations with normal CSRF, target a throwaway probe so
+	// the lifecycle stays isolated from this test's assertions.
+	tp := newAccountProbe(t, e)
+	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", tp.id), ""); rec.Code != 200 {
+		t.Fatalf("manage-only disable = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", tp.id), ""); rec.Code != 200 {
+		t.Fatalf("manage-only enable = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
 }
 
