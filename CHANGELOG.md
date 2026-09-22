@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Agent-facing MCP HTTP interface at `/mcp` using the official MCP Go SDK
 - MCP protocol 2026-07-28 (Streamable HTTP, stateless) with cross-origin protection
-- Same Agent API key authenticates both MCP (`Authorization: Bearer`) and REST (`X-Bot-Key`) — no second credential type
+- The Agent key authenticates protected MCP tool calls via `Authorization: Bearer`; no second Agent credential type is introduced
 - Agent key hardened at rest: only SHA-256 hash + last 4 characters are persisted; the raw key is returned exactly once at registration or reset
 
 ### MCP capabilities
