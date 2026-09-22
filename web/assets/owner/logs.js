@@ -7,15 +7,27 @@
 // never shows "new page + old data" — the box shows the error state
 // and Retry reloads the SAME (rolled-back) page.
 function logsReload(previous) {
+    // The outcome tells the caller whether the load succeeded; the
+    // section error itself is already persistently rendered by
+    // runSection/sectionBox (persistent error + Retry stays).
     return runSection('logs', loadLogs, '#logsTableWrap', () => renderLogs(), {
         isEmpty: () => !state.logs.items.length,
         emptyKey: 'js.state_logs_empty'
-    }).catch(() => {
-        if (previous && state.logs.page !== previous.page) {
+    }).then((outcome) => {
+        if (previous && outcome && !outcome.ok) {
+            // Roll the read state back so Retry reloads the previous
+            // page/filter/type and the UI never shows new-page+old-data.
             state.logs.page = previous.page;
             state.logs.taskCode = previous.taskCode;
             state.logs.type = previous.type;
+            // Keep the task-filter DOM selection in sync with the
+            // restored state (selection must not disagree with state).
+            const taskFilter = qs('#logTaskFilter');
+            if (taskFilter) taskFilter.value = state.logs.taskCode;
+            // Do NOT renderLogs() here — the persistent error state
+            // must stay visible until Retry succeeds.
         }
+        return outcome;
     });
 }
 

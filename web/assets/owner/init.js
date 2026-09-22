@@ -27,7 +27,7 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
             ? {unavailableKey: options.unavailableKey}
             : {message: noticeText(error)};
         box.render(stateName, payload);
-        return;
+        return {ok: false};
     }
     // Success: empty vs ready is decided by the section's own
     // empty-check — an initial load failure NEVER renders as empty.
@@ -42,6 +42,7 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
         return;
     }
     box.render('ready');
+    return {ok: true};
 }
 
 function renderPage() {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -370,5 +371,201 @@ func TestActivateSessionAccountFailureSemantics(t *testing.T) {
 	authedIdx := strings.Index(fn, "shellAuthed()")
 	if acctIdx < 0 || authedIdx < 0 || acctIdx > authedIdx {
 		t.Fatal("activateSession must succeed /api/account before revealing the authed shell")
+	}
+}
+
+// ── Logs rollback control-flow regression ───────────────────────────
+//
+// The locks below EXECUTE the real lifecycle sources (init.js +
+// logs.js + lifecycle.js) under node with instrumented DOM/fetch —
+// they verify actual control flow, not string presence.
+
+const logsRollbackHarness = `
+// minimal DOM/fetch/i18n shims sufficient for the real sources
+const elements = {};
+function makeEl(id) {
+    return elements[id] || (elements[id] = {
+        id, innerHTML: '', value: '', hidden: false, className: '',
+        _listeners: {},
+        addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+        querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+        querySelectorAll(sel) { return this.innerHTML.includes(sel.replace('.', '')) ? [makeEl(sel)] : []; },
+        classList: { toggle() {} }
+    });
+}
+const document = {
+    body: makeEl('body'),
+    querySelector: (sel) => makeEl(sel),
+    querySelectorAll: () => []
+};
+const qs = (sel) => makeEl(sel);
+const qsa = () => [];
+// stub binders / helpers from sources not under test (core.js etc.)
+function bindAuthHandlers() {}
+function bindTaskHandlers() {}
+function bindStoreHandlers() {}
+function bindCreditsEvents() {}
+function isOwnerLoginRequired(error) {
+    const code = (error && error.code) || '';
+    return code === 'OWNER_LOGIN_REQUIRED' || (error && error.httpStatus === 401);
+}
+const window = { location: { href: '' }, fetch: null };
+function escapeHtml(x) { return String(x); }
+function t(key, params) { return key; }
+function noticeText(e) { return String((e && e.message) || e); }
+function showToast() { throw new Error('showToast must not be used for page-level logs errors'); }
+const SECTION = 'logs';
+const state = {
+    logs: { type: 'task', page: 1, pageSize: 20, taskCode: '', items: [{}], total: 40, totalPages: 2, balance: '0', tasks: [] }
+};
+
+// instrumentation
+let loadCalls = 0;
+let failNext = false;
+async function loadLogs() {
+    loadCalls++;
+    if (failNext) {
+        failNext = false;
+        throw apiError('INTERNAL', 'boom', 500);
+    }
+    state.logs.items = [{}];
+}
+function renderLogs() { renderCalls++; }
+let renderCalls = 0;
+`
+
+// execLifecycleSources loads the real web assets into a sandbox and
+// returns the harness globals for assertions.
+func execLifecycleSources(t *testing.T, extra string) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "..", "..")
+	script := logsRollbackHarness +
+		"// real sources under test\n" +
+		readFileOrFatal(t, filepath.Join(root, "web", "assets", "owner", "lifecycle.js")) + "\n" +
+		readFileOrFatal(t, filepath.Join(root, "web", "assets", "owner", "init.js")) + "\n" +
+		readFileOrFatal(t, filepath.Join(root, "web", "assets", "owner", "logs.js")) + "\n" +
+		extra + "\n"
+	out, err := execNode(t, script)
+	if err != nil {
+		t.Fatalf("node harness failed: %v\n%s", err, out)
+	}
+	return out
+}
+
+func readFileOrFatal(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// neutralize the top-level restoreSession()/decorateRenderPage()/
+	// bindOwnerPage() boot calls by renaming them; tests call them
+	// explicitly.
+	return string(data)
+}
+
+func execNode(t *testing.T, script string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "harness.mjs")
+	// The real sources auto-boot (restoreSession etc.) which needs
+	// fetch; provide a stub via a prelude executed as CommonJS.
+	full := "const __origFetch = globalThis.fetch;\n" +
+		"globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({success:true,data:{}}) });\n" +
+		script
+	if err := os.WriteFile(file, []byte(full), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", file)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// LogsRollbackOnLoadFailure: with the real sources, a failing
+// loadLogs through logsReload must (a) leave the persistent error
+// state rendered, (b) roll page/type/taskCode back to previous, and
+// (c) Retry must re-read the ROLLED-BACK state.
+func TestLogsRollbackOnLoadFailure(t *testing.T) {
+	out := execLifecycleSources(t, `
+;(async () => {
+    const prev = {type: 'task', page: 1, taskCode: ''};
+    state.logs.page = 2; // user clicked "next"
+    failNext = true;
+    const outcome = await logsReload(prev);
+    console.log('OUTCOME=' + JSON.stringify(outcome));
+    console.log('PAGE_AFTER=' + state.logs.page);
+    console.log('BOX_STATE=' + (qs('#logsTableWrap').innerHTML.includes('state-error') ? 'error' : 'other'));
+    // Retry: fetch restored (failNext already consumed), reads page 1
+    failNext = false;
+    loadCalls = 0;
+    await logsReload(prev);
+    console.log('RETRY_LOADS=' + loadCalls);
+    console.log('PAGE_FINAL=' + state.logs.page);
+})().catch(e => { console.error('HARNESS_FAIL', e); process.exit(1); });
+`)
+	for _, want := range []string{
+		"OUTCOME={\"ok\":false}",
+		"PAGE_AFTER=1",    // rolled back from 2
+		"BOX_STATE=error", // persistent error rendered
+		"RETRY_LOADS=1",   // retry re-executed the loader
+		"PAGE_FINAL=1",    // retry read the restored state
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in harness output, got:\n%s", want, out)
+		}
+	}
+}
+
+// LogsTaskFilterSelectionConsistency: after a filter-change load
+// failure the DOM selection is restored together with state.
+func TestLogsTaskFilterSelectionConsistency(t *testing.T) {
+	out := execLifecycleSources(t, `
+;(async () => {
+    const prev = {type: 'task', page: 1, taskCode: ''};
+    state.logs.taskCode = 'TASK-X'; // user picked a filter
+    qs('#logTaskFilter').value = 'TASK-X';
+    failNext = true;
+    await logsReload(prev);
+    console.log('STATE_CODE=' + (state.logs.taskCode === '' ? 'restored' : 'stale'));
+    console.log('DOM_CODE=' + (qs('#logTaskFilter').value === '' ? 'restored' : 'stale'));
+    console.log('CONSISTENT=' + (state.logs.taskCode === qs('#logTaskFilter').value));
+})().catch(e => { console.error('HARNESS_FAIL', e); process.exit(1); });
+`)
+	for _, want := range []string{
+		"STATE_CODE=restored",
+		"DOM_CODE=restored",
+		"CONSISTENT=true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in harness output, got:\n%s", want, out)
+		}
+	}
+}
+
+// RunSectionOutcomeContract: runSection resolves (never rejects) with
+// an explicit {ok} outcome on both paths — this is the mechanism the
+// rollback branch depends on.
+func TestRunSectionOutcomeContract(t *testing.T) {
+	out := execLifecycleSources(t, `
+;(async () => {
+    let okPath = null, failPath = null;
+    okPath = await runSection('logs', loadLogs, '#logsTableWrap', () => renderLogs(), {isEmpty: () => !state.logs.items.length, emptyKey: 'js.state_logs_empty'});
+    failNext = true;
+    failPath = await runSection('logs', loadLogs, '#logsTableWrap', () => renderLogs(), {isEmpty: () => !state.logs.items.length, emptyKey: 'js.state_logs_empty'});
+    console.log('OK_PATH=' + JSON.stringify(okPath));
+    console.log('FAIL_PATH=' + JSON.stringify(failPath));
+})().catch(e => { console.error('REJECTED', e); process.exit(1); });
+`)
+	for _, want := range []string{
+		"OK_PATH={\"ok\":true}",
+		"FAIL_PATH={\"ok\":false}",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in harness output, got:\n%s", want, out)
+		}
 	}
 }
