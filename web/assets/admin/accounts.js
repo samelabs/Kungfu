@@ -97,7 +97,14 @@ function renderAccountDetail() {
         '<dt>Published tasks</dt><dd>' + d.published_task_count + '</dd>' +
         '<dt>Submissions</dt><dd>' + d.submission_count + '</dd>' +
         '<dt>Kungfu / memory</dt><dd>' + d.kungfu_count + '</dd>' +
-        '</dl>';
+        '</dl>' +
+        // Pure cross-link into the Finance domain — shown only when
+        // this admin also holds finance.read (visibility only; the
+        // finance API enforces its own authority). No finance data
+        // is embedded in the Accounts API.
+        (hasPermission('finance.read')
+            ? '<a class="btn small" href="/admin/finance">View finance for this account</a>'
+            : '');
 }
 
 async function accountAction(action, id) {

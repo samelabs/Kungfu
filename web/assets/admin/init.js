@@ -96,6 +96,11 @@ async function renderPage() {
                 await loadAccounts(); renderAccounts();
             }
         }
+        if (SECTION === 'finance') {
+            if (hasPermission('finance.read')) {
+                await loadFinance(); renderFinance();
+            }
+        }
     } catch (err) {
         window.alert(err.message);
     }
@@ -111,6 +116,7 @@ async function renderPage() {
     bindStoreProductsEvents();
     bindStoreRedemptionsEvents();
     bindAdminAccountsEvents();
+    bindFinanceEvents();
 
     if (SECTION !== 'login') {
         try {

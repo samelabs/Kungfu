@@ -64,6 +64,7 @@ func (s *Server) renderAdmin(w http.ResponseWriter, data *tmplData) {
 <script src="/assets/admin/audit.js?v=1"></script>
 <script src="/assets/admin/store.js?v=1"></script>
 <script src="/assets/admin/accounts.js?v=1"></script>
+    <script src="/assets/admin/finance.js?v=1"></script>
 <script src="/assets/admin/init.js?v=1"></script>
 </body>
 </html>`
@@ -82,6 +83,7 @@ func adminNavHTML(data *tmplData) string {
     <a class="btn" data-admin-nav="store_products" href="/admin/store/products">Store Products</a>
     <a class="btn" data-admin-nav="store_redemptions" href="/admin/store/redemptions">Store Redemptions</a>
     <a class="btn" data-admin-nav="accounts" href="/admin/accounts">Accounts</a>
+    <a class="btn" data-admin-nav="finance" href="/admin/finance">Finance</a>
     <a class="btn" data-admin-nav="account" href="/admin/account">Account</a>
     <button class="btn danger" id="adminLogoutBtn" type="button">Logout</button>
 </nav>`
@@ -107,6 +109,8 @@ func adminSectionHTML(data *tmplData) string {
 		return adminStoreRedemptionsHTML()
 	case "accounts":
 		return adminAccountsHTML()
+	case "finance":
+		return adminFinanceHTML()
 	default: // dashboard
 		return adminDashboardHTML()
 	}
@@ -130,6 +134,51 @@ func adminDashboardHTML() string {
 	return `<section class="admin-section" id="adminDashboardSection">
     <h2>Dashboard</h2>
     <div id="adminDashboardCard" class="admin-card"></div>
+</section>`
+}
+
+func adminFinanceHTML() string {
+	return `<section class="admin-section" id="adminFinanceSection">
+    <h2>Finance</h2>
+    <p class="admin-note">Read-only finance control plane: payments, payment adjustments, credits ledger, local reconciliation. Economic mutations belong to the Credits / Payment authorities — no mutation controls exist here.</p>
+
+    <div id="adminFinanceSummary"></div>
+
+    <h3>Payments</h3>
+    <form id="adminFinancePaymentFilters" class="admin-filters" autocomplete="off">
+        <select id="financePaymentStatusFilter">
+            <option value="">status: all</option>
+            <option value="pending">pending</option>
+            <option value="paid">paid</option>
+            <option value="failed">failed</option>
+            <option value="expired">expired</option>
+        </select>
+        <input id="financePaymentQFilter" type="text" placeholder="search code / bot name / provider order id">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminFinancePayments"></div>
+
+    <h3>Payment Adjustments</h3>
+    <form id="adminFinanceAdjustmentFilters" class="admin-filters" autocomplete="off">
+        <select id="financeAdjustmentKindFilter">
+            <option value="">kind: all</option>
+            <option value="refund">refund</option>
+            <option value="dispute">dispute</option>
+        </select>
+        <input id="financeAdjustmentCodeFilter" type="text" placeholder="payment code">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminFinanceAdjustments"></div>
+
+    <h3>Credits Ledger</h3>
+    <form id="adminFinanceLedgerFilters" class="admin-filters" autocomplete="off">
+        <input id="financeLedgerBotFilter" type="number" placeholder="bot id">
+        <input id="financeLedgerTypeFilter" type="text" placeholder="type (e.g. grant_payment)">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminFinanceLedger"></div>
+
+    <div id="adminFinancePaymentDetail"></div>
 </section>`
 }
 

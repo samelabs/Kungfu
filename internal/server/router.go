@@ -225,6 +225,14 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Post("/api/admin/accounts/{id}/disable", s.handleAdminAccountDisable)
 	r.Post("/api/admin/accounts/{id}/enable", s.handleAdminAccountEnable)
 
+	// 012: Finance Admin — READ-ONLY control plane (no POST/PATCH/
+	// DELETE finance routes exist anywhere).
+	r.Get("/api/admin/finance/summary", s.handleAdminFinanceSummary)
+	r.Get("/api/admin/finance/payments", s.handleAdminFinancePayments)
+	r.Get("/api/admin/finance/payments/{code}", s.handleAdminFinancePaymentDetail)
+	r.Get("/api/admin/finance/adjustments", s.handleAdminFinanceAdjustments)
+	r.Get("/api/admin/finance/ledger", s.handleAdminFinanceLedger)
+
 	// B1.2: Admin Workspace HTML routes
 	r.Get("/admin", s.handleAdminPage("dashboard"))
 	r.Get("/admin/login", s.handleAdminPage("login"))
@@ -236,6 +244,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/admin/store/products", s.handleAdminPage("store_products"))
 	r.Get("/admin/store/redemptions", s.handleAdminPage("store_redemptions"))
 	r.Get("/admin/accounts", s.handleAdminPage("accounts"))
+	r.Get("/admin/finance", s.handleAdminPage("finance"))
 
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
