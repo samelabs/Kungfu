@@ -10,6 +10,14 @@
 
     var paymentsPage = 1, adjustmentsPage = 1, ledgerPage = 1;
 
+    // Account scope (?bot_id=N entered from the Accounts detail
+    // cross-link): Payments / Adjustments / Ledger requests all
+    // carry bot_id. The Summary stays a GLOBAL aggregate and is
+    // clearly labelled as such — it is never silently scoped.
+    var scopeBot = null;
+    var m = window.location.search.match(/[?&]bot_id=(\d+)/);
+    if (m) scopeBot = m[1];
+
     function el(id) { return document.getElementById(id); }
     function esc(v) {
         return window.escapeHtml ? window.escapeHtml(String(v == null ? '' : v)) : String(v);
@@ -43,8 +51,11 @@
             var volumeRows = (d.paid_volume || []).map(function (v) {
                 return [esc(v.currency), money(v.amount_minor), esc(v.count)];
             });
+            var scopeNote = scopeBot
+                ? '<p class="admin-note"><strong>Account scope active: bot #' + esc(scopeBot) + '</strong> — Payments / Adjustments / Ledger below are scoped to this account. <a href="/admin/finance">Clear scope</a></p>'
+                : '';
             el('adminFinanceSummary').innerHTML =
-                '<h3>Summary</h3>' +
+                '<h3>Summary <small>(global — not account-scoped)</small></h3>' + scopeNote +
                 table(['payment status', 'count'], statusRows) +
                 '<p><strong>Paid volume</strong> (per currency — never summed across currencies; this is not revenue):</p>' +
                 table(['currency', 'amount_minor', 'payments'], volumeRows) +
@@ -55,6 +66,7 @@
 
     function loadPayments(page) {
         var qs = '?page=' + page + '&page_size=20';
+        if (scopeBot) qs += '&bot_id=' + scopeBot;
         var st = el('financePaymentStatusFilter').value;
         var q = el('financePaymentQFilter').value.trim();
         if (st) qs += '&status=' + encodeURIComponent(st);
@@ -78,6 +90,7 @@
 
     function loadAdjustments(page) {
         var qs = '?page=' + page + '&page_size=20';
+        if (scopeBot) qs += '&bot_id=' + scopeBot;
         var kind = el('financeAdjustmentKindFilter').value;
         var code = el('financeAdjustmentCodeFilter').value.trim();
         if (kind) qs += '&kind=' + encodeURIComponent(kind);
@@ -100,7 +113,7 @@
 
     function loadLedger(page) {
         var qs = '?page=' + page + '&page_size=20';
-        var bot = el('financeLedgerBotFilter').value.trim();
+        var bot = scopeBot || el('financeLedgerBotFilter').value.trim();
         var type = el('financeLedgerTypeFilter').value.trim();
         if (bot) qs += '&bot_id=' + encodeURIComponent(bot);
         if (type) qs += '&type=' + encodeURIComponent(type);
@@ -118,6 +131,13 @@
     }
 
     function flag(v) { return v ? '<span class="ok">PASS</span>' : '<span class="fail">FAIL</span>'; }
+
+    // No-ledger accounts must render N/A — never a fake PASS, never
+    // a FAIL (there is no ledger fact to compare against).
+    function ledgerFlag(v, latest) {
+        if (latest === null || latest === undefined) return '<span class="na">N/A</span>';
+        return flag(v);
+    }
 
     function loadPaymentDetail(code) {
         return api('/api/admin/finance/payments/' + encodeURIComponent(code)).then(function (r) { return r.json(); }).then(function (body) {
@@ -163,7 +183,7 @@
                     ['adjustment_basis_consistent', flag(integ.adjustment_basis_consistent)],
                     ['reverse_payment_nonpositive', flag(integ.reverse_payment_nonpositive)],
                     ['reverse_payment_within_original_entitlement', flag(integ.reverse_payment_within_original_entitlement)],
-                    ['account_balance_matches_latest_ledger', flag(integ.account_balance_matches_latest_ledger)]
+                    ['account_balance_matches_latest_ledger', ledgerFlag(integ.account_balance_matches_latest_ledger, rec.latest_account_ledger_balance_after)]
                 ]);
             window.scrollTo(0, el('adminFinancePaymentDetail').offsetTop);
         });

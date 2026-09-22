@@ -13,22 +13,35 @@ package server
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"kungfu.md/internal/admin"
 )
 
-// int64Query parses an optional integer query parameter; empty or
-// invalid means "no filter".
-func int64Query(q map[string][]string, key string) int64 {
-	vs := q[key]
+// botIDQuery parses the optional bot_id filter, fail closed.
+//
+//	omitted / empty      -> no filter (0)
+//	valid positive int64 -> exact bot filter
+//	malformed / 0 / negative / overflow -> 400 INVALID_FINANCE_FILTER
+//
+// A malformed value must NEVER degrade into an unfiltered query.
+func botIDQuery(q map[string][]string) (int64, error) {
+	vs := q["bot_id"]
 	if len(vs) == 0 || vs[0] == "" {
-		return 0
+		return 0, nil
 	}
-	n, err := strconv.ParseInt(vs[0], 10, 64)
+	raw := strings.TrimSpace(vs[0])
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return 0
+		return 0, admin.ErrInvalidFinanceFilter
 	}
-	return n
+	if n <= 0 {
+		return 0, admin.ErrInvalidFinanceFilter
+	}
+	return n, nil
 }
 
 func financePaymentDTO(p admin.FinancePayment) map[string]interface{} {
@@ -126,7 +139,11 @@ func (s *Server) handleAdminFinancePayments(w http.ResponseWriter, r *http.Reque
 	}
 	q := r.URL.Query()
 	page, pageSize := pageParams(q.Get("page"), q.Get("page_size"))
-	botID := int64Query(q, "bot_id")
+	botID, err := botIDQuery(q)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
 	items, total, err := admin.ListFinancePayments(r.Context(), s.Pool, principal, admin.FinancePaymentFilter{
 		Status:   q.Get("status"),
 		Provider: q.Get("provider"),
@@ -218,11 +235,16 @@ func (s *Server) handleAdminFinanceAdjustments(w http.ResponseWriter, r *http.Re
 	}
 	q := r.URL.Query()
 	page, pageSize := pageParams(q.Get("page"), q.Get("page_size"))
+	botID, err := botIDQuery(q)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
 	items, total, err := admin.ListFinanceAdjustments(r.Context(), s.Pool, principal, admin.FinanceAdjustmentFilter{
 		Kind:        q.Get("kind"),
 		Provider:    q.Get("provider"),
 		PaymentCode: q.Get("payment_code"),
-		BotID:       int64Query(q, "bot_id"),
+		BotID:       botID,
 		Page:        page,
 		PageSize:    pageSize,
 	})
@@ -247,8 +269,13 @@ func (s *Server) handleAdminFinanceLedger(w http.ResponseWriter, r *http.Request
 	}
 	q := r.URL.Query()
 	page, pageSize := pageParams(q.Get("page"), q.Get("page_size"))
+	botID, err := botIDQuery(q)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
 	items, total, err := admin.ListFinanceLedger(r.Context(), s.Pool, principal, admin.FinanceLedgerFilter{
-		BotID:    int64Query(q, "bot_id"),
+		BotID:    botID,
 		Type:     q.Get("type"),
 		RefType:  q.Get("ref_type"),
 		RefID:    q.Get("ref_id"),

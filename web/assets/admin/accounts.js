@@ -103,7 +103,7 @@ function renderAccountDetail() {
         // finance API enforces its own authority). No finance data
         // is embedded in the Accounts API.
         (hasPermission('finance.read')
-            ? '<a class="btn small" href="/admin/finance">View finance for this account</a>'
+            ? '<a class="btn small" href="/admin/finance?bot_id=' + d.id + '">View finance for this account</a>'
             : '');
 }
 

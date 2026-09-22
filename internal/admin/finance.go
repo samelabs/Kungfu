@@ -40,6 +40,12 @@ type (
 	FinanceLedgerFilter     = repository.FinanceLedgerFilter
 )
 
+// ErrInvalidFinanceFilter re-exports the repository sentinel so the
+// HTTP layer can fail closed on malformed filters without importing
+// the repository package (dependency direction: server -> admin ->
+// repository).
+var ErrInvalidFinanceFilter = repository.ErrInvalidFinanceFilter
+
 // ListFinancePayments (finance.read): paginated payment list.
 func ListFinancePayments(ctx context.Context, pool *pg.Pool, principal *Principal, f FinancePaymentFilter) ([]FinancePayment, int64, error) {
 	if err := RequirePermission(ctx, pool, principal, "finance.read"); err != nil {
