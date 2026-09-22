@@ -91,7 +91,6 @@ jobs:
           test "$ENTRY" = '["/usr/local/bin/kungfu-server"]'
           echo "$EXPOSE" | grep -q '"8090/tcp"'
           echo "$ENV_JSON" | grep -q '"LISTEN_ADDR=0.0.0.0:8090"'
-          docker run --rm --entrypoint /usr/local/bin/kungfu-adminctl "$IMG" --help
 
       - name: Container smoke (healthz + readyz + SIGTERM)
         run: |

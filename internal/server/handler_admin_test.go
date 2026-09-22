@@ -33,23 +33,14 @@ func newAdminTestServer(t *testing.T) *Server {
 	}
 }
 
-// seedAdminForHTTP bootstraps (or reuses) an admin named root with a
+// seedAdminForHTTP seeds (or reuses) an admin with a
 // known password; the shared CI database may already have admins, in
 // which case seed directly with a unique username.
 func seedAdminForHTTP(t *testing.T, s *Server) (username, password string) {
 	t.Helper()
 	password = "http-pass-123"
-	var count int
-	if err := s.Pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_admins`).Scan(&count); err != nil {
-		t.Fatalf("count admins: %v", err)
-	}
-	if count == 0 {
-		if _, err := admin.Bootstrap(context.Background(), s.Pool, "httproot", "HTTP Root", password); err != nil {
-			t.Fatalf("bootstrap: %v", err)
-		}
-		return "httproot", password
-	}
-	// direct seed with unique username (no bootstrap gate involved)
+	// direct seed with unique username (admin rows are operator-seeded
+	// data; the runtime has no bootstrap mechanism)
 	username = "h_" + time.Now().Format("150405.000000000")
 	hash, err := hashPasswordForAdminTest(password)
 	if err != nil {

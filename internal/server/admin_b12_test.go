@@ -18,7 +18,7 @@ import (
 )
 
 // b12TestEnv: fresh private-ish env on the SHARED test DB (admin rows
-// cleaned up per test; bootstrap gate handled by seeding directly).
+// cleaned up per test; seeded directly — no bootstrap mechanism exists).
 type b12Env struct {
 	s        *Server
 	router   http.Handler
@@ -33,39 +33,29 @@ func newB12Env(t *testing.T) *b12Env {
 	s := newAdminTestServer(t)
 	s.TrustedProxies = nil
 
-	// ensure an admin exists (shared DB may be empty)
-	var count int
-	if err := s.Pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_admins`).Scan(&count); err != nil {
-		t.Fatalf("count: %v", err)
-	}
+	// seed an admin directly (admin rows are operator-seeded data; the
+	// runtime has no bootstrap mechanism)
 	username := "b12_" + time.Now().Format("150405.000000000")
 	password := "b12-pass-123"
-	if count == 0 {
-		if _, err := admin.Bootstrap(context.Background(), s.Pool, username, "B12 Root", password); err != nil {
-			t.Fatalf("bootstrap: %v", err)
-		}
-	} else {
-		hash, err := hashPasswordForAdminTest(password)
-		if err != nil {
-			t.Fatalf("hash: %v", err)
-		}
-		var id int64
-		if err := s.Pool.QueryRow(context.Background(),
-			`INSERT INTO tb_admins (username, display_name, password_hash) VALUES ($1,'B12',$2) RETURNING id`,
-			username, hash).Scan(&id); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-		// superadmin so the principal holds the wildcard
-		if _, err := s.Pool.Exec(context.Background(), `INSERT INTO tb_admin_user_roles (admin_id, role_id)
-			SELECT $1, r.id FROM tb_admin_roles r WHERE r.code='superadmin' ON CONFLICT DO NOTHING`, id); err != nil {
-			t.Fatalf("role: %v", err)
-		}
-		t.Cleanup(func() {
-			_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admin_user_roles WHERE admin_id=$1`, id)
-			_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admin_sessions WHERE admin_id=$1`, id)
-			_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admins WHERE id=$1`, id)
-		})
+	hash, err := hashPasswordForAdminTest(password)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
 	}
+	var id int64
+	if err := s.Pool.QueryRow(context.Background(),
+		`INSERT INTO tb_admins (username, display_name, password_hash) VALUES ($1,'B12',$2) RETURNING id`, username, hash).Scan(&id); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// superadmin so the principal holds the wildcard
+	if _, err := s.Pool.Exec(context.Background(), `INSERT INTO tb_admin_user_roles (admin_id, role_id)
+		SELECT $1, r.id FROM tb_admin_roles r WHERE r.code='superadmin' ON CONFLICT DO NOTHING`, id); err != nil {
+		t.Fatalf("role: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admin_user_roles WHERE admin_id=$1`, id)
+		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admin_sessions WHERE admin_id=$1`, id)
+		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admins WHERE id=$1`, id)
+	})
 
 	env := &b12Env{s: s, username: username, password: password, router: s.buildRouter()}
 	env.login(t)

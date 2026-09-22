@@ -98,14 +98,12 @@ All configuration is via environment variables. No config files, nothing stored 
 
 The Agent execution protocol is MCP (`https://kungfu.md/mcp`). `/healthz` and `/readyz` are the infrastructure probes.
 
-### Admin bootstrap
+### Admin accounts
 
-First platform admin (fails closed if any admin already exists). Password is read from stdin only — never argv or environment:
-
-```bash
-go build -o adminctl ./cmd/adminctl
-adminctl bootstrap --username <username> --display-name <name> --password-stdin
-```
+The application has no first-admin bootstrap mechanism. Admin rows —
+including the first one in a fresh environment — are operator-seeded
+data (see `docs/production-runbook.md`); the runtime only
+authenticates and manages admins that already exist.
 
 ### Container deployment
 
@@ -118,14 +116,11 @@ Production order for an exact Git commit:
 3. Build and tag an immutable image from that same commit (do not promote `latest` as the version authority), for example `kungfu:<git-sha>`.
 4. Start the container. Default `ENTRYPOINT` is `/usr/local/bin/kungfu-server`. The image sets `LISTEN_ADDR=0.0.0.0:8090`; application config still defaults to `127.0.0.1:8090` outside this container.
 5. Wait until `GET /readyz` returns 200 (PostgreSQL readiness). Orchestrators should use `GET /healthz` for liveness and `GET /readyz` for readiness.
-6. First deployment only: create the platform admin with the **same image**:
+6. First deployment only: seed the initial platform admin as operator
+   data (per `docs/production-runbook.md` §6); no bootstrap binary or
+   API exists in the image.
 
-```bash
-docker run --rm -i --entrypoint /usr/local/bin/kungfu-adminctl kungfu:<git-sha> \
-  bootstrap --username <username> --display-name <name> --password-stdin
-```
-
-Password is stdin only. Stop the process with SIGTERM (`docker stop`); that is the existing server lifecycle, not a container-specific handler.
+Stop the process with SIGTERM (`docker stop`); that is the existing server lifecycle, not a container-specific handler.
 
 For production deployment sequencing and operational verification, see [`docs/production-runbook.md`](docs/production-runbook.md).
 

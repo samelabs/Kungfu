@@ -40,97 +40,13 @@ func ValidateUsername(username string) bool {
 	return usernamePattern.MatchString(username)
 }
 
-// BootstrapResult reports what a bootstrap run did.
-type BootstrapResult struct {
-	AdminID  int64
-	Username string
-	Created  bool // false when the run was refused (admins already exist)
-}
-
-// Bootstrap creates the FIRST platform admin, assigns the superadmin
-// system role, and writes the bootstrap audit record — all in ONE
-// transaction. Fails closed when any admin already exists. Re-running
-// never creates a second superadmin.
-func Bootstrap(ctx context.Context, pool *pg.Pool, username, displayName, password string) (*BootstrapResult, error) {
-	username = NormalizeUsername(username)
-	if !ValidateUsername(username) {
-		return nil, errors.New(400, "INVALID_USERNAME",
-			"Username must be 3-64 chars of lowercase letters, digits, '.', '_' or '-'")
-	}
-	if strings.TrimSpace(displayName) == "" {
-		return nil, errors.New(400, "INVALID_DISPLAY_NAME", "Display name must not be empty")
-	}
-	if len(password) < 8 {
-		return nil, errors.New(400, "INVALID_PASSWORD", "Password must be at least 8 characters")
-	}
-
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Failed to hash password")
-	}
-
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	defer pg.Rollback(tx)
-
-	// Serialize concurrent first-bootstraps: the EXCLUSIVE lock makes
-	// the second transaction's COUNT wait until the first commits, so
-	// exactly one winner is possible regardless of goroutine ordering.
-	if err := repository.LockAdminsTableExclusive(ctx, tx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-
-	// Fail-closed gate inside the transaction (post-lock).
-	count, err := repository.CountAdmins(ctx, tx)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	if count > 0 {
-		return nil, errors.New(409, "BOOTSTRAP_REFUSED",
-			"Bootstrap refused: an administrator already exists")
-	}
-
-	created, err := repository.InsertAdmin(ctx, tx, &model.Admin{
-		Username:     username,
-		DisplayName:  strings.TrimSpace(displayName),
-		PasswordHash: hash,
-		Status:       "active",
-	})
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Failed to create admin")
-	}
-
-	role, err := repository.FindAdminRoleByCode(ctx, tx, "superadmin")
-	if err != nil || role == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "superadmin system role missing")
-	}
-	if err := repository.AssignAdminRole(ctx, tx, created.ID, role.ID); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Failed to assign superadmin role")
-	}
-
-	// Bootstrap audit record: same transaction as the mutation.
-	if err := repository.InsertAdminAuditLog(ctx, tx, &model.AdminAuditLog{
-		ActorAdminID:  &created.ID,
-		ActorUsername: created.Username,
-		Action:        "admin.bootstrap",
-		TargetType:    strPtr("admin"),
-		TargetID:      strPtr(idToString(created.ID)),
-		Success:       true,
-		AfterJSON:     []byte(`{"username":"` + created.Username + `","roles":["superadmin"]}`),
-		MetadataJSON:  []byte(`{"source":"cli"}`),
-	}); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Failed to write bootstrap audit")
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	return &BootstrapResult{AdminID: created.ID, Username: created.Username, Created: true}, nil
-}
-
 // -- Login --
+
+// The FIRST environment admin is an operator data-seeding concern, not
+// an application mechanism: no bootstrap code path exists. Admin rows
+// (including the first one) are seeded by the operator per the
+// production runbook; the runtime only authenticates and manages
+// admins that already exist.
 
 // dummyAdminBcryptHash is a valid cost-10 bcrypt hash of an unguessable
 // random secret; verified when the username does not resolve, so

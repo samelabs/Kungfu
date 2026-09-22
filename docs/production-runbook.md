@@ -292,19 +292,47 @@ Required evidence:
 
 `/healthz` and `/readyz` are the infrastructure health evidence; there is no other health surface.
 
-## 6. First Admin Bootstrap
+## 6. First Admin Seed (operator data initialization)
 
-Using the **same immutable image**:
+There is NO application bootstrap mechanism: the server exposes no
+"empty database → create first admin" path, and no bootstrap binary
+ships in the image. The first admin is plain operator-owned seed data:
 
-```bash
-docker run --rm -i --entrypoint /usr/local/bin/kungfu-adminctl kungfu:<git-sha> \
-  bootstrap --username <username> --display-name <name> --password-stdin
+```sql
+-- operator console, production database, one-time:
+-- The whole seed (admin row + superadmin binding) is ONE transaction:
+-- either both commit, or a failure leaves nothing behind (ROLLBACK).
+BEGIN;
+
+INSERT INTO tb_admins (username, display_name, password_hash, status)
+VALUES ('<username>', '<display name>', '<bcrypt hash>', 'active');
+
+INSERT INTO tb_admin_user_roles (admin_id, role_id)
+SELECT a.id, r.id FROM tb_admins a, tb_admin_roles r
+WHERE a.username = '<username>' AND r.code = 'superadmin';
+
+COMMIT;  -- on any error: ROLLBACK; and re-seed — no partial admin remains
 ```
 
+The bcrypt hash MUST be generated offline WITHOUT the plaintext
+password ever entering argv, environment, or logs. Read it from stdin
+instead — e.g. on the operator workstation:
+
+```bash
+python3 - <<'PY'
+import bcrypt, getpass
+pw = getpass.getpass("admin password: ")          # stdin, not argv/env
+print(bcrypt.hashpw(pw.encode(), bcrypt.gensalt(rounds=10)).decode())
+PY
+```
+
+The printed hash is then pasted into the seed transaction above. The
+plaintext password never appears in argv, environment, command
+history, or logs.
+
 Evidence:
-- first bootstrap succeeds (record username + timestamp, **never the password**)
-- a second bootstrap attempt **fails closed** (record the failure)
-- password entered only via stdin
+- exactly one admin row exists after seeding (record username + timestamp, **never the password**)
+- the seeded admin can log in (`POST /api/admin/session`) and holds the superadmin role
 
 ## 7. Agent / Owner Account Bootstrap (model clarification)
 

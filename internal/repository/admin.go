@@ -16,24 +16,6 @@ import (
 // Admin repository: all Admin-plane SQL lives here. Handlers never
 // embed Admin business SQL. The Admin plane never touches tb_bots.
 
-// CountAdmins returns the number of admin rows (bootstrap gate).
-func CountAdmins(ctx context.Context, q pg.Querier) (int64, error) {
-	var n int64
-	err := q.QueryRow(ctx, `SELECT COUNT(*) FROM tb_admins`).Scan(&n)
-	return n, err
-}
-
-// LockAdminsTableExclusive is the bootstrap serialization primitive:
-// inside the caller's transaction it takes a session-level EXCLUSIVE
-// lock on tb_admins, so two concurrent first-bootstraps serialize —
-// the second only observes COUNT>0 after the first commits (its lock
-// wait ends post-commit). Must be the FIRST statement of the
-// bootstrap transaction.
-func LockAdminsTableExclusive(ctx context.Context, q pg.Querier) error {
-	_, err := q.Exec(ctx, `LOCK TABLE tb_admins IN EXCLUSIVE MODE`)
-	return err
-}
-
 // IncrementAdminAuthVersion bumps auth_version by one. Tx-aware:
 // the caller owns BEGIN/COMMIT (typically via WithAuditTx so the
 // bump, the revocations, the business mutation, and the audit row
@@ -43,24 +25,6 @@ func IncrementAdminAuthVersion(ctx context.Context, q pg.Querier, adminID int64)
 		`UPDATE tb_admins SET auth_version = auth_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
 		adminID)
 	return err
-}
-
-// InsertAdmin creates an admin; username must already be normalized
-// lowercase. Returns the full row.
-func InsertAdmin(ctx context.Context, q pg.Querier, a *model.Admin) (*model.Admin, error) {
-	row := &model.Admin{}
-	err := q.QueryRow(ctx, `
-		INSERT INTO tb_admins (username, display_name, password_hash, status)
-		VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'))
-		RETURNING id, username, display_name, password_hash, status, auth_version,
-			last_login_at, password_changed_at, created_at, updated_at`,
-		a.Username, a.DisplayName, a.PasswordHash, a.Status,
-	).Scan(&row.ID, &row.Username, &row.DisplayName, &row.PasswordHash, &row.Status,
-		&row.AuthVersion, &row.LastLoginAt, &row.PasswordChangedAt, &row.CreatedAt, &row.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return row, nil
 }
 
 // FindAdminByUsername looks up any admin (any status) by exact username.

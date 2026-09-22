@@ -17,88 +17,39 @@ func hashForTest(password string) (string, error) {
 	return auth.HashPassword(password)
 }
 
-// -- Bootstrap --
-
-func TestBootstrapFirstAdminSucceeds(t *testing.T) {
-	dbPool := createPrivateDB(t)
-	res, err := Bootstrap(context.Background(), dbPool, "Root.Admin", "Root Admin", "correct-horse-12")
+// seedAdminWithRole creates an admin directly (the runtime has no
+// bootstrap mechanism; admin rows are operator-seeded data) and binds
+// the superadmin system role. Login/session/RBAC behavior below is
+// unchanged by how the row came to exist.
+func seedAdminWithRole(t *testing.T, dbPool *pg.Pool, username, password string) {
+	t.Helper()
+	hash, err := hashForTest(password)
 	if err != nil {
-		t.Fatalf("bootstrap: %v", err)
+		t.Fatalf("hash: %v", err)
 	}
-	if res.Username != "root.admin" {
-		t.Fatalf("username not normalized to lowercase: %q", res.Username)
+	var id int64
+	if err := dbPool.QueryRow(context.Background(), `
+		INSERT INTO tb_admins (username, display_name, password_hash)
+		VALUES ($1, 'Root', $2) RETURNING id`, username, hash).Scan(&id); err != nil {
+		t.Fatalf("seed admin: %v", err)
 	}
-	adminRec, err := repository.FindAdminByUsername(context.Background(), dbPool, "root.admin")
-	if err != nil || adminRec == nil {
-		t.Fatalf("admin not found after bootstrap: %v", err)
-	}
-	if adminRec.Status != "active" || adminRec.AuthVersion != 1 {
-		t.Fatalf("bad admin row: status=%s auth_version=%d", adminRec.Status, adminRec.AuthVersion)
-	}
-	// auto superadmin
-	perms, err := repository.ListAdminPermissionCodesByAdminID(context.Background(), dbPool, adminRec.ID)
-	if err != nil {
-		t.Fatalf("perms: %v", err)
-	}
-	if len(perms) != 1 || perms[0] != "*" {
-		t.Fatalf("bootstrap admin must hold exactly *, got %v", perms)
-	}
-	// bootstrap audit row exists
-	var n int
-	err = dbPool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action = 'admin.bootstrap' AND success`).Scan(&n)
-	if err != nil || n != 1 {
-		t.Fatalf("bootstrap audit rows = %d err=%v", n, err)
+	if _, err := dbPool.Exec(context.Background(), `
+		INSERT INTO tb_admin_user_roles (admin_id, role_id)
+		SELECT $1, r.id FROM tb_admin_roles r WHERE r.code='superadmin' ON CONFLICT DO NOTHING`, id); err != nil {
+		t.Fatalf("seed role: %v", err)
 	}
 }
 
-func TestBootstrapSecondRunRefused(t *testing.T) {
-	dbPool := createPrivateDB(t)
-	if _, err := Bootstrap(context.Background(), dbPool, "first", "First", "password-123"); err != nil {
-		t.Fatalf("first bootstrap: %v", err)
+func TestUsernameNormalization(t *testing.T) {
+	// NormalizeUsername lowercases and trims; ValidateUsername enforces
+	// the [a-z0-9._-]{3,64} form on the normalized value.
+	if NormalizeUsername("Root.Admin") != "root.admin" {
+		t.Fatal("username not normalized to lowercase")
 	}
-	_, err := Bootstrap(context.Background(), dbPool, "second", "Second", "password-456")
-	if err == nil {
-		t.Fatal("second bootstrap must fail closed")
-	}
-	ae, ok := errors.IsAppError(err)
-	if !ok || ae.HTTPCode != 409 || ae.Code != "BOOTSTRAP_REFUSED" {
-		t.Fatalf("expected 409 BOOTSTRAP_REFUSED, got %v", err)
-	}
-	// no second superadmin appeared
-	var n int
-	_ = dbPool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_admin_user_roles ur
-		 JOIN tb_admin_roles r ON r.id = ur.role_id
-		 WHERE r.code = 'superadmin'`).Scan(&n)
-	if n != 1 {
-		t.Fatalf("superadmin bindings after refused re-run = %d, want 1", n)
-	}
-}
-
-func TestBootstrapInvalidUsernameRejected(t *testing.T) {
-	dbPool := createPrivateDB(t)
 	for _, bad := range []string{"ab", "Has Upper", "空间", strings.Repeat("a", 65), "a b"} {
-		if _, err := Bootstrap(context.Background(), dbPool, bad, "X", "password-123"); err == nil {
+		if ValidateUsername(bad) {
 			t.Fatalf("username %q must be rejected", bad)
 		}
-	}
-}
-
-func TestUsernameNormalizeAndUnique(t *testing.T) {
-	dbPool := createPrivateDB(t)
-	if _, err := Bootstrap(context.Background(), dbPool, "Root", "Root", "password-123"); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	// same username different case is the SAME normalized name
-	_, err := Bootstrap(context.Background(), dbPool, "ROOT", "Root2", "password-456")
-	if err == nil {
-		t.Fatal("bootstrap gate must refuse (already admins) — and username uniqueness is unique(normalized)")
-	}
-	var count int
-	_ = dbPool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_admins`).Scan(&count)
-	if count != 1 {
-		t.Fatalf("admins = %d, want 1", count)
 	}
 }
 
@@ -106,9 +57,7 @@ func TestUsernameNormalizeAndUnique(t *testing.T) {
 
 func TestAdminLoginSuccess(t *testing.T) {
 	dbPool := createPrivateDB(t)
-	if _, err := Bootstrap(context.Background(), dbPool, "root", "Root", "password-123"); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
+	seedAdminWithRole(t, dbPool, "root", "password-123")
 	res, err := Login(context.Background(), dbPool, LoginInput{Username: "ROOT", Password: "password-123", IPAddress: "1.2.3.4", UserAgent: "test-agent"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -140,9 +89,7 @@ func TestAdminLoginSuccess(t *testing.T) {
 
 func TestAdminLoginUniformFailures(t *testing.T) {
 	dbPool := createPrivateDB(t)
-	if _, err := Bootstrap(context.Background(), dbPool, "root", "Root", "password-123"); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
+	seedAdminWithRole(t, dbPool, "root", "password-123")
 	// disabled admin (direct DB flip on a second seed)
 	seeded := seedAdmin(t, dbPool, "another-pass-9")
 	_, _ = dbPool.Exec(context.Background(), `UPDATE tb_admins SET status='disabled' WHERE id=$1`, seeded.ID)
@@ -181,9 +128,7 @@ func loginForTest(t *testing.T, dbPool *pg.Pool, username, password string) *Log
 
 func bootstrapForTest(t *testing.T, dbPool *pg.Pool) {
 	t.Helper()
-	if _, err := Bootstrap(context.Background(), dbPool, "root", "Root", "password-123"); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
+	seedAdminWithRole(t, dbPool, "root", "password-123")
 }
 
 func TestRawSessionTokenNeverPersisted(t *testing.T) {
@@ -344,80 +289,6 @@ func TestAuthVersionMismatchInvalidatesSession(t *testing.T) {
 		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='admin.disable' AND success`).Scan(&n)
 	if n != 1 {
 		t.Fatalf("admin.disable audit rows = %d, want 1", n)
-	}
-}
-
-// Concurrent bootstrap: two goroutines, two different usernames, both
-// fire Bootstrap() simultaneously on an empty admin table. The
-// LOCK TABLE serialization must yield exactly one winner regardless
-// of goroutine scheduling order.
-func TestConcurrentBootstrapExactlyOneWinner(t *testing.T) {
-	dbPool := createPrivateDB(t)
-
-	const racers = 2
-	type outcome struct {
-		success bool
-		refused bool
-		err     error
-	}
-	outcomes := make(chan outcome, racers)
-	start := make(chan struct{})
-
-	for i := 0; i < racers; i++ {
-		go func(i int) {
-			username := ""
-			if i == 0 {
-				username = "racer.alpha"
-			} else {
-				username = "racer.beta"
-			}
-			<-start // release both goroutines together
-			_, err := Bootstrap(context.Background(), dbPool, username, "Racer "+username, "racer-pass-123")
-			oc := outcome{err: err}
-			if err == nil {
-				oc.success = true
-			} else if ae, ok := errors.IsAppError(err); ok && ae.Code == "BOOTSTRAP_REFUSED" {
-				oc.refused = true
-			}
-			outcomes <- oc
-		}(i)
-	}
-	close(start)
-
-	successes, refusals, other := 0, 0, 0
-	for i := 0; i < racers; i++ {
-		oc := <-outcomes
-		switch {
-		case oc.success:
-			successes++
-		case oc.refused:
-			refusals++
-		default:
-			other++
-			t.Errorf("unexpected bootstrap error: %v", oc.err)
-		}
-	}
-	if successes != 1 || refusals != 1 || other != 0 {
-		t.Fatalf("outcomes: successes=%d refusals=%d other=%d — want 1/1/0", successes, refusals, other)
-	}
-
-	ctx := context.Background()
-	var admins, superAssign, bootstrapAudits int
-	_ = dbPool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_admins`).Scan(&admins)
-	_ = dbPool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tb_admin_user_roles ur
-		JOIN tb_admin_roles r ON r.id = ur.role_id
-		WHERE r.code = 'superadmin'`).Scan(&superAssign)
-	_ = dbPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='admin.bootstrap' AND success`).Scan(&bootstrapAudits)
-	if admins != 1 {
-		t.Fatalf("tb_admins = %d, want 1", admins)
-	}
-	if superAssign != 1 {
-		t.Fatalf("superadmin assignments = %d, want 1", superAssign)
-	}
-	if bootstrapAudits != 1 {
-		t.Fatalf("successful admin.bootstrap audit rows = %d, want 1", bootstrapAudits)
 	}
 }
 

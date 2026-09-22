@@ -260,14 +260,13 @@ func detectStoreSQLInSource(path, src string) []sqlViolation {
 
 // Guard: SQL against tb_admin* tables lives ONLY in
 // internal/repository/admin.go (outside the scanned dirs) or in
-// migrations (not Go). internal/admin, internal/server, and
-// cmd/adminctl production sources must contain none.
+// migrations (not Go). internal/admin and internal/server production
+// sources must contain none.
 func TestAdminSQLLivesOnlyInRepository(t *testing.T) {
 	root := repoRoot(t)
 	violations := detectAdminSQLInDirs(t,
 		filepath.Join(root, "internal", "admin"),
 		filepath.Join(root, "internal", "server"),
-		filepath.Join(root, "cmd", "adminctl"),
 	)
 	for _, v := range violations {
 		t.Errorf("%s: admin-table SQL (%s) must live only in internal/repository/admin.go: %q",

@@ -17,9 +17,8 @@ import (
 
 // Admin integration tests run against a PRIVATE throwaway database
 // created from the full migration chain (001→006) — proving the chain
-// applies from zero — so the bootstrap gate (COUNT(tb_admins)==0) is
-// deterministic and parallel packages sharing the CI database cannot
-// interfere.
+// applies from zero — so test isolation is deterministic and parallel
+// packages sharing the CI database cannot interfere.
 
 func mustTestDatabaseURL(t *testing.T) string {
 	t.Helper()
@@ -94,7 +93,8 @@ func createPrivateDB(t *testing.T) *pg.Pool {
 }
 
 // sharedPool is the package-wide private DB (one migration run for the
-// whole package). Bootstrap tests use their own fresh DB instead.
+// whole package). Tests needing a pristine admin table use their own
+// fresh DB instead.
 var (
 	sharedPoolOnce sync.Once
 	sharedPool     *pg.Pool
@@ -116,7 +116,7 @@ func createPrivateDBOneshot(t *testing.T) *pg.Pool {
 	return createPrivateDB(t)
 }
 
-// seedAdmin creates an admin directly (no bootstrap gate) and returns
+// seedAdmin creates an admin directly and returns
 // it. Unique username per call.
 func seedAdmin(t *testing.T, dbPool *pg.Pool, password string) *struct {
 	ID       int64
