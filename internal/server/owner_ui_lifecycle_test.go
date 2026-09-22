@@ -201,10 +201,15 @@ func TestStructuredErrorsPropagate(t *testing.T) {
 // hydration happens before any section load.
 func TestBalanceServerFactContract(t *testing.T) {
 	initSrc := ownerAsset(t, "init.js")
-	// /api/account must be awaited before showApp/renderPage in the
-	// restore flow (balance first paint, independent of Store/Credits).
-	acctIdx := strings.Index(initSrc, "await requestJson('/api/account'")
-	shellIdx := strings.Index(initSrc, "shellAuthed();\n    shellClearError();")
+	// /api/account must be awaited before the authed shell reveal in
+	// the restore flow (balance first paint, independent of
+	// Store/Credits). Scoped to restoreSession's own body.
+	restoreFn := regexp.MustCompile(`async function restoreSession\(\) \{[\s\S]*?\n\}`).FindString(initSrc)
+	if restoreFn == "" {
+		t.Fatal("restoreSession not found")
+	}
+	acctIdx := strings.Index(restoreFn, "await requestJson('/api/account'")
+	shellIdx := strings.Index(restoreFn, "shellAuthed();")
 	if acctIdx < 0 || shellIdx < 0 || acctIdx > shellIdx {
 		t.Fatal("restoreSession must load /api/account before revealing the authed shell")
 	}
@@ -261,5 +266,109 @@ func TestShellErrorIsPersistentNotGuest(t *testing.T) {
 	body := renderOwnerShellForTest(t, "en", "overview")
 	if !strings.Contains(body, `id="shellStatus"`) {
 		t.Fatal("owner shell template missing #shellStatus host")
+	}
+}
+
+// ── Repair locks ────────────────────────────────────────────────────
+
+// CreditsEmptyIsUnavailable: packages=[] must map to the REAL
+// unavailable state (emptyState option), not an empty-state render
+// relabeled with unavailable text.
+func TestCreditsEmptyMapsToUnavailable(t *testing.T) {
+	initSrc := ownerAsset(t, "init.js")
+	// The credits runSection call must select unavailable as its
+	// success-empty target state.
+	start := strings.Index(initSrc, "runSection('owner_credits'")
+	if start < 0 {
+		t.Fatal("credits runSection call not found")
+	}
+	credBlock := initSrc[start : start+400]
+	if !strings.Contains(credBlock, "emptyState: 'unavailable'") {
+		t.Fatalf("credits packages=[] must select emptyState unavailable, got: %s", credBlock)
+	}
+	if strings.Contains(credBlock, "emptyKey: 'credits.unavailable'") {
+		t.Fatal("unavailable must not be faked through an empty-state text key")
+	}
+	// Store/Tasks/Logs keep plain empty.
+	block := func(section string) string {
+		i := strings.Index(initSrc, "runSection('"+section+"'")
+		if i < 0 {
+			return ""
+		}
+		return initSrc[i : i+400]
+	}
+	storeBlock := block("store")
+	tasksBlock := block("tasks")
+	logsBlock := block("logs")
+	for name, block := range map[string]string{"store": storeBlock, "tasks": tasksBlock, "logs": logsBlock} {
+		if block == "" {
+			t.Fatalf("%s runSection call not found", name)
+		}
+		if strings.Contains(block, "emptyState") {
+			t.Fatalf("%s success-empty must stay plain empty", name)
+		}
+	}
+}
+
+// LogsReadsUseSharedLifecycle: every page-level logs read (type
+// change, task filter, pagination) goes through the shared
+// runSection/sectionBox lifecycle with persistent Retry; no direct
+// loadLogs+renderLogs path and no toast-only error path remains.
+func TestLogsReadsUseSharedLifecycle(t *testing.T) {
+	logsSrc := ownerAsset(t, "logs.js")
+	if strings.Contains(logsSrc, "showToast") {
+		t.Fatal("logs.js still has a toast-only error path")
+	}
+	// No handler calls loadLogs()/renderLogs() directly anymore.
+	if regexp.MustCompile(`await loadLogs\(\)`).MatchString(logsSrc) {
+		t.Fatal("logs.js still awaits loadLogs() directly instead of the shared lifecycle")
+	}
+	if !strings.Contains(logsSrc, "runSection('logs'") {
+		t.Fatal("logs.js must route reads through runSection")
+	}
+	// All three handlers use logsReload.
+	for _, handler := range []string{"bindLogsTypeButtons", "bindLogsTaskFilter", "bindLogsPagination"} {
+		block := regexp.MustCompile(regexp.QuoteMeta(handler) + `\(\) \{[\s\S]*?\n\}`).FindString(logsSrc)
+		if block == "" {
+			t.Fatalf("logs handler %s not found", handler)
+		}
+		if !strings.Contains(block, "logsReload(") {
+			t.Fatalf("logs handler %s must use logsReload (shared lifecycle)", handler)
+		}
+	}
+	// Pagination failure rolls the page back — no new-page+old-data.
+	if !strings.Contains(logsSrc, "previous.page") {
+		t.Fatal("logs pagination/filter failure must roll state back to the previous page")
+	}
+}
+
+// ActivateSessionAccountFailureSemantics: explicit login/registration
+// account hydration must match restoreSession — guest on auth
+// failure, persistent shellError with Retry otherwise, reveal only
+// after account success. No toast-only bubbling.
+func TestActivateSessionAccountFailureSemantics(t *testing.T) {
+	initSrc := ownerAsset(t, "init.js")
+	fn := regexp.MustCompile(`async function activateSession\(\) \{[\s\S]*?\n\}`).FindString(initSrc)
+	if fn == "" {
+		t.Fatal("activateSession not found")
+	}
+	if !strings.Contains(fn, "isOwnerLoginRequired(error)") {
+		t.Fatal("activateSession must map auth failures to guest")
+	}
+	if !strings.Contains(fn, "shellGuest()") {
+		t.Fatal("activateSession auth failure must call shellGuest")
+	}
+	if !strings.Contains(fn, "shellError(t('js.account_load_failed'), activateSession)") {
+		t.Fatal("activateSession non-auth failure must render persistent shellError with itself as Retry")
+	}
+	if strings.Contains(fn, "showToast") {
+		t.Fatal("activateSession must not bubble account failure as a toast")
+	}
+	// Reveal only after account success: loadAccount before
+	// shellAuthed.
+	acctIdx := strings.Index(fn, "await loadAccount()")
+	authedIdx := strings.Index(fn, "shellAuthed()")
+	if acctIdx < 0 || authedIdx < 0 || acctIdx > authedIdx {
+		t.Fatal("activateSession must succeed /api/account before revealing the authed shell")
 	}
 }

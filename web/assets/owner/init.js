@@ -31,8 +31,14 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
     }
     // Success: empty vs ready is decided by the section's own
     // empty-check — an initial load failure NEVER renders as empty.
+    // Success with an empty result: the section chooses its target
+    // state via emptyState ('empty' or 'unavailable') — Store/Tasks/
+    // Logs 0 rows are empty; Credits packages=[] is unavailable.
     if (options.isEmpty && options.isEmpty()) {
-        box.render('empty', {emptyKey: options.emptyKey});
+        box.render(options.emptyState || 'empty', {
+            emptyKey: options.emptyKey,
+            unavailableKey: options.unavailableKey
+        });
         return;
     }
     box.render('ready');
@@ -69,22 +75,37 @@ function renderPage() {
             await initCreditsReturnStatus();
             await runSection('owner_credits', loadCreditsPackages, '#creditsPackages', () => renderCredits(), {
                 isEmpty: () => !state.credits.packages.length,
-                emptyKey: 'credits.unavailable'
+                emptyState: 'unavailable',
+                unavailableKey: 'credits.unavailable'
             });
             renderCreditsPaymentResult();
         })();
     }
 }
 
-// activateSession is called after a successful explicit login: the
-// account fact is already known to be fresh.
+// activateSession is called after a successful explicit login /
+// registration. Account hydration uses the SAME semantics as
+// restoreSession: auth failure → guest; non-auth failure →
+// persistent shellError with Retry; the authed shell is revealed
+// only after /api/account succeeds. Failures never bubble as a
+// toast-only path.
 async function activateSession() {
-    await loadAccount();
+    try {
+        await loadAccount();
+    } catch (error) {
+        if (isOwnerLoginRequired(error)) {
+            shellGuest();
+            return;
+        }
+        shellError(t('js.account_load_failed'), activateSession);
+        return;
+    }
     if (SECTION === 'login' || SECTION === 'register') {
         window.location.href = `/owner?lang=${encodeURIComponent(window.APP_LOCALE || document.body.dataset.locale || 'en')}`;
         return;
     }
     shellAuthed();
+    shellClearError();
     await renderPage();
 }
 
