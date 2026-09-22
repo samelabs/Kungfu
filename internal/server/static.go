@@ -64,7 +64,14 @@ func serveAssets() http.HandlerFunc {
 		if mime, ok := assetMimeTypes[ext]; ok {
 			w.Header().Set("Content-Type", mime)
 		}
-		w.Header().Set("Cache-Control", "public, max-age=300")
+		// Code assets (JS/CSS) must always revalidate: a stale cached
+		// script must never survive a deployment. Images/fonts are
+		// content-stable and keep a fresh cache window.
+		if ext == "js" || ext == "css" {
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write(data)
 	}

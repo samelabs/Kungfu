@@ -3,22 +3,33 @@ async function requestJson(url, options = {}) {
     const response = await fetch(url, Object.assign({}, options, {headers, credentials: 'same-origin'}));
     const text = await response.text();
     if (!text) {
-        const error = new Error(t('js.empty_response', {status: response.status, url}));
-        error.httpStatus = response.status;
+        const error = apiError('EMPTY_RESPONSE', t('js.empty_response', {status: response.status, url}), response.status);
         throw error;
     }
+    let json;
     try {
-        const json = JSON.parse(text);
-        if (json && typeof json === 'object') {
-            Object.defineProperty(json, '_httpStatus', {value: response.status});
-        }
-        return json;
+        json = JSON.parse(text);
     } catch (error) {
         const preview = text.slice(0, 200);
-        const parseError = new Error(t('js.invalid_json', {status: response.status, url, preview}));
-        parseError.httpStatus = response.status;
-        throw parseError;
+        throw apiError('INVALID_JSON', t('js.invalid_json', {status: response.status, url, preview}), response.status);
     }
+    if (json && typeof json === 'object') {
+        Object.defineProperty(json, '_httpStatus', {value: response.status});
+    }
+    return json;
+}
+
+// apiErrorFrom converts a server error envelope ({success:false,
+// error:{code,message,details}}) into a structured ApiError carrying
+// the machine code and HTTP status — so lifecycle layers branch on
+// error.code, never on message strings.
+function apiErrorFrom(json, fallbackMessageKey) {
+    const env = json && typeof json === 'object' ? json : {};
+    const err = env.error && typeof env.error === 'object' ? env.error : env;
+    const code = String(err.code || env.code || '');
+    const message = err.message || t(fallbackMessageKey);
+    const httpStatus = (env._httpStatus || env.httpStatus || 0);
+    return apiError(code, message, httpStatus, err.details || null);
 }
 
 // loadOwnerKey fetches MASKED key metadata only — the full current
@@ -26,20 +37,20 @@ async function requestJson(url, options = {}) {
 // repopulate a raw credential.
 async function loadOwnerKey() {
     const json = await requestJson('/api/key', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('js.key_load_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'js.key_load_failed');
     state.keyMasked = json.data.key_masked || '';
 }
 
 async function loadAccount() {
     const json = await requestJson('/api/account', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('js.account_load_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'js.account_load_failed');
     state.account = json.data;
     state.name = json.data.bot_name || state.name;
 }
 
 async function loadTasks() {
     const json = await requestJson('/api/owner/tasks', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('js.task_load_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'js.task_load_failed');
     state.tasks = json.data.tasks || [];
 }
 
@@ -53,7 +64,7 @@ async function loadLogs() {
         params.set('task_code', state.logs.taskCode);
     }
     const json = await requestJson(`/api/owner/logs?${params.toString()}`, {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('js.log_load_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'js.log_load_failed');
 
     state.logs.items = json.data.items || [];
     state.logs.total = Number(json.data.pagination?.total || 0);

@@ -28,12 +28,11 @@ function renderCredits() {
         balanceEl.textContent = String(state.account.balance);
     }
     const pkgs = (state.credits && state.credits.packages) || [];
-    if (!state.credits || !state.credits.loaded) {
-        wrap.innerHTML = `<div class="muted">${escapeHtml(t('credits.loading'))}</div>`;
-        return;
-    }
+    // Loading/unavailable/error states are owned by the shared
+    // section lifecycle (sectionBox). The renderer only paints the
+    // ready state — a non-empty package list. PAYMENT_NOT_CONFIGURED
+    // and packages=[] both map to unavailable upstream.
     if (!pkgs.length) {
-        wrap.innerHTML = `<div class="muted">${escapeHtml(t('credits.unavailable'))}</div>`;
         return;
     }
     wrap.innerHTML = pkgs.map((p) => `

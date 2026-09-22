@@ -47,8 +47,10 @@ function renderLogs() {
         }
     }
 
+    // Loading/empty/error states are owned by the shared section
+    // lifecycle (sectionBox). The renderer only paints ready tables;
+    // an initial load error never renders as "no data".
     if (!state.logs.items.length) {
-        wrap.innerHTML = `<div class="logs-empty">${escapeHtml(t('logs.empty'))}</div>`;
         return;
     }
 

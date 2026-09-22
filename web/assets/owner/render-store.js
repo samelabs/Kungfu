@@ -19,9 +19,10 @@ function renderStore() {
 
     const wrap = qs('#storeProducts');
     if (wrap) {
-        if (!state.store.products.length) {
-            wrap.innerHTML = '<div class="muted">' + escapeHtml(t('store.empty')) + '</div>';
-        } else {
+        // Loading/empty/unavailable/error states are owned by the
+        // shared section lifecycle (sectionBox). The renderer only
+        // paints the ready state — a non-empty product list.
+        if (state.store.products.length) {
             wrap.innerHTML = state.store.products.map((p) => `
                 <div class="store-product" data-product-code="${escapeHtml(p.code)}">
                     <div class="store-product-body">

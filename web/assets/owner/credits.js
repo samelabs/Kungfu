@@ -26,7 +26,7 @@ function creditsReset() {
 
 async function loadCreditsPackages() {
     const json = await requestJson('/api/owner/payments/packages', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('credits.packages_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'credits.packages_failed');
     state.credits.packages = (json.data && json.data.packages) || [];
     state.credits.loaded = true;
 }
@@ -44,7 +44,7 @@ async function buyPackage(code) {
             body: JSON.stringify({package: code})
         });
         if (!json.success || !json.data || !json.data.checkout_url) {
-            throw new Error(noticeText((json && json.error) || t('credits.checkout_failed')));
+            throw apiErrorFrom(json, 'credits.checkout_failed');
         }
         // Persist this payment's code before leaving: the return visit
         // resolves the payment status from it.

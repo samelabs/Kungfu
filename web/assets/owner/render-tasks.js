@@ -7,8 +7,10 @@
 function renderTasks() {
     const list = qs('#taskList');
     if (!list) return;
+    // Loading/empty/error states are owned by the shared section
+    // lifecycle (sectionBox). The renderer only paints the ready
+    // state — a non-empty task list.
     if (!state.tasks.length) {
-        list.innerHTML = `<p class="muted">${escapeHtml(t('tasks.empty'))}</p>`;
         return;
     }
     list.innerHTML = state.tasks.map((task) => `

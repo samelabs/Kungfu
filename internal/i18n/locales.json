@@ -230,7 +230,13 @@
         "log_load_failed": "Log load failed",
         "owner_session_failed": "Owner session check failed",
         "status_line": "Status: {{status}}",
-        "owner_key_hidden": "Owner key is hidden until loaded."
+        "owner_key_hidden": "Owner key is hidden until loaded.",
+        "state_loading": "Loading…",
+        "state_empty": "No data yet.",
+        "state_logs_empty": "No entries found for the current filter.",
+        "state_unavailable": "This feature is currently unavailable.",
+        "state_error": "Something went wrong while loading.",
+        "state_retry": "Retry"
       },
       "status": {
         "active": "Active",
@@ -617,7 +623,13 @@
         "log_load_failed": "加载日志失败",
         "owner_session_failed": "检查 Owner 会话失败",
         "status_line": "状态：{{status}}",
-        "owner_key_hidden": "Owner 密钥在加载完成前不会显示。"
+        "owner_key_hidden": "Owner 密钥在加载完成前不会显示。",
+        "state_loading": "正在加载…",
+        "state_empty": "暂无数据。",
+        "state_logs_empty": "当前筛选条件下暂无记录。",
+        "state_unavailable": "该功能当前不可用。",
+        "state_error": "加载时出现问题。",
+        "state_retry": "重试"
       },
       "status": {
         "active": "活跃",
@@ -1004,7 +1016,13 @@
         "log_load_failed": "ログの読み込みに失敗しました",
         "owner_session_failed": "owner セッション確認に失敗しました",
         "status_line": "ステータス: {{status}}",
-        "owner_key_hidden": "Owner キーは読み込み完了まで表示されません。"
+        "owner_key_hidden": "Owner キーは読み込み完了まで表示されません。",
+        "state_loading": "読み込み中…",
+        "state_empty": "データはまだありません。",
+        "state_logs_empty": "現在のフィルターに一致する記録はありません。",
+        "state_unavailable": "この機能は現在利用できません。",
+        "state_error": "読み込み中に問題が発生しました。",
+        "state_retry": "再試行"
       },
       "status": {
         "active": "有効",
@@ -1391,7 +1409,13 @@
         "log_load_failed": "로그 로드 실패",
         "owner_session_failed": "오너 세션 확인 실패",
         "status_line": "상태: {{status}}",
-        "owner_key_hidden": "오너 키는 로드되기 전까지 숨김 처리됩니다."
+        "owner_key_hidden": "오너 키는 로드되기 전까지 숨김 처리됩니다.",
+        "state_loading": "불러오는 중…",
+        "state_empty": "아직 데이터가 없습니다.",
+        "state_logs_empty": "현재 필터에 해당하는 기록이 없습니다.",
+        "state_unavailable": "이 기능은 현재 이용할 수 없습니다.",
+        "state_error": "불러오는 중 문제가 발생했습니다.",
+        "state_retry": "다시 시도"
       },
       "status": {
         "active": "활성",
@@ -1778,7 +1802,13 @@
         "log_load_failed": "Error al cargar registros",
         "owner_session_failed": "Error al verificar sesión de owner",
         "status_line": "Estado: {{status}}",
-        "owner_key_hidden": "La clave de owner permanece oculta hasta cargarse."
+        "owner_key_hidden": "La clave de owner permanece oculta hasta cargarse.",
+        "state_loading": "Cargando…",
+        "state_empty": "Aún no hay datos.",
+        "state_logs_empty": "No se encontraron entradas para el filtro actual.",
+        "state_unavailable": "Esta función no está disponible actualmente.",
+        "state_error": "Ocurrió un problema al cargar.",
+        "state_retry": "Reintentar"
       },
       "status": {
         "active": "Activa",

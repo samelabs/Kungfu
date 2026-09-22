@@ -275,8 +275,8 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="stylesheet" href="/assets/site.css?v=5">
-    <link rel="stylesheet" href="/assets/owner.css?v=5">
+    <link rel="stylesheet" href="/assets/site.css">
+    <link rel="stylesheet" href="/assets/owner.css">
 </head>
 <body class="booting guest" data-section="` + data.Section + `" data-locale="` + data.Locale + `">
 <div class="shell">
@@ -290,26 +290,27 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
         </div>
     </header>
     ` + viewHTML + `
-    <div class="app-only">` + navHTML + sectionHTML + `</div>
+    <div class="app-only"><div id="shellStatus"></div>` + navHTML + sectionHTML + `</div>
     ` + siteFooter(data.Locale, langOpts, "owner-lang-switch") + `
 </div>
 <script>
 window.APP_LOCALE = "` + data.Locale + `";
 window.OWNER_I18N = ` + ownerI18N + `;
 </script>
-<script src="/assets/owner/core.js?v=5"></script>
-<script src="/assets/owner/api.js?v=5"></script>
-<script src="/assets/owner/render-overview.js?v=5"></script>
-<script src="/assets/owner/render-tasks.js?v=5"></script>
-<script src="/assets/owner/render-logs.js?v=5"></script>
-<script src="/assets/owner/auth.js?v=5"></script>
-<script src="/assets/owner/tasks.js?v=5"></script>
-<script src="/assets/owner/logs.js?v=5"></script>
-<script src="/assets/owner/render-store.js?v=5"></script>
-<script src="/assets/owner/store.js?v=5"></script>
-<script src="/assets/owner/render-credits.js?v=5"></script>
-<script src="/assets/owner/credits.js?v=5"></script>
-<script src="/assets/owner/init.js?v=5"></script>
+<script src="/assets/owner/core.js"></script>
+<script src="/assets/owner/lifecycle.js"></script>
+<script src="/assets/owner/api.js"></script>
+<script src="/assets/owner/render-overview.js"></script>
+<script src="/assets/owner/render-tasks.js"></script>
+<script src="/assets/owner/render-logs.js"></script>
+<script src="/assets/owner/auth.js"></script>
+<script src="/assets/owner/tasks.js"></script>
+<script src="/assets/owner/logs.js"></script>
+<script src="/assets/owner/render-store.js"></script>
+<script src="/assets/owner/store.js"></script>
+<script src="/assets/owner/render-credits.js"></script>
+<script src="/assets/owner/credits.js"></script>
+<script src="/assets/owner/init.js"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`

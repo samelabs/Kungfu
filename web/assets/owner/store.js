@@ -1,6 +1,6 @@
 async function loadStoreProducts() {
     const json = await requestJson('/api/owner/store/products', {method: 'GET'});
-    if (!json.success) throw new Error(noticeText(json.error || t('store.load_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'store.load_failed');
     state.store.products = json.data.products || [];
 }
 
@@ -20,7 +20,7 @@ async function redeemStoreProduct(productCode) {
         method: 'POST',
         body: JSON.stringify({product_code: productCode, request_key: requestKey})
     });
-    if (!json.success) throw new Error(noticeText(json.error || t('store.redeem_failed')));
+    if (!json.success) throw apiErrorFrom(json, 'store.redeem_failed');
     state.store.lastRedemption = json.data.redemption || null;
     return state.store.lastRedemption;
 }

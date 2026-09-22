@@ -1,4 +1,21 @@
-const SW_VERSION = 'kungfu-pwa-v3';
+// sw.js — Kungfu.md service worker.
+//
+// Cache policy (deployment correctness first):
+//   - scripts & styles: NETWORK-FIRST. The network response always
+//     wins when reachable and updates the cache; the cached copy is
+//     only a fallback for offline. A deployed JS/CSS change is picked
+//     up by a plain online refresh — no manual cache clearing.
+//   - images & fonts: cache-first (content-stable assets).
+//   - navigations: network with offline fallback.
+//   - /api/*: never handled here.
+//   - /sw.js itself: served no-cache/no-store by the server.
+//
+// Version history:
+//   v3 — cache-first scripts/styles (stale-code bug), migrated away.
+//   v4 — network-first scripts/styles; old v3 caches deleted on
+//        activate so they cannot keep polluting pages.
+
+const SW_VERSION = 'kungfu-pwa-v4';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
 
@@ -31,6 +48,9 @@ self.addEventListener('activate', (event) => {
     const names = await caches.keys();
     await Promise.all(
       names
+        // Delete every cache not of the current version — including
+        // the old kungfu-pwa-v3 runtime cache that pinned stale
+        // JS/CSS.
         .filter((name) => !name.startsWith(SW_VERSION))
         .map((name) => caches.delete(name))
     );
@@ -62,7 +82,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (['style', 'script', 'image', 'font'].includes(event.request.destination)) {
+  const dest = event.request.destination;
+
+  if (dest === 'script' || dest === 'style') {
+    // NETWORK-FIRST: never serve stale code while online.
+    event.respondWith((async () => {
+      const cache = await caches.open(RUNTIME_CACHE);
+      try {
+        const network = await fetch(event.request);
+        if (network && network.ok) {
+          cache.put(event.request, network.clone());
+        }
+        return network;
+      } catch (error) {
+        const cached = await cache.match(event.request);
+        if (cached) return cached;
+        throw error;
+      }
+    })());
+    return;
+  }
+
+  if (dest === 'image' || dest === 'font') {
+    // Content-stable assets keep the existing cache-first policy.
     event.respondWith((async () => {
       const cache = await caches.open(RUNTIME_CACHE);
       const cached = await cache.match(event.request);
