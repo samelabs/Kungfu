@@ -63,7 +63,8 @@ function applyPermissionVisibility() {
         'sessions': ['admin.sessions.manage'],
         'audit': ['admin.audit.read'],
         'store_products': ['store.products.read'],
-        'store_redemptions': ['store.redemptions.read']
+        'store_redemptions': ['store.redemptions.read'],
+        'accounts': ['accounts.read']
     };
     document.querySelectorAll('#adminNav [data-admin-nav]').forEach(link => {
         const key = link.dataset.adminNav;

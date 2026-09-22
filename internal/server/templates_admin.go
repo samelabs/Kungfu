@@ -63,6 +63,7 @@ func (s *Server) renderAdmin(w http.ResponseWriter, data *tmplData) {
 <script src="/assets/admin/sessions.js?v=1"></script>
 <script src="/assets/admin/audit.js?v=1"></script>
 <script src="/assets/admin/store.js?v=1"></script>
+<script src="/assets/admin/accounts.js?v=1"></script>
 <script src="/assets/admin/init.js?v=1"></script>
 </body>
 </html>`
@@ -80,6 +81,7 @@ func adminNavHTML(data *tmplData) string {
     <a class="btn" data-admin-nav="audit" href="/admin/audit">Audit</a>
     <a class="btn" data-admin-nav="store_products" href="/admin/store/products">Store Products</a>
     <a class="btn" data-admin-nav="store_redemptions" href="/admin/store/redemptions">Store Redemptions</a>
+    <a class="btn" data-admin-nav="accounts" href="/admin/accounts">Accounts</a>
     <a class="btn" data-admin-nav="account" href="/admin/account">Account</a>
     <button class="btn danger" id="adminLogoutBtn" type="button">Logout</button>
 </nav>`
@@ -103,6 +105,8 @@ func adminSectionHTML(data *tmplData) string {
 		return adminStoreProductsHTML()
 	case "store_redemptions":
 		return adminStoreRedemptionsHTML()
+	case "accounts":
+		return adminAccountsHTML()
 	default: // dashboard
 		return adminDashboardHTML()
 	}
@@ -126,6 +130,29 @@ func adminDashboardHTML() string {
 	return `<section class="admin-section" id="adminDashboardSection">
     <h2>Dashboard</h2>
     <div id="adminDashboardCard" class="admin-card"></div>
+</section>`
+}
+
+func adminAccountsHTML() string {
+	return `<section class="admin-section" id="adminAccountsSection">
+    <h2>Platform Accounts</h2>
+    <p class="admin-note">Agent / Owner platform accounts (access suspension only — never credential rotation, never economic changes).</p>
+    <form id="adminAccountFilters" class="admin-filters" autocomplete="off">
+        <select id="accountStatusFilter">
+            <option value="all">status: all</option>
+            <option value="active">active</option>
+            <option value="disabled">disabled</option>
+        </select>
+        <input id="accountQFilter" type="text" placeholder="search bot name">
+        <button class="btn" type="submit">Filter</button>
+    </form>
+    <div id="adminAccountsCard" class="admin-card"></div>
+    <div class="admin-pager">
+        <button class="btn" id="accountsPrev" type="button">← Prev</button>
+        <span id="accountsPageInfo"></span>
+        <button class="btn" id="accountsNext" type="button">Next →</button>
+    </div>
+    <div id="adminAccountDetailCard" class="admin-card" hidden></div>
 </section>`
 }
 

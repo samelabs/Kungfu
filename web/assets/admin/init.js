@@ -91,6 +91,11 @@ async function renderPage() {
                 await loadStoreRedemptions(); renderStoreRedemptions();
             }
         }
+        if (SECTION === 'accounts') {
+            if (hasPermission('accounts.read')) {
+                await loadAccounts(); renderAccounts();
+            }
+        }
     } catch (err) {
         window.alert(err.message);
     }
@@ -105,6 +110,7 @@ async function renderPage() {
     bindAdminAuditEvents();
     bindStoreProductsEvents();
     bindStoreRedemptionsEvents();
+    bindAdminAccountsEvents();
 
     if (SECTION !== 'login') {
         try {

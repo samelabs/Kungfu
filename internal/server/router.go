@@ -218,6 +218,13 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Post("/api/admin/store/redemptions/{code}/fulfill", s.handleAdminStoreRedemptionFulfill)
 	r.Post("/api/admin/store/redemptions/{code}/cancel", s.handleAdminStoreRedemptionCancel)
 
+	// 011: Platform Account Administration (Admin control plane →
+	// tb_bots accounts; NOT admin accounts, NOT finance authority)
+	r.Get("/api/admin/accounts", s.handleAdminAccountsList)
+	r.Get("/api/admin/accounts/{id}", s.handleAdminAccountGet)
+	r.Post("/api/admin/accounts/{id}/disable", s.handleAdminAccountDisable)
+	r.Post("/api/admin/accounts/{id}/enable", s.handleAdminAccountEnable)
+
 	// B1.2: Admin Workspace HTML routes
 	r.Get("/admin", s.handleAdminPage("dashboard"))
 	r.Get("/admin/login", s.handleAdminPage("login"))
@@ -228,6 +235,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/admin/audit", s.handleAdminPage("audit"))
 	r.Get("/admin/store/products", s.handleAdminPage("store_products"))
 	r.Get("/admin/store/redemptions", s.handleAdminPage("store_redemptions"))
+	r.Get("/admin/accounts", s.handleAdminPage("accounts"))
 
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
