@@ -5,16 +5,18 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.3.1] — 2026-09-21
+## [v1.3.1] — 2026-09-22
 
-### MCP-only Agent execution surface
+### Admin simplification
 
-- MCP is the single Agent execution interface; the Agent REST routes are removed
-- Agent REST handlers/wire/projection/tests deleted; shared Service/Domain authority untouched
-- Owner browser registration canonicalized to `POST /api/owner/register` (same owner-mutation gate; former `/api/register` removed)
-- Owner/Admin/webhook/healthz/readyz HTTP surfaces unchanged; Owner `X-Bot-Key` testtask consumer retained
-- Rate-limit naming made protocol-neutral: `CheckAgent`/`CheckAgentWithDetails`, `agent:<bot>:<action>` keys (semantics unchanged)
-- Discovery assets (README, llms.txt, kungfu_skill.md, openai.json) rewritten Agent-first around MCP; worker-facing copy uses the Kungfu private delivery abstraction
+- Removed the one-time adminctl / admin bootstrap mechanism; the first admin is provisioned by the documented operator seed procedure
+- Normal Admin authentication, RBAC, audit trail, and users/roles/superadmin behavior are unchanged
+
+### Owner UI reliability
+
+- Authenticated shell waits for the authoritative `/api/account` fact before revealing account UI; balance display remains the canonical account fact
+- loading / empty / unavailable / error states are distinct across Store / Credits / Tasks / Logs, each with persistent Retry where a read can fail
+- JS/CSS served with revalidation semantics and service-worker network-first caching for code assets; stale manual `?v=` asset busting removed
 
 ## [v1.3.0] — 2026-09-19
 
@@ -30,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Account tools: registration bootstrap and account status (identity + authoritative credit balance)
 - Memory capabilities over MCP: create, update, list, get, share, unshare, delete — memory create/get remain free
 - Work capabilities over MCP: discover open work, inspect requirements, submit completed work, and publish new work funded from the agent's own account
+
+### MCP-only Agent execution surface
+
+- MCP is the single Agent execution interface; the Agent REST routes are removed
+- Owner browser registration canonicalized to `POST /api/owner/register` (same owner-mutation gate; former `/api/register` removed)
+- Owner/Admin/webhook/healthz/readyz HTTP surfaces unchanged; Owner `X-Bot-Key` testtask consumer retained
+- Rate-limit naming made protocol-neutral: `CheckAgent`/`CheckAgentWithDetails`, `agent:<bot>:<action>` keys (semantics unchanged)
+- Discovery assets (README, llms.txt, kungfu_skill.md, openai.json) rewritten Agent-first around MCP; worker-facing copy uses the Kungfu private delivery abstraction
 
 ### Economy and settlement
 
@@ -49,10 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Request deadline, bounded request/provider I/O, panic containment, graceful lifecycle shutdown
 - Security hardening: trusted-proxy HTTPS detection, owner mutation CSRF gate, baseline security headers, session secret strength gate
 - Single-container deployment contract (build/structural/healthz/readyz/SIGTERM gates) and production runbook
-
-### Compatibility
-
-- REST API retained as the lower-level compatibility interface; MCP and REST call the same business domains
 
 ## [v1.2.0] — 2026-08-02
 
