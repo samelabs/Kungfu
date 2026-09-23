@@ -1,0 +1,29 @@
+{{define "content"}}
+<div class="sl-grid main-side">
+<div>
+<form class="sl-filters" method="get">
+  <input name="q" value="{{.Q "q"}}" placeholder="Code or title">
+  <select name="status">{{range $s := (list "all" "active" "inactive")}}<option value="{{$s}}" {{if eq ($.Q "status") $s}}selected{{end}}>{{$s}}</option>{{end}}</select>
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.Items}}<table class="sl-table"><thead><tr><th>Product</th><th class="r">Price</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+{{range .Data.Items}}<tr><td><a href="/samelabs/store/products/{{.Code}}">{{.Title}}</a><div class="sl-muted mono">{{.Code}}</div></td><td class="r">{{num .CreditsPrice}} cr</td><td>{{template "badge" .Status}}</td><td>{{time .UpdatedAt}}</td></tr>{{end}}
+</tbody></table>{{else}}{{template "empty" "No products yet."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.Total .Data.Page .Data.Size)}}
+</div>
+{{if .Can "store.products.manage"}}
+<section class="sl-card">
+  <h2>New product</h2>
+  <form class="sl-form" method="post" action="/samelabs/store/products">
+    {{template "csrf" .CSRF}}
+    <label>Title<input name="title" maxlength="128" required></label>
+    <label>Description<textarea name="description" maxlength="500" rows="3"></textarea></label>
+    <label>Price in credits<input name="credits_price" inputmode="numeric" pattern="[0-9]+" required></label>
+    <button class="sl-btn primary" type="submit">Create product</button>
+  </form>
+</section>
+{{end}}
+</div>
+{{end}}

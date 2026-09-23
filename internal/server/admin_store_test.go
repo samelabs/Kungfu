@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -287,24 +285,6 @@ func TestB2StorePlanesIsolated(t *testing.T) {
 	e.router.ServeHTTP(rec2, req2)
 	if rec2.Code != 401 {
 		t.Fatalf("kf_owner reached admin store: %d", rec2.Code)
-	}
-}
-
-func TestB2StoreHTMLAndAssets(t *testing.T) {
-	e := newB2HTTPEnv(t)
-	for _, path := range []string{"/samelabs/store/products", "/samelabs/store/redemptions"} {
-		req := httptest.NewRequest("GET", path, nil)
-		rec := httptest.NewRecorder()
-		e.router.ServeHTTP(rec, req)
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Admin Workspace") {
-			t.Fatalf("%s = %d", path, rec.Code)
-		}
-	}
-	req := httptest.NewRequest("GET", "/assets/admin/store.js", nil)
-	rec := httptest.NewRecorder()
-	e.router.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("store.js = %d", rec.Code)
 	}
 }
 
@@ -696,70 +676,6 @@ func jsonPath(t *testing.T, rec *httptest.ResponseRecorder) string {
 // construction, the GET endpoint wiring, and the field coverage of the
 // detail renderers — not bare "detail" string presence.
 // ===========================================================================
-
-func readAdminAsset(t *testing.T, rel string) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "web", "assets", "admin", rel))
-	if err != nil {
-		t.Fatalf("read %s: %v", rel, err)
-	}
-	return string(b)
-}
-
-func TestB2RepairProductDetailUIContract(t *testing.T) {
-	src := readAdminAsset(t, "store.js")
-
-	// 1) rendered Detail action exists in the products actions array
-	if !strings.Contains(src, `data-pact="detail" data-code="${escapeHtml(p.code)}">Detail</button>`) {
-		t.Fatal("products renderer must construct a data-pact=detail Detail button per row")
-	}
-	// 2) the product detail action must be OUTSIDE the canManage gate
-	// (read permission only) — locate the actions block and check order
-	detailIdx := strings.Index(src, `data-pact="detail"`)
-	editIdx := strings.Index(src, "if (canManage) {")
-	if detailIdx < 0 || editIdx < 0 || detailIdx > editIdx {
-		t.Fatal("product Detail button must be rendered before the canManage gate (read-only)")
-	}
-	// 3) click path calls the GET detail endpoint
-	if !strings.Contains(src, "adminGet(`/api/samelabs/store/products/${code}`)") {
-		t.Fatal("product detail click path must call GET /api/samelabs/store/products/{code}")
-	}
-	// 4) renderer covers all required fields
-	renderer := src[strings.Index(src, "function showStoreProductDetail"):strings.Index(src, "function showStoreRedemptionDetail")]
-	for _, field := range []string{"p.code", "p.title", "p.description", "p.credits_price", "p.status", "p.created_at", "p.updated_at"} {
-		if !strings.Contains(renderer, field) {
-			t.Fatalf("product detail renderer missing field %s", field)
-		}
-	}
-}
-
-func TestB2RepairRedemptionDetailUIContract(t *testing.T) {
-	src := readAdminAsset(t, "store.js")
-
-	// 1) rendered Detail action exists per redemption row
-	if !strings.Contains(src, `data-ract="detail" data-code="${escapeHtml(r.code)}">Detail</button>`) {
-		t.Fatal("redemptions renderer must construct a data-ract=detail Detail button per row")
-	}
-	// 2) the Detail button is prepended OUTSIDE the canManage-only ops
-	if !strings.Contains(src, "const actions = [`<button class=\"btn small\" data-ract=\"detail\"") {
-		t.Fatal("redemption Detail button must not be gated behind manage permission")
-	}
-	// 3) click path calls the GET detail endpoint
-	if !strings.Contains(src, "adminGet(`/api/samelabs/store/redemptions/${code}`)") {
-		t.Fatal("redemption detail click path must call GET /api/samelabs/store/redemptions/{code}")
-	}
-	// 4) renderer covers ALL required operational fields
-	renderer := src[strings.Index(src, "function showStoreRedemptionDetail"):]
-	for _, field := range []string{
-		"r.code", "r.bot_id", "r.product_id", "r.product_title", "r.credits_cost",
-		"r.request_key", "r.status", "r.review_note", "r.fulfillment_note",
-		"r.created_at", "r.updated_at", "r.reviewed_at", "r.fulfilled_at", "r.cancelled_at",
-	} {
-		if !strings.Contains(renderer, field) {
-			t.Fatalf("redemption detail renderer missing field %s", field)
-		}
-	}
-}
 
 // ===========================================================================
 // B2 repair-2: Finding 2 — >256KB body fails closed; Finding 3 —

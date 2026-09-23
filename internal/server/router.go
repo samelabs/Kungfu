@@ -237,6 +237,10 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Post("/api/samelabs/store/redemptions/{code}/fulfill", s.handleAdminStoreRedemptionFulfill)
 	r.Post("/api/samelabs/store/redemptions/{code}/cancel", s.handleAdminStoreRedemptionCancel)
 
+	// 013: payment provider settings (Creem), secrets sealed at rest
+	r.Get("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsGet)
+	r.Put("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsPut)
+
 	// 011: Platform Account Administration (Admin control plane →
 	// tb_bots accounts; NOT admin accounts, NOT finance authority)
 	r.Get("/api/samelabs/accounts", s.handleAdminAccountsList)
@@ -246,8 +250,6 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 
 	// 012: Finance Admin — READ-ONLY control plane (no POST/PATCH/
 	// DELETE finance routes exist anywhere).
-	r.Get("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsGet)
-	r.Put("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsPut)
 	r.Get("/api/samelabs/finance/summary", s.handleAdminFinanceSummary)
 	r.Get("/api/samelabs/finance/payments", s.handleAdminFinancePayments)
 	r.Get("/api/samelabs/finance/payments/{code}", s.handleAdminFinancePaymentDetail)
@@ -255,17 +257,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/api/samelabs/finance/ledger", s.handleAdminFinanceLedger)
 
 	// B1.2: Admin Workspace HTML routes
-	r.Get("/samelabs", s.handleAdminPage("dashboard"))
-	r.Get("/samelabs/login", s.handleAdminPage("login"))
-	r.Get("/samelabs/account", s.handleAdminPage("account"))
-	r.Get("/samelabs/users", s.handleAdminPage("users"))
-	r.Get("/samelabs/roles", s.handleAdminPage("roles"))
-	r.Get("/samelabs/sessions", s.handleAdminPage("sessions"))
-	r.Get("/samelabs/audit", s.handleAdminPage("audit"))
-	r.Get("/samelabs/store/products", s.handleAdminPage("store_products"))
-	r.Get("/samelabs/store/redemptions", s.handleAdminPage("store_redemptions"))
-	r.Get("/samelabs/accounts", s.handleAdminPage("accounts"))
-	r.Get("/samelabs/finance", s.handleAdminPage("finance"))
+	// Platform admin pages (server-rendered)
+	s.registerSamelabs(r)
 
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())

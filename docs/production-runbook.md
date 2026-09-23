@@ -34,6 +34,7 @@ Current release migration set (application order):
 011_admin_account_permissions.sql
 012_admin_finance_permission.sql
 013_payment_settings.sql
+014_admin_operations_permissions.sql
 ```
 
 Rules:

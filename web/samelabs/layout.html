@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · SameLabs console</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32.png">
+<link rel="stylesheet" href="/assets/samelabs.css?v=1">
+<script src="/assets/samelabs.js?v=1" defer></script>
+</head>
+{{if .Principal}}
+<body class="sl-app">
+<div class="sl-shell">
+  <aside class="sl-side">
+    <a class="sl-brand" href="/samelabs"><span class="sl-logo" aria-hidden="true">K</span><span class="sl-brand-text">Kungfu<small>SameLabs console</small></span></a>
+    <nav class="sl-nav" aria-label="Console">
+      <a class="{{if eq .Nav "dashboard"}}on{{end}}" href="/samelabs">Dashboard</a>
+      {{if or (.Can "tasks.read") (.Can "memories.read") (.Can "accounts.read")}}<div class="sl-group">Operations</div>{{end}}
+      {{if .Can "tasks.read"}}<a class="{{if eq .Nav "tasks"}}on{{end}}" href="/samelabs/tasks">Tasks</a>{{end}}
+      {{if .Can "memories.read"}}<a class="{{if eq .Nav "memories"}}on{{end}}" href="/samelabs/memories">Memories</a>{{end}}
+      {{if .Can "accounts.read"}}<a class="{{if eq .Nav "accounts"}}on{{end}}" href="/samelabs/accounts">Accounts</a>{{end}}
+      {{if or (.Can "store.redemptions.read") (.Can "store.products.read") (.Can "finance.read")}}<div class="sl-group">Commerce</div>{{end}}
+      {{if .Can "store.redemptions.read"}}<a class="{{if eq .Nav "redemptions"}}on{{end}}" href="/samelabs/store/redemptions">Redemptions</a>{{end}}
+      {{if .Can "store.products.read"}}<a class="{{if eq .Nav "products"}}on{{end}}" href="/samelabs/store/products">Store products</a>{{end}}
+      {{if .Can "finance.read"}}<a class="{{if eq .Nav "finance"}}on{{end}}" href="/samelabs/finance">Finance</a>{{end}}
+      {{if or (.Can "settings.payment.manage") (.Can "admin.users.read") (.Can "admin.roles.read") (.Can "admin.sessions.manage") (.Can "admin.audit.read")}}<div class="sl-group">Platform</div>{{end}}
+      {{if .Can "settings.payment.manage"}}<a class="{{if eq .Nav "payment"}}on{{end}}" href="/samelabs/settings/payment">Payment settings</a>{{end}}
+      {{if .Can "admin.users.read"}}<a class="{{if eq .Nav "admins"}}on{{end}}" href="/samelabs/admins">Admins</a>{{end}}
+      {{if .Can "admin.roles.read"}}<a class="{{if eq .Nav "roles"}}on{{end}}" href="/samelabs/roles">Roles</a>{{end}}
+      {{if .Can "admin.sessions.manage"}}<a class="{{if eq .Nav "sessions"}}on{{end}}" href="/samelabs/sessions">Sessions</a>{{end}}
+      {{if .Can "admin.audit.read"}}<a class="{{if eq .Nav "audit"}}on{{end}}" href="/samelabs/audit">Audit log</a>{{end}}
+    </nav>
+    <div class="sl-me">
+      <a class="sl-me-name {{if eq .Nav "account"}}on{{end}}" href="/samelabs/account">{{.Principal.Admin.DisplayName}}<small>@{{.Principal.Admin.Username}}</small></a>
+      <form method="post" action="/samelabs/logout">{{template "csrf" .CSRF}}<button class="sl-link" type="submit">Sign out</button></form>
+    </div>
+  </aside>
+  <main class="sl-main">
+    <header class="sl-top">
+      <div>{{template "crumbs" .}}<h1>{{.Title}}</h1></div>
+      <div class="sl-top-actions">{{template "actions" .}}</div>
+    </header>
+    {{with .Flash}}<div class="sl-flash {{.Kind}}" role="{{if eq .Kind "error"}}alert{{else}}status{{end}}">{{.Text}}</div>{{end}}
+    {{template "content" .}}
+  </main>
+</div>
+</body>
+{{else}}
+<body class="sl-auth">
+<main class="sl-auth-main">{{template "content" .}}</main>
+</body>
+{{end}}
+</html>
+{{define "csrf"}}<input type="hidden" name="_csrf" value="{{.}}">{{end}}
+{{define "badge"}}<span class="sl-badge s-{{.}}">{{.}}</span>{{end}}
+{{define "pager"}}{{if gt .Pages 1}}<nav class="sl-pager" aria-label="Pages">{{if .PrevURL}}<a class="sl-btn" href="{{.PrevURL}}">← Previous</a>{{else}}<span class="sl-btn disabled">← Previous</span>{{end}}<span>Page {{.Page}} of {{.Pages}} · {{num .Total}} total</span>{{if .NextURL}}<a class="sl-btn" href="{{.NextURL}}">Next →</a>{{else}}<span class="sl-btn disabled">Next →</span>{{end}}</nav>{{else}}<p class="sl-count">{{num .Total}} total</p>{{end}}{{end}}
+{{define "empty"}}<div class="sl-empty">{{.}}</div>{{end}}
+{{define "crumbs"}}{{end}}
+{{define "actions"}}{{end}}
+{{define "content"}}{{end}}

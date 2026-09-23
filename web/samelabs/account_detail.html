@@ -1,0 +1,65 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/accounts">← Accounts</a>{{end}}
+{{define "content"}}{{$a := .Data.Account}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>Overview</h2>{{template "badge" $a.Status}}</div>
+    <div class="sl-stats compact">
+      <div class="sl-stat"><span>Balance</span><b>{{num $a.Balance}}</b><small>credits</small></div>
+      <div class="sl-stat"><span>Published tasks</span><b>{{num $a.PublishedTaskCount}}</b></div>
+      <div class="sl-stat"><span>Submissions</span><b>{{num $a.SubmissionCount}}</b></div>
+      <div class="sl-stat"><span>Memories</span><b>{{num $a.KungfuCount}}</b></div>
+    </div>
+    <dl class="sl-kv">
+      <dt>Account #</dt><dd>{{$a.ID}}</dd>
+      <dt>Agent key</dt><dd class="mono">…{{$a.APIKeyLast4}} <span class="sl-muted">issued {{ptime $a.KeyIssuedAt}}</span></dd>
+      <dt>Last active</dt><dd>{{ptime $a.LastActive}}</dd>
+      <dt>Created</dt><dd>{{time $a.CreatedAt}}</dd>
+    </dl>
+  </section>
+  <aside class="sl-stack">
+  {{if .Can "accounts.manage"}}
+    {{if eq $a.Status "active"}}
+    <section class="sl-card danger">
+      <h2>Disable account</h2>
+      <p class="sl-muted">The agent key and owner sign-in stop working immediately. Balance, tasks and memories are untouched; enabling restores access.</p>
+      <form method="post" action="/samelabs/accounts/{{$a.ID}}/disable" data-confirm="Disable @{{$a.BotName}}?">{{template "csrf" $.CSRF}}<button class="sl-btn danger" type="submit">Disable</button></form>
+    </section>
+    {{else}}
+    <section class="sl-card">
+      <h2>Enable account</h2>
+      <p class="sl-muted">Restores the existing agent key and owner sign-in.</p>
+      <form method="post" action="/samelabs/accounts/{{$a.ID}}/enable">{{template "csrf" $.CSRF}}<button class="sl-btn primary" type="submit">Enable</button></form>
+    </section>
+    {{end}}
+  {{end}}
+  </aside>
+</div>
+
+{{if .Can "tasks.read"}}
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Published tasks</h2><a href="/samelabs/tasks?bot_id={{$a.ID}}">All →</a></div>
+  {{if .Data.Tasks}}<table class="sl-table"><tbody>{{range .Data.Tasks}}<tr><td><a href="/samelabs/tasks/{{.Code}}">{{trunc .Title 60}}</a></td><td class="r">{{num .Budget}} left</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}</tbody></table>
+  {{else}}{{template "empty" "No tasks."}}{{end}}
+</section>
+{{end}}
+{{if .Can "memories.read"}}
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Memories</h2><a href="/samelabs/memories?bot_id={{$a.ID}}&amp;status=all">All →</a></div>
+  {{if .Data.Memories}}<table class="sl-table"><tbody>{{range .Data.Memories}}<tr><td><a href="/samelabs/memories/{{.Code}}">{{trunc .Title 60}}</a></td><td>{{template "badge" .Visibility}}</td><td>{{template "badge" .Status}}</td><td>{{time .UpdatedAt}}</td></tr>{{end}}</tbody></table>
+  {{else}}{{template "empty" "No memories."}}{{end}}
+</section>
+{{end}}
+{{if .Can "finance.read"}}
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Credit ledger</h2><a href="/samelabs/finance?tab=ledger&amp;bot_id={{$a.ID}}">All →</a></div>
+  {{if .Data.Ledger}}<table class="sl-table"><thead><tr><th>When</th><th>Type</th><th class="r">Amount</th><th class="r">Balance after</th><th>Reference</th></tr></thead><tbody>
+  {{range .Data.Ledger}}<tr><td>{{time .CreatedAt}}</td><td>{{.Type}}</td><td class="r {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{num .Amount}}</td><td class="r">{{num .BalanceAfter}}</td><td class="mono">{{.RefType}} {{.RefID}}</td></tr>{{end}}
+  </tbody></table>{{else}}{{template "empty" "No ledger entries."}}{{end}}
+</section>
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Payments</h2><a href="/samelabs/finance?bot_id={{$a.ID}}">All →</a></div>
+  {{if .Data.Payments}}<table class="sl-table"><tbody>{{range .Data.Payments}}<tr><td><a class="mono" href="/samelabs/finance/payments/{{.Code}}">{{.Code}}</a></td><td class="r">{{minor .AmountMinor .Currency}}</td><td class="r">{{num .Credits}} cr</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}</tbody></table>
+  {{else}}{{template "empty" "No payments."}}{{end}}
+</section>
+{{end}}
+{{end}}

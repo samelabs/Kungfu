@@ -316,20 +316,11 @@ func Test012FinanceNoLedgerIsExplicitNull(t *testing.T) {
 		t.Fatal("no-ledger must not project PASS")
 	}
 
-	// UI contract: finance.js must express null as N/A — neither PASS
-	// nor FAIL.
-	js, err := os.ReadFile(filepath.Join(repoRootForTest(t), "web", "assets", "admin", "finance.js"))
-	if err != nil {
-		t.Fatalf("read finance.js: %v", err)
-	}
-	jsSrc := string(js)
-	for _, needle := range []string{"N/A", "ledgerFlag"} {
-		if !strings.Contains(jsSrc, needle) {
-			t.Fatalf("finance.js missing %s — no-ledger UI must render N/A", needle)
-		}
-	}
-	if !strings.Contains(jsSrc, "latest_account_ledger_balance_after") {
-		t.Fatal("finance.js no longer consults the no-ledger fact")
+	// The console shows "no ledger rows" as not applicable — neither a
+	// pass nor a failure.
+	page := e.do(t, "GET", "/samelabs/finance/payments/"+f.payCode, "", false)
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "No ledger rows for this account yet") {
+		t.Fatalf("payment page: %d, missing not-applicable ledger check", page.Code)
 	}
 }
 

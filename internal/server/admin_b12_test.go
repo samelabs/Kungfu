@@ -290,50 +290,6 @@ func TestB12AuditExplorerPaginationAndFilters(t *testing.T) {
 	}
 }
 
-func TestB12AdminHTMLRoutesRender(t *testing.T) {
-	e := newB12Env(t)
-	for _, path := range []string{"/samelabs", "/samelabs/login", "/samelabs/account", "/samelabs/users",
-		"/samelabs/roles", "/samelabs/sessions", "/samelabs/audit"} {
-		req := httptest.NewRequest("GET", path, nil)
-		rec := httptest.NewRecorder()
-		e.router.ServeHTTP(rec, req)
-		if rec.Code != 200 {
-			t.Fatalf("%s = %d", path, rec.Code)
-		}
-		if !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
-			t.Fatalf("%s content-type = %s", path, rec.Header().Get("Content-Type"))
-		}
-		if !strings.Contains(rec.Body.String(), "Admin Workspace") {
-			t.Fatalf("%s did not render the admin shell", path)
-		}
-	}
-	// no owner identity references in the admin shell
-	for _, banned := range []string{"kf_owner", "/api/owner/", "OWNER_I18N"} {
-		req := httptest.NewRequest("GET", "/samelabs/users", nil)
-		rec := httptest.NewRecorder()
-		e.router.ServeHTTP(rec, req)
-		if strings.Contains(rec.Body.String(), banned) {
-			t.Fatalf("admin shell references %s", banned)
-		}
-	}
-}
-
-func TestB12AdminAssetsServe(t *testing.T) {
-	e := newB12Env(t)
-	for _, asset := range []string{
-		"/assets/admin/core.js", "/assets/admin/api.js", "/assets/admin/auth.js",
-		"/assets/admin/users.js", "/assets/admin/roles.js", "/assets/admin/sessions.js",
-		"/assets/admin/audit.js", "/assets/admin/init.js", "/assets/admin.css",
-	} {
-		req := httptest.NewRequest("GET", asset, nil)
-		rec := httptest.NewRecorder()
-		e.router.ServeHTTP(rec, req)
-		if rec.Code != 200 {
-			t.Fatalf("%s = %d", asset, rec.Code)
-		}
-	}
-}
-
 func TestB12SelfPasswordChangeClearsCookie(t *testing.T) {
 	e := newB12Env(t)
 	newPass := "rotated-pass-9"

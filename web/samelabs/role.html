@@ -1,0 +1,28 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/roles">← Roles</a>{{end}}
+{{define "content"}}{{$r := .Data.Role.Role}}{{$mine := .Data.Role.Permissions}}{{$manage := and (.Can "admin.roles.manage") (not $r.IsSystem)}}
+<div class="sl-grid two">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>Details</h2>{{template "badge" $r.Status}}</div>
+    {{if $r.IsSystem}}<p class="sl-muted">System role. It cannot be edited.</p>{{end}}
+    {{if $manage}}
+    <form class="sl-form" method="post" action="/samelabs/roles/{{$r.ID}}">{{template "csrf" .CSRF}}
+      <label>Name<input name="name" value="{{$r.Name}}" maxlength="128" required></label>
+      <label>Description<input name="description" value="{{deref $r.Description}}" maxlength="500"></label>
+      <label>Status<select name="status"><option value="active" {{if eq $r.Status "active"}}selected{{end}}>active</option><option value="disabled" {{if eq $r.Status "disabled"}}selected{{end}}>disabled</option></select></label>
+      <button class="sl-btn primary" type="submit">Save</button>
+    </form>
+    {{else}}
+    <dl class="sl-kv"><dt>Code</dt><dd class="mono">{{$r.Code}}</dd><dt>Description</dt><dd>{{deref $r.Description}}</dd></dl>
+    {{end}}
+  </section>
+  <section class="sl-card">
+    <h2>Permissions</h2>
+    <form class="sl-form" method="post" action="/samelabs/roles/{{$r.ID}}/permissions">{{template "csrf" .CSRF}}
+      <div class="sl-checklist">
+      {{range .Data.Permissions}}<label class="sl-check"><input type="checkbox" name="permission" value="{{.Code}}" {{if or (has $mine .Code) (has $mine "*")}}checked{{end}} {{if not $manage}}disabled{{end}}> <span class="mono">{{.Code}}</span><small>{{deref .Description}}</small></label>{{end}}
+      </div>
+      {{if $manage}}<button class="sl-btn primary" type="submit">Save permissions</button>{{end}}
+    </form>
+  </section>
+</div>
+{{end}}

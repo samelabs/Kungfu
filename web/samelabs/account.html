@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="sl-grid two">
+  <section class="sl-card">
+    <h2>Profile</h2>
+    <dl class="sl-kv">
+      <dt>Username</dt><dd>{{.Principal.Admin.Username}}</dd>
+      <dt>Display name</dt><dd>{{.Principal.Admin.DisplayName}}</dd>
+      <dt>Roles</dt><dd>{{range .Principal.Roles}}<span class="sl-tag">{{.}}</span>{{else}}—{{end}}</dd>
+      <dt>Last sign-in</dt><dd>{{ptime .Principal.Admin.LastLoginAt}}</dd>
+      <dt>Session ends</dt><dd>{{time .Principal.Session.ExpiresAt}} UTC at the latest (30 min idle)</dd>
+    </dl>
+  </section>
+  <section class="sl-card">
+    <h2>Change password</h2>
+    <form class="sl-form" method="post" action="/samelabs/account/password">
+      {{template "csrf" .CSRF}}
+      <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+      <label>New password<input type="password" name="new_password" minlength="8" autocomplete="new-password" required><small>At least 8 characters. You will be signed out everywhere.</small></label>
+      <label>Repeat new password<input type="password" name="confirm_password" minlength="8" autocomplete="new-password" required></label>
+      <button class="sl-btn primary" type="submit">Change password</button>
+    </form>
+  </section>
+</div>
+{{end}}

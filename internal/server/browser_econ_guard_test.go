@@ -38,7 +38,6 @@ var economicAssetFiles = []string{
 	"web/assets/owner/render-overview.js",
 	"web/assets/owner/render-logs.js",
 	"web/assets/owner/tasks.js",
-	"web/assets/admin/store.js",
 }
 
 func stripJSComments(src string) []string {
@@ -89,24 +88,5 @@ func TestFiatFormatterStringExact(t *testing.T) {
 	}
 	if !strings.Contains(src, "padStart(3, '0')") {
 		t.Fatal("fiat formatting must use string padding")
-	}
-}
-
-// TestAdminStoreWritebackPreservesString proves the admin store
-// write path sends the canonical integer string (no Number()).
-func TestAdminStoreWritebackPreservesString(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "web/assets/admin/store.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := strings.Join(stripJSComments(string(b)), "\n")
-	if !strings.Contains(code, "body.credits_price = ci;") {
-		t.Fatal("edit path must assign the canonical integer string (ci)")
-	}
-	if !strings.Contains(code, "credits_price: priceInput") {
-		t.Fatal("create path must send the canonical integer string")
-	}
-	if !strings.Contains(code, "RE_CANON_INT") {
-		t.Fatal("canonical integer validation missing")
 	}
 }

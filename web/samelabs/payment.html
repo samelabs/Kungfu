@@ -1,0 +1,49 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/finance">← Finance</a>{{end}}
+{{define "content"}}{{$p := .Data.Payment}}{{$r := .Data.Reconciliation}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>Details</h2>{{template "badge" $p.Status}}</div>
+    <dl class="sl-kv">
+      <dt>Account</dt><dd><a href="/samelabs/accounts/{{$p.BotID}}">@{{$p.BotName}}</a></dd>
+      <dt>Amount</dt><dd>{{minor $p.AmountMinor $p.Currency}}</dd>
+      <dt>Credits</dt><dd>{{num $p.Credits}}</dd>
+      <dt>Provider</dt><dd>{{$p.Provider}} · product <span class="mono">{{$p.ProviderProductID}}</span></dd>
+      <dt>Provider order</dt><dd class="mono">{{if $p.ProviderOrderID}}{{$p.ProviderOrderID}}{{else}}—{{end}}</dd>
+      <dt>Created</dt><dd>{{time $p.CreatedAt}}</dd>
+      <dt>Paid</dt><dd>{{ptime $p.PaidAt}}</dd>
+    </dl>
+  </section>
+  <section class="sl-card">
+    <h2>Reconciliation</h2>
+    <ul class="sl-checks">
+      <li class="{{if $r.PaidGrantExact}}ok{{else}}bad{{end}}">Credits granted exactly once for the paid amount</li>
+      <li class="{{if $r.AdjustmentBasisConsistent}}ok{{else}}bad{{end}}">Refund / dispute facts are consistent</li>
+      <li class="{{if $r.ReversePaymentNonPositive}}ok{{else}}bad{{end}}">Reversals only remove credits</li>
+      <li class="{{if $r.ReversePaymentWithinOriginalEntitlement}}ok{{else}}bad{{end}}">Reversals stay within what was granted</li>
+      {{if $r.LatestAccountLedgerBalanceAfter}}
+      <li class="{{if $r.AccountBalanceMatchesLatestLedger}}ok{{else}}bad{{end}}">Account balance matches its latest ledger row</li>
+      {{else}}
+      <li class="na">No ledger rows for this account yet, so there is no balance to compare</li>
+      {{end}}
+    </ul>
+    <dl class="sl-kv">
+      <dt>Granted</dt><dd>{{num $r.GrantPaymentSum}} in {{$r.GrantPaymentCount}} entries</dd>
+      <dt>Reversed</dt><dd>{{num $r.ReversePaymentSum}} in {{$r.ReversePaymentCount}} entries</dd>
+      <dt>Account balance</dt><dd>{{num $r.CurrentAccountBalance}}</dd>
+    </dl>
+  </section>
+</div>
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Refunds &amp; disputes</h2></div>
+  {{if .Data.Adjustments}}<table class="sl-table"><thead><tr><th>Kind</th><th class="r">Amount</th><th>Status</th><th>Reason</th><th>Recorded</th></tr></thead><tbody>
+  {{range .Data.Adjustments}}<tr><td>{{template "badge" .Kind}}</td><td class="r">{{minor .AmountMinor .Currency}}</td><td>{{.ObjectStatus}}</td><td>{{.Reason}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
+  </tbody></table>{{else}}{{template "empty" "None."}}{{end}}
+</section>
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Ledger entries</h2></div>
+  {{if or .Data.GrantEntries .Data.ReverseEntries}}<table class="sl-table"><thead><tr><th>When</th><th>Type</th><th class="r">Amount</th><th class="r">Balance after</th></tr></thead><tbody>
+  {{range .Data.GrantEntries}}<tr><td>{{time .CreatedAt}}</td><td>{{.Type}}</td><td class="r pos">{{num .Amount}}</td><td class="r">{{num .BalanceAfter}}</td></tr>{{end}}
+  {{range .Data.ReverseEntries}}<tr><td>{{time .CreatedAt}}</td><td>{{.Type}}</td><td class="r neg">{{num .Amount}}</td><td class="r">{{num .BalanceAfter}}</td></tr>{{end}}
+  </tbody></table>{{else}}{{template "empty" "No credits granted for this payment."}}{{end}}
+</section>
+{{end}}

@@ -1,0 +1,20 @@
+{{define "content"}}
+<form class="sl-filters" method="get">
+  <input name="q" value="{{.Q "q"}}" placeholder="Account name">
+  <select name="status">{{range $s := (list "all" "active" "disabled")}}<option value="{{$s}}" {{if eq ($.Q "status") $s}}selected{{end}}>{{$s}}</option>{{end}}</select>
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.Items}}
+<table class="sl-table">
+  <thead><tr><th>Account</th><th>Status</th><th class="r">Balance</th><th>Key</th><th>Last active</th><th>Created</th></tr></thead>
+  <tbody>
+  {{range .Data.Items}}
+  <tr><td><a href="/samelabs/accounts/{{.ID}}">@{{.BotName}}</a><div class="sl-muted">#{{.ID}}</div></td><td>{{template "badge" .Status}}</td><td class="r">{{num .Balance}}</td><td class="mono">…{{.APIKeyLast4}}</td><td>{{ptime .LastActive}}</td><td>{{time .CreatedAt}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}{{template "empty" "No account matches these filters."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.Total .Data.Page .Data.Size)}}
+{{end}}

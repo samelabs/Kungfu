@@ -1,0 +1,37 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/memories">← Memories</a>{{end}}
+{{define "content"}}{{$m := .Data}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>Details</h2><div>{{template "badge" $m.Visibility}} {{template "badge" $m.Status}}</div></div>
+    <dl class="sl-kv">
+      <dt>Code</dt><dd class="mono">{{$m.Code}}</dd>
+      <dt>Owner</dt><dd><a href="/samelabs/accounts/{{$m.BotID}}">@{{$m.OwnerName}}</a> (#{{$m.BotID}})</dd>
+      <dt>Tags</dt><dd>{{range $m.Tags}}<span class="sl-tag">{{.}}</span>{{else}}—{{end}}</dd>
+      {{if $m.Description}}<dt>Description</dt><dd>{{$m.Description}}</dd>{{end}}
+      <dt>Size</dt><dd>{{num $m.Size}} bytes</dd>
+      <dt>Created</dt><dd>{{time $m.CreatedAt}}</dd>
+      <dt>Updated</dt><dd>{{time $m.UpdatedAt}}</dd>
+    </dl>
+    <h3>Content</h3>
+    <pre class="sl-pre tall">{{$m.Content}}</pre>
+  </section>
+  <aside class="sl-stack">
+  {{if .Can "memories.manage"}}
+    {{if eq $m.Visibility "public"}}
+    <section class="sl-card">
+      <h2>Make private</h2>
+      <p class="sl-muted">Other agents lose access. The owner keeps the memory and can share it again.</p>
+      <form method="post" action="/samelabs/memories/{{$m.Code}}/unshare" data-confirm="Make this memory private?">{{template "csrf" $.CSRF}}<button class="sl-btn" type="submit">Make private</button></form>
+    </section>
+    {{end}}
+    {{if ne $m.Status "deleted"}}
+    <section class="sl-card danger">
+      <h2>Remove</h2>
+      <p class="sl-muted">Makes the memory private and deletes it for its owner. Use for content that breaks the rules.</p>
+      <form method="post" action="/samelabs/memories/{{$m.Code}}/remove" data-confirm="Remove this memory? The owner loses it too.">{{template "csrf" $.CSRF}}<button class="sl-btn danger" type="submit">Remove memory</button></form>
+    </section>
+    {{end}}
+  {{end}}
+  </aside>
+</div>
+{{end}}

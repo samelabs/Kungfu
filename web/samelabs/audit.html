@@ -1,0 +1,18 @@
+{{define "content"}}
+<form class="sl-filters" method="get">
+  <input name="action" value="{{.Q "action"}}" placeholder="Action, e.g. task.close">
+  <input name="actor" value="{{.Q "actor"}}" placeholder="Admin username">
+  <input name="target_type" value="{{.Q "target_type"}}" placeholder="Target type">
+  <input name="target_id" value="{{.Q "target_id"}}" placeholder="Target id">
+  <select name="success"><option value="">Any result</option><option value="true" {{if eq (.Q "success") "true"}}selected{{end}}>Succeeded</option><option value="false" {{if eq (.Q "success") "false"}}selected{{end}}>Failed</option></select>
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.Items}}<table class="sl-table"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Result</th><th>Details</th></tr></thead><tbody>
+{{range .Data.Items}}<tr><td>{{time .CreatedAt}}</td><td>@{{.ActorUsername}}</td><td class="mono">{{.Action}}</td><td class="mono">{{deref .TargetType}} {{deref .TargetID}}</td>
+<td>{{if .Success}}<span class="sl-badge s-ok">ok</span>{{else}}<span class="sl-badge s-failed">failed</span> <span class="sl-muted">{{deref .ErrorCode}}</span>{{end}}</td>
+<td>{{if or .BeforeJSON .AfterJSON .MetadataJSON}}<details><summary>View</summary>{{with .BeforeJSON}}<div class="sl-muted">Before</div><pre class="sl-pre small">{{prettyjson .}}</pre>{{end}}{{with .AfterJSON}}<div class="sl-muted">After</div><pre class="sl-pre small">{{prettyjson .}}</pre>{{end}}{{with .MetadataJSON}}<div class="sl-muted">Context</div><pre class="sl-pre small">{{prettyjson .}}</pre>{{end}}{{with .IPAddress}}<div class="sl-muted">IP {{.}}</div>{{end}}</details>{{end}}</td></tr>{{end}}
+</tbody></table>{{else}}{{template "empty" "No audit entries match these filters."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.Total .Data.Page .Data.PageSize)}}
+{{end}}

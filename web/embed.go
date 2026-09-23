@@ -14,6 +14,9 @@ var staticFiles embed.FS
 //go:embed all:assets
 var assetFS embed.FS
 
+//go:embed samelabs/*.html
+var samelabsFS embed.FS
+
 // StaticFile returns the raw bytes of a top-level static file.
 // filename is relative to web/ (e.g. "robots.txt", "llms.txt").
 func StaticFile(filename string) ([]byte, error) {
@@ -23,6 +26,12 @@ func StaticFile(filename string) ([]byte, error) {
 // AssetFS returns the filesystem for assets/ subdirectory.
 func AssetFS() fs.FS {
 	sub, _ := fs.Sub(assetFS, "assets")
+	return sub
+}
+
+// SamelabsTemplates returns the platform admin page templates.
+func SamelabsTemplates() fs.FS {
+	sub, _ := fs.Sub(samelabsFS, "samelabs")
 	return sub
 }
 
