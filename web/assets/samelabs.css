@@ -170,6 +170,7 @@ input, select, textarea {
     font: inherit; color: var(--text); background: var(--panel);
     border: 1px solid var(--line-strong); border-radius: 7px; padding: 7px 10px; min-height: 36px;
 }
+input[type="checkbox"], input[type="radio"] { min-height: 0; width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
 textarea { resize: vertical; }
 ::placeholder { color: var(--muted); opacity: .55; }
 input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
@@ -184,7 +185,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb
 .sl-form-foot { display: flex; align-items: center; gap: 14px; }
 .sl-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
 .sl-filters input { min-width: 180px; }
-.sl-check { display: flex !important; flex-direction: row !important; align-items: baseline; gap: 8px; font-weight: 400 !important; }
+.sl-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; white-space: nowrap; }
 .sl-check small { color: var(--muted); margin-left: 4px; }
 .sl-checklist { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
 .sl-switch { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 600 !important; }
@@ -195,7 +196,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb
 .sl-btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     min-height: 36px; padding: 7px 14px; border-radius: 7px; cursor: pointer;
-    font: 600 13px/1 inherit; font-family: inherit;
+    font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1;
     background: var(--panel); color: var(--text); border: 1px solid var(--line-strong);
 }
 .sl-btn:hover { border-color: var(--accent); text-decoration: none; }

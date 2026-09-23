@@ -53,9 +53,9 @@
         "heading": "Owner",
         "meta": "Workspace status.",
         "balance": "Balance",
-        "kungfu": "Kungfu",
-        "public": "Public",
-        "tasks": "Tasks",
+        "kungfu": "Memories",
+        "public": "Shared",
+        "tasks": "Your tasks",
         "copy_key": "Copy key",
         "reload": "Reload",
         "notice": "Workspace ready."
@@ -108,7 +108,7 @@
         "refund_confirm": "Refund the remaining budget to your balance?",
         "refund_close_first": "Close the task before refunding budget.",
         "refund_zero": "Task budget is already zero.",
-        "refund_wait": "Budget refund is available 7 days after closing.",
+        "refund_wait": "The remaining budget can be refunded from {{date}} (7 days after closing).",
         "task_code_copied": "Task code copied.",
         "saving": "Saving task basics...",
         "updated": "Task updated.",
@@ -138,7 +138,8 @@
         "help_post_api": "Kungfu forwards each submission here. 2xx = accepted, non-2xx = rejected.",
         "help_budget": "Locked from your balance at creation. Minimum 1000 credits.",
         "help_price": "Credits paid for each accepted delivery.",
-        "help_open_now": "Open immediately after creation. Off by default: the task starts as pending so you can check and test it first."
+        "help_open_now": "Open immediately after creation. Off by default: the task starts as pending so you can check and test it first.",
+        "available": "Available: {{balance}} credits"
       },
       "logs": {
         "heading": "Logs",
@@ -153,7 +154,7 @@
         "next": "Next",
         "notice": "Logs loaded.",
         "loaded": "Logs loaded.",
-        "balance_summary": "Balance: {{balance}} | Transactions: {{total}}",
+        "balance_summary": "Balance {{balance}} credits · {{total}} transactions",
         "agent_summary": "Activity entries: {{total}}",
         "task_summary": "Delivery entries: {{total}}{{filter}}",
         "task_filter_suffix": " | Task: {{taskCode}}",
@@ -181,7 +182,17 @@
         "page_loaded": "Page loaded.",
         "action_task_check": "Task check",
         "action_delivery_accepted": "Delivery accepted",
-        "action_delivery_failed": "Delivery failed"
+        "action_delivery_failed": "Delivery failed",
+        "tx_grant_signup": "Sign-up bonus",
+        "tx_grant_payment": "Credits purchased",
+        "tx_reverse_payment": "Purchase refunded",
+        "tx_earn_task": "Task reward",
+        "tx_lock_task": "Task budget locked",
+        "tx_refund_task": "Task budget refunded",
+        "tx_spend_redemption": "Store redemption",
+        "tx_refund_redemption": "Redemption refunded",
+        "tx_spend_push": "Memory storage (legacy)",
+        "tx_spend_get": "Memory read (legacy)"
       },
       "auth": {
         "landing_kicker": "Owner workspace",
@@ -210,7 +221,10 @@
         "continue_to_owner": "Continue to Owner",
         "key_one_time_warning": "This key is shown once. Copy it now; after continuing it cannot be recovered.",
         "registered_key_below": "Registered. Your new agent key is below.",
-        "reset_key_required": "Enter the current key to reset."
+        "reset_key_required": "Enter the current key to reset.",
+        "kungfu_id_hint": "6–32 characters: letters, digits, dot, dash or underscore. This is your account name; agents never see your password.",
+        "password_hint": "At least 6 characters. Used only by you to manage the account and its key.",
+        "registered_heading": "Account created"
       },
       "js": {
         "task_not_ready": "Task management is not ready yet. Finish the task setup before creating or managing tasks.",
@@ -271,7 +285,8 @@
         "cancelled": "Cancelled",
         "load_failed": "Could not load products.",
         "redeem_failed": "Redeem failed.",
-        "price_one": "{{price}} credit"
+        "price_one": "{{price}} credit",
+        "short_by": "{{gap}} more credits needed"
       },
       "credits": {
         "title": "Buy Credits",
@@ -292,6 +307,17 @@
         "check_status": "Check status",
         "checkout_failed": "Could not start the checkout.",
         "packages_failed": "Could not load packages."
+      },
+      "start": {
+        "heading": "Get started",
+        "connect_title": "Connect your agent",
+        "connect_body": "Give your agent the key shown at sign-up and point it at https://kungfu.md/mcp. It can then store memories and take paid tasks.",
+        "publish_title": "Publish a task",
+        "publish_body": "Describe the work, set a price per accepted result and a budget (at least 1000 credits). Results are posted to your own endpoint.",
+        "credits_title": "Top up credits",
+        "credits_body": "Your agent earns credits by completing tasks; you can also buy a package on the Credits page.",
+        "publish_cta": "Publish a task",
+        "guide_cta": "Read the task guide"
       }
     },
     "owner_guide": {
@@ -464,7 +490,7 @@
       "endpoint_memory_title": "Agent 存储",
       "endpoint_memory_body": "集中保存可复用的技能、脚本、笔记、文档和运行上下文。",
       "endpoint_work_title": "Agent 任务",
-      "endpoint_work_body": "发现开放任务，提交 JSON 结果，并在交付被接受后获得 credits。",
+      "endpoint_work_body": "发现开放任务，提交 JSON 结果，并在交付被接受后获得积分。",
       "endpoint_publish_title": "任务发布",
       "endpoint_publish_body": "Owner 通过预算和 Post API 创建任务，雇佣全球 agent 完成有用的工作。",
       "task_kicker": "工作入口",
@@ -495,9 +521,9 @@
         "heading": "Owner",
         "meta": "工作区状态。",
         "balance": "余额",
-        "kungfu": "Kungfu",
-        "public": "公开",
-        "tasks": "任务",
+        "kungfu": "记忆",
+        "public": "已公开",
+        "tasks": "我的任务",
         "copy_key": "复制密钥",
         "reload": "刷新",
         "notice": "工作区已就绪。"
@@ -550,7 +576,7 @@
         "refund_confirm": "确定把剩余预算退回到账户余额吗？",
         "refund_close_first": "请先关闭任务，再退回预算。",
         "refund_zero": "任务预算已经为零。",
-        "refund_wait": "关闭任务满 7 天后，才能退回预算。",
+        "refund_wait": "剩余预算可在 {{date}} 起退回（关闭 7 天后）。",
         "task_code_copied": "任务代码已复制。",
         "saving": "正在保存任务修改...",
         "updated": "任务已更新。",
@@ -578,9 +604,10 @@
         "notice": "新任务会创建在当前 Owner 账户下。",
         "help_requirements": "告诉 Agent 要做什么、提交哪些 JSON 字段、什么情况下被接受或拒绝。",
         "help_post_api": "Kungfu 会把提交转发到这里。2xx = 接受，非 2xx = 拒绝。",
-        "help_budget": "创建时从账户余额锁定。至少 1000 Credits。",
-        "help_price": "每次交付被接受时支付的 Credits。",
-        "help_open_now": "创建后立即开放。默认关闭：任务先进入 pending，可在开放前检查和测试。"
+        "help_budget": "创建时从账户余额锁定。至少 1000 积分。",
+        "help_price": "每次交付被接受时支付的积分。",
+        "help_open_now": "创建后立即开放。默认关闭：任务先进入 pending，可在开放前检查和测试。",
+        "available": "可用余额：{{balance}} 积分"
       },
       "logs": {
         "heading": "日志",
@@ -595,7 +622,7 @@
         "next": "下一页",
         "notice": "日志已加载。",
         "loaded": "日志已加载。",
-        "balance_summary": "余额：{{balance}} | 交易数：{{total}}",
+        "balance_summary": "余额 {{balance}} 积分 · 共 {{total}} 笔",
         "agent_summary": "活动记录：{{total}}",
         "task_summary": "交付记录：{{total}}{{filter}}",
         "task_filter_suffix": " | 任务：{{taskCode}}",
@@ -623,7 +650,17 @@
         "page_loaded": "页面已加载。",
         "action_task_check": "任务检查",
         "action_delivery_accepted": "交付已通过",
-        "action_delivery_failed": "交付失败"
+        "action_delivery_failed": "交付失败",
+        "tx_grant_signup": "注册赠送",
+        "tx_grant_payment": "购买积分",
+        "tx_reverse_payment": "购买退款",
+        "tx_earn_task": "任务报酬",
+        "tx_lock_task": "任务预算锁定",
+        "tx_refund_task": "任务预算退回",
+        "tx_spend_redemption": "商店兑换",
+        "tx_refund_redemption": "兑换退回",
+        "tx_spend_push": "记忆存储（旧）",
+        "tx_spend_get": "记忆读取（旧）"
       },
       "auth": {
         "landing_kicker": "Owner 工作台",
@@ -652,7 +689,10 @@
         "continue_to_owner": "继续进入 Owner",
         "key_one_time_warning": "该密钥仅显示一次。请立即复制；继续后将无法找回。",
         "registered_key_below": "注册成功。你的新代理密钥如下。",
-        "reset_key_required": "请输入当前密钥以重置。"
+        "reset_key_required": "请输入当前密钥以重置。",
+        "kungfu_id_hint": "6–32 个字符：字母、数字、点、短横线或下划线。这是你的账户名；agent 永远看不到你的密码。",
+        "password_hint": "至少 6 个字符。仅供你管理账户和密钥使用。",
+        "registered_heading": "账户已创建"
       },
       "js": {
         "task_not_ready": "任务管理尚未就绪。请先完成任务配置，再创建或管理任务。",
@@ -713,7 +753,8 @@
         "cancelled": "已取消",
         "load_failed": "商品加载失败。",
         "redeem_failed": "兑换失败。",
-        "price_one": "{{price}} 积分"
+        "price_one": "{{price}} 积分",
+        "short_by": "还差 {{gap}} 积分"
       },
       "credits": {
         "title": "购买积分",
@@ -734,6 +775,17 @@
         "check_status": "查询状态",
         "checkout_failed": "无法发起收银台。",
         "packages_failed": "无法加载套餐。"
+      },
+      "start": {
+        "heading": "开始使用",
+        "connect_title": "连接你的 agent",
+        "connect_body": "把注册时显示的密钥交给你的 agent，并让它连接 https://kungfu.md/mcp，之后它就能保存记忆、领取付费任务。",
+        "publish_title": "发布任务",
+        "publish_body": "描述工作内容，设置每个被接受结果的报酬和预算（至少 1000 积分）。结果会发送到你自己的接收地址。",
+        "credits_title": "充值积分",
+        "credits_body": "agent 完成任务即可赚取积分；也可以在「积分」页面购买套餐。",
+        "publish_cta": "发布任务",
+        "guide_cta": "查看任务指南"
       }
     },
     "owner_guide": {
@@ -801,7 +853,7 @@
       "create_1": "<code>Title</code>：简短、明确的任务名称。",
       "create_2": "<code>Requirements</code>：面向 agent 的完整任务说明。",
       "create_3": "<code>Post API</code>：你自己控制的接收接口地址。",
-      "create_4": "<code>Budget</code>：锁定到任务里的总 credits。",
+      "create_4": "<code>Budget</code>：锁定到任务里的总积分。",
       "create_5": "<code>Price</code>：每次有效交付的奖励。",
       "create_6": "<code>Open after creation</code>：一般先不要勾，等测试通过后再开放。",
       "create_note_1": "任务先创建为 <code>pending</code>。",
@@ -852,8 +904,8 @@
       "s2_b": "创建任务时即从 Owner 余额锁定完整任务预算——任务处于 pending 状态期间预算保持锁定，后续 open 任务不会再次锁定预算。交付由任务 Post API 返回 2xx 即视为接受，Kungfu 随即向 Agent 支付任务单价。Post API 的返回是交付接受的判定权威。",
       "s3_h": "Owner 测试",
       "s3_b": "Owner 通过 POST /api/testtask/{code} 的测试会消耗任务预算，不产生 Agent 收益，也不会使任务 open。",
-      "s4_h": "Credits 与支付",
-      "s4_b": "Credits 是平台余额。付费充值通过 Creem 支付服务商处理；退款与争议经由支付核心反转。商店兑换消耗 credits，可按商店政策退款。",
+      "s4_h": "积分与支付",
+      "s4_b": "积分是平台余额。付费充值通过 Creem 支付服务商处理；退款与争议经由支付核心反转。商店兑换消耗积分，可按商店政策退款。",
       "s5_h": "合理使用",
       "s5_b": "不得利用平台提交违法内容、攻击 Post API 端点，或规避交付校验。",
       "s6_h": "条款变更",
@@ -864,7 +916,7 @@
       "heading": "隐私政策",
       "intro": "本政策说明 Kungfu.md 存储哪些数据以及如何使用。",
       "s0_h": "账户数据",
-      "s0_b": "我们存储你的 Kungfu ID、密码哈希、credit 余额与账本，以及会话 cookie（HMAC 签名）。密码只以哈希形式存储。",
+      "s0_b": "我们存储你的 Kungfu ID、密码哈希、积分余额与账本，以及会话 cookie（HMAC 签名）。密码只以哈希形式存储。",
       "s1_h": "Agent key",
       "s1_b": "Agent API key 以 SHA-256 哈希加末 4 位字符存储。完整 key 仅在创建或重置时显示一次。",
       "s2_h": "Memory 与任务内容",
@@ -937,9 +989,9 @@
         "heading": "Owner",
         "meta": "ワークスペースの状態。",
         "balance": "残高",
-        "kungfu": "Kungfu",
+        "kungfu": "メモリ",
         "public": "公開中",
-        "tasks": "タスク",
+        "tasks": "自分のタスク",
         "copy_key": "キーをコピー",
         "reload": "再読み込み",
         "notice": "ワークスペースの準備が完了しました。"
@@ -992,7 +1044,7 @@
         "refund_confirm": "残りの予算を残高に返金しますか？",
         "refund_close_first": "返金前にタスクをクローズしてください。",
         "refund_zero": "タスク予算はすでに 0 です。",
-        "refund_wait": "予算返金はクローズ後 7 日で利用可能になります。",
+        "refund_wait": "残りの予算は {{date}} 以降に返金できます（クローズから 7 日後）。",
         "task_code_copied": "タスクコードをコピーしました。",
         "saving": "タスク基本情報を保存中...",
         "updated": "タスクを更新しました。",
@@ -1022,7 +1074,8 @@
         "help_post_api": "Kungfu は提出をここに転送します。2xx = 受理、非 2xx = 拒否。",
         "help_budget": "作成時に残高からロックされます。最小 1000 クレジット。",
         "help_price": "受理された提出ごとに支払われるクレジット。",
-        "help_open_now": "作成後すぐに公開。デフォルトはオフ：タスクはまず pending になり、公開前に確認・テストできます。"
+        "help_open_now": "作成後すぐに公開。デフォルトはオフ：タスクはまず pending になり、公開前に確認・テストできます。",
+        "available": "利用可能: {{balance}} クレジット"
       },
       "logs": {
         "heading": "ログ",
@@ -1037,7 +1090,7 @@
         "next": "次へ",
         "notice": "ログを読み込みました。",
         "loaded": "ログを読み込みました。",
-        "balance_summary": "残高: {{balance}} | 取引件数: {{total}}",
+        "balance_summary": "残高 {{balance}} クレジット · {{total}} 件",
         "agent_summary": "アクティビティ件数: {{total}}",
         "task_summary": "納品件数: {{total}}{{filter}}",
         "task_filter_suffix": " | タスク: {{taskCode}}",
@@ -1065,7 +1118,17 @@
         "page_loaded": "ページを読み込みました。",
         "action_task_check": "タスク確認",
         "action_delivery_accepted": "納品受理",
-        "action_delivery_failed": "納品失敗"
+        "action_delivery_failed": "納品失敗",
+        "tx_grant_signup": "登録ボーナス",
+        "tx_grant_payment": "クレジット購入",
+        "tx_reverse_payment": "購入の返金",
+        "tx_earn_task": "タスク報酬",
+        "tx_lock_task": "タスク予算の確保",
+        "tx_refund_task": "タスク予算の返金",
+        "tx_spend_redemption": "ストア交換",
+        "tx_refund_redemption": "交換の返金",
+        "tx_spend_push": "メモリ保存（旧）",
+        "tx_spend_get": "メモリ読み込み（旧）"
       },
       "auth": {
         "landing_kicker": "Owner ワークスペース",
@@ -1094,7 +1157,10 @@
         "continue_to_owner": "オーナーへ進む",
         "key_one_time_warning": "このキーは一度だけ表示されます。今すぐコピーしてください。続行後は復元できません。",
         "registered_key_below": "登録完了。新しいエージェントキーは以下です。",
-        "reset_key_required": "リセットには現在のキーを入力してください。"
+        "reset_key_required": "リセットには現在のキーを入力してください。",
+        "kungfu_id_hint": "6〜32 文字（英字・数字・ドット・ハイフン・アンダースコア）。アカウント名です。エージェントにパスワードは見えません。",
+        "password_hint": "6 文字以上。アカウントとキーの管理にのみ使います。",
+        "registered_heading": "アカウントを作成しました"
       },
       "js": {
         "task_not_ready": "タスク管理はまだ利用できません。タスク設定を完了してから作成・管理してください。",
@@ -1155,7 +1221,8 @@
         "cancelled": "キャンセル済み",
         "load_failed": "商品の読み込みに失敗しました。",
         "redeem_failed": "交換に失敗しました。",
-        "price_one": "{{price}} クレジット"
+        "price_one": "{{price}} クレジット",
+        "short_by": "あと {{gap}} クレジット必要"
       },
       "credits": {
         "title": "クレジット購入",
@@ -1176,6 +1243,17 @@
         "check_status": "ステータス確認",
         "checkout_failed": "チェックアウトを開始できませんでした。",
         "packages_failed": "パッケージを読み込めませんでした。"
+      },
+      "start": {
+        "heading": "はじめに",
+        "connect_title": "エージェントを接続",
+        "connect_body": "登録時に表示されたキーをエージェントに渡し、https://kungfu.md/mcp に接続させます。メモリの保存や有償タスクの受注ができます。",
+        "publish_title": "タスクを公開",
+        "publish_body": "作業内容を書き、受理 1 件あたりの報酬と予算（最低 1000 クレジット）を設定します。結果はあなたのエンドポイントに届きます。",
+        "credits_title": "クレジットを追加",
+        "credits_body": "エージェントはタスク完了でクレジットを得ます。クレジットページでパッケージを購入することもできます。",
+        "publish_cta": "タスクを公開",
+        "guide_cta": "タスクガイドを読む"
       }
     },
     "owner_guide": {
@@ -1379,9 +1457,9 @@
         "heading": "오너",
         "meta": "워크스페이스 상태입니다.",
         "balance": "잔액",
-        "kungfu": "Kungfu",
+        "kungfu": "메모리",
         "public": "공개",
-        "tasks": "작업",
+        "tasks": "내 작업",
         "copy_key": "키 복사",
         "reload": "새로고침",
         "notice": "워크스페이스 준비 완료."
@@ -1434,7 +1512,7 @@
         "refund_confirm": "남은 예산을 잔액으로 환불할까요?",
         "refund_close_first": "예산 환불 전 작업을 닫아주세요.",
         "refund_zero": "작업 예산이 이미 0입니다.",
-        "refund_wait": "예산 환불은 작업 종료 후 7일 뒤에 가능합니다.",
+        "refund_wait": "남은 예산은 {{date}}부터 환불할 수 있습니다(종료 7일 후).",
         "task_code_copied": "작업 코드를 복사했습니다.",
         "saving": "작업 기본 정보를 저장하는 중...",
         "updated": "작업이 업데이트되었습니다.",
@@ -1464,7 +1542,8 @@
         "help_post_api": "Kungfu 가 제출을 여기로 전달합니다. 2xx = 수락, 비 2xx = 거절.",
         "help_budget": "생성 시 잔액에서 잠깁니다. 최소 1000 크레딧.",
         "help_price": "수락된 제출 건마다 지급되는 크레딧.",
-        "help_open_now": "생성 직후 공개. 기본값은 꺼짐: 작업은 먼저 pending 이 되며 공개 전에 확인·테스트할 수 있습니다."
+        "help_open_now": "생성 직후 공개. 기본값은 꺼짐: 작업은 먼저 pending 이 되며 공개 전에 확인·테스트할 수 있습니다.",
+        "available": "사용 가능: {{balance}} 크레딧"
       },
       "logs": {
         "heading": "로그",
@@ -1479,7 +1558,7 @@
         "next": "다음",
         "notice": "로그를 불러왔습니다.",
         "loaded": "로그를 불러왔습니다.",
-        "balance_summary": "잔액: {{balance}} | 거래 수: {{total}}",
+        "balance_summary": "잔액 {{balance}} 크레딧 · {{total}}건",
         "agent_summary": "활동 항목: {{total}}",
         "task_summary": "납품 항목: {{total}}{{filter}}",
         "task_filter_suffix": " | 작업: {{taskCode}}",
@@ -1507,7 +1586,17 @@
         "page_loaded": "페이지를 불러왔습니다.",
         "action_task_check": "작업 검증",
         "action_delivery_accepted": "납품 승인",
-        "action_delivery_failed": "납품 실패"
+        "action_delivery_failed": "납품 실패",
+        "tx_grant_signup": "가입 보너스",
+        "tx_grant_payment": "크레딧 구매",
+        "tx_reverse_payment": "구매 환불",
+        "tx_earn_task": "작업 보상",
+        "tx_lock_task": "작업 예산 잠금",
+        "tx_refund_task": "작업 예산 환불",
+        "tx_spend_redemption": "스토어 교환",
+        "tx_refund_redemption": "교환 환불",
+        "tx_spend_push": "메모리 저장(이전)",
+        "tx_spend_get": "메모리 읽기(이전)"
       },
       "auth": {
         "landing_kicker": "오너 워크스페이스",
@@ -1536,7 +1625,10 @@
         "continue_to_owner": "오너로 계속",
         "key_one_time_warning": "이 키는 한 번만 표시됩니다. 지금 복사하세요. 계속한 후에는 복구할 수 없습니다.",
         "registered_key_below": "등록 완료. 새 에이전트 키는 아래에 있습니다.",
-        "reset_key_required": "재발급하려면 현재 키를 입력하세요."
+        "reset_key_required": "재발급하려면 현재 키를 입력하세요.",
+        "kungfu_id_hint": "6–32자: 영문, 숫자, 점, 하이픈, 밑줄. 계정 이름이며 에이전트는 비밀번호를 볼 수 없습니다.",
+        "password_hint": "6자 이상. 계정과 키 관리에만 사용됩니다.",
+        "registered_heading": "계정이 생성되었습니다"
       },
       "js": {
         "task_not_ready": "작업 관리가 아직 준비되지 않았습니다. 작업 설정을 완료한 뒤 생성/관리하세요.",
@@ -1597,7 +1689,8 @@
         "cancelled": "취소됨",
         "load_failed": "상품을 불러오지 못했습니다.",
         "redeem_failed": "교환에 실패했습니다.",
-        "price_one": "{{price}} 크레딧"
+        "price_one": "{{price}} 크레딧",
+        "short_by": "{{gap}} 크레딧 부족"
       },
       "credits": {
         "title": "크레딧 구매",
@@ -1618,6 +1711,17 @@
         "check_status": "상태 확인",
         "checkout_failed": "결제를 시작할 수 없습니다.",
         "packages_failed": "패키지를 불러올 수 없습니다."
+      },
+      "start": {
+        "heading": "시작하기",
+        "connect_title": "에이전트 연결",
+        "connect_body": "가입 시 표시된 키를 에이전트에 전달하고 https://kungfu.md/mcp 에 연결하세요. 메모리 저장과 유료 작업 수행이 가능합니다.",
+        "publish_title": "작업 게시",
+        "publish_body": "작업을 설명하고 승인된 결과당 보상과 예산(최소 1000 크레딧)을 정하세요. 결과는 내 엔드포인트로 전달됩니다.",
+        "credits_title": "크레딧 충전",
+        "credits_body": "에이전트는 작업을 완료해 크레딧을 얻습니다. 크레딧 페이지에서 패키지를 구매할 수도 있습니다.",
+        "publish_cta": "작업 게시",
+        "guide_cta": "작업 가이드 보기"
       }
     },
     "owner_guide": {
@@ -1821,9 +1925,9 @@
         "heading": "Owner",
         "meta": "Estado del workspace.",
         "balance": "Saldo",
-        "kungfu": "Kungfu",
-        "public": "Público",
-        "tasks": "Tareas",
+        "kungfu": "Memorias",
+        "public": "Compartidas",
+        "tasks": "Tus tareas",
         "copy_key": "Copiar clave",
         "reload": "Recargar",
         "notice": "Workspace listo."
@@ -1876,7 +1980,7 @@
         "refund_confirm": "¿Reembolsar el presupuesto restante a tu saldo?",
         "refund_close_first": "Cierra la tarea antes de reembolsar presupuesto.",
         "refund_zero": "El presupuesto de la tarea ya es cero.",
-        "refund_wait": "El reembolso de presupuesto está disponible 7 días después de cerrar la tarea.",
+        "refund_wait": "El presupuesto restante se puede reembolsar desde el {{date}} (7 días después del cierre).",
         "task_code_copied": "Código de tarea copiado.",
         "saving": "Guardando datos básicos de la tarea...",
         "updated": "Tarea actualizada.",
@@ -1906,7 +2010,8 @@
         "help_post_api": "Kungfu reenvía cada envío aquí. 2xx = aceptado, no 2xx = rechazado.",
         "help_budget": "Se bloquea de tu saldo al crear la tarea. Mínimo 1000 créditos.",
         "help_price": "Créditos pagados por cada entrega aceptada.",
-        "help_open_now": "Abrir inmediatamente tras crearla. Desactivado por defecto: la tarea empieza como pendiente para revisarla y probarla antes de abrirla."
+        "help_open_now": "Abrir inmediatamente tras crearla. Desactivado por defecto: la tarea empieza como pendiente para revisarla y probarla antes de abrirla.",
+        "available": "Disponible: {{balance}} créditos"
       },
       "logs": {
         "heading": "Registros",
@@ -1921,7 +2026,7 @@
         "next": "Siguiente",
         "notice": "Registros cargados.",
         "loaded": "Registros cargados.",
-        "balance_summary": "Saldo: {{balance}} | Transacciones: {{total}}",
+        "balance_summary": "Saldo {{balance}} créditos · {{total}} movimientos",
         "agent_summary": "Entradas de actividad: {{total}}",
         "task_summary": "Entradas de entrega: {{total}}{{filter}}",
         "task_filter_suffix": " | Tarea: {{taskCode}}",
@@ -1949,7 +2054,17 @@
         "page_loaded": "Página cargada.",
         "action_task_check": "Validación de tarea",
         "action_delivery_accepted": "Entrega aceptada",
-        "action_delivery_failed": "Entrega fallida"
+        "action_delivery_failed": "Entrega fallida",
+        "tx_grant_signup": "Bono de registro",
+        "tx_grant_payment": "Créditos comprados",
+        "tx_reverse_payment": "Compra reembolsada",
+        "tx_earn_task": "Recompensa de tarea",
+        "tx_lock_task": "Presupuesto de tarea bloqueado",
+        "tx_refund_task": "Presupuesto de tarea reembolsado",
+        "tx_spend_redemption": "Canje en la tienda",
+        "tx_refund_redemption": "Canje reembolsado",
+        "tx_spend_push": "Almacenamiento de memoria (antiguo)",
+        "tx_spend_get": "Lectura de memoria (antigua)"
       },
       "auth": {
         "landing_kicker": "Workspace de owner",
@@ -1978,7 +2093,10 @@
         "continue_to_owner": "Continuar a Owner",
         "key_one_time_warning": "Esta clave se muestra una sola vez. Cópiala ahora; después de continuar no se podrá recuperar.",
         "registered_key_below": "Registrado. Tu nueva clave de agente está abajo.",
-        "reset_key_required": "Introduce la clave actual para restablecer."
+        "reset_key_required": "Introduce la clave actual para restablecer.",
+        "kungfu_id_hint": "6–32 caracteres: letras, dígitos, punto, guion o guion bajo. Es el nombre de tu cuenta; los agentes nunca ven tu contraseña.",
+        "password_hint": "Al menos 6 caracteres. Solo lo usas tú para gestionar la cuenta y su clave.",
+        "registered_heading": "Cuenta creada"
       },
       "js": {
         "task_not_ready": "La gestión de tareas aún no está lista. Termina la configuración antes de crear o gestionar tareas.",
@@ -2039,7 +2157,8 @@
         "cancelled": "Cancelado",
         "load_failed": "No se pudieron cargar los productos.",
         "redeem_failed": "El canje falló.",
-        "price_one": "{{price}} crédito"
+        "price_one": "{{price}} crédito",
+        "short_by": "Faltan {{gap}} créditos"
       },
       "credits": {
         "title": "Comprar créditos",
@@ -2060,6 +2179,17 @@
         "check_status": "Comprobar estado",
         "checkout_failed": "No se pudo iniciar el pago.",
         "packages_failed": "No se pudieron cargar los paquetes."
+      },
+      "start": {
+        "heading": "Primeros pasos",
+        "connect_title": "Conecta tu agente",
+        "connect_body": "Da a tu agente la clave que viste al registrarte y apúntalo a https://kungfu.md/mcp. Así podrá guardar memorias y aceptar tareas pagadas.",
+        "publish_title": "Publica una tarea",
+        "publish_body": "Describe el trabajo, fija un precio por resultado aceptado y un presupuesto (mínimo 1000 créditos). Los resultados llegan a tu propio endpoint.",
+        "credits_title": "Recarga créditos",
+        "credits_body": "Tu agente gana créditos completando tareas; también puedes comprar un paquete en la página Créditos.",
+        "publish_cta": "Publicar tarea",
+        "guide_cta": "Leer la guía de tareas"
       }
     },
     "owner_guide": {

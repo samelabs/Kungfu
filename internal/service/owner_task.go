@@ -206,6 +206,13 @@ func SetTaskStatus(ctx context.Context, pool *pg.Pool, botID int64, code, status
 	}
 
 	if status == taskStatusOpen {
+		// A task closed by the platform (review_note is written only by
+		// the admin close) stays closed: the owner may still edit it
+		// and refund the budget, but cannot put it back on the board.
+		if task.ReviewNote != nil && *task.ReviewNote != "" {
+			return nil, errors.New(409, "TASK_CLOSED_BY_PLATFORM",
+				"This task was closed by Kungfu and cannot be reopened. Reason: "+*task.ReviewNote)
+		}
 		// Unified fundable rule (task_rules.go): postapi, budget, price.
 		// Reopen fundability counts ACTIVE RESERVATIONS: available =
 		// budget - reserved_budget (a closed task with accepted

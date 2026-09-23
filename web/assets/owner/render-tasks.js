@@ -10,6 +10,8 @@ function renderTasks() {
     // Loading/empty/error states are owned by the shared section
     // lifecycle (sectionBox). The renderer only paints the ready
     // state — a non-empty task list.
+    const detailPanel = qs('#taskDetailPanel');
+    if (detailPanel) detailPanel.hidden = !state.tasks.length;
     if (!state.tasks.length) {
         return;
     }
@@ -70,13 +72,15 @@ function renderTaskDetail(task) {
             <h2>${escapeHtml(task.title)}</h2>
             <span class="badge ${escapeHtml(task.status)}">${escapeHtml(humanTaskStatus(task.status))}</span>
         </div>
+        ${platformNote(task)}
         <div class="task-action-bar">
             ${isOpen ? `<button class="btn danger" type="button" data-act="close">${escapeHtml(t('tasks.close'))}</button>` : ''}
-            ${isClosed || isPending ? `<button class="btn primary" type="button" data-act="open">${escapeHtml(t('tasks.open'))}</button>` : ''}
+            ${(isClosed && !task.review_note) || isPending ? `<button class="btn primary" type="button" data-act="open">${escapeHtml(t('tasks.open'))}</button>` : ''}
             ${isClosed || isPending ? `<button class="btn" type="button" data-act="edit">${escapeHtml(t('tasks.edit_basics'))}</button>` : ''}
             ${isOpen ? `<button class="btn" type="button" data-act="budget">${escapeHtml(t('tasks.add_budget'))}</button>` : ''}
             ${canRefund ? `<button class="btn" type="button" data-act="refund">${escapeHtml(t('tasks.refund'))}</button>` : ''}
         </div>
+        ${refundWaitText(task)}
         <div class="task-code-box">
             <div>
                 <b>${escapeHtml(t('tasks.task_code'))}</b>
@@ -93,7 +97,6 @@ function renderTaskDetail(task) {
         </div>
         <div class="detail-box"><h3>${escapeHtml(t('tasks.requirements'))}</h3><p>${escapeHtml(task.requirements)}</p></div>
         <div class="detail-box"><h3>${escapeHtml(t('tasks.post_api'))}</h3><p class="mono">${escapeHtml(task.postapi || '')}</p></div>
-        ${platformNote(task)}
     `;
 
     // Bind action bar
@@ -157,8 +160,8 @@ function openTaskModal(mode, task) {
                     <p class="field-help">${escapeHtml(t('task_new.help_post_api'))}</p>
                     <input name="postapi" required maxlength="2048" placeholder="${escapeHtml(t('task_new.post_api_placeholder'))}">
                     <div class="row">
-                        <div><label>${escapeHtml(t('task_new.budget'))}</label><p class="field-help">${escapeHtml(t('task_new.help_budget'))}</p><input name="budget" type="number" step="1" min="1000" required></div>
-                        <div><label>${escapeHtml(t('task_new.price'))}</label><p class="field-help">${escapeHtml(t('task_new.help_price'))}</p><input name="price" type="number" step="1" min="1" required></div>
+                        <div><label>${escapeHtml(t('task_new.budget'))}</label><input name="budget" type="number" step="1" min="1000" required><p class="field-help">${escapeHtml(t('task_new.help_budget'))}</p>${state.account && state.account.balance != null ? `<p class="field-help strong">${escapeHtml(t('task_new.available', {balance: String(state.account.balance)}))}</p>` : ''}</div>
+                        <div><label>${escapeHtml(t('task_new.price'))}</label><input name="price" type="number" step="1" min="1" required><p class="field-help">${escapeHtml(t('task_new.help_price'))}</p></div>
                     </div>
                     <label class="checkline"><input name="open_now" type="checkbox"> ${escapeHtml(t('task_new.open_now'))}</label>
                     <p class="field-help">${escapeHtml(t('task_new.help_open_now'))}</p>
@@ -313,4 +316,16 @@ function refundReady(closedAt) {
     const closed = new Date(closedAt.replace(' ', 'T'));
     if (Number.isNaN(closed.getTime())) return false;
     return (Date.now() - closed.getTime()) >= (7 * 24 * 60 * 60 * 1000);
+}
+
+// refundWaitText tells the owner of a closed task with budget left when
+// the refund becomes available (7 days after closing).
+function refundWaitText(task) {
+    if (task.status !== 'closed' || !task.closed_at) return '';
+    const budgetStr = String(task.budget);
+    if (!/^[0-9]+$/.test(budgetStr) || BigInt(budgetStr) === 0n || refundReady(task.closed_at)) return '';
+    const closed = new Date(task.closed_at.replace(' ', 'T'));
+    if (Number.isNaN(closed.getTime())) return '';
+    const ready = new Date(closed.getTime() + 7 * 86400000);
+    return `<p class="muted refund-wait">${escapeHtml(t('tasks.refund_wait', {date: ready.toISOString().slice(0, 10)}))}</p>`;
 }

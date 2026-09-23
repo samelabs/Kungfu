@@ -66,7 +66,7 @@ function renderLogs() {
                     ${state.logs.items.map((row) => `
                         <tr>
                             <td>${row.id}</td>
-                            <td>${escapeHtml(row.type)}</td>
+                            <td>${escapeHtml(ledgerTypeLabel(row.type))}</td>
                             <td>${escapeHtml(String(row.amount))}</td>
                             <td>${escapeHtml(String(row.balance_after))}</td>
                             <td>${escapeHtml([row.ref_type, row.ref_id].filter(Boolean).join(':') || '-')}</td>
@@ -126,4 +126,12 @@ function renderLogs() {
             </tbody>
         </table>
     `;
+}
+
+// ledgerTypeLabel turns an internal ledger type into owner-facing text;
+// unknown types fall back to the raw value.
+function ledgerTypeLabel(type) {
+    const key = `logs.tx_${String(type || '')}`;
+    const label = t(key);
+    return label === key ? String(type || '') : label;
 }

@@ -5,6 +5,33 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Deployment notes
+
+- Apply migrations `013_payment_settings.sql` and `014_admin_operations_permissions.sql`
+- Set `SETTINGS_ENC_KEY` (64 hex chars, `openssl rand -hex 32`) and keep it stable
+- Remove every `CREEM_*` environment variable (startup now fails if one is set), then enter the Creem settings at `/samelabs/settings/payment`; checkout stays unavailable until they are saved
+- The platform admin moved from `/admin` to `/samelabs` (API: `/api/samelabs/*`); the old paths return 404
+
+### Platform admin (`/samelabs`)
+
+- Rebuilt as server-rendered pages with plain form posts (CSRF-protected, audited); the admin single-page app and its scripts are removed
+- New: dashboard counters; task governance (list, detail with submissions, pin to the homepage, close with a reason the owner sees — no credits move); memory governance (view content, make private, remove); account detail with tasks, memories, ledger and payments
+- New: payment settings page; Creem API key and webhook secret are stored encrypted (AES-256-GCM) and only shown masked
+- Switching checkout off stops new purchases only; webhooks for existing payments keep being processed
+
+### Owner and public site
+
+- Owners can no longer reopen a task the platform closed; the task shows the platform's reason and when the remaining budget can be refunded
+- Registration explains the Kungfu ID and password rules and, once the account exists, shows only the one-time key and the way forward
+- Overview: clearer labels (Memories, Shared, Your tasks) and a getting-started card until the first task is published
+- New task form shows the available balance; Store disables products the balance cannot cover and shows the shortfall
+- Credit history shows readable transaction types instead of internal ledger codes
+- Mobile: single-row scrollable navigation and a 2×2 stats grid
+- Chinese copy uses 积分 consistently
+- Homepage agent routing recognises httpx, aiohttp, axios, undici, Deno and Node's built-in fetch, and sends `Vary: User-Agent, Accept`
+
 ## [v1.3.1] — 2026-09-22
 
 ### Admin simplification

@@ -23,15 +23,24 @@ function renderStore() {
         // shared section lifecycle (sectionBox). The renderer only
         // paints the ready state — a non-empty product list.
         if (state.store.products.length) {
-            wrap.innerHTML = state.store.products.map((p) => `
+            const balanceStr = state.account && state.account.balance != null ? String(state.account.balance) : null;
+            const shortBy = (price) => {
+                if (balanceStr == null || !/^[0-9]+$/.test(balanceStr) || !/^[0-9]+$/.test(String(price))) return null;
+                const gap = BigInt(String(price)) - BigInt(balanceStr);
+                return gap > 0n ? gap.toString() : null;
+            };
+            wrap.innerHTML = state.store.products.map((p) => { const gap = shortBy(p.credits_price); return `
                 <div class="store-product" data-product-code="${escapeHtml(p.code)}">
                     <div class="store-product-body">
                         <div class="store-product-title">${escapeHtml(p.title)}</div>
                         ${p.description ? `<div class="muted store-product-desc">${escapeHtml(p.description)}</div>` : ''}
                         <div class="store-product-price">${escapeHtml(String(p.credits_price) === '1' ? t('store.price_one', {price: p.credits_price}) : t('store.price', {price: p.credits_price}))}</div>
                     </div>
-                    <button class="btn primary" type="button" data-redeem-code="${escapeHtml(p.code)}">${escapeHtml(t('store.redeem'))}</button>
-                </div>`).join('');
+                    <div class="store-product-actions">
+                        <button class="btn primary" type="button" data-redeem-code="${escapeHtml(p.code)}" ${gap ? 'disabled' : ''}>${escapeHtml(t('store.redeem'))}</button>
+                        ${gap ? `<span class="muted store-shortfall">${escapeHtml(t('store.short_by', {gap}))}</span>` : ''}
+                    </div>
+                </div>`; }).join('');
         }
     }
 

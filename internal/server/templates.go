@@ -510,9 +510,11 @@ func ownerAuthRegisterHTML(d *tmplData) string {
     <h2>` + d.T("owner.auth.register_heading") + `</h2>
     <form id="registerForm" novalidate>
         <label>` + d.T("owner.auth.kungfu_id") + `</label>
-        <input name="name" autocomplete="username" required minlength="6" maxlength="32">
+        <input name="name" autocomplete="username" required minlength="6" maxlength="32" pattern="[A-Za-z0-9_.\-]{6,32}" aria-describedby="kungfuIdHint">
+        <p class="field-help" id="kungfuIdHint">` + d.T("owner.auth.kungfu_id_hint") + `</p>
         <label>` + d.T("owner.auth.password") + `</label>
-        <input name="password" type="password" autocomplete="new-password" required minlength="6" maxlength="128">
+        <input name="password" type="password" autocomplete="new-password" required minlength="6" maxlength="128" aria-describedby="passwordHint">
+        <p class="field-help" id="passwordHint">` + d.T("owner.auth.password_hint") + `</p>
         <label>` + d.T("owner.auth.confirm_password") + `</label>
         <input name="confirm_password" type="password" autocomplete="new-password" required minlength="6" maxlength="128">
         <div class="actions">
@@ -555,8 +557,17 @@ func ownerOverviewHTML(d *tmplData) string {
         <b>` + d.T("owner.key.heading") + `</b>
         <code id="keyBox" class="keybox overview-keybox is-empty"></code>
     </div>
+</section>
+<section class="panel start-panel" id="ownerStart" hidden>
+    <h2>` + d.T("owner.start.heading") + `</h2>
+    <ol class="start-steps">
+        <li><b>` + d.T("owner.start.connect_title") + `</b><span>` + d.T("owner.start.connect_body") + `</span></li>
+        <li><b>` + d.T("owner.start.publish_title") + `</b><span>` + d.T("owner.start.publish_body") + `</span></li>
+        <li><b>` + d.T("owner.start.credits_title") + `</b><span>` + d.T("owner.start.credits_body") + `</span></li>
+    </ol>
     <div class="actions">
-        <button class="btn" type="button" id="reloadBtn">` + d.T("owner.overview.reload") + `</button>
+        <a class="btn primary" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks") + `">` + d.T("owner.start.publish_cta") + `</a>
+        <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/task-guide") + `">` + d.T("owner.start.guide_cta") + `</a>
     </div>
 </section>`
 }
@@ -613,7 +624,7 @@ func ownerTasksHTML(d *tmplData) string {
         <h2>` + d.T("owner.tasks.my_tasks") + `</h2>
         <div class="task-list" id="taskList"></div>
     </div>
-    <div class="panel">
+    <div class="panel" id="taskDetailPanel">
         <div id="taskDetail"><p class="muted">` + d.T("owner.tasks.select_hint") + `</p></div>
     </div>
 </section>`
