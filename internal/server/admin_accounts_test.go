@@ -117,7 +117,7 @@ func Test011AccountsListBasics(t *testing.T) {
 	e := newB12Env(t)
 	p := newAccountProbe(t, e)
 
-	rec := e.do(t, "GET", "/api/admin/accounts?status=active&q="+p.name, "", false)
+	rec := e.do(t, "GET", "/api/samelabs/accounts?status=active&q="+p.name, "", false)
 	if rec.Code != 200 {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -179,7 +179,7 @@ func Test011AccountDetailAggregatesDistinct(t *testing.T) {
 			`DELETE FROM tb_task_submissions WHERE bot_id=$1`, p.id)
 	})
 
-	rec := e.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false)
+	rec := e.do(t, "GET", fmt.Sprintf("/api/samelabs/accounts/%d", p.id), "", false)
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
 	}
@@ -214,7 +214,7 @@ func Test011ScopedPermissions(t *testing.T) {
 	scopedLogin := func(rolePerms []string) *b12Env {
 		t.Helper()
 		code := fmt.Sprintf("ra%d", time.Now().UnixNano()%1000000)
-		rec := e.mutateJSON(t, "POST", "/api/admin/roles",
+		rec := e.mutateJSON(t, "POST", "/api/samelabs/roles",
 			fmt.Sprintf(`{"code":%q,"name":"RA"}`, code))
 		if rec.Code != 200 {
 			t.Fatalf("role: %d %s", rec.Code, rec.Body.String())
@@ -226,13 +226,13 @@ func Test011ScopedPermissions(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &rr)
 		permJSON, _ := json.Marshal(rolePerms)
-		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", rr.Data.ID),
 			`{"permission_codes":`+string(permJSON)+`}`)
 		if rec.Code != 200 {
 			t.Fatalf("perms: %d %s", rec.Code, rec.Body.String())
 		}
 		username := fmt.Sprintf("ra_user_%d", time.Now().UnixNano()%1000000)
-		rec = e.mutateJSON(t, "POST", "/api/admin/users",
+		rec = e.mutateJSON(t, "POST", "/api/samelabs/users",
 			fmt.Sprintf(`{"username":%q,"display_name":"RA","password":"ra-pass-123"}`, username))
 		if rec.Code != 200 {
 			t.Fatalf("user: %d %s", rec.Code, rec.Body.String())
@@ -244,7 +244,7 @@ func Test011ScopedPermissions(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &ur)
 		ids, _ := json.Marshal([]int64{rr.Data.ID})
-		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID),
+		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", ur.Data.ID),
 			`{"role_ids":`+string(ids)+`}`)
 		if rec.Code != 200 {
 			t.Fatalf("assign: %d %s", rec.Code, rec.Body.String())
@@ -256,50 +256,50 @@ func Test011ScopedPermissions(t *testing.T) {
 
 	// accounts.read only: list/get 200, mutations 403.
 	rv := scopedLogin([]string{"accounts.read"})
-	if rec := rv.do(t, "GET", "/api/admin/accounts", "", false); rec.Code != 200 {
+	if rec := rv.do(t, "GET", "/api/samelabs/accounts", "", false); rec.Code != 200 {
 		t.Fatalf("read list = %d", rec.Code)
 	}
-	if rec := rv.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false); rec.Code != 200 {
+	if rec := rv.do(t, "GET", fmt.Sprintf("/api/samelabs/accounts/%d", p.id), "", false); rec.Code != 200 {
 		t.Fatalf("read get = %d", rec.Code)
 	}
-	if rec := rv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", p.id), ""); rec.Code != 403 {
+	if rec := rv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/disable", p.id), ""); rec.Code != 403 {
 		t.Fatalf("read disable = %d, want 403", rec.Code)
 	}
-	if rec := rv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", p.id), ""); rec.Code != 403 {
+	if rec := rv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/enable", p.id), ""); rec.Code != 403 {
 		t.Fatalf("read enable = %d, want 403", rec.Code)
 	}
 
 	// no account permissions at all: complete 403 matrix.
 	nv := scopedLogin([]string{"admin.audit.read"})
-	if rec := nv.do(t, "GET", "/api/admin/accounts", "", false); rec.Code != 403 {
+	if rec := nv.do(t, "GET", "/api/samelabs/accounts", "", false); rec.Code != 403 {
 		t.Fatalf("no-perm list = %d, want 403", rec.Code)
 	}
-	if rec := nv.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false); rec.Code != 403 {
+	if rec := nv.do(t, "GET", fmt.Sprintf("/api/samelabs/accounts/%d", p.id), "", false); rec.Code != 403 {
 		t.Fatalf("no-perm detail = %d, want 403", rec.Code)
 	}
-	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", p.id), ""); rec.Code != 403 {
+	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/disable", p.id), ""); rec.Code != 403 {
 		t.Fatalf("no-perm disable = %d, want 403", rec.Code)
 	}
-	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", p.id), ""); rec.Code != 403 {
+	if rec := nv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/enable", p.id), ""); rec.Code != 403 {
 		t.Fatalf("no-perm enable = %d, want 403", rec.Code)
 	}
 
 	// manage WITHOUT read: mutations work, reads are forbidden —
 	// accounts.manage must not implicitly require accounts.read.
 	mv := scopedLogin([]string{"accounts.manage"})
-	if rec := mv.do(t, "GET", "/api/admin/accounts", "", false); rec.Code != 403 {
+	if rec := mv.do(t, "GET", "/api/samelabs/accounts", "", false); rec.Code != 403 {
 		t.Fatalf("manage-only list = %d, want 403", rec.Code)
 	}
-	if rec := mv.do(t, "GET", fmt.Sprintf("/api/admin/accounts/%d", p.id), "", false); rec.Code != 403 {
+	if rec := mv.do(t, "GET", fmt.Sprintf("/api/samelabs/accounts/%d", p.id), "", false); rec.Code != 403 {
 		t.Fatalf("manage-only detail = %d, want 403", rec.Code)
 	}
 	// Real mutations with normal CSRF, target a throwaway probe so
 	// the lifecycle stays isolated from this test's assertions.
 	tp := newAccountProbe(t, e)
-	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", tp.id), ""); rec.Code != 200 {
+	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/disable", tp.id), ""); rec.Code != 200 {
 		t.Fatalf("manage-only disable = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
-	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", tp.id), ""); rec.Code != 200 {
+	if rec := mv.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/enable", tp.id), ""); rec.Code != 200 {
 		t.Fatalf("manage-only enable = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
 }
@@ -309,8 +309,8 @@ func Test011CSRFRequiredOnMutations(t *testing.T) {
 	e := newB12Env(t)
 	p := newAccountProbe(t, e)
 	for _, path := range []string{
-		fmt.Sprintf("/api/admin/accounts/%d/disable", p.id),
-		fmt.Sprintf("/api/admin/accounts/%d/enable", p.id),
+		fmt.Sprintf("/api/samelabs/accounts/%d/disable", p.id),
+		fmt.Sprintf("/api/samelabs/accounts/%d/enable", p.id),
 	} {
 		rec := e.do(t, "POST", path, "", false) // NO CSRF header
 		if rec.Code == 200 {
@@ -370,7 +370,7 @@ func Test011DisableEnableLifecycle(t *testing.T) {
 	}
 
 	// -- disable --
-	rec := e.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", p.id), "")
+	rec := e.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/disable", p.id), "")
 	if rec.Code != 200 {
 		t.Fatalf("disable: %d %s", rec.Code, rec.Body.String())
 	}
@@ -408,7 +408,7 @@ func Test011DisableEnableLifecycle(t *testing.T) {
 	}
 
 	// (12) Idempotent disable: 200 + second REAL audit row.
-	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/disable", p.id), "")
+	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/disable", p.id), "")
 	if rec.Code != 200 {
 		t.Fatalf("idempotent disable: %d", rec.Code)
 	}
@@ -419,7 +419,7 @@ func Test011DisableEnableLifecycle(t *testing.T) {
 
 	// (7) Enable: SAME cookie + SAME agent key work again (no
 	// rotation, no permanent revoke).
-	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", p.id), "")
+	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/enable", p.id), "")
 	if rec.Code != 200 {
 		t.Fatalf("enable: %d %s", rec.Code, rec.Body.String())
 	}
@@ -435,7 +435,7 @@ func Test011DisableEnableLifecycle(t *testing.T) {
 	}
 
 	// Idempotent enable also audited.
-	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/admin/accounts/%d/enable", p.id), "")
+	rec = e.mutateJSON(t, "POST", fmt.Sprintf("/api/samelabs/accounts/%d/enable", p.id), "")
 	if rec.Code != 200 {
 		t.Fatalf("idempotent enable: %d", rec.Code)
 	}
@@ -447,10 +447,10 @@ func Test011DisableEnableLifecycle(t *testing.T) {
 // 404 path: unknown account id.
 func Test011AccountNotFound(t *testing.T) {
 	e := newB12Env(t)
-	if rec := e.do(t, "GET", "/api/admin/accounts/999999999", "", false); rec.Code != 404 {
+	if rec := e.do(t, "GET", "/api/samelabs/accounts/999999999", "", false); rec.Code != 404 {
 		t.Fatalf("get 404: %d", rec.Code)
 	}
-	if rec := e.mutateJSON(t, "POST", "/api/admin/accounts/999999999/disable", ""); rec.Code != 404 {
+	if rec := e.mutateJSON(t, "POST", "/api/samelabs/accounts/999999999/disable", ""); rec.Code != 404 {
 		t.Fatalf("disable 404: %d", rec.Code)
 	}
 }
@@ -458,7 +458,7 @@ func Test011AccountNotFound(t *testing.T) {
 // 14: list respects the page-size cap.
 func Test011ListPaginationCap(t *testing.T) {
 	e := newB12Env(t)
-	rec := e.do(t, "GET", "/api/admin/accounts?page=1&page_size=100", "", false)
+	rec := e.do(t, "GET", "/api/samelabs/accounts?page=1&page_size=100", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("list: %d", rec.Code)
 	}
@@ -473,7 +473,7 @@ func Test011ListPaginationCap(t *testing.T) {
 func Test011IllegalStatusIs400(t *testing.T) {
 	e := newB12Env(t)
 	p := newAccountProbe(t, e)
-	rec := e.do(t, "GET", "/api/admin/accounts?status=garbage", "", false)
+	rec := e.do(t, "GET", "/api/samelabs/accounts?status=garbage", "", false)
 	if rec.Code != 400 {
 		t.Fatalf("status=garbage = %d, want 400", rec.Code)
 	}

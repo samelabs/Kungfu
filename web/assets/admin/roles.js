@@ -2,13 +2,13 @@
 'use strict';
 
 async function loadRoles() {
-    const json = await adminGet('/api/admin/roles');
+    const json = await adminGet('/api/samelabs/roles');
     if (!json.success) throw new Error(apiError(json, 'Failed to load roles'));
     state.roles = json.data.roles || [];
 }
 
 async function loadPermissions() {
-    const json = await adminGet('/api/admin/permissions');
+    const json = await adminGet('/api/samelabs/permissions');
     if (!json.success) throw new Error(apiError(json, 'Failed to load permissions'));
     state.permissions = json.data.permissions || [];
 }
@@ -96,7 +96,7 @@ async function bindAdminRolesEvents() {
             try {
                 if (act === 'disable' || act === 'enable') {
                     // status-only PATCH: name/description preserved
-                    const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {
+                    const json = await adminMutate(`/api/samelabs/roles/${id}`, 'PATCH', {
                         status: act === 'disable' ? 'disabled' : 'active'
                     });
                     if (!json.success) throw new Error(apiError(json));
@@ -105,20 +105,20 @@ async function bindAdminRolesEvents() {
                     const next = window.prompt('New role name:', role ? role.name : '');
                     if (next === null) return;
                     // name-only PATCH: status/description preserved
-                    const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {name: next});
+                    const json = await adminMutate(`/api/samelabs/roles/${id}`, 'PATCH', {name: next});
                     if (!json.success) throw new Error(apiError(json));
                 } else if (act === 'editdesc') {
                     const role = state.roles.find(x => x.id === id);
                     const next = window.prompt('Role description (empty clears it):',
                         role && role.description ? role.description : '');
                     if (next === null) return;
-                    const json = await adminMutate(`/api/admin/roles/${id}`, 'PATCH', {description: next});
+                    const json = await adminMutate(`/api/samelabs/roles/${id}`, 'PATCH', {description: next});
                     if (!json.success) throw new Error(apiError(json));
                 } else if (act === 'perms') {
                     const role = state.roles.find(r => r.id === id);
                     if (!role) return;
                     permissionPickerOverlay(role, async (codes) => {
-                        const json = await adminMutate(`/api/admin/roles/${id}/permissions`, 'PUT', {permission_codes: codes});
+                        const json = await adminMutate(`/api/samelabs/roles/${id}/permissions`, 'PUT', {permission_codes: codes});
                         if (!json.success) window.alert(apiError(json));
                         await loadRoles(); renderRoles();
                     });
@@ -135,7 +135,7 @@ async function bindAdminRolesEvents() {
         createForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
-                const json = await adminMutate('/api/admin/roles', 'POST', {
+                const json = await adminMutate('/api/samelabs/roles', 'POST', {
                     code: document.getElementById('adminNewRoleCode').value.trim(),
                     name: document.getElementById('adminNewRoleName').value.trim(),
                     description: document.getElementById('adminNewRoleDesc').value.trim()

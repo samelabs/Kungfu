@@ -9,7 +9,7 @@ import (
 
 // CSRF foundation: the Admin plane is a cookie-authenticated control
 // plane, so every mutating request (POST/PUT/PATCH/DELETE under
-// /api/admin/** except the login POST) must present X-CSRF-Token.
+// /api/samelabs/** except the login POST) must present X-CSRF-Token.
 //
 // The CSRF token is HMAC-SHA256 over a DOMAIN-SEPARATED value derived
 // from the CURRENT raw admin session token and the SessionSecret:

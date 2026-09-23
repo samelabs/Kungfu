@@ -83,7 +83,7 @@ func TestRetainedSurfacesStay(t *testing.T) {
 		// exec list below and check registration separately.
 		{"POST", "/api/webhooks/creem", 400}, // bad signature, not 404/405
 		{"GET", "/api/owner/session", 401},   // unauthenticated JSON, not 404
-		{"GET", "/api/admin/session", 401},
+		{"GET", "/api/samelabs/session", 401},
 		{"GET", "/api/account", 401},
 		{"POST", "/api/owner/register", 400},    // live owner surface (bad body, not 404/405)
 		{"POST", "/api/testtask/somecode", 401}, // owner bot-auth surface stays

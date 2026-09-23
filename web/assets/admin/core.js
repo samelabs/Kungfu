@@ -1,5 +1,5 @@
 /* Admin Workspace core: state + tiny DOM helpers. Independent from
- * the Owner workspace; reads only /api/admin/*. Secrets (csrf token,
+ * the Owner workspace; reads only /api/samelabs/*. Secrets (csrf token,
  * session material, passwords) live ONLY in memory here — never in
  * localStorage/sessionStorage. */
 'use strict';

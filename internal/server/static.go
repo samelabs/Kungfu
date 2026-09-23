@@ -106,8 +106,19 @@ func (s *Server) agentHomeHandler() http.HandlerFunc {
 			strings.Contains(ua, "go-http-client") ||
 			strings.Contains(ua, "node-fetch") ||
 			strings.Contains(ua, "httpie") ||
+			strings.Contains(ua, "python-httpx") ||
+			strings.Contains(ua, "aiohttp") ||
+			strings.Contains(ua, "axios") ||
+			strings.Contains(ua, "undici") ||
+			strings.Contains(ua, "deno/") ||
+			ua == "node" || // Node.js built-in fetch
 			strings.Contains(accept, "text/plain")
 
+		// The body at "/" depends on these headers: shared caches must
+		// key on them or they would serve llms.txt to browsers (or HTML
+		// to agents).
+		w.Header().Add("Vary", "User-Agent")
+		w.Header().Add("Vary", "Accept")
 		if isAgent {
 			serveStaticFile("llms.txt", "text/plain; charset=utf-8", "")(w, r)
 			return

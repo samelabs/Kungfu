@@ -75,16 +75,16 @@ func (s *Server) renderAdmin(w http.ResponseWriter, data *tmplData) {
 func adminNavHTML(data *tmplData) string {
 	_ = data // nav visibility is driven client-side from permissions
 	return `<nav class="nav admin-nav" aria-label="Admin Workspace" id="adminNav" hidden>
-    <a class="btn" data-admin-nav="dashboard" href="/admin">Dashboard</a>
-    <a class="btn" data-admin-nav="users" href="/admin/users">Admins</a>
-    <a class="btn" data-admin-nav="roles" href="/admin/roles">Roles</a>
-    <a class="btn" data-admin-nav="sessions" href="/admin/sessions">Sessions</a>
-    <a class="btn" data-admin-nav="audit" href="/admin/audit">Audit</a>
-    <a class="btn" data-admin-nav="store_products" href="/admin/store/products">Store Products</a>
-    <a class="btn" data-admin-nav="store_redemptions" href="/admin/store/redemptions">Store Redemptions</a>
-    <a class="btn" data-admin-nav="accounts" href="/admin/accounts">Accounts</a>
-    <a class="btn" data-admin-nav="finance" href="/admin/finance">Finance</a>
-    <a class="btn" data-admin-nav="account" href="/admin/account">Account</a>
+    <a class="btn" data-admin-nav="dashboard" href="/samelabs">Dashboard</a>
+    <a class="btn" data-admin-nav="users" href="/samelabs/users">Admins</a>
+    <a class="btn" data-admin-nav="roles" href="/samelabs/roles">Roles</a>
+    <a class="btn" data-admin-nav="sessions" href="/samelabs/sessions">Sessions</a>
+    <a class="btn" data-admin-nav="audit" href="/samelabs/audit">Audit</a>
+    <a class="btn" data-admin-nav="store_products" href="/samelabs/store/products">Store Products</a>
+    <a class="btn" data-admin-nav="store_redemptions" href="/samelabs/store/redemptions">Store Redemptions</a>
+    <a class="btn" data-admin-nav="accounts" href="/samelabs/accounts">Accounts</a>
+    <a class="btn" data-admin-nav="finance" href="/samelabs/finance">Finance</a>
+    <a class="btn" data-admin-nav="account" href="/samelabs/account">Account</a>
     <button class="btn danger" id="adminLogoutBtn" type="button">Logout</button>
 </nav>`
 }

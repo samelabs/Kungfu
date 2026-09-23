@@ -43,7 +43,7 @@
     }
 
     function loadSummary() {
-        return api('/api/admin/finance/summary').then(function (r) { return r.json(); }).then(function (body) {
+        return api('/api/samelabs/finance/summary').then(function (r) { return r.json(); }).then(function (body) {
             var d = body.data || {};
             var statusRows = Object.keys(d.payments_by_status || {}).map(function (k) {
                 return [esc(k), esc(d.payments_by_status[k])];
@@ -52,7 +52,7 @@
                 return [esc(v.currency), money(v.amount_minor), esc(v.count)];
             });
             var scopeNote = scopeBot
-                ? '<p class="admin-note"><strong>Account scope active: bot #' + esc(scopeBot) + '</strong> — Payments / Adjustments / Ledger below are scoped to this account. <a href="/admin/finance">Clear scope</a></p>'
+                ? '<p class="admin-note"><strong>Account scope active: bot #' + esc(scopeBot) + '</strong> — Payments / Adjustments / Ledger below are scoped to this account. <a href="/samelabs/finance">Clear scope</a></p>'
                 : '';
             el('adminFinanceSummary').innerHTML =
                 '<h3>Summary <small>(global — not account-scoped)</small></h3>' + scopeNote +
@@ -71,7 +71,7 @@
         var q = el('financePaymentQFilter').value.trim();
         if (st) qs += '&status=' + encodeURIComponent(st);
         if (q) qs += '&q=' + encodeURIComponent(q);
-        return api('/api/admin/finance/payments' + qs).then(function (r) { return r.json(); }).then(function (body) {
+        return api('/api/samelabs/finance/payments' + qs).then(function (r) { return r.json(); }).then(function (body) {
             var d = body.data || {};
             paymentsPage = page;
             var rows = (d.payments || []).map(function (p) {
@@ -95,7 +95,7 @@
         var code = el('financeAdjustmentCodeFilter').value.trim();
         if (kind) qs += '&kind=' + encodeURIComponent(kind);
         if (code) qs += '&payment_code=' + encodeURIComponent(code);
-        return api('/api/admin/finance/adjustments' + qs).then(function (r) { return r.json(); }).then(function (body) {
+        return api('/api/samelabs/finance/adjustments' + qs).then(function (r) { return r.json(); }).then(function (body) {
             var d = body.data || {};
             adjustmentsPage = page;
             var rows = (d.adjustments || []).map(function (a) {
@@ -117,7 +117,7 @@
         var type = el('financeLedgerTypeFilter').value.trim();
         if (bot) qs += '&bot_id=' + encodeURIComponent(bot);
         if (type) qs += '&type=' + encodeURIComponent(type);
-        return api('/api/admin/finance/ledger' + qs).then(function (r) { return r.json(); }).then(function (body) {
+        return api('/api/samelabs/finance/ledger' + qs).then(function (r) { return r.json(); }).then(function (body) {
             var d = body.data || {};
             ledgerPage = page;
             var rows = (d.entries || []).map(function (e) {
@@ -140,7 +140,7 @@
     }
 
     function loadPaymentDetail(code) {
-        return api('/api/admin/finance/payments/' + encodeURIComponent(code)).then(function (r) { return r.json(); }).then(function (body) {
+        return api('/api/samelabs/finance/payments/' + encodeURIComponent(code)).then(function (r) { return r.json(); }).then(function (body) {
             var d = body.data || {};
             var p = d.payment || {};
             var rec = d.reconciliation || {};

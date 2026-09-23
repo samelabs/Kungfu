@@ -16,7 +16,7 @@ async function adminFetch(path, options = {}) {
         credentials: 'same-origin'
     }));
     if (response.status === 401 && SECTION !== 'login') {
-        window.location.assign('/admin/login');
+        window.location.assign('/samelabs/login');
         throw new Error('session expired');
     }
     const text = await response.text();

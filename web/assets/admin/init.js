@@ -38,13 +38,13 @@ function bindAdminAccountEvents() {
             const current = document.getElementById('adminCurrentPassword').value;
             const next = document.getElementById('adminNewPassword').value;
             try {
-                const json = await adminMutate('/api/admin/me/password', 'POST', {
+                const json = await adminMutate('/api/samelabs/me/password', 'POST', {
                     current_password: current,
                     new_password: next
                 });
                 if (!json.success) throw new Error(apiError(json));
                 setNotice('adminPasswordNotice', json.message || 'Password changed — redirecting…', 'ok');
-                setTimeout(() => window.location.assign('/admin/login'), 1200);
+                setTimeout(() => window.location.assign('/samelabs/login'), 1200);
             } catch (err) {
                 setNotice('adminPasswordNotice', err.message, 'error');
             }

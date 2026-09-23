@@ -68,7 +68,7 @@ func httpLoginAdmin(t *testing.T, s *Server, username, password string) *http.Co
 	t.Helper()
 	router := s.buildRouter()
 	body := `{"username":"` + username + `","password":"` + password + `"}`
-	req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -90,7 +90,7 @@ func TestAdminLoginSetsIndependentCookie(t *testing.T) {
 	router := s.buildRouter()
 
 	body := `{"username":"` + username + `","password":"` + password + `"}`
-	req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -147,7 +147,7 @@ func TestAdminSessionGetReturnsPrincipalAndCSRF(t *testing.T) {
 	router := s.buildRouter()
 	cookie := httpLoginAdmin(t, s, username, password)
 
-	req := httptest.NewRequest("GET", "/api/admin/session", nil)
+	req := httptest.NewRequest("GET", "/api/samelabs/session", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -179,7 +179,7 @@ func TestOwnerCookieCannotAccessAdminPlane(t *testing.T) {
 	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
-	req := httptest.NewRequest("GET", "/api/admin/session", nil)
+	req := httptest.NewRequest("GET", "/api/samelabs/session", nil)
 	req.AddCookie(ownerCookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -192,7 +192,7 @@ func TestOwnerCookieCannotAccessAdminPlane(t *testing.T) {
 func TestBotKeyCannotAccessAdminPlane(t *testing.T) {
 	s := newAdminTestServer(t)
 	router := s.buildRouter()
-	req := httptest.NewRequest("GET", "/api/admin/session", nil)
+	req := httptest.NewRequest("GET", "/api/samelabs/session", nil)
 	req.Header.Set("X-Bot-Key", "kf_live_"+strings.Repeat("a", 64))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -224,14 +224,14 @@ func TestAdminLogoutCSRFAndRevocation(t *testing.T) {
 	cookie := httpLoginAdmin(t, s, username, password)
 
 	// 1) DELETE without CSRF token → rejected, session stays live
-	req := httptest.NewRequest("DELETE", "/api/admin/session", nil)
+	req := httptest.NewRequest("DELETE", "/api/samelabs/session", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != 403 {
 		t.Fatalf("logout without CSRF must be 403, got %d", rec.Code)
 	}
-	req2 := httptest.NewRequest("GET", "/api/admin/session", nil)
+	req2 := httptest.NewRequest("GET", "/api/samelabs/session", nil)
 	req2.AddCookie(cookie)
 	rec2 := httptest.NewRecorder()
 	router.ServeHTTP(rec2, req2)
@@ -240,7 +240,7 @@ func TestAdminLogoutCSRFAndRevocation(t *testing.T) {
 	}
 
 	// 2) DELETE with wrong CSRF → rejected
-	req3 := httptest.NewRequest("DELETE", "/api/admin/session", nil)
+	req3 := httptest.NewRequest("DELETE", "/api/samelabs/session", nil)
 	req3.AddCookie(cookie)
 	req3.Header.Set("X-CSRF-Token", "bogus")
 	rec3 := httptest.NewRecorder()
@@ -250,7 +250,7 @@ func TestAdminLogoutCSRFAndRevocation(t *testing.T) {
 	}
 
 	// 3) DELETE with valid CSRF → revoked + cookie cleared
-	req4 := httptest.NewRequest("DELETE", "/api/admin/session", nil)
+	req4 := httptest.NewRequest("DELETE", "/api/samelabs/session", nil)
 	req4.AddCookie(cookie)
 	req4.Header.Set("X-CSRF-Token", admin.CSRFToken(cookie.Value, s.Config.SessionSecret))
 	rec4 := httptest.NewRecorder()
@@ -268,7 +268,7 @@ func TestAdminLogoutCSRFAndRevocation(t *testing.T) {
 		t.Fatal("kf_admin cookie not cleared on logout")
 	}
 	// session now dead
-	req5 := httptest.NewRequest("GET", "/api/admin/session", nil)
+	req5 := httptest.NewRequest("GET", "/api/samelabs/session", nil)
 	req5.AddCookie(cookie)
 	rec5 := httptest.NewRecorder()
 	router.ServeHTTP(rec5, req5)
@@ -281,7 +281,7 @@ func TestAdminLogoutWithStaleCookieStillClearsLocally(t *testing.T) {
 	s := newAdminTestServer(t)
 	router := s.buildRouter()
 	// bogus token → invalid session, no CSRF header
-	req := httptest.NewRequest("DELETE", "/api/admin/session", nil)
+	req := httptest.NewRequest("DELETE", "/api/samelabs/session", nil)
 	req.AddCookie(&http.Cookie{Name: admin.AdminCookieName, Value: "stale-garbage"})
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -309,7 +309,7 @@ func TestAdminLoginRateLimitIndependentNamespace(t *testing.T) {
 
 	doLogin := func() int {
 		body := `{"username":"` + username + `","password":"` + password + `"}`
-		req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+		req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "9.9.9.9:1234"
 		rec := httptest.NewRecorder()
@@ -337,7 +337,7 @@ func TestAdminLoginUniform401Externally(t *testing.T) {
 
 	attempt := func(user, pass string) (int, string) {
 		body := `{"username":"` + user + `","password":"` + pass + `"}`
-		req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+		req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -357,5 +357,30 @@ func TestAdminLoginUniform401Externally(t *testing.T) {
 	}
 	if c1 != 401 || code1 != "INVALID_CREDENTIALS" {
 		t.Fatalf("expected 401 INVALID_CREDENTIALS, got (%d,%s)", c1, code1)
+	}
+}
+
+// The platform admin lives under /samelabs; the legacy /admin and
+// /api/admin entry points are plain 404s (no redirect that would
+// advertise the real location).
+func TestLegacyAdminPathsAre404(t *testing.T) {
+	s := newAdminTestServer(t)
+	router := s.buildRouter()
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/admin"},
+		{"GET", "/admin/login"},
+		{"GET", "/admin/users"},
+		{"GET", "/api/admin/session"},
+		{"POST", "/api/admin/session"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != 404 {
+			t.Fatalf("%s %s = %d, want 404", tc.method, tc.path, rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "" {
+			t.Fatalf("%s %s redirected to %q", tc.method, tc.path, loc)
+		}
 	}
 }

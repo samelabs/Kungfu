@@ -201,13 +201,13 @@ func TestAdminStoreRejectsFractionalPrice(t *testing.T) {
 	env := newB2HTTPEnv(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
-	rec := env.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec := env.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		`{"title":"FRAC `+suffix+`","credits_price":12.5}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "INVALID_PRICE") {
 		t.Fatalf("fractional create = %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = env.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec = env.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		`{"title":"FRAC2 `+suffix+`","credits_price":12}`)
 	if rec.Code != 200 {
 		t.Fatalf("integer create = %d %s", rec.Code, rec.Body.String())
@@ -222,7 +222,7 @@ func TestAdminStoreRejectsFractionalPrice(t *testing.T) {
 		_, _ = env.s.Pool.Exec(ctxBg(), `DELETE FROM tb_store_products WHERE code=$1`, created.Data.Code)
 	})
 
-	rec = env.mutateJSON(t, "PATCH", "/api/admin/store/products/"+created.Data.Code,
+	rec = env.mutateJSON(t, "PATCH", "/api/samelabs/store/products/"+created.Data.Code,
 		`{"credits_price":13.75}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "INVALID_PRICE") {
 		t.Fatalf("fractional patch = %d %s", rec.Code, rec.Body.String())

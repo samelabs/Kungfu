@@ -34,7 +34,7 @@ async function loadStoreProducts() {
         page_size: String(st.pageSize)
     });
     if (st.filters.q) params.set('q', st.filters.q);
-    const json = await adminGet('/api/admin/store/products?' + params.toString());
+    const json = await adminGet('/api/samelabs/store/products?' + params.toString());
     if (!json.success) throw new Error(apiError(json, 'Failed to load products'));
     st.items = json.data.products || [];
     st.total = json.data.total || 0;
@@ -100,11 +100,11 @@ async function bindStoreProductsEvents() {
             const act = btn.dataset.pact;
             try {
                 if (act === 'activate' || act === 'deactivate') {
-                    const json = await adminMutate(`/api/admin/store/products/${code}/${act}`, 'POST');
+                    const json = await adminMutate(`/api/samelabs/store/products/${code}/${act}`, 'POST');
                     if (!json.success) throw new Error(apiError(json));
                 } else if (act === 'detail') {
                     // fetch the authoritative detail via the GET endpoint
-                    const json = await adminGet(`/api/admin/store/products/${code}`);
+                    const json = await adminGet(`/api/samelabs/store/products/${code}`);
                     if (!json.success) throw new Error(apiError(json));
                     showStoreProductDetail(json.data);
                 } else if (act === 'edit') {
@@ -122,7 +122,7 @@ async function bindStoreProductsEvents() {
                         body.credits_price = ci; // canonical integer string preserved exactly
                     }
                     if (!Object.keys(body).length) return;
-                    const json = await adminMutate(`/api/admin/store/products/${code}`, 'PATCH', body);
+                    const json = await adminMutate(`/api/samelabs/store/products/${code}`, 'PATCH', body);
                     if (!json.success) throw new Error(apiError(json));
                 }
                 await loadStoreProducts();
@@ -143,7 +143,7 @@ async function bindStoreProductsEvents() {
                     setNotice('storeProductCreateNotice', 'Credits price must be a whole integer (no decimals).', 'error');
                     return;
                 }
-                const json = await adminMutate('/api/admin/store/products', 'POST', {
+                const json = await adminMutate('/api/samelabs/store/products', 'POST', {
                     title: document.getElementById('storeNewTitle').value.trim(),
                     description: document.getElementById('storeNewDesc').value.trim(),
                     credits_price: priceInput // canonical integer string preserved exactly
@@ -170,7 +170,7 @@ async function loadStoreRedemptions() {
     });
     if (st.filters.bot_id) params.set('bot_id', st.filters.bot_id);
     if (st.filters.q) params.set('q', st.filters.q);
-    const json = await adminGet('/api/admin/store/redemptions?' + params.toString());
+    const json = await adminGet('/api/samelabs/store/redemptions?' + params.toString());
     if (!json.success) throw new Error(apiError(json, 'Failed to load redemptions'));
     st.items = json.data.redemptions || [];
     st.total = json.data.total || 0;
@@ -249,7 +249,7 @@ async function bindStoreRedemptionsEvents() {
             const act = btn.dataset.ract;
             if (act === 'detail') {
                 try {
-                    const json = await adminGet(`/api/admin/store/redemptions/${code}`);
+                    const json = await adminGet(`/api/samelabs/store/redemptions/${code}`);
                     if (!json.success) throw new Error(apiError(json));
                     showStoreRedemptionDetail(json.data);
                 } catch (err) {
@@ -278,7 +278,7 @@ async function bindStoreRedemptionsEvents() {
                     if (note === null) return;
                     body = {fulfillment_note: note};
                 }
-                const json = await adminMutate(`/api/admin/store/redemptions/${code}/${act}`, 'POST', body);
+                const json = await adminMutate(`/api/samelabs/store/redemptions/${code}/${act}`, 'POST', body);
                 if (!json.success) throw new Error(apiError(json));
                 await loadStoreRedemptions();
                 renderStoreRedemptions();

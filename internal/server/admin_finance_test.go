@@ -104,11 +104,11 @@ func Test012FinanceReadEndpoints(t *testing.T) {
 	f := newFinanceFixture(t, e)
 
 	for _, path := range []string{
-		"/api/admin/finance/summary",
-		"/api/admin/finance/payments",
-		"/api/admin/finance/payments/" + f.payCode,
-		"/api/admin/finance/adjustments",
-		"/api/admin/finance/ledger",
+		"/api/samelabs/finance/summary",
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/payments/" + f.payCode,
+		"/api/samelabs/finance/adjustments",
+		"/api/samelabs/finance/ledger",
 	} {
 		if rec := e.do(t, "GET", path, "", false); rec.Code != 200 {
 			t.Fatalf("%s = %d %s", path, rec.Code, rec.Body.String())
@@ -116,7 +116,7 @@ func Test012FinanceReadEndpoints(t *testing.T) {
 	}
 
 	// (7) list wire: amount_minor/credits are decimal strings.
-	rec := e.do(t, "GET", "/api/admin/finance/payments?q="+f.payCode, "", false)
+	rec := e.do(t, "GET", "/api/samelabs/finance/payments?q="+f.payCode, "", false)
 	var list struct {
 		Data struct {
 			Payments []map[string]interface{} `json:"payments"`
@@ -132,7 +132,7 @@ func Test012FinanceReadEndpoints(t *testing.T) {
 	}
 
 	// (9) consistent chain → paid_grant_exact true + all integrity PASS.
-	rec = e.do(t, "GET", "/api/admin/finance/payments/"+f.payCode, "", false)
+	rec = e.do(t, "GET", "/api/samelabs/finance/payments/"+f.payCode, "", false)
 	var detail struct {
 		Data struct {
 			Reconciliation struct {
@@ -149,7 +149,7 @@ func Test012FinanceReadEndpoints(t *testing.T) {
 	}
 
 	// (17) summary groups paid volume by currency; (label check)
-	rec = e.do(t, "GET", "/api/admin/finance/summary", "", false)
+	rec = e.do(t, "GET", "/api/samelabs/finance/summary", "", false)
 	var sum struct {
 		Data struct {
 			PaidVolume []map[string]interface{} `json:"paid_volume"`
@@ -172,11 +172,11 @@ func Test012FinanceNoPermission403(t *testing.T) {
 	e := newB12Env(t)
 	scoped := newScopedAdmin(t, e, []string{"accounts.read"})
 	for _, path := range []string{
-		"/api/admin/finance/summary",
-		"/api/admin/finance/payments",
-		"/api/admin/finance/payments/whatever",
-		"/api/admin/finance/adjustments",
-		"/api/admin/finance/ledger",
+		"/api/samelabs/finance/summary",
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/payments/whatever",
+		"/api/samelabs/finance/adjustments",
+		"/api/samelabs/finance/ledger",
 	} {
 		if rec := scoped.do(t, "GET", path, "", false); rec.Code != 403 {
 			t.Fatalf("no-perm %s = %d, want 403", path, rec.Code)
@@ -197,7 +197,7 @@ func Test012FinanceOwnerAgentRejected(t *testing.T) {
 	setOwnerCookie(w, f.botID, e.s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
-	req := httptest.NewRequest("GET", "/api/admin/finance/summary", nil)
+	req := httptest.NewRequest("GET", "/api/samelabs/finance/summary", nil)
 	req.AddCookie(ownerCookie)
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
@@ -214,7 +214,7 @@ func Test012FinanceOwnerAgentRejected(t *testing.T) {
 		f.botID, h[:], rawKey[len(rawKey)-4:]); err != nil {
 		t.Fatalf("seed agent key: %v", err)
 	}
-	req = httptest.NewRequest("GET", "/api/admin/finance/summary", nil)
+	req = httptest.NewRequest("GET", "/api/samelabs/finance/summary", nil)
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	rec = httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
@@ -232,9 +232,9 @@ func Test012FinanceBotIDFailClosed(t *testing.T) {
 
 	for _, bad := range []string{"malformed", "0", "-1", "-999999", "99999999999999999999999", "1.5", "abc12"} {
 		for _, base := range []string{
-			"/api/admin/finance/payments",
-			"/api/admin/finance/adjustments",
-			"/api/admin/finance/ledger",
+			"/api/samelabs/finance/payments",
+			"/api/samelabs/finance/adjustments",
+			"/api/samelabs/finance/ledger",
 		} {
 			rec := e.do(t, "GET", base+"?bot_id="+bad, "", false)
 			if rec.Code != 400 || !strings.Contains(rec.Body.String(), "INVALID_FINANCE_FILTER") {
@@ -245,9 +245,9 @@ func Test012FinanceBotIDFailClosed(t *testing.T) {
 
 	// omitted / empty → no filter (200, full list, NOT 400).
 	for _, base := range []string{
-		"/api/admin/finance/payments",
-		"/api/admin/finance/adjustments",
-		"/api/admin/finance/ledger",
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/adjustments",
+		"/api/samelabs/finance/ledger",
 	} {
 		if rec := e.do(t, "GET", base, "", false); rec.Code != 200 {
 			t.Fatalf("%s (no bot_id) = %d, want 200", base, rec.Code)
@@ -260,9 +260,9 @@ func Test012FinanceBotIDFailClosed(t *testing.T) {
 	// valid positive int64 → exact filter.
 	f2 := newFinanceFixture(t, e)
 	for _, base := range []string{
-		"/api/admin/finance/payments",
-		"/api/admin/finance/adjustments",
-		"/api/admin/finance/ledger",
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/adjustments",
+		"/api/samelabs/finance/ledger",
 	} {
 		rec := e.do(t, "GET", fmt.Sprintf("%s?bot_id=%d", base, f2.botID), "", false)
 		if rec.Code != 200 {
@@ -277,7 +277,7 @@ func Test012FinanceBotIDFailClosed(t *testing.T) {
 		// every returned row must carry the exact bot (payments have
 		// bot_id on rows; ledger/adjustments equivalents verified by
 		// scoping in repository).
-		if base == "/api/admin/finance/ledger" && rec.Body.String() == "" {
+		if base == "/api/samelabs/finance/ledger" && rec.Body.String() == "" {
 			t.Fatal("empty ledger response for valid bot")
 		}
 	}
@@ -294,7 +294,7 @@ func Test012FinanceNoLedgerIsExplicitNull(t *testing.T) {
 		t.Fatalf("wipe ledger: %v", err)
 	}
 
-	rec := e.do(t, "GET", "/api/admin/finance/payments/"+f.payCode, "", false)
+	rec := e.do(t, "GET", "/api/samelabs/finance/payments/"+f.payCode, "", false)
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d", rec.Code)
 	}
@@ -339,18 +339,18 @@ func Test012FinanceFiltersAndPagination(t *testing.T) {
 	f := newFinanceFixture(t, e)
 
 	// Stable pagination: same page twice → identical ordering.
-	p1 := e.do(t, "GET", "/api/admin/finance/payments?page=1&page_size=5", "", false)
-	p2 := e.do(t, "GET", "/api/admin/finance/payments?page=1&page_size=5", "", false)
+	p1 := e.do(t, "GET", "/api/samelabs/finance/payments?page=1&page_size=5", "", false)
+	p2 := e.do(t, "GET", "/api/samelabs/finance/payments?page=1&page_size=5", "", false)
 	if p1.Body.String() != p2.Body.String() {
 		t.Fatal("payment list pagination not stable")
 	}
 
 	// Invalid filters must be explicit 400s, never 200-empty.
 	for _, path := range []string{
-		"/api/admin/finance/payments?status=garbage",
-		"/api/admin/finance/payments?provider=stripe",
-		"/api/admin/finance/adjustments?kind=chargeback",
-		"/api/admin/finance/adjustments?provider=paypal",
+		"/api/samelabs/finance/payments?status=garbage",
+		"/api/samelabs/finance/payments?provider=stripe",
+		"/api/samelabs/finance/adjustments?kind=chargeback",
+		"/api/samelabs/finance/adjustments?provider=paypal",
 	} {
 		if rec := e.do(t, "GET", path, "", false); rec.Code != 400 {
 			t.Fatalf("%s = %d, want 400", path, rec.Code)
@@ -360,14 +360,14 @@ func Test012FinanceFiltersAndPagination(t *testing.T) {
 	// The fixture payment must be findable via q (code / bot name /
 	// provider order id).
 	for _, q := range []string{f.payCode, f.botName, "o" + f.payCode} {
-		rec := e.do(t, "GET", "/api/admin/finance/payments?q="+q, "", false)
+		rec := e.do(t, "GET", "/api/samelabs/finance/payments?q="+q, "", false)
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), f.payCode) {
 			t.Fatalf("q=%s did not match fixture: %d", q, rec.Code)
 		}
 	}
 
 	// Detail for unknown code → 404.
-	if rec := e.do(t, "GET", "/api/admin/finance/payments/no-such-code", "", false); rec.Code != 404 {
+	if rec := e.do(t, "GET", "/api/samelabs/finance/payments/no-such-code", "", false); rec.Code != 404 {
 		t.Fatalf("unknown payment detail = %d, want 404", rec.Code)
 	}
 }
@@ -380,7 +380,7 @@ func Test012FinanceIntegrityAnomalies(t *testing.T) {
 
 	integrityOf := func(payCode string) map[string]bool {
 		t.Helper()
-		rec := e.do(t, "GET", "/api/admin/finance/payments/"+payCode, "", false)
+		rec := e.do(t, "GET", "/api/samelabs/finance/payments/"+payCode, "", false)
 		if rec.Code != 200 {
 			t.Fatalf("detail %s: %d", payCode, rec.Code)
 		}
@@ -519,11 +519,11 @@ func Test012FinanceReadsNeverMutate(t *testing.T) {
 
 	before := snapshot() // DB-first: no Finance API called yet
 	for _, path := range []string{
-		"/api/admin/finance/summary",
-		"/api/admin/finance/payments",
-		"/api/admin/finance/payments/" + f.payCode,
-		"/api/admin/finance/adjustments",
-		"/api/admin/finance/ledger",
+		"/api/samelabs/finance/summary",
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/payments/" + f.payCode,
+		"/api/samelabs/finance/adjustments",
+		"/api/samelabs/finance/ledger",
 	} {
 		if rec := e.do(t, "GET", path, "", false); rec.Code != 200 {
 			t.Fatalf("%s = %d", path, rec.Code)
@@ -554,7 +554,7 @@ func Test012FinanceAdjustmentFactsAndHygiene(t *testing.T) {
 		t.Fatalf("seed adjustment: %v", err)
 	}
 
-	rec := e.do(t, "GET", "/api/admin/finance/payments/"+f.payCode, "", false)
+	rec := e.do(t, "GET", "/api/samelabs/finance/payments/"+f.payCode, "", false)
 	body := rec.Body.String()
 
 	// (18) payment status stays "paid" — refund is a separate fact.
@@ -575,7 +575,7 @@ func Test012FinanceAdjustmentFactsAndHygiene(t *testing.T) {
 		}
 	}
 	// (7) adjustment monetary BIGINTs are strings in the list too.
-	rec = e.do(t, "GET", "/api/admin/finance/adjustments?payment_code="+f.payCode, "", false)
+	rec = e.do(t, "GET", "/api/samelabs/finance/adjustments?payment_code="+f.payCode, "", false)
 	var list struct {
 		Data struct {
 			Adjustments []map[string]interface{} `json:"adjustments"`
@@ -593,7 +593,7 @@ func Test012FinanceAdjustmentFactsAndHygiene(t *testing.T) {
 	}
 
 	// Ledger explorer: amount / balance_after strings.
-	rec = e.do(t, "GET", "/api/admin/finance/ledger?bot_id="+fmt.Sprint(f.botID), "", false)
+	rec = e.do(t, "GET", "/api/samelabs/finance/ledger?bot_id="+fmt.Sprint(f.botID), "", false)
 	var led struct {
 		Data struct {
 			Entries []map[string]interface{} `json:"entries"`
@@ -620,7 +620,7 @@ func Test012FinanceAdjustmentFactsAndHygiene(t *testing.T) {
 // re-logs in as that user.
 func newScopedAdmin(t *testing.T, e *b12Env, perms []string) *b12Env {
 	t.Helper()
-	rec := e.mutateJSON(t, "POST", "/api/admin/roles",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/roles",
 		fmt.Sprintf(`{"code":"fin_%d","name":"FIN"}`, time.Now().UnixNano()%1000000))
 	if rec.Code != 200 {
 		t.Fatalf("role: %d %s", rec.Code, rec.Body.String())
@@ -632,13 +632,13 @@ func newScopedAdmin(t *testing.T, e *b12Env, perms []string) *b12Env {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &rr)
 	permJSON, _ := json.Marshal(perms)
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", rr.Data.ID),
 		`{"permission_codes":`+string(permJSON)+`}`)
 	if rec.Code != 200 {
 		t.Fatalf("perms: %d %s", rec.Code, rec.Body.String())
 	}
 	username := fmt.Sprintf("fin_user_%d", time.Now().UnixNano()%1000000)
-	rec = e.mutateJSON(t, "POST", "/api/admin/users",
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/users",
 		fmt.Sprintf(`{"username":%q,"display_name":"FIN","password":"fin-pass-123"}`, username))
 	if rec.Code != 200 {
 		t.Fatalf("user: %d %s", rec.Code, rec.Body.String())
@@ -650,7 +650,7 @@ func newScopedAdmin(t *testing.T, e *b12Env, perms []string) *b12Env {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &ur)
 	ids, _ := json.Marshal([]int64{rr.Data.ID})
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", ur.Data.ID),
 		`{"role_ids":`+string(ids)+`}`)
 	if rec.Code != 200 {
 		t.Fatalf("assign: %d %s", rec.Code, rec.Body.String())

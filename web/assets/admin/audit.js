@@ -11,7 +11,7 @@ async function loadAudit() {
     if (f.actor_username) params.set('actor_username', f.actor_username);
     if (f.target_type) params.set('target_type', f.target_type);
     if (f.success) params.set('success', f.success);
-    const json = await adminGet('/api/admin/audit?' + params.toString());
+    const json = await adminGet('/api/samelabs/audit?' + params.toString());
     if (!json.success) throw new Error(apiError(json, 'Failed to load audit'));
     state.audit.items = json.data.items || [];
     state.audit.total = json.data.total || 0;

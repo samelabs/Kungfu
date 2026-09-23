@@ -31,14 +31,14 @@ async function loadAccounts() {
         page_size: String(st.pageSize)
     });
     if (st.filters.q) params.set('q', st.filters.q);
-    const json = await adminGet('/api/admin/accounts?' + params.toString());
+    const json = await adminGet('/api/samelabs/accounts?' + params.toString());
     if (!json.success) throw new Error(apiError(json, 'Failed to load accounts'));
     st.items = json.data.accounts || [];
     st.total = json.data.total || 0;
 }
 
 async function loadAccountDetail(id) {
-    const json = await adminGet('/api/admin/accounts/' + encodeURIComponent(id));
+    const json = await adminGet('/api/samelabs/accounts/' + encodeURIComponent(id));
     if (!json.success) throw new Error(apiError(json, 'Failed to load account'));
     accountsState.detail = json.data.account;
 }
@@ -103,13 +103,13 @@ function renderAccountDetail() {
         // finance API enforces its own authority). No finance data
         // is embedded in the Accounts API.
         (hasPermission('finance.read')
-            ? '<a class="btn small" href="/admin/finance?bot_id=' + d.id + '">View finance for this account</a>'
+            ? '<a class="btn small" href="/samelabs/finance?bot_id=' + d.id + '">View finance for this account</a>'
             : '');
 }
 
 async function accountAction(action, id) {
     try {
-        const json = await adminMutate('/api/admin/accounts/' + encodeURIComponent(id) + '/' + action, 'POST');
+        const json = await adminMutate('/api/samelabs/accounts/' + encodeURIComponent(id) + '/' + action, 'POST');
         if (!json.success) throw new Error(apiError(json));
         await Promise.all([loadAccounts(), loadAccountDetail(id)]);
         renderAccounts();

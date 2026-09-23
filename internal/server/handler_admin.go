@@ -10,10 +10,10 @@ import (
 
 // Admin HTTP surface (B1.1) — identity foundation ONLY:
 //
-//	POST   /api/admin/session   login (rate-limited; no CSRF — this
+//	POST   /api/samelabs/session   login (rate-limited; no CSRF — this
 //	                            is the credential entry point)
-//	GET    /api/admin/session   current principal + CSRF token
-//	DELETE /api/admin/session   logout (CSRF-gated; stale cookie still
+//	GET    /api/samelabs/session   current principal + CSRF token
+//	DELETE /api/samelabs/session   logout (CSRF-gated; stale cookie still
 //	                            clears locally, privileged mutation
 //	                            only runs for a valid session)
 //

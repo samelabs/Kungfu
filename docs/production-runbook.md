@@ -332,7 +332,7 @@ history, or logs.
 
 Evidence:
 - exactly one admin row exists after seeding (record username + timestamp, **never the password**)
-- the seeded admin can log in (`POST /api/admin/session`) and holds the superadmin role
+- the seeded admin can log in (`POST /api/samelabs/session`) and holds the superadmin role
 
 ## 7. Agent / Owner Account Bootstrap (model clarification)
 
@@ -368,9 +368,9 @@ Raw current keys are never exposed (not recoverable). No key-security mechanism 
 
 ## 10. Admin Smoke (representative)
 
-- admin login (`POST /api/admin/session`)
-- session principal loads (`GET /api/admin/session`)
-- one read-only RBAC/admin view (e.g. `GET /api/admin/users` or `GET /api/admin/audit`)
+- admin login (`POST /api/samelabs/session`)
+- session principal loads (`GET /api/samelabs/session`)
+- one read-only RBAC/admin view (e.g. `GET /api/samelabs/users` or `GET /api/samelabs/audit`)
 - logout or self-session revoke
 
 Destructive admin-account mutation is **not** required for smoke.
@@ -380,7 +380,7 @@ Destructive admin-account mutation is **not** required for smoke.
 Non-destructive/controlled path:
 1. Owner lists products (`GET /api/owner/store/products`).
 2. Exercise a redemption for a low-value **test product** (`POST /api/owner/store/redemptions`) in the acceptance environment.
-3. Admin observes/processes the test redemption (`GET /api/admin/store/redemptions`, then approve or reject).
+3. Admin observes/processes the test redemption (`GET /api/samelabs/store/redemptions`, then approve or reject).
 4. Economic results checked against the Credits ledger (§13): `spend_redemption` (and `refund_redemption` if rejected) rows appear; balance moves accordingly.
 
 Only existing store state transitions are used; none are invented.

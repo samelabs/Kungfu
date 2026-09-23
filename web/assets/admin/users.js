@@ -9,7 +9,7 @@
 let rolesCatalogReady = false;
 
 async function loadUsers() {
-    const json = await adminGet('/api/admin/users');
+    const json = await adminGet('/api/samelabs/users');
     if (!json.success) throw new Error(apiError(json, 'Failed to load admins'));
     state.users = json.data.users || [];
     // The role picker needs the code→id map. A failed/unpermitted
@@ -17,7 +17,7 @@ async function loadUsers() {
     // a fallback to empty preselection.
     rolesCatalogReady = false;
     if (hasPermission('admin.roles.read')) {
-        const rj = await adminGet('/api/admin/roles');
+        const rj = await adminGet('/api/samelabs/roles');
         if (!rj.success) throw new Error(apiError(rj, 'Failed to load role catalog'));
         state.roles = rj.data.roles || [];
         rolesCatalogReady = true;
@@ -101,20 +101,20 @@ async function bindAdminUsersEvents() {
         const act = btn.dataset.act;
         try {
             if (act === 'disable') {
-                const json = await adminMutate(`/api/admin/users/${id}/disable`, 'POST');
+                const json = await adminMutate(`/api/samelabs/users/${id}/disable`, 'POST');
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'enable') {
-                const json = await adminMutate(`/api/admin/users/${id}/enable`, 'POST');
+                const json = await adminMutate(`/api/samelabs/users/${id}/enable`, 'POST');
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'rename') {
                 const next = window.prompt('New display name:', btn.dataset.name || '');
                 if (next === null) return;
-                const json = await adminMutate(`/api/admin/users/${id}`, 'PATCH', {display_name: next});
+                const json = await adminMutate(`/api/samelabs/users/${id}`, 'PATCH', {display_name: next});
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'resetpw') {
                 const next = window.prompt('New password for this admin (min 8 chars):', '');
                 if (next === null) return;
-                const json = await adminMutate(`/api/admin/users/${id}/password`, 'PUT', {password: next});
+                const json = await adminMutate(`/api/samelabs/users/${id}/password`, 'PUT', {password: next});
                 if (!json.success) throw new Error(apiError(json));
             } else if (act === 'roles') {
                 const t = state.users.find(u => u.id === id);
@@ -141,7 +141,7 @@ async function bindAdminUsersEvents() {
                 }
                 rolePickerOverlay('Roles for ' + (t ? t.username : '#' + id),
                     currentRoleIds, async (roleIds) => {
-                        const json = await adminMutate(`/api/admin/users/${id}/roles`, 'PUT', {role_ids: roleIds});
+                        const json = await adminMutate(`/api/samelabs/users/${id}/roles`, 'PUT', {role_ids: roleIds});
                         if (!json.success) window.alert(apiError(json));
                         await loadUsers(); renderUsers();
                     });
@@ -158,7 +158,7 @@ async function bindAdminUsersEvents() {
         createForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
-                const json = await adminMutate('/api/admin/users', 'POST', {
+                const json = await adminMutate('/api/samelabs/users', 'POST', {
                     username: document.getElementById('adminNewUsername').value.trim(),
                     display_name: document.getElementById('adminNewDisplayName').value.trim(),
                     password: document.getElementById('adminNewUserPassword').value

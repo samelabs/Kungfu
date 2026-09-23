@@ -163,7 +163,7 @@ func TestS64AdminRoutesRemainUnderAdminMechanism(t *testing.T) {
 	// admin session create is NOT ownerMutation-wired: a form POST
 	// there must be handled by the ADMIN plane (401/400 from admin
 	// auth parsing), never 415 from the Owner gate.
-	rec := s64Mutate(t, s, nil, "POST", "/api/admin/session",
+	rec := s64Mutate(t, s, nil, "POST", "/api/samelabs/session",
 		"application/x-www-form-urlencoded", "u=x")
 	if rec.Code == 415 {
 		t.Fatal("Admin route appears to be behind the Owner gate")

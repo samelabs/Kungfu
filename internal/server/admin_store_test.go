@@ -30,14 +30,14 @@ func TestB2StoreCSRFRequiredOnAllMutations(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{"POST", "/api/admin/store/products", `{"title":"X","credits_price":1}`},
-		{"PATCH", "/api/admin/store/products/abc123456789", `{"title":"Y"}`},
-		{"POST", "/api/admin/store/products/abc123456789/activate", ""},
-		{"POST", "/api/admin/store/products/abc123456789/deactivate", ""},
-		{"POST", "/api/admin/store/redemptions/abc123456789/approve", `{}`},
-		{"POST", "/api/admin/store/redemptions/abc123456789/reject", `{}`},
-		{"POST", "/api/admin/store/redemptions/abc123456789/fulfill", `{}`},
-		{"POST", "/api/admin/store/redemptions/abc123456789/cancel", `{}`},
+		{"POST", "/api/samelabs/store/products", `{"title":"X","credits_price":1}`},
+		{"PATCH", "/api/samelabs/store/products/abc123456789", `{"title":"Y"}`},
+		{"POST", "/api/samelabs/store/products/abc123456789/activate", ""},
+		{"POST", "/api/samelabs/store/products/abc123456789/deactivate", ""},
+		{"POST", "/api/samelabs/store/redemptions/abc123456789/approve", `{}`},
+		{"POST", "/api/samelabs/store/redemptions/abc123456789/reject", `{}`},
+		{"POST", "/api/samelabs/store/redemptions/abc123456789/fulfill", `{}`},
+		{"POST", "/api/samelabs/store/redemptions/abc123456789/cancel", `{}`},
 	}
 	for _, m := range mutations {
 		rec := e.do(t, m.method, m.path, m.body, false) // NO CSRF header
@@ -63,7 +63,7 @@ func TestB2StoreScopedPermission403(t *testing.T) {
 	scopedLogin := func(rolePerms []string) *b12Env {
 		t.Helper()
 		code := fmt.Sprintf("rp%d%d", time.Now().UnixNano()%1000000, time.Now().Nanosecond()%97)
-		rec := e.mutateJSON(t, "POST", "/api/admin/roles",
+		rec := e.mutateJSON(t, "POST", "/api/samelabs/roles",
 			fmt.Sprintf(`{"code":%q,"name":"RP"}`, code))
 		if rec.Code != 200 {
 			t.Fatalf("role: %d %s", rec.Code, rec.Body.String())
@@ -75,14 +75,14 @@ func TestB2StoreScopedPermission403(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &rr)
 		permJSON, _ := json.Marshal(rolePerms)
-		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", rr.Data.ID),
 			`{"permission_codes":`+string(permJSON)+`}`)
 		if rec.Code != 200 {
 			t.Fatalf("perms: %d %s", rec.Code, rec.Body.String())
 		}
 		username := fmt.Sprintf("rp_%d", time.Now().UnixNano())
 		password := "rp-pass-123"
-		rec = e.mutateJSON(t, "POST", "/api/admin/users",
+		rec = e.mutateJSON(t, "POST", "/api/samelabs/users",
 			fmt.Sprintf(`{"username":%q,"display_name":"RP","password":%q}`, username, password))
 		if rec.Code != 200 {
 			t.Fatalf("user: %d %s", rec.Code, rec.Body.String())
@@ -94,7 +94,7 @@ func TestB2StoreScopedPermission403(t *testing.T) {
 		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &ur)
 		ids, _ := json.Marshal([]int64{rr.Data.ID})
-		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID),
+		rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", ur.Data.ID),
 			`{"role_ids":`+string(ids)+`}`)
 		if rec.Code != 200 {
 			t.Fatalf("assign: %d", rec.Code)
@@ -106,26 +106,26 @@ func TestB2StoreScopedPermission403(t *testing.T) {
 
 	// -- products.read only: GET 200, mutations 403 --
 	pv := scopedLogin([]string{"store.products.read"})
-	rec := pv.do(t, "GET", "/api/admin/store/products", "", false)
+	rec := pv.do(t, "GET", "/api/samelabs/store/products", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("products.read GET = %d", rec.Code)
 	}
-	rec = pv.mutateJSON(t, "POST", "/api/admin/store/products", `{"title":"X","credits_price":1}`)
+	rec = pv.mutateJSON(t, "POST", "/api/samelabs/store/products", `{"title":"X","credits_price":1}`)
 	if rec.Code != 403 {
 		t.Fatalf("products.read POST = %d, want 403", rec.Code)
 	}
-	rec = pv.mutateJSON(t, "PATCH", "/api/admin/store/products/abc123456789", `{"title":"Y"}`)
+	rec = pv.mutateJSON(t, "PATCH", "/api/samelabs/store/products/abc123456789", `{"title":"Y"}`)
 	if rec.Code != 403 {
 		t.Fatalf("products.read PATCH = %d, want 403", rec.Code)
 	}
 
 	// -- redemptions.read only: GET list/detail 200, transition 403 --
 	rv := scopedLogin([]string{"store.redemptions.read"})
-	rec = rv.do(t, "GET", "/api/admin/store/redemptions", "", false)
+	rec = rv.do(t, "GET", "/api/samelabs/store/redemptions", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("redemptions.read GET = %d", rec.Code)
 	}
-	rec = rv.mutateJSON(t, "POST", "/api/admin/store/redemptions/abc123456789/approve", `{}`)
+	rec = rv.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/abc123456789/approve", `{}`)
 	if rec.Code != 403 {
 		t.Fatalf("redemptions.read approve = %d, want 403", rec.Code)
 	}
@@ -135,7 +135,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	e := newB2HTTPEnv(t)
 
 	// create product
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		`{"title":"HTTP Item","description":"via http","credits_price":7}`)
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
@@ -153,7 +153,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	}
 
 	// partial patch (title only)
-	rec = e.mutateJSON(t, "PATCH", "/api/admin/store/products/"+created.Data.Code, `{"title":"HTTP Item v2"}`)
+	rec = e.mutateJSON(t, "PATCH", "/api/samelabs/store/products/"+created.Data.Code, `{"title":"HTTP Item v2"}`)
 	if rec.Code != 200 {
 		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
 	}
@@ -170,27 +170,27 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	}
 
 	// empty patch → 400
-	rec = e.mutateJSON(t, "PATCH", "/api/admin/store/products/"+created.Data.Code, `{}`)
+	rec = e.mutateJSON(t, "PATCH", "/api/samelabs/store/products/"+created.Data.Code, `{}`)
 	if rec.Code != 400 {
 		t.Fatalf("empty patch: %d", rec.Code)
 	}
 
 	// deactivate → list shows inactive → activate idempotent
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/products/"+created.Data.Code+"/deactivate", "")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/products/"+created.Data.Code+"/deactivate", "")
 	if rec.Code != 200 {
 		t.Fatalf("deactivate: %d", rec.Code)
 	}
-	rec = e.do(t, "GET", "/api/admin/store/products?status=inactive", "", false)
+	rec = e.do(t, "GET", "/api/samelabs/store/products?status=inactive", "", false)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), created.Data.Code) {
 		t.Fatalf("inactive list: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/products/"+created.Data.Code+"/deactivate", "")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/products/"+created.Data.Code+"/deactivate", "")
 	if rec.Code != 200 {
 		t.Fatalf("idempotent deactivate: %d", rec.Code)
 	}
 
 	// detail
-	rec = e.do(t, "GET", "/api/admin/store/products/"+created.Data.Code, "", false)
+	rec = e.do(t, "GET", "/api/samelabs/store/products/"+created.Data.Code, "", false)
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d", rec.Code)
 	}
@@ -232,27 +232,27 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 	})
 
 	// list + filters
-	rec = e.do(t, "GET", "/api/admin/store/redemptions?status=pending_review&q="+code, "", false)
+	rec = e.do(t, "GET", "/api/samelabs/store/redemptions?status=pending_review&q="+code, "", false)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), code) {
 		t.Fatalf("list filter: %d %s", rec.Code, rec.Body.String())
 	}
 	// detail
-	rec = e.do(t, "GET", "/api/admin/store/redemptions/"+code, "", false)
+	rec = e.do(t, "GET", "/api/samelabs/store/redemptions/"+code, "", false)
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d", rec.Code)
 	}
 
 	// approve → fulfill
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+code+"/approve", `{"review_note":"ok"}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+code+"/approve", `{"review_note":"ok"}`)
 	if rec.Code != 200 {
 		t.Fatalf("approve: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+code+"/fulfill", `{"fulfillment_note":"done"}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+code+"/fulfill", `{"fulfillment_note":"done"}`)
 	if rec.Code != 200 {
 		t.Fatalf("fulfill: %d %s", rec.Code, rec.Body.String())
 	}
 	// cancel from fulfilled → 409
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+code+"/cancel", "{}")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+code+"/cancel", "{}")
 	if rec.Code != 409 {
 		t.Fatalf("cancel fulfilled: %d", rec.Code)
 	}
@@ -269,7 +269,7 @@ func TestB2StoreFullFlowViaRouter(t *testing.T) {
 func TestB2StorePlanesIsolated(t *testing.T) {
 	e := newB2HTTPEnv(t)
 	// X-Bot-Key cannot touch admin store APIs
-	req := httptest.NewRequest("GET", "/api/admin/store/products", nil)
+	req := httptest.NewRequest("GET", "/api/samelabs/store/products", nil)
 	req.Header.Set("X-Bot-Key", "kf_live_"+strings.Repeat("a", 64))
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
@@ -281,7 +281,7 @@ func TestB2StorePlanesIsolated(t *testing.T) {
 	_, botID := seededTestServer(t)
 	setOwnerCookie(w, botID, e.s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
-	req2 := httptest.NewRequest("GET", "/api/admin/store/products", nil)
+	req2 := httptest.NewRequest("GET", "/api/samelabs/store/products", nil)
 	req2.AddCookie(ownerCookie)
 	rec2 := httptest.NewRecorder()
 	e.router.ServeHTTP(rec2, req2)
@@ -292,7 +292,7 @@ func TestB2StorePlanesIsolated(t *testing.T) {
 
 func TestB2StoreHTMLAndAssets(t *testing.T) {
 	e := newB2HTTPEnv(t)
-	for _, path := range []string{"/admin/store/products", "/admin/store/redemptions"} {
+	for _, path := range []string{"/samelabs/store/products", "/samelabs/store/redemptions"} {
 		req := httptest.NewRequest("GET", path, nil)
 		rec := httptest.NewRecorder()
 		e.router.ServeHTTP(rec, req)
@@ -321,7 +321,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 
 	// create the manage-only role via the superadmin APIs
 	code := fmt.Sprintf("mo%d%d", time.Now().UnixNano()%1000000, time.Now().Nanosecond()%97)
-	rec := e.mutateJSON(t, "POST", "/api/admin/roles", fmt.Sprintf(`{"code":%q,"name":"Manage Only"}`, code))
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/roles", fmt.Sprintf(`{"code":%q,"name":"Manage Only"}`, code))
 	if rec.Code != 200 {
 		t.Fatalf("role: %d %s", rec.Code, rec.Body.String())
 	}
@@ -331,14 +331,14 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &rr)
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", rr.Data.ID),
 		`{"permission_codes":["store.redemptions.manage"]}`)
 	if rec.Code != 200 {
 		t.Fatalf("perms: %d %s", rec.Code, rec.Body.String())
 	}
 	username := fmt.Sprintf("mo_%d", time.Now().UnixNano())
 	password := "mo-pass-123"
-	rec = e.mutateJSON(t, "POST", "/api/admin/users",
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/users",
 		fmt.Sprintf(`{"username":%q,"display_name":"MO","password":%q}`, username, password))
 	if rec.Code != 200 {
 		t.Fatalf("user: %d", rec.Code)
@@ -350,7 +350,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &ur)
 	ids, _ := json.Marshal([]int64{rr.Data.ID})
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID), `{"role_ids":`+string(ids)+`}`)
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", ur.Data.ID), `{"role_ids":`+string(ids)+`}`)
 	if rec.Code != 200 {
 		t.Fatalf("assign: %d", rec.Code)
 	}
@@ -358,7 +358,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	mo.login(t)
 
 	// seed: product + bot + pending redemption (with spend)
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		`{"title":"MO Item","credits_price":9}`)
 	if rec.Code != 200 {
 		t.Fatalf("product: %d", rec.Code)
@@ -402,17 +402,17 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	})
 
 	// manage-only actor: read endpoints are 403 …
-	rec = mo.do(t, "GET", "/api/admin/store/redemptions", "", false)
+	rec = mo.do(t, "GET", "/api/samelabs/store/redemptions", "", false)
 	if rec.Code != 403 {
 		t.Fatalf("manage-only list = %d, want 403", rec.Code)
 	}
-	rec = mo.do(t, "GET", "/api/admin/store/redemptions/"+redCode, "", false)
+	rec = mo.do(t, "GET", "/api/samelabs/store/redemptions/"+redCode, "", false)
 	if rec.Code != 403 {
 		t.Fatalf("manage-only detail = %d, want 403", rec.Code)
 	}
 
 	// … but the economic transition succeeds and returns committed state
-	rec = mo.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+redCode+"/reject", `{"review_note":"no"}`)
+	rec = mo.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+redCode+"/reject", `{"review_note":"no"}`)
 	if rec.Code != 200 {
 		t.Fatalf("manage-only reject = %d %s (must NOT depend on store.redemptions.read)", rec.Code, rec.Body.String())
 	}
@@ -457,7 +457,7 @@ func TestB2RepairManageOnlyTransitionNoPostCommitRead(t *testing.T) {
 	}
 
 	// idempotent re-reject still 200 without read permission
-	rec = mo.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+redCode+"/reject", `{"review_note":"no"}`)
+	rec = mo.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+redCode+"/reject", `{"review_note":"no"}`)
 	if rec.Code != 200 {
 		t.Fatalf("idempotent re-reject = %d", rec.Code)
 	}
@@ -492,13 +492,13 @@ func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 	prefix := fmt.Sprintf("FCP %d", time.Now().UnixNano())
 
 	// description omitted → success
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		fmt.Sprintf(`{"title":%q,"credits_price":2}`, prefix+" Omit"))
 	if rec.Code != 200 {
 		t.Fatalf("omitted description: %d %s", rec.Code, rec.Body.String())
 	}
 	// description string → success
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		fmt.Sprintf(`{"title":%q,"description":"d","credits_price":2}`, prefix+" Str"))
 	if rec.Code != 200 {
 		t.Fatalf("string description: %d", rec.Code)
@@ -514,7 +514,7 @@ func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 		"array":  fmt.Sprintf(`{"title":%q,"description":[1],"credits_price":2}`, prefix+" A"),
 		"null":   fmt.Sprintf(`{"title":%q,"description":null,"credits_price":2}`, prefix+" Z"),
 	} {
-		rec := e.mutateJSON(t, "POST", "/api/admin/store/products", body)
+		rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products", body)
 		if rec.Code != 400 {
 			t.Fatalf("%s description: %d, want 400", name, rec.Code)
 		}
@@ -528,7 +528,7 @@ func TestB2RepairProductCreateParsingFailClosed(t *testing.T) {
 		"missing price":    `{"title":"X"}`,
 		"price fractional": `{"title":"X","credits_price":"2.5"}`,
 	} {
-		rec := e.mutateJSON(t, "POST", "/api/admin/store/products", body)
+		rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products", body)
 		if rec.Code != 400 {
 			t.Fatalf("%s: %d, want 400", name, rec.Code)
 		}
@@ -544,7 +544,7 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 	// fresh pending redemption for transition probes
 	seedPending := func() string {
 		t.Helper()
-		rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+		rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 			fmt.Sprintf(`{"title":"OB %d","credits_price":1}`, time.Now().UnixNano()))
 		if rec.Code != 200 {
 			t.Fatalf("product: %d", rec.Code)
@@ -588,35 +588,35 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 	}
 
 	// approve with EMPTY body
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+seedPending()+"/approve", "")
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+seedPending()+"/approve", "")
 	if rec.Code != 200 {
 		t.Fatalf("approve empty body: %d %s", rec.Code, rec.Body.String())
 	}
 	// approve (idempotent) with {}
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+
 		jsonPath(t, rec)+"/approve", "{}")
 	if rec.Code != 200 {
 		t.Fatalf("approve {} : %d", rec.Code)
 	}
 	// fulfill with empty body
 	c1 := seedPending()
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c1+"/approve", `{}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c1+"/approve", `{}`)
 	if rec.Code != 200 {
 		t.Fatalf("approve: %d", rec.Code)
 	}
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c1+"/fulfill", "")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c1+"/fulfill", "")
 	if rec.Code != 200 {
 		t.Fatalf("fulfill empty body: %d", rec.Code)
 	}
 	// reject with note string
 	c2 := seedPending()
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c2+"/reject", `{"review_note":"bad"}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c2+"/reject", `{"review_note":"bad"}`)
 	if rec.Code != 200 {
 		t.Fatalf("reject with note: %d", rec.Code)
 	}
 	// reject note wrong type → 400, state unchanged
 	c3 := seedPending()
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c3+"/reject", `{"review_note":7}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c3+"/reject", `{"review_note":7}`)
 	if rec.Code != 400 {
 		t.Fatalf("reject note wrong type: %d, want 400", rec.Code)
 	}
@@ -626,17 +626,17 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 		t.Fatalf("rejected despite invalid payload: %s", status)
 	}
 	// fulfill note wrong type → 400
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c3+"/fulfill", `{"fulfillment_note":[]}`)
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c3+"/fulfill", `{"fulfillment_note":[]}`)
 	if rec.Code != 400 {
 		t.Fatalf("fulfill note wrong type: %d", rec.Code)
 	}
 	// cancel: empty body and {} both accepted
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c3+"/cancel", "")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c3+"/cancel", "")
 	if rec.Code != 200 {
 		t.Fatalf("cancel empty body: %d %s", rec.Code, rec.Body.String())
 	}
 	c4 := seedPending()
-	rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c4+"/cancel", "{}")
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c4+"/cancel", "{}")
 	if rec.Code != 200 {
 		t.Fatalf("cancel {}: %d", rec.Code)
 	}
@@ -648,7 +648,7 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 		"array":      `[1,2]`,
 		"number":     `5`,
 	} {
-		rec = e.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+c5+"/approve", body)
+		rec = e.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+c5+"/approve", body)
 		if rec.Code != 400 {
 			t.Fatalf("%s body: %d, want 400", name, rec.Code)
 		}
@@ -660,19 +660,19 @@ func TestB2RepairTransitionOptionalBody(t *testing.T) {
 	}
 
 	// gates NOT relaxed: no CSRF → 403 CSRF_INVALID
-	rec = e.do(t, "POST", "/api/admin/store/redemptions/"+c5+"/approve", `{}`, false)
+	rec = e.do(t, "POST", "/api/samelabs/store/redemptions/"+c5+"/approve", `{}`, false)
 	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "CSRF_INVALID") {
 		t.Fatalf("CSRF gate regressed: %d %s", rec.Code, rec.Body.String())
 	}
 	// no session → 401
-	req := httptest.NewRequest("POST", "/api/admin/store/redemptions/"+c5+"/approve", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/api/samelabs/store/redemptions/"+c5+"/approve", strings.NewReader("{}"))
 	rec2 := httptest.NewRecorder()
 	e.router.ServeHTTP(rec2, req)
 	if rec2.Code != 401 {
 		t.Fatalf("auth gate regressed: %d", rec2.Code)
 	}
 	// permission gate: products-only reader cannot transition
-	rec = e.mutateJSON(t, "GET", "/api/admin/store/products", "") // warm check super env fine
+	rec = e.mutateJSON(t, "GET", "/api/samelabs/store/products", "") // warm check super env fine
 	_ = rec
 }
 
@@ -721,8 +721,8 @@ func TestB2RepairProductDetailUIContract(t *testing.T) {
 		t.Fatal("product Detail button must be rendered before the canManage gate (read-only)")
 	}
 	// 3) click path calls the GET detail endpoint
-	if !strings.Contains(src, "adminGet(`/api/admin/store/products/${code}`)") {
-		t.Fatal("product detail click path must call GET /api/admin/store/products/{code}")
+	if !strings.Contains(src, "adminGet(`/api/samelabs/store/products/${code}`)") {
+		t.Fatal("product detail click path must call GET /api/samelabs/store/products/{code}")
 	}
 	// 4) renderer covers all required fields
 	renderer := src[strings.Index(src, "function showStoreProductDetail"):strings.Index(src, "function showStoreRedemptionDetail")]
@@ -745,8 +745,8 @@ func TestB2RepairRedemptionDetailUIContract(t *testing.T) {
 		t.Fatal("redemption Detail button must not be gated behind manage permission")
 	}
 	// 3) click path calls the GET detail endpoint
-	if !strings.Contains(src, "adminGet(`/api/admin/store/redemptions/${code}`)") {
-		t.Fatal("redemption detail click path must call GET /api/admin/store/redemptions/{code}")
+	if !strings.Contains(src, "adminGet(`/api/samelabs/store/redemptions/${code}`)") {
+		t.Fatal("redemption detail click path must call GET /api/samelabs/store/redemptions/{code}")
 	}
 	// 4) renderer covers ALL required operational fields
 	renderer := src[strings.Index(src, "function showStoreRedemptionDetail"):]
@@ -771,7 +771,7 @@ func TestB2Repair2OversizedBodyFailsClosed(t *testing.T) {
 	ctx := context.Background()
 
 	// seed a pending redemption to prove ZERO mutation
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		fmt.Sprintf(`{"title":"OB2 %d","credits_price":1}`, time.Now().UnixNano()))
 	if rec.Code != 200 {
 		t.Fatalf("product: %d", rec.Code)
@@ -825,7 +825,7 @@ func TestB2Repair2OversizedBodyFailsClosed(t *testing.T) {
 	}
 	oversized := body + strings.Repeat("y", 1024) // trailing bytes beyond the cap
 
-	req := httptest.NewRequest("POST", "/api/admin/store/redemptions/"+redCode+"/approve",
+	req := httptest.NewRequest("POST", "/api/samelabs/store/redemptions/"+redCode+"/approve",
 		strings.NewReader(oversized))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(e.cookie)
@@ -856,7 +856,7 @@ func TestB2Repair2OversizedBodyFailsClosed(t *testing.T) {
 	}
 
 	// sanity: the EXACT-256KB body alone IS accepted (limit not off-by-one)
-	req = httptest.NewRequest("POST", "/api/admin/store/redemptions/"+redCode+"/approve",
+	req = httptest.NewRequest("POST", "/api/samelabs/store/redemptions/"+redCode+"/approve",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(e.cookie)
@@ -873,7 +873,7 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 	ctx := context.Background()
 
 	// seed a REAL redemption
-	rec := e.mutateJSON(t, "POST", "/api/admin/store/products",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/store/products",
 		fmt.Sprintf(`{"title":"RD %d","credits_price":1}`, time.Now().UnixNano()))
 	if rec.Code != 200 {
 		t.Fatalf("product: %d", rec.Code)
@@ -916,7 +916,7 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 
 	// build a redemptions.read-only actor (reuse the scoped-login shape)
 	code := fmt.Sprintf("ro%d%d", time.Now().UnixNano()%1000000, time.Now().Nanosecond()%97)
-	rec = e.mutateJSON(t, "POST", "/api/admin/roles", fmt.Sprintf(`{"code":%q,"name":"RO"}`, code))
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/roles", fmt.Sprintf(`{"code":%q,"name":"RO"}`, code))
 	if rec.Code != 200 {
 		t.Fatalf("role: %d", rec.Code)
 	}
@@ -926,14 +926,14 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &rr)
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", rr.Data.ID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", rr.Data.ID),
 		`{"permission_codes":["store.redemptions.read"]}`)
 	if rec.Code != 200 {
 		t.Fatalf("perms: %d", rec.Code)
 	}
 	username := fmt.Sprintf("ro_%d", time.Now().UnixNano())
 	password := "ro-pass-123"
-	rec = e.mutateJSON(t, "POST", "/api/admin/users",
+	rec = e.mutateJSON(t, "POST", "/api/samelabs/users",
 		fmt.Sprintf(`{"username":%q,"display_name":"RO","password":%q}`, username, password))
 	if rec.Code != 200 {
 		t.Fatalf("user: %d", rec.Code)
@@ -945,7 +945,7 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &ur)
 	ids, _ := json.Marshal([]int64{rr.Data.ID})
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", ur.Data.ID), `{"role_ids":`+string(ids)+`}`)
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", ur.Data.ID), `{"role_ids":`+string(ids)+`}`)
 	if rec.Code != 200 {
 		t.Fatalf("assign: %d", rec.Code)
 	}
@@ -953,17 +953,17 @@ func TestB2Repair2RedemptionsReadOnlyDetailContract(t *testing.T) {
 	ro.login(t)
 
 	// list → 200
-	rec = ro.do(t, "GET", "/api/admin/store/redemptions", "", false)
+	rec = ro.do(t, "GET", "/api/samelabs/store/redemptions", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("read-only list = %d", rec.Code)
 	}
 	// detail on the REAL existing redemption → 200 with its code
-	rec = ro.do(t, "GET", "/api/admin/store/redemptions/"+redCode, "", false)
+	rec = ro.do(t, "GET", "/api/samelabs/store/redemptions/"+redCode, "", false)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), redCode) {
 		t.Fatalf("read-only detail(existing) = %d %s", rec.Code, rec.Body.String())
 	}
 	// transition → 403
-	rec = ro.mutateJSON(t, "POST", "/api/admin/store/redemptions/"+redCode+"/approve", `{}`)
+	rec = ro.mutateJSON(t, "POST", "/api/samelabs/store/redemptions/"+redCode+"/approve", `{}`)
 	if rec.Code != 403 {
 		t.Fatalf("read-only transition = %d, want 403", rec.Code)
 	}

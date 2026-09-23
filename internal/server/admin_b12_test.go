@@ -65,7 +65,7 @@ func newB12Env(t *testing.T) *b12Env {
 func (e *b12Env) login(t *testing.T) {
 	t.Helper()
 	body := fmt.Sprintf(`{"username":%q,"password":%q}`, e.username, e.password)
-	req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
@@ -116,18 +116,18 @@ func TestB12CSRFRequiredOnEveryNewMutation(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{"POST", "/api/admin/users", `{"username":"csrf.guy","display_name":"X","password":"long-enough"}`},
-		{"PATCH", "/api/admin/users/1", `{"display_name":"X"}`},
-		{"POST", "/api/admin/users/1/disable", ""},
-		{"POST", "/api/admin/users/1/enable", ""},
-		{"PUT", "/api/admin/users/1/roles", `{"role_ids":[]}`},
-		{"PUT", "/api/admin/users/1/password", `{"password":"newpass-123"}`},
-		{"POST", "/api/admin/users/1/force-logout", ""},
-		{"POST", "/api/admin/me/password", `{"current_password":"x","new_password":"y"}`},
-		{"POST", "/api/admin/roles", `{"code":"csrf.role","name":"X"}`},
-		{"PATCH", "/api/admin/roles/999", `{"name":"X"}`},
-		{"PUT", "/api/admin/roles/999/permissions", `{"permission_codes":[]}`},
-		{"DELETE", "/api/admin/sessions/999", ""},
+		{"POST", "/api/samelabs/users", `{"username":"csrf.guy","display_name":"X","password":"long-enough"}`},
+		{"PATCH", "/api/samelabs/users/1", `{"display_name":"X"}`},
+		{"POST", "/api/samelabs/users/1/disable", ""},
+		{"POST", "/api/samelabs/users/1/enable", ""},
+		{"PUT", "/api/samelabs/users/1/roles", `{"role_ids":[]}`},
+		{"PUT", "/api/samelabs/users/1/password", `{"password":"newpass-123"}`},
+		{"POST", "/api/samelabs/users/1/force-logout", ""},
+		{"POST", "/api/samelabs/me/password", `{"current_password":"x","new_password":"y"}`},
+		{"POST", "/api/samelabs/roles", `{"code":"csrf.role","name":"X"}`},
+		{"PATCH", "/api/samelabs/roles/999", `{"name":"X"}`},
+		{"PUT", "/api/samelabs/roles/999/permissions", `{"permission_codes":[]}`},
+		{"DELETE", "/api/samelabs/sessions/999", ""},
 	}
 	for _, m := range mutations {
 		// WITHOUT CSRF → 403 CSRF_INVALID (or 401/404 if it fails
@@ -149,10 +149,10 @@ func TestB12CSRFRequiredOnEveryNewMutation(t *testing.T) {
 
 	// WITH valid CSRF: request proceeds past the gate (may 404 etc.,
 	// but not CSRF_INVALID)
-	rec := e.do(t, "POST", "/api/admin/roles", `{"code":"csrf.ok.role","name":"CSRF OK"}`, true)
+	rec := e.do(t, "POST", "/api/samelabs/roles", `{"code":"csrf.ok.role","name":"CSRF OK"}`, true)
 	if rec.Code == 200 {
 		// created now; clean up via disable (roles are not deletable)
-		_ = e.do(t, "PATCH", "/api/admin/roles/"+lastRoleID(t, e), `{"name":"CSRF OK","status":"disabled"}`, true)
+		_ = e.do(t, "PATCH", "/api/samelabs/roles/"+lastRoleID(t, e), `{"name":"CSRF OK","status":"disabled"}`, true)
 	} else if !strings.Contains(rec.Body.String(), "CSRF_INVALID") {
 		// proceeded past CSRF — acceptable
 	} else {
@@ -188,7 +188,7 @@ func TestB12PermissionDeniedPaths(t *testing.T) {
 
 	// login
 	body := fmt.Sprintf(`{"username":%q,"password":%q}`, username, password)
-	req := httptest.NewRequest("POST", "/api/admin/session", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -225,26 +225,26 @@ func TestB12PermissionDeniedPaths(t *testing.T) {
 		return rec.Code
 	}
 
-	if c := get("/api/admin/users"); c != 403 {
+	if c := get("/api/samelabs/users"); c != 403 {
 		t.Fatalf("users list without perm = %d, want 403", c)
 	}
-	if c := get("/api/admin/roles"); c != 403 {
+	if c := get("/api/samelabs/roles"); c != 403 {
 		t.Fatalf("roles list without perm = %d", c)
 	}
-	if c := get("/api/admin/sessions"); c != 403 {
+	if c := get("/api/samelabs/sessions"); c != 403 {
 		t.Fatalf("sessions without perm = %d", c)
 	}
-	if c := get("/api/admin/audit"); c != 403 {
+	if c := get("/api/samelabs/audit"); c != 403 {
 		t.Fatalf("audit without perm = %d", c)
 	}
-	if c := mutate("POST", "/api/admin/users"); c != 403 {
+	if c := mutate("POST", "/api/samelabs/users"); c != 403 {
 		t.Fatalf("create user without perm = %d", c)
 	}
 }
 
 func TestB12SessionListNeverLeaksTokenMaterial(t *testing.T) {
 	e := newB12Env(t)
-	rec := e.do(t, "GET", "/api/admin/sessions", "", false)
+	rec := e.do(t, "GET", "/api/samelabs/sessions", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("sessions list: %d", rec.Code)
 	}
@@ -260,8 +260,8 @@ func TestB12SessionListNeverLeaksTokenMaterial(t *testing.T) {
 func TestB12AuditExplorerPaginationAndFilters(t *testing.T) {
 	e := newB12Env(t)
 	// generate a few audit facts
-	_ = e.do(t, "GET", "/api/admin/audit?action=admin.login&page=1&page_size=5", "", false)
-	rec := e.do(t, "GET", "/api/admin/audit?page=1&page_size=5", "", false)
+	_ = e.do(t, "GET", "/api/samelabs/audit?action=admin.login&page=1&page_size=5", "", false)
+	rec := e.do(t, "GET", "/api/samelabs/audit?page=1&page_size=5", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("audit: %d %s", rec.Code, rec.Body.String())
 	}
@@ -284,7 +284,7 @@ func TestB12AuditExplorerPaginationAndFilters(t *testing.T) {
 		t.Fatal("page_size exceeded")
 	}
 	// filter by action
-	rec = e.do(t, "GET", "/api/admin/audit?action=admin.login", "", false)
+	rec = e.do(t, "GET", "/api/samelabs/audit?action=admin.login", "", false)
 	if rec.Code != 200 {
 		t.Fatalf("audit filter: %d", rec.Code)
 	}
@@ -292,8 +292,8 @@ func TestB12AuditExplorerPaginationAndFilters(t *testing.T) {
 
 func TestB12AdminHTMLRoutesRender(t *testing.T) {
 	e := newB12Env(t)
-	for _, path := range []string{"/admin", "/admin/login", "/admin/account", "/admin/users",
-		"/admin/roles", "/admin/sessions", "/admin/audit"} {
+	for _, path := range []string{"/samelabs", "/samelabs/login", "/samelabs/account", "/samelabs/users",
+		"/samelabs/roles", "/samelabs/sessions", "/samelabs/audit"} {
 		req := httptest.NewRequest("GET", path, nil)
 		rec := httptest.NewRecorder()
 		e.router.ServeHTTP(rec, req)
@@ -309,7 +309,7 @@ func TestB12AdminHTMLRoutesRender(t *testing.T) {
 	}
 	// no owner identity references in the admin shell
 	for _, banned := range []string{"kf_owner", "/api/owner/", "OWNER_I18N"} {
-		req := httptest.NewRequest("GET", "/admin/users", nil)
+		req := httptest.NewRequest("GET", "/samelabs/users", nil)
 		rec := httptest.NewRecorder()
 		e.router.ServeHTTP(rec, req)
 		if strings.Contains(rec.Body.String(), banned) {
@@ -337,7 +337,7 @@ func TestB12AdminAssetsServe(t *testing.T) {
 func TestB12SelfPasswordChangeClearsCookie(t *testing.T) {
 	e := newB12Env(t)
 	newPass := "rotated-pass-9"
-	rec := e.do(t, "POST", "/api/admin/me/password",
+	rec := e.do(t, "POST", "/api/samelabs/me/password",
 		fmt.Sprintf(`{"current_password":%q,"new_password":%q}`, e.password, newPass), true)
 	if rec.Code != 200 {
 		t.Fatalf("me/password: %d %s", rec.Code, rec.Body.String())
@@ -360,7 +360,7 @@ func TestB12SelfPasswordChangeClearsCookie(t *testing.T) {
 		t.Fatal("audit leaked password")
 	}
 	// old session invalid
-	rec = e.do(t, "GET", "/api/admin/session", "", false)
+	rec = e.do(t, "GET", "/api/samelabs/session", "", false)
 	if rec.Code != 401 {
 		t.Fatalf("old session must be revoked: %d", rec.Code)
 	}

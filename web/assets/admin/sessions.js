@@ -2,7 +2,7 @@
 'use strict';
 
 async function loadSessions() {
-    const json = await adminGet('/api/admin/sessions');
+    const json = await adminGet('/api/samelabs/sessions');
     if (!json.success) throw new Error(apiError(json, 'Failed to load sessions'));
     state.sessions = json.data.sessions || [];
 }
@@ -47,17 +47,17 @@ async function bindAdminSessionsEvents() {
         try {
             if (btn.dataset.act === 'revoke') {
                 const id = parseInt(btn.dataset.id, 10);
-                const json = await adminMutate(`/api/admin/sessions/${id}`, 'DELETE');
+                const json = await adminMutate(`/api/samelabs/sessions/${id}`, 'DELETE');
                 if (!json.success) throw new Error(apiError(json));
                 // revoking our own current session logs us out
                 const revokedSelf = json.data && state.principal &&
                     json.data.admin_id === state.principal.id;
                 await loadSessions(); renderSessions();
-                if (revokedSelf) window.location.assign('/admin/login');
+                if (revokedSelf) window.location.assign('/samelabs/login');
             } else if (btn.dataset.act === 'force') {
                 const adminId = parseInt(btn.dataset.admin, 10);
                 if (!window.confirm(`Force logout ALL sessions of ${btn.dataset.name}?`)) return;
-                const json = await adminMutate(`/api/admin/users/${adminId}/force-logout`, 'POST');
+                const json = await adminMutate(`/api/samelabs/users/${adminId}/force-logout`, 'POST');
                 if (!json.success) throw new Error(apiError(json));
                 await loadSessions(); renderSessions();
             }

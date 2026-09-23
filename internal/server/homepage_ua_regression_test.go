@@ -55,6 +55,11 @@ func TestHomepageUARouting(t *testing.T) {
 		{"wget", "Wget/1.21.4", "", false},
 		{"python_requests", "python-requests/2.31.0", "", false},
 		{"go_http", "Go-http-client/2.0", "", false},
+		{"python_httpx", "python-httpx/0.27.0", "", false},
+		{"aiohttp", "Python/3.12 aiohttp/3.9.5", "", false},
+		{"node_builtin_fetch", "node", "*/*", false},
+		{"axios", "axios/1.7.2", "", false},
+		{"deno", "Deno/1.44.0", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,6 +77,14 @@ func TestHomepageUARouting(t *testing.T) {
 			}
 		})
 	}
+
+	// "/" varies by UA and Accept: caches must key on both.
+	t.Run("vary_headers", func(t *testing.T) {
+		vary := strings.Join(fetch("/", "curl/8.5.0", "").Header().Values("Vary"), ",")
+		if !strings.Contains(vary, "User-Agent") || !strings.Contains(vary, "Accept") {
+			t.Fatalf("GET / Vary=%q, want User-Agent and Accept", vary)
+		}
+	})
 
 	// /llms.txt stays a dedicated agent discovery surface for ANY client.
 	t.Run("explicit_llms_txt_browser", func(t *testing.T) {

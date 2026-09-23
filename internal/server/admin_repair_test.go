@@ -31,7 +31,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 
 	// seed a target admin with a known binding
 	target := fmt.Sprintf("fcuser_%d", time.Now().UnixNano())
-	rec := e.mutateJSON(t, "POST", "/api/admin/users",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/users",
 		fmt.Sprintf(`{"username":%q,"display_name":"FC","password":"fc-pass-123"}`, target))
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
@@ -45,7 +45,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 	targetID := created.Data.ID
 
 	// find a role id to bind
-	rolesRec := e.do(t, "GET", "/api/admin/roles", "", false)
+	rolesRec := e.do(t, "GET", "/api/samelabs/roles", "", false)
 	var rolesResp struct {
 		Data struct {
 			Roles []struct {
@@ -63,7 +63,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 	}
 
 	// baseline binding: [superID]
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", targetID),
 		fmt.Sprintf(`{"role_ids":[%d]}`, superID))
 	if rec.Code != 200 {
 		t.Fatalf("baseline bind: %d %s", rec.Code, rec.Body.String())
@@ -80,7 +80,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 		{"string entry", `{"role_ids":["superadmin"]}`},
 	}
 	for _, tc := range cases {
-		rec := e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID), tc.body)
+		rec := e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", targetID), tc.body)
 		if rec.Code != 400 {
 			t.Fatalf("%s: got %d %s, want 400", tc.name, rec.Code, rec.Body.String())
 		}
@@ -92,7 +92,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 	}
 
 	// valid empty array = legal explicit clear
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID), `{"role_ids":[]}`)
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", targetID), `{"role_ids":[]}`)
 	if rec.Code != 200 {
 		t.Fatalf("empty array clear: %d %s", rec.Code, rec.Body.String())
 	}
@@ -103,7 +103,7 @@ func TestRepairPutRolesFailClosed(t *testing.T) {
 
 func (e *b12Env) bindingsOf(t *testing.T, adminID int64) []int64 {
 	t.Helper()
-	rec := e.do(t, "GET", fmt.Sprintf("/api/admin/users/%d", adminID), "", false)
+	rec := e.do(t, "GET", fmt.Sprintf("/api/samelabs/users/%d", adminID), "", false)
 	if rec.Code != 200 {
 		t.Fatalf("get user: %d", rec.Code)
 	}
@@ -114,7 +114,7 @@ func (e *b12Env) bindingsOf(t *testing.T, adminID int64) []int64 {
 		} `json:"data"`
 	}
 	_ = jsonDecode(rec.Body.String(), &userResp)
-	rolesRec := e.do(t, "GET", "/api/admin/roles", "", false)
+	rolesRec := e.do(t, "GET", "/api/samelabs/roles", "", false)
 	var rolesResp struct {
 		Data struct {
 			Roles []struct {
@@ -141,7 +141,7 @@ func TestRepairPutPermissionsFailClosed(t *testing.T) {
 	e := newB12Env(t)
 
 	// create a custom role
-	rec := e.mutateJSON(t, "POST", "/api/admin/roles",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/roles",
 		fmt.Sprintf(`{"code":"fcperm_%d","name":"FC Perm"}`, time.Now().UnixNano()%100000))
 	if rec.Code != 200 {
 		t.Fatalf("create role: %d %s", rec.Code, rec.Body.String())
@@ -155,7 +155,7 @@ func TestRepairPutPermissionsFailClosed(t *testing.T) {
 	roleID := created.Data.ID
 
 	// baseline permission binding
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", roleID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", roleID),
 		`{"permission_codes":["admin.users.read"]}`)
 	if rec.Code != 200 {
 		t.Fatalf("baseline: %d %s", rec.Code, rec.Body.String())
@@ -171,7 +171,7 @@ func TestRepairPutPermissionsFailClosed(t *testing.T) {
 		{"non-string entry", `{"permission_codes":["admin.users.read",7]}`},
 	}
 	for _, tc := range cases {
-		rec := e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", roleID), tc.body)
+		rec := e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", roleID), tc.body)
 		if rec.Code != 400 {
 			t.Fatalf("%s: got %d %s, want 400", tc.name, rec.Code, rec.Body.String())
 		}
@@ -182,7 +182,7 @@ func TestRepairPutPermissionsFailClosed(t *testing.T) {
 	}
 
 	// valid empty array clears
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/roles/%d/permissions", roleID), `{"permission_codes":[]}`)
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/roles/%d/permissions", roleID), `{"permission_codes":[]}`)
 	if rec.Code != 200 {
 		t.Fatalf("empty clear: %d %s", rec.Code, rec.Body.String())
 	}
@@ -193,7 +193,7 @@ func TestRepairPutPermissionsFailClosed(t *testing.T) {
 
 func (e *b12Env) permsOf(t *testing.T, roleID int64) []string {
 	t.Helper()
-	rec := e.do(t, "GET", fmt.Sprintf("/api/admin/roles/%d", roleID), "", false)
+	rec := e.do(t, "GET", fmt.Sprintf("/api/samelabs/roles/%d", roleID), "", false)
 	if rec.Code != 200 {
 		t.Fatalf("get role: %d", rec.Code)
 	}
@@ -211,7 +211,7 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 
 	// create + disable a role
 	code := fmt.Sprintf("patchrole_%d", time.Now().UnixNano()%100000)
-	rec := e.mutateJSON(t, "POST", "/api/admin/roles", fmt.Sprintf(`{"code":%q,"name":"Patch Me"}`, code))
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/roles", fmt.Sprintf(`{"code":%q,"name":"Patch Me"}`, code))
 	if rec.Code != 200 {
 		t.Fatalf("create: %d", rec.Code)
 	}
@@ -223,13 +223,13 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 	_ = jsonDecode(rec.Body.String(), &created)
 	roleID := created.Data.ID
 
-	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/admin/roles/%d", roleID), `{"status":"disabled"}`)
+	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/samelabs/roles/%d", roleID), `{"status":"disabled"}`)
 	if rec.Code != 200 {
 		t.Fatalf("disable: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// name-only PATCH → status stays disabled
-	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/admin/roles/%d", roleID), `{"name":"Patched Name"}`)
+	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/samelabs/roles/%d", roleID), `{"name":"Patched Name"}`)
 	if rec.Code != 200 {
 		t.Fatalf("name patch: %d %s", rec.Code, rec.Body.String())
 	}
@@ -245,7 +245,7 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 	}
 
 	// description-only PATCH keeps name+status
-	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/admin/roles/%d", roleID), `{"description":"added later"}`)
+	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/samelabs/roles/%d", roleID), `{"description":"added later"}`)
 	if rec.Code != 200 {
 		t.Fatalf("desc patch: %d %s", rec.Code, rec.Body.String())
 	}
@@ -255,12 +255,12 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 	}
 
 	// empty PATCH → 400
-	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/admin/roles/%d", roleID), `{}`)
+	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/samelabs/roles/%d", roleID), `{}`)
 	if rec.Code != 400 {
 		t.Fatalf("empty patch: %d", rec.Code)
 	}
 	// wrong type → 400
-	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/admin/roles/%d", roleID), `{"name":123}`)
+	rec = e.mutateJSON(t, "PATCH", fmt.Sprintf("/api/samelabs/roles/%d", roleID), `{"name":123}`)
 	if rec.Code != 400 {
 		t.Fatalf("wrong type: %d", rec.Code)
 	}
@@ -367,7 +367,7 @@ func TestRepairPickerApplyUnchangedKeepsBindings(t *testing.T) {
 	e := newB12Env(t)
 
 	target := fmt.Sprintf("pick_%d", time.Now().UnixNano())
-	rec := e.mutateJSON(t, "POST", "/api/admin/users",
+	rec := e.mutateJSON(t, "POST", "/api/samelabs/users",
 		fmt.Sprintf(`{"username":%q,"display_name":"Pick","password":"pick-pass-123"}`, target))
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
@@ -381,7 +381,7 @@ func TestRepairPickerApplyUnchangedKeepsBindings(t *testing.T) {
 	targetID := created.Data.ID
 
 	// bind superadmin (what the prechecked picker would show checked)
-	rolesRec := e.do(t, "GET", "/api/admin/roles", "", false)
+	rolesRec := e.do(t, "GET", "/api/samelabs/roles", "", false)
 	var rolesResp struct {
 		Data struct {
 			Roles []struct {
@@ -397,14 +397,14 @@ func TestRepairPickerApplyUnchangedKeepsBindings(t *testing.T) {
 			superID = r.ID
 		}
 	}
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", targetID),
 		fmt.Sprintf(`{"role_ids":[%d]}`, superID))
 	if rec.Code != 200 {
 		t.Fatalf("bind: %d", rec.Code)
 	}
 
 	// "Apply without changes": submit the same set back
-	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/admin/users/%d/roles", targetID),
+	rec = e.mutateJSON(t, "PUT", fmt.Sprintf("/api/samelabs/users/%d/roles", targetID),
 		fmt.Sprintf(`{"role_ids":[%d]}`, superID))
 	if rec.Code != 200 {
 		t.Fatalf("re-apply: %d %s", rec.Code, rec.Body.String())
