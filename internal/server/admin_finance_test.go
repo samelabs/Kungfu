@@ -487,25 +487,32 @@ func Test012FinanceReadsNeverMutate(t *testing.T) {
 	f := newFinanceFixture(t, e)
 
 	snapshot := func() string {
+		// Isolated to this fixture's own finance facts: go test runs
+		// real-PG packages in parallel and sibling packages' t.Cleanup
+		// legitimately deletes THEIR fixture rows, which must not be
+		// misread as a Finance GET mutation here.
+		var payID int64
+		if err := e.s.Pool.QueryRow(context.Background(),
+			`SELECT id FROM tb_payments WHERE code=$1`, f.payCode).Scan(&payID); err != nil {
+			t.Fatalf("snapshot payment id: %v", err)
+		}
 		var out strings.Builder
 		rows, err := e.s.Pool.Query(context.Background(), `
-			SELECT (SELECT COUNT(*) FROM tb_payments),
-			       (SELECT COUNT(*) FROM tb_payment_adjustments),
-			       (SELECT COUNT(*) FROM tb_transactions),
-			       (SELECT COALESCE(string_agg(id::text || ':' || status || ':' || amount_minor || ':' || coalesce(paid_at::text,'-'), ',' ORDER BY id), '') FROM tb_payments),
-			       (SELECT COALESCE(string_agg(id::text || ':' || coalesce(ref_type,'-') || ':' || coalesce(ref_id,'-') || ':' || amount || ':' || balance_after, ',' ORDER BY id), '') FROM tb_transactions),
-			       (SELECT COALESCE(string_agg(id::text || ':' || kind || ':' || coalesce(provider_transaction_id,'-') || ':' || amount_minor || ':' || coalesce(refunded_amount_minor,0), ',' ORDER BY id), '') FROM tb_payment_adjustments),
-			       (SELECT COALESCE(string_agg(id::text || ':' || balance, ',' ORDER BY id), '') FROM tb_bots)`)
+			SELECT (SELECT status || ':' || amount_minor || ':' || coalesce(paid_at::text,'-') FROM tb_payments WHERE id=$1),
+			       (SELECT COALESCE(string_agg(kind || ':' || coalesce(provider_transaction_id,'-') || ':' || amount_minor || ':' || coalesce(refunded_amount_minor,0), ',' ORDER BY id), '') FROM tb_payment_adjustments WHERE payment_id=$1),
+			       (SELECT COALESCE(string_agg(id::text || ':' || coalesce(ref_type,'-') || ':' || coalesce(ref_id,'-') || ':' || amount || ':' || balance_after, ',' ORDER BY id), '') FROM tb_transactions WHERE bot_id=$2),
+			       (SELECT balance::text FROM tb_bots WHERE id=$2)`,
+			payID, f.botID)
 		if err != nil {
 			t.Fatalf("snapshot: %v", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var a, b, c, d, g, h, i string
-			if err := rows.Scan(&a, &b, &c, &d, &g, &h, &i); err != nil {
+			var a, b, c, d string
+			if err := rows.Scan(&a, &b, &c, &d); err != nil {
 				t.Fatalf("snapshot scan (fail closed): %v", err)
 			}
-			fmt.Fprintf(&out, "%s|%s|%s|%s|%s|%s|%s", a, b, c, d, g, h, i)
+			fmt.Fprintf(&out, "%s|%s|%s|%s", a, b, c, d)
 		}
 		return out.String()
 	}
