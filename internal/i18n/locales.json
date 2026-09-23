@@ -119,7 +119,8 @@
         "budget_added": "Budget added.",
         "status_pending": "Pending",
         "status_open": "Open",
-        "status_closed": "Closed"
+        "status_closed": "Closed",
+        "platform_review_note": "Platform review"
       },
       "task_new": {
         "heading": "New task",
@@ -560,7 +561,8 @@
         "budget_added": "预算已追加。",
         "status_pending": "待开放",
         "status_open": "开放中",
-        "status_closed": "已关闭"
+        "status_closed": "已关闭",
+        "platform_review_note": "平台审核意见"
       },
       "task_new": {
         "heading": "新建任务",
@@ -1001,7 +1003,8 @@
         "budget_added": "予算を追加しました。",
         "status_pending": "保留",
         "status_open": "公開中",
-        "status_closed": "クローズ済み"
+        "status_closed": "クローズ済み",
+        "platform_review_note": "プラットフォーム審査メモ"
       },
       "task_new": {
         "heading": "新規タスク",
@@ -1442,7 +1445,8 @@
         "budget_added": "예산이 추가되었습니다.",
         "status_pending": "대기",
         "status_open": "열림",
-        "status_closed": "닫힘"
+        "status_closed": "닫힘",
+        "platform_review_note": "플랫폼 심사 메모"
       },
       "task_new": {
         "heading": "새 작업",
@@ -1883,7 +1887,8 @@
         "budget_added": "Presupuesto agregado.",
         "status_pending": "Pendiente",
         "status_open": "Abierta",
-        "status_closed": "Cerrada"
+        "status_closed": "Cerrada",
+        "platform_review_note": "Revisión de la plataforma"
       },
       "task_new": {
         "heading": "Nueva tarea",

@@ -1,11 +1,23 @@
 {{define "content"}}{{$c := .Data.Counts}}
 <div class="sl-stats">
-  <a class="sl-stat" href="{{if .Can "accounts.read"}}/samelabs/accounts{{end}}"><span>Accounts</span><b>{{num $c.Accounts}}</b><small>+{{num $c.AccountsNew7d}} in 7 days · {{num $c.AccountsDisabled}} disabled</small></a>
-  <a class="sl-stat" href="{{if .Can "tasks.read"}}/samelabs/tasks?status=open{{end}}"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksPending}} pending · {{num $c.TasksClosed}} closed</small></a>
+{{if .Can "accounts.read"}}
+  <a class="sl-stat" href="/samelabs/accounts"><span>Accounts</span><b>{{num $c.Accounts}}</b><small>+{{num $c.AccountsNew7d}} in 7 days · {{num $c.AccountsDisabled}} disabled</small></a>
+{{end}}
+{{if .Can "tasks.read"}}
+  {{with $c := .Data.Counts}}
+  <a class="sl-stat" href="/samelabs/tasks?status=open"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksPending}} pending · {{num $c.TasksClosed}} closed</small></a>
   <div class="sl-stat"><span>Completed (7 days)</span><b>{{num $c.SubmissionsSettled7d}}</b><small>{{num $c.SubmissionsInFlight}} in delivery · {{num $c.SubmissionsRejected7d}} rejected</small></div>
-  <a class="sl-stat" href="{{if .Can "memories.read"}}/samelabs/memories?visibility=public{{end}}"><span>Memories</span><b>{{num $c.Memories}}</b><small>{{num $c.MemoriesPublic}} shared publicly</small></a>
+  {{end}}
+{{end}}
+{{if .Can "memories.read"}}
+  <a class="sl-stat" href="/samelabs/memories?visibility=public"><span>Memories</span><b>{{num $c.Memories}}</b><small>{{num $c.MemoriesPublic}} shared publicly</small></a>
+{{end}}
+{{if .Can "finance.read"}}
   <div class="sl-stat"><span>Credits held by accounts</span><b>{{num $c.CreditsOutstanding}}</b><small>{{num $c.CreditsEarned7d}} earned from tasks in 7 days</small></div>
-  <a class="sl-stat {{if $c.RedemptionsPending}}attention{{end}}" href="{{if .Can "store.redemptions.read"}}/samelabs/store/redemptions?status=pending_review{{end}}"><span>Redemptions to review</span><b>{{num $c.RedemptionsPending}}</b><small>{{if $c.RedemptionsPending}}Needs a decision{{else}}Nothing waiting{{end}}</small></a>
+{{end}}
+{{if .Can "store.redemptions.read"}}
+  <a class="sl-stat {{if $c.RedemptionsPending}}attention{{end}}" href="/samelabs/store/redemptions?status=pending_review"><span>Redemptions to review</span><b>{{num $c.RedemptionsPending}}</b><small>{{if $c.RedemptionsPending}}Needs a decision{{else}}Nothing waiting{{end}}</small></a>
+{{end}}
 </div>
 
 <div class="sl-grid two">

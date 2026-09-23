@@ -44,6 +44,18 @@ async function selectTask(code) {
 }
 
 // ── Detail: pure display + action bar, ZERO inline forms ───
+// platformNote renders the platform review note left by an admin close
+// (review_note/reviewed_at come straight from the owner task detail API).
+// No note -> render nothing.
+function platformNote(task) {
+    const note = task && task.review_note ? String(task.review_note) : '';
+    if (!note) return '';
+    const when = task.reviewed_at
+        ? `<div class="sl-note-when">${escapeHtml(String(task.reviewed_at))}</div>`
+        : '';
+    return `<div class="detail-box platform-note"><h3>${escapeHtml(t('tasks.platform_review_note'))}</h3><p>${escapeHtml(note)}</p>${when}</div>`;
+}
+
 function renderTaskDetail(task) {
     const isClosed = task.status === 'closed';
     const isOpen = task.status === 'open';
@@ -81,6 +93,7 @@ function renderTaskDetail(task) {
         </div>
         <div class="detail-box"><h3>${escapeHtml(t('tasks.requirements'))}</h3><p>${escapeHtml(task.requirements)}</p></div>
         <div class="detail-box"><h3>${escapeHtml(t('tasks.post_api'))}</h3><p class="mono">${escapeHtml(task.postapi || '')}</p></div>
+        ${platformNote(task)}
     `;
 
     // Bind action bar

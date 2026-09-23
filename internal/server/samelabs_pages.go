@@ -180,24 +180,42 @@ type slDashboardData struct {
 
 func (s *Server) slDashboard(r *http.Request, p *admin.Principal) (interface{}, error) {
 	ctx := r.Context()
-	c, err := admin.Dashboard(ctx, s.Pool, p)
-	if err != nil {
-		return nil, err
-	}
-	d := slDashboardData{Counts: c}
-	if p.HasPermission("finance.read") {
-		if d.Finance, err = admin.GetFinanceSummary(ctx, s.Pool, p); err != nil {
+	d := slDashboardData{}
+	// RBAC: each domain's data is only loaded when the principal holds the
+	// matching read permission; restricted admins must not see stats from
+	// domains they cannot access. Counts feed the Accounts / Tasks /
+	// Memories / Credits / Redemptions stat cards, so they load only when
+	// at least one permission that renders a stats card is held. No new
+	// query mechanism: the single existing Dashboard round trip is reused,
+	// the template decides per card.
+	if p.HasPermission("accounts.read") || p.HasPermission("tasks.read") ||
+		p.HasPermission("memories.read") || p.HasPermission("finance.read") ||
+		p.HasPermission("store.redemptions.read") {
+		c, err := admin.Dashboard(ctx, s.Pool, p)
+		if err != nil {
 			return nil, err
+		}
+		d.Counts = c
+	}
+	if p.HasPermission("finance.read") {
+		if fs, err := admin.GetFinanceSummary(ctx, s.Pool, p); err != nil {
+			return nil, err
+		} else {
+			d.Finance = fs
 		}
 	}
 	if p.HasPermission("store.redemptions.read") {
-		if d.Pending, _, err = admin.ListStoreRedemptions(ctx, s.Pool, p, admin.StoreRedemptionListFilter{Status: "pending_review", Page: 1, PageSize: 5}); err != nil {
+		if pd, _, err := admin.ListStoreRedemptions(ctx, s.Pool, p, admin.StoreRedemptionListFilter{Status: "pending_review", Page: 1, PageSize: 5}); err != nil {
 			return nil, err
+		} else {
+			d.Pending = pd
 		}
 	}
 	if p.HasPermission("tasks.read") {
-		if d.RecentTasks, _, err = admin.ListTasks(ctx, s.Pool, p, repository.AdminTaskFilter{Page: 1, PageSize: 6}); err != nil {
+		if rt, _, err := admin.ListTasks(ctx, s.Pool, p, repository.AdminTaskFilter{Page: 1, PageSize: 6}); err != nil {
 			return nil, err
+		} else {
+			d.RecentTasks = rt
 		}
 	}
 	return d, nil
