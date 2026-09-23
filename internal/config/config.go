@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -9,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"kungfu.md/internal/security"
 	"kungfu.md/internal/version"
 )
 
@@ -53,41 +53,11 @@ type Config struct {
 	// non-empty entry fails Load (no silent drop, no default fallback).
 	TrustedProxyCIDRs []*net.IPNet
 
-	// Creem fixed-package payment runtime. All-or-nothing: every key
-	// unset → disabled (server still boots); any subset → Load fails
-	// closed. Credits authority is this server-side package config; fiat
-	// price authority is the live Creem product.
-	CreemAPIKey        string
-	CreemWebhookSecret string
-	CreemMode          string // "test" | "prod"
-	CreemSuccessURL    string
-	CreemPackages      map[string]CreemPackage
-}
-
-// CreemPackage is one fixed Kungfu credits package backed by exactly one
-// Creem onetime product.
-type CreemPackage struct {
-	Code      string `json:"code"`
-	ProductID string `json:"product_id"`
-	Credits   int64  `json:"credits"`
-}
-
-// CreemEnabled reports whether the Creem payment runtime is fully
-// configured. Never partial: Load() rejects partial configuration.
-func (c *Config) CreemEnabled() bool {
-	return c.CreemAPIKey != "" && c.CreemWebhookSecret != "" &&
-		(c.CreemMode == "test" || c.CreemMode == "prod") &&
-		c.CreemSuccessURL != "" && len(c.CreemPackages) > 0
-}
-
-// CreemAPIBase maps the configured mode to the official API host. The
-// client never accepts a base URL from outside (tests inject one via the
-// server's internal override).
-func (c *Config) CreemAPIBase() string {
-	if c.CreemMode == "prod" {
-		return "https://api.creem.io"
-	}
-	return "https://test-api.creem.io"
+	// SettingsEncKey (SETTINGS_ENC_KEY, 32 bytes as 64 hex chars) seals
+	// operator secrets stored in the database — the Creem API key and
+	// webhook secret. Optional: when unset, payment settings cannot be
+	// saved and payments stay unavailable, but the server boots.
+	SettingsEncKey []byte
 }
 
 type RateLimitConfig struct {
@@ -161,94 +131,29 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DB_SSLMODE value %q is not supported (allowed: disable | require | verify-ca | verify-full)", cfg.DBSSLMode)
 	}
 
-	if err := loadCreemConfig(cfg); err != nil {
+	if err := loadSettingsConfig(cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
 }
 
-// loadCreemConfig applies the all-or-none fixed-package Creem rules.
-func loadCreemConfig(cfg *Config) error {
-	// Legacy units-mechanism env vars are rejected loudly — never
-	// silently ignored.
-	for _, legacy := range []string{"CREEM_PRODUCT_ID", "CREEM_CREDITS_PER_UNIT"} {
-		if strings.TrimSpace(os.Getenv(legacy)) != "" {
-			return fmt.Errorf("%s is set but the legacy units configuration is no longer supported; migrate to CREEM_PACKAGES_JSON", legacy)
-		}
-	}
-
-	creemKeys := []string{"CREEM_API_KEY", "CREEM_WEBHOOK_SECRET", "CREEM_PACKAGES_JSON", "CREEM_MODE", "CREEM_SUCCESS_URL"}
-	setCount := 0
-	for _, k := range creemKeys {
+// loadSettingsConfig parses SETTINGS_ENC_KEY and rejects the retired
+// CREEM_* environment configuration loudly: payment settings now live
+// in the database (platform admin → Settings → Payments), and a stale
+// env var must never be mistaken for the active configuration.
+func loadSettingsConfig(cfg *Config) error {
+	for _, k := range []string{"CREEM_API_KEY", "CREEM_WEBHOOK_SECRET", "CREEM_PACKAGES_JSON", "CREEM_MODE", "CREEM_SUCCESS_URL", "CREEM_PRODUCT_ID", "CREEM_CREDITS_PER_UNIT"} {
 		if strings.TrimSpace(os.Getenv(k)) != "" {
-			setCount++
+			return fmt.Errorf("%s is set, but Creem configuration now lives in the database: configure it in the platform admin (/samelabs/settings/payment) and remove all CREEM_* environment variables", k)
 		}
 	}
-	if setCount == 0 {
-		return nil // disabled; server boots normally
-	}
-	if setCount < len(creemKeys) {
-		return fmt.Errorf("Creem configuration is partial: set all of %s or none", strings.Join(creemKeys, ", "))
-	}
-
-	cfg.CreemAPIKey = envStr("CREEM_API_KEY", "")
-	cfg.CreemWebhookSecret = envStr("CREEM_WEBHOOK_SECRET", "")
-	cfg.CreemMode = envStr("CREEM_MODE", "")
-	cfg.CreemSuccessURL = strings.TrimSpace(envStr("CREEM_SUCCESS_URL", ""))
-
-	if cfg.CreemMode != "test" && cfg.CreemMode != "prod" {
-		return fmt.Errorf("CREEM_MODE must be test or prod")
-	}
-	u, err := url.Parse(cfg.CreemSuccessURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("CREEM_SUCCESS_URL must be a valid http/https URL")
-	}
-
-	// Fixed packages: valid JSON array, >=1 package, unique codes AND
-	// unique product ids (one fiat product must never map to two credit
-	// entitlements), whole positive integer credits — fractional credits
-	// are rejected ({"credits": 1000.5} fails Load).
-	rawPkgs := strings.TrimSpace(envStr("CREEM_PACKAGES_JSON", ""))
-	var rawNumbers []struct {
-		Code      string      `json:"code"`
-		ProductID string      `json:"product_id"`
-		Credits   json.Number `json:"credits"`
-	}
-	if err := json.Unmarshal([]byte(rawPkgs), &rawNumbers); err != nil {
-		return fmt.Errorf("CREEM_PACKAGES_JSON must be a valid JSON array: %w", err)
-	}
-	packages := make([]CreemPackage, 0, len(rawNumbers))
-	for _, rn := range rawNumbers {
-		credits, err := rn.Credits.Int64()
+	if raw := strings.TrimSpace(os.Getenv("SETTINGS_ENC_KEY")); raw != "" {
+		key, err := security.ParseSecretBoxKey(raw)
 		if err != nil {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q credits must be a whole integer", rn.Code)
+			return fmt.Errorf("SETTINGS_ENC_KEY %v", err)
 		}
-		packages = append(packages, CreemPackage{Code: rn.Code, ProductID: rn.ProductID, Credits: credits})
-	}
-	if len(packages) == 0 {
-		return fmt.Errorf("CREEM_PACKAGES_JSON must define at least one package")
-	}
-	cfg.CreemPackages = make(map[string]CreemPackage, len(packages))
-	seenProducts := map[string]string{}
-	for _, pkg := range packages {
-		if pkg.Code == "" {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: package code must not be empty")
-		}
-		if pkg.ProductID == "" {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q product_id must not be empty", pkg.Code)
-		}
-		if pkg.Credits <= 0 {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: package %q credits must be a positive whole integer", pkg.Code)
-		}
-		if _, dup := cfg.CreemPackages[pkg.Code]; dup {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: duplicate package code %q", pkg.Code)
-		}
-		if other, dup := seenProducts[pkg.ProductID]; dup {
-			return fmt.Errorf("CREEM_PACKAGES_JSON: product %s is mapped by both %q and %q — one fiat product cannot carry two credit entitlements", pkg.ProductID, other, pkg.Code)
-		}
-		seenProducts[pkg.ProductID] = pkg.Code
-		cfg.CreemPackages[pkg.Code] = pkg
+		cfg.SettingsEncKey = key
 	}
 	return nil
 }

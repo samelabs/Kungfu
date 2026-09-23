@@ -18,9 +18,11 @@ import (
 	"kungfu.md/internal/mcpserver"
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/model"
+	"kungfu.md/internal/payment"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/security"
 	"kungfu.md/internal/service"
 
 	"bytes"
@@ -34,9 +36,19 @@ type Server struct {
 	Router         http.Handler
 	TrustedProxies []*net.IPNet
 
-	// creemBaseOverride redirects the Creem client at a test fake.
-	// Empty in production; never settable from requests or env.
-	creemBaseOverride string
+	// secretBox seals/opens operator secrets stored in the database
+	// (SETTINGS_ENC_KEY). nil when the key is not configured.
+	secretBox *security.SecretBox
+
+	// creemCache holds the last loaded payment settings snapshot.
+	creemCache creemSettingsCache
+
+	// creemBaseOverride redirects the Creem client at a test fake, and
+	// creemSettingsOverride replaces the database settings. Both are
+	// test-only: nil/empty in production, never settable from requests
+	// or env.
+	creemBaseOverride     string
+	creemSettingsOverride *payment.CreemSettings
 }
 
 // New creates a new server with all routes configured.
@@ -61,6 +73,13 @@ func New(cfg *config.Config, pool *pg.Pool) *Server {
 		Pool:           pool,
 		RateLimiter:    rl,
 		TrustedProxies: cfg.TrustedProxyCIDRs,
+	}
+	if len(cfg.SettingsEncKey) > 0 {
+		box, err := security.NewSecretBox(cfg.SettingsEncKey)
+		if err != nil {
+			log.Fatalf("SETTINGS_ENC_KEY: %v", err) // Load already validated the length
+		}
+		s.secretBox = box
 	}
 
 	s.Router = s.buildRouter()
@@ -227,6 +246,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 
 	// 012: Finance Admin — READ-ONLY control plane (no POST/PATCH/
 	// DELETE finance routes exist anywhere).
+	r.Get("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsGet)
+	r.Put("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsPut)
 	r.Get("/api/samelabs/finance/summary", s.handleAdminFinanceSummary)
 	r.Get("/api/samelabs/finance/payments", s.handleAdminFinancePayments)
 	r.Get("/api/samelabs/finance/payments/{code}", s.handleAdminFinancePaymentDetail)

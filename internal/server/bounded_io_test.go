@@ -9,13 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kungfu.md/internal/payment"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 )
@@ -170,12 +170,15 @@ func TestR22CheckoutOversizedFailClosed(t *testing.T) {
 		RateLimiter: ratelimit.NewLimiter(
 			map[string]ratelimit.Config{}),
 	}
-	s.Config.CreemAPIKey = "k"
-	s.Config.CreemWebhookSecret = "s"
-	s.Config.CreemMode = "test"
-	s.Config.CreemSuccessURL = "https://example.com/x"
-	s.Config.CreemPackages = map[string]config.CreemPackage{
-		"starter": {Code: "starter", ProductID: "prod_r22", Credits: 10},
+	s.creemSettingsOverride = &payment.CreemSettings{
+		CheckoutEnabled: true,
+		APIKey:          "k",
+		WebhookSecret:   "s",
+		Mode:            "test",
+		SuccessURL:      "https://example.com/x",
+		Packages: map[string]payment.CreemPackageSpec{
+			"starter": {Code: "starter", ProductID: "prod_r22", Credits: 10},
+		},
 	}
 	s.creemBaseOverride = fake.URL
 	router := s.buildRouter()
@@ -230,7 +233,7 @@ func TestR22WebhookOversizedFailsBeforeSignature(t *testing.T) {
 		Pool:        pool,
 		RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
 	}
-	s.Config.CreemWebhookSecret = "whsec"
+	s.creemSettingsOverride = &payment.CreemSettings{WebhookSecret: "whsec", Mode: "test"}
 	router := s.buildRouter()
 
 	// test-unique event id: the attributable marker

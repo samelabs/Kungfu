@@ -81,13 +81,9 @@ All configuration is via environment variables. No config files, nothing stored 
 | `LISTEN_ADDR` | `127.0.0.1:8090` | | Listen address |
 | `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,::1/128` | | Trusted proxy CIDRs/IPs. Default trusts loopback direct peers only. When TLS terminates at an upstream reverse proxy, configure that proxy's direct CIDR — forwarded client IP and `X-Forwarded-Proto` (cookie Secure flag) are honored ONLY from a trusted direct peer. Any invalid entry fails startup. |
 | `DEBUG_MODE` | `false` | | Verbose logging |
-| `CREEM_API_KEY` | — | optional* | Creem API key |
-| `CREEM_WEBHOOK_SECRET` | — | optional* | Creem webhook HMAC secret |
-| `CREEM_PACKAGES_JSON` | — | optional* | Creem package catalog JSON |
-| `CREEM_MODE` | — | optional* | `test` or `prod` |
-| `CREEM_SUCCESS_URL` | — | optional* | Owner return URL after checkout |
+| `SETTINGS_ENC_KEY` | — | for payments | 32-byte key as 64 hex chars (`openssl rand -hex 32`). Encrypts the Creem API key and webhook secret stored in the database. Without it the server starts but payment settings cannot be saved. Keep it stable: rotating it makes stored secrets unreadable until they are re-entered. |
 
-\*Creem is all-or-none: leave all five unset and payments stay disabled (the server still starts). Set any of them without the rest and config load fails closed. Set all five and Creem is enabled. There is no server auto-migration; apply `migrations/*.sql` in filename order before starting.
+Creem payments are configured in the platform admin (`/samelabs/settings/payment`): mode, success URL, credit packages, API key and webhook secret. The retired `CREEM_*` environment variables make startup fail with a pointer to that page. There is no server auto-migration; apply `migrations/*.sql` in filename order before starting.
 
 ### Operations / Health
 

@@ -10,9 +10,12 @@ package server
 // reconciled against the payment snapshot through Payment Core.
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -20,24 +23,76 @@ import (
 	"kungfu.md/internal/payment"
 )
 
-// creemRuntime resolves the validated provider runtime; nil when disabled.
-func (s *Server) creemRuntime() *payment.CreemRuntime {
-	if s.Config == nil || !s.Config.CreemEnabled() {
+// creemSettingsTTL bounds how long a loaded settings snapshot is
+// reused. Saves through the admin invalidate immediately; the TTL only
+// covers edits made outside this process.
+const creemSettingsTTL = 30 * time.Second
+
+type creemSettingsCache struct {
+	mu       sync.Mutex
+	val      *payment.CreemSettings
+	loadedAt time.Time
+}
+
+// creemSettings returns the active provider settings from the database
+// (cached briefly); nil when payments are unconfigured or switched off.
+func (s *Server) creemSettings(ctx context.Context) *payment.CreemSettings {
+	if s.creemSettingsOverride != nil {
+		return s.creemSettingsOverride // test injection only
+	}
+	c := &s.creemCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.loadedAt.IsZero() && time.Since(c.loadedAt) < creemSettingsTTL {
+		return c.val
+	}
+	val, err := payment.LoadCreemSettings(ctx, s.Pool, s.secretBox)
+	if err != nil {
+		// Transient DB failure: keep serving the last good snapshot
+		// rather than flapping payments off; retry on the next call.
+		log.Printf("creem: settings load failed: %v", err)
+		return c.val
+	}
+	c.val, c.loadedAt = val, time.Now()
+	return val
+}
+
+// invalidateCreemSettings forces the next request to reload.
+func (s *Server) invalidateCreemSettings() {
+	s.creemCache.mu.Lock()
+	s.creemCache.loadedAt = time.Time{}
+	s.creemCache.mu.Unlock()
+}
+
+// creemRuntime resolves the provider runtime for processing EXISTING
+// payments (webhooks); nil when unconfigured.
+func (s *Server) creemRuntime(ctx context.Context) *payment.CreemRuntime {
+	return s.runtimeFrom(s.creemSettings(ctx))
+}
+
+// creemCheckoutRuntime is creemRuntime gated on checkout being switched
+// on — used for new purchases and the package list.
+func (s *Server) creemCheckoutRuntime(ctx context.Context) *payment.CreemRuntime {
+	st := s.creemSettings(ctx)
+	if st == nil || !st.CheckoutEnabled {
 		return nil
 	}
-	base := s.Config.CreemAPIBase()
+	return s.runtimeFrom(st)
+}
+
+func (s *Server) runtimeFrom(st *payment.CreemSettings) *payment.CreemRuntime {
+	if st == nil {
+		return nil
+	}
+	base := payment.CreemAPIBase(st.Mode)
 	if s.creemBaseOverride != "" {
 		base = s.creemBaseOverride // test injection only
 	}
-	packages := make(map[string]payment.CreemPackageSpec, len(s.Config.CreemPackages))
-	for code, pkg := range s.Config.CreemPackages {
-		packages[code] = payment.CreemPackageSpec(pkg)
-	}
 	return &payment.CreemRuntime{
-		Client:     payment.NewCreemClient(payment.CreemConfig{APIBase: base, APIKey: s.Config.CreemAPIKey}),
-		Mode:       s.Config.CreemMode,
-		SuccessURL: s.Config.CreemSuccessURL,
-		Packages:   packages,
+		Client:     payment.NewCreemClient(payment.CreemConfig{APIBase: base, APIKey: st.APIKey}),
+		Mode:       st.Mode,
+		SuccessURL: st.SuccessURL,
+		Packages:   st.Packages,
 	}
 }
 
@@ -58,7 +113,7 @@ func (s *Server) handleOwnerPaymentCheckout(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rt := s.creemRuntime()
+	rt := s.creemCheckoutRuntime(r.Context())
 	if rt == nil {
 		handleAppError(w, errors.New(503, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server"))
 		return
@@ -115,7 +170,8 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 		MethodNotAllowed(w)
 		return
 	}
-	if s.Config == nil || s.Config.CreemWebhookSecret == "" {
+	st := s.creemSettings(r.Context())
+	if st == nil || st.WebhookSecret == "" {
 		ErrorResponse(w, http.StatusServiceUnavailable, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server", nil)
 		return
 	}
@@ -132,7 +188,7 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sig := r.Header.Get("creem-signature")
-	if !payment.VerifyCreemWebhookSignature(raw, s.Config.CreemWebhookSecret, sig) {
+	if !payment.VerifyCreemWebhookSignature(raw, st.WebhookSecret, sig) {
 		// Missing/malformed/mismatched signature: 401, zero DB mutation.
 		ErrorResponse(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "Webhook signature verification failed", nil)
 		return
@@ -146,7 +202,7 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case ev.EventType == "checkout.completed":
-		rt := s.creemRuntime()
+		rt := s.creemRuntime(r.Context())
 		if rt == nil {
 			ErrorResponse(w, http.StatusServiceUnavailable, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server", nil)
 			return
@@ -169,7 +225,7 @@ func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 		// reverse_payment ledger by the provider refunded-amount ratio
 		// (may drive the balance negative). Ordinary spends still cannot
 		// cross zero; only this reversal path can.
-		rt := s.creemRuntime()
+		rt := s.creemRuntime(r.Context())
 		if rt == nil {
 			ErrorResponse(w, http.StatusServiceUnavailable, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server", nil)
 			return
@@ -242,7 +298,7 @@ func (s *Server) handleOwnerPaymentPackages(w http.ResponseWriter, r *http.Reque
 		handleAppError(w, err)
 		return
 	}
-	rt := s.creemRuntime()
+	rt := s.creemCheckoutRuntime(r.Context())
 	if rt == nil {
 		handleAppError(w, errors.New(503, "PAYMENT_NOT_CONFIGURED", "Payment is not configured on this server"))
 		return

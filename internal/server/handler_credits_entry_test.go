@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kungfu.md/internal/payment"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"kungfu.md/internal/config"
 	"kungfu.md/internal/i18n"
 
 	"bytes"
@@ -59,13 +59,16 @@ func newBcpFake(t *testing.T, extra ...string) *httptest.Server {
 func bcpServer(t *testing.T, fakeURL string) *Server {
 	t.Helper()
 	s := storeTestServer(t)
-	s.Config.CreemAPIKey = "k"
-	s.Config.CreemWebhookSecret = "whsec"
-	s.Config.CreemMode = "test"
-	s.Config.CreemSuccessURL = "https://kungfu.md/owner?payment=success"
-	s.Config.CreemPackages = map[string]config.CreemPackage{
-		"starter":  {Code: "starter", ProductID: "prod_a", Credits: 1000},
-		"standard": {Code: "standard", ProductID: "prod_b", Credits: 500},
+	s.creemSettingsOverride = &payment.CreemSettings{
+		CheckoutEnabled: true,
+		APIKey:          "k",
+		WebhookSecret:   "whsec",
+		Mode:            "test",
+		SuccessURL:      "https://kungfu.md/owner?payment=success",
+		Packages: map[string]payment.CreemPackageSpec{
+			"starter":  {Code: "starter", ProductID: "prod_a", Credits: 1000},
+			"standard": {Code: "standard", ProductID: "prod_b", Credits: 500},
+		},
 	}
 	s.creemBaseOverride = fakeURL
 	return s
@@ -180,7 +183,7 @@ func TestPackagesAPIProjection(t *testing.T) {
 func TestPackagesAPIFailClosed(t *testing.T) {
 	// prod_c exists but has subscription billing → invalid
 	s := bcpServer(t, newBcpFake(t, "prod_c", `{"id":"prod_c","name":"Broken","billing_type":"subscription","status":"active","mode":"test","currency":"USD","price":100}`).URL)
-	s.Config.CreemPackages["broken"] = config.CreemPackage{Code: "broken", ProductID: "prod_c", Credits: 10}
+	s.creemSettingsOverride.Packages["broken"] = payment.CreemPackageSpec{Code: "broken", ProductID: "prod_c", Credits: 10}
 	router := s.buildRouter()
 	botID := bcpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
@@ -195,7 +198,7 @@ func TestPackagesAPIFailClosed(t *testing.T) {
 
 	// unreadable (404) product also fails closed — same server, catalog
 	// mutated in place (the runtime resolves packages per request)
-	s.Config.CreemPackages["ghost"] = config.CreemPackage{Code: "ghost", ProductID: "prod_404", Credits: 10}
+	s.creemSettingsOverride.Packages["ghost"] = payment.CreemPackageSpec{Code: "ghost", ProductID: "prod_404", Credits: 10}
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/api/owner/payments/packages", nil)
 	req2.AddCookie(cookie)

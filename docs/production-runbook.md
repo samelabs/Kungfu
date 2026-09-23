@@ -31,6 +31,9 @@ Current release migration set (application order):
 008_agent_key_hash.sql
 009_integer_credits.sql
 010_task_submissions.sql
+011_admin_account_permissions.sql
+012_admin_finance_permission.sql
+013_payment_settings.sql
 ```
 
 Rules:
@@ -51,7 +54,7 @@ Required values (record **presence + source only**, never values):
 | `DB_SSLMODE` | yes | exactly one of `disable\|require\|verify-ca\|verify-full` (no default) |
 | `LISTEN_ADDR` | as applicable | container default `0.0.0.0:8090` |
 | `TRUSTED_PROXY_CIDRS` | when behind a proxy | must match the real direct proxy peer/network |
-| `CREEM_API_KEY` `CREEM_WEBHOOK_SECRET` `CREEM_PACKAGES_JSON` `CREEM_MODE` `CREEM_SUCCESS_URL` | when payments enabled | all-or-none: all five set, or all five unset (payments disabled) |
+| `SETTINGS_ENC_KEY` | when payments enabled | 64 hex chars; encrypts the Creem secrets stored in the database. Must stay stable across deploys. Any leftover `CREEM_*` variable fails startup — Creem settings now live in `/samelabs/settings/payment` |
 
 Evidence hygiene: record e.g. "`SESSION_SECRET` present, injected via <source>". Secret values never appear in any artifact (see §17).
 
@@ -388,9 +391,8 @@ Only existing store state transitions are used; none are invented.
 ## 12. Creem Prerequisites (documented; sandbox acceptance is a separately scheduled gate)
 
 Documented prerequisites only — no sandbox validation is performed by this document:
-- `CREEM_MODE=test`
-- valid Creem API key + webhook secret (presence recorded, values never logged)
-- package catalog (`CREEM_PACKAGES_JSON`) + success URL configured
+- `SETTINGS_ENC_KEY` set on the server
+- in `/samelabs/settings/payment`: mode `test`, valid Creem API key + webhook secret (stored encrypted, shown masked), package catalog + success URL, checkout switched on
 - public HTTPS webhook endpoint reachable from Creem
 - Creem dashboard webhook configured to `POST /api/webhooks/creem`
 

@@ -11,13 +11,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"kungfu.md/internal/payment"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/service"
@@ -332,12 +332,15 @@ func TestR21RealCreemCheckoutCancellation(t *testing.T) {
 
 	// configure a valid Creem runtime (all-or-none contract) pointed at
 	// the slow fake via the existing test-only base override
-	s.Config.CreemAPIKey = "test-key"
-	s.Config.CreemWebhookSecret = "test-secret"
-	s.Config.CreemMode = "test"
-	s.Config.CreemSuccessURL = "https://example.com/return"
-	s.Config.CreemPackages = map[string]config.CreemPackage{
-		"starter": {Code: "starter", ProductID: "prod_r21", Credits: 100},
+	s.creemSettingsOverride = &payment.CreemSettings{
+		CheckoutEnabled: true,
+		APIKey:          "test-key",
+		WebhookSecret:   "test-secret",
+		Mode:            "test",
+		SuccessURL:      "https://example.com/return",
+		Packages: map[string]payment.CreemPackageSpec{
+			"starter": {Code: "starter", ProductID: "prod_r21", Credits: 100},
+		},
 	}
 	s.creemBaseOverride = slowCreem.URL
 

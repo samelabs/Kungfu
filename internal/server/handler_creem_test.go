@@ -12,14 +12,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"kungfu.md/internal/payment"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"kungfu.md/internal/config"
 )
 
 const cfpWebhookSecret = "whsec_http_cfp"
@@ -93,13 +92,16 @@ func (f *cfpFake) setTxn(id, body string) {
 func cfpServer(t *testing.T, fakeURL string) *Server {
 	t.Helper()
 	s := storeTestServer(t)
-	s.Config.CreemAPIKey = "k"
-	s.Config.CreemWebhookSecret = cfpWebhookSecret
-	s.Config.CreemMode = "test"
-	s.Config.CreemSuccessURL = "https://kungfu.md/owner?payment=success"
-	s.Config.CreemPackages = map[string]config.CreemPackage{
-		"starter":  {Code: "starter", ProductID: "prod_a", Credits: 1000},
-		"standard": {Code: "standard", ProductID: "prod_b", Credits: 5000},
+	s.creemSettingsOverride = &payment.CreemSettings{
+		CheckoutEnabled: true,
+		APIKey:          "k",
+		WebhookSecret:   cfpWebhookSecret,
+		Mode:            "test",
+		SuccessURL:      "https://kungfu.md/owner?payment=success",
+		Packages: map[string]payment.CreemPackageSpec{
+			"starter":  {Code: "starter", ProductID: "prod_a", Credits: 1000},
+			"standard": {Code: "standard", ProductID: "prod_b", Credits: 5000},
+		},
 	}
 	s.creemBaseOverride = fakeURL
 	return s
