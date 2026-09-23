@@ -28,7 +28,7 @@ function renderStore() {
                     <div class="store-product-body">
                         <div class="store-product-title">${escapeHtml(p.title)}</div>
                         ${p.description ? `<div class="muted store-product-desc">${escapeHtml(p.description)}</div>` : ''}
-                        <div class="store-product-price">${escapeHtml(t('store.price', {price: p.credits_price}))}</div>
+                        <div class="store-product-price">${escapeHtml(String(p.credits_price) === '1' ? t('store.price_one', {price: p.credits_price}) : t('store.price', {price: p.credits_price}))}</div>
                     </div>
                     <button class="btn primary" type="button" data-redeem-code="${escapeHtml(p.code)}">${escapeHtml(t('store.redeem'))}</button>
                 </div>`).join('');

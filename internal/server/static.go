@@ -86,15 +86,26 @@ func filepathExt(path string) string {
 	return path[idx+1:]
 }
 
-// agentHomeHandler routes agent/curl requests to llms.txt, browser requests to HTML.
+// agentHomeHandler routes explicit agent/CLI requests to llms.txt, browser
+// requests (including search crawlers like Googlebot/Bingbot, which must see
+// the canonical human homepage) to HTML.
+//
+// The check is an allowlist of known agent/CLI client signatures, NOT a
+// generic "bot" substring match: a generic match would hijack Googlebot and
+// Bingbot into the agent discovery text and damage search indexing.
+// Search-engine crawlers are browsers for our purposes; agents that want the
+// discovery surface can always fetch /llms.txt explicitly.
 func (s *Server) agentHomeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ua := strings.ToLower(r.UserAgent())
 		accept := strings.ToLower(r.Header.Get("Accept"))
 		isAgent := strings.Contains(ua, "curl") ||
-			strings.Contains(ua, "python") ||
-			strings.Contains(ua, "bot") ||
-			strings.Contains(ua, "agent") ||
+			strings.Contains(ua, "wget") ||
+			strings.Contains(ua, "python-requests") ||
+			strings.Contains(ua, "python-urllib") ||
+			strings.Contains(ua, "go-http-client") ||
+			strings.Contains(ua, "node-fetch") ||
+			strings.Contains(ua, "httpie") ||
 			strings.Contains(accept, "text/plain")
 
 		if isAgent {

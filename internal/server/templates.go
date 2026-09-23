@@ -52,7 +52,11 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 }
 
 // renderLegalPage renders /terms or /privacy from i18n content — a
-// single template source for all five locales.
+// single template source for all five locales. The page uses the
+// dedicated legal document layout (header band, intro lede, numbered
+// section hierarchy, reading-width prose), NOT the generic card grid:
+// legal documents are long-form reading surfaces and must look like one
+// on desktop and mobile.
 func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/"+kind)
@@ -64,7 +68,10 @@ func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind str
 		if h == "" || b == "" {
 			continue
 		}
-		sections.WriteString(`<div class="card"><h2>` + html.EscapeString(h) + `</h2><p>` + html.EscapeString(b) + `</p></div>`)
+		sections.WriteString(`<section class="legal-section" id="s` + strconv.Itoa(i+1) + `">
+            <h2><span class="legal-section-num">` + strconv.Itoa(i+1) + `</span>` + html.EscapeString(h) + `</h2>
+            <p>` + html.EscapeString(b) + `</p>
+        </section>`)
 	}
 
 	htmlOut := `<!DOCTYPE html>
@@ -73,15 +80,22 @@ func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind str
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>` + html.EscapeString(data.T(kind+".title")) + ` | Kungfu.md</title>
+    <meta name="robots" content="index,follow">
     <link rel="stylesheet" href="/assets/site.css">
 </head>
-<body>
-<div class="wrap">
-    <div class="card">
-        <h1>` + html.EscapeString(data.T(kind+".heading")) + `</h1>
-        <p>` + html.EscapeString(data.T(kind+".intro")) + `</p>
-    </div>
-    ` + sections.String() + `
+<body class="legal-body">
+<div class="wrap legal-wrap">
+    <header class="legal-header">
+        <a class="legal-home" href="` + i18n.LocaleURL(data.Locale, "/") + `"><span class="site-logo" aria-hidden="true">🥋</span>Kungfu.md</a>
+        <div class="legal-header-meta">` + html.EscapeString(data.T(kind+".heading")) + `</div>
+    </header>
+    <main class="legal-main">
+        <div class="legal-lede">
+            <h1>` + html.EscapeString(data.T(kind+".heading")) + `</h1>
+            <p class="legal-intro">` + html.EscapeString(data.T(kind+".intro")) + `</p>
+        </div>
+        ` + sections.String() + `
+    </main>
     ` + siteFooter(data.Locale, langOpts, kind+"-lang-switch") + `
 </div>
 <script src="/assets/pwa-register.js"></script>
@@ -211,8 +225,16 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
 		b.WriteString(`<div class="task-title">` + title + `</div>`)
 		b.WriteString(`<div class="content">` + req + `</div>`)
 		b.WriteString(`<div class="task-facts">`)
-		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_reward") + `</b><span>` + reward + " " + i18n.T(locale, "home.task_credit_singular") + `</span></div>`)
-		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_budget") + `</b><span>` + budget + " " + i18n.T(locale, "home.task_credit_plural") + `</span></div>`)
+		rewardUnit := i18n.T(locale, "home.task_credit_plural")
+		if reward == "1" {
+			rewardUnit = i18n.T(locale, "home.task_credit_singular")
+		}
+		budgetUnit := i18n.T(locale, "home.task_credit_plural")
+		if budget == "1" {
+			budgetUnit = i18n.T(locale, "home.task_credit_singular")
+		}
+		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_reward") + `</b><span>` + reward + " " + rewardUnit + `</span></div>`)
+		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_budget") + `</b><span>` + budget + " " + budgetUnit + `</span></div>`)
 		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_completed") + `</b><span>` + intToStr(t.SuccessCount) + `</span></div>`)
 		b.WriteString(`</div></div>`)
 	}
@@ -529,7 +551,10 @@ func ownerOverviewHTML(d *tmplData) string {
         <div class="stat"><b>-</b><span>` + d.T("owner.overview.public") + `</span></div>
         <div class="stat"><b>-</b><span>` + d.T("owner.overview.tasks") + `</span></div>
     </div>
-    <div id="keyBox" class="keybox"></div>
+    <div class="task-code-box overview-key-wrap">
+        <b>` + d.T("owner.key.heading") + `</b>
+        <code id="keyBox" class="keybox overview-keybox is-empty"></code>
+    </div>
     <div class="actions">
         <button class="btn" type="button" id="reloadBtn">` + d.T("owner.overview.reload") + `</button>
     </div>

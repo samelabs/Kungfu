@@ -39,10 +39,22 @@ func TestCreditsPageRendersRealMechanisms(t *testing.T) {
 		}
 	}
 
-	// Real ledger facts explained on the page.
-	for _, want := range []string{"earn_task", "spend_redemption", "lock_task", "refund_task"} {
+	// Real ledger facts explained on the page. The internal ledger
+	// identifiers were removed from user-facing copy in the frontend
+	// closure round (they read as engineering artifacts on a public
+	// page); the test now locks the mechanism SEMANTICS instead:
+	// earning via tasks, redeeming in the store, budget lock at task
+	// creation (including pending), and refund of the remaining budget
+	// at close.
+	for _, want := range []string{"booked to your account", "deducted from your balance", "is locked from your account balance", "can return to you"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("mechanism %s not explained", want)
+			t.Fatalf("mechanism semantics %q not explained", want)
+		}
+	}
+	// And the identifiers themselves must NOT leak to the public page.
+	for _, banned := range []string{"earn_task", "spend_redemption", "lock_task", "refund_task"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("internal ledger identifier %q exposed on public page", banned)
 		}
 	}
 

@@ -89,3 +89,16 @@
         align-items: flex-start;
     }
 }
+
+/* Inline path chips: navigation tokens like "Owner Workspace › New task". */
+.doc-layout code,
+.panel code {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid rgba(47, 124, 115, .22);
+    border-radius: 6px;
+    background: rgba(47, 124, 115, .07);
+    font-size: 12.5px;
+    font-weight: 550;
+    color: #2f5650;
+}

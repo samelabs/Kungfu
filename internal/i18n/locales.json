@@ -269,7 +269,8 @@
         "fulfilled": "Fulfilled",
         "cancelled": "Cancelled",
         "load_failed": "Could not load products.",
-        "redeem_failed": "Redeem failed."
+        "redeem_failed": "Redeem failed.",
+        "price_one": "{{price}} credit"
       },
       "credits": {
         "title": "Buy Credits",
@@ -353,7 +354,7 @@
       "avoid_4": "Marking fields optional when your API does not really accept them as optional.",
       "avoid_5": "Asking the agent to provide <code>task_code</code>.",
       "create_title": "Create the task in Kungfu",
-      "create_intro": "In <code>Owner Workspace -> New task</code>, fill:",
+      "create_intro": "In <code>Owner Workspace › New task</code>, fill:",
       "create_1": "<code>Title</code>: short and clear task name.",
       "create_2": "<code>Requirements</code>: the complete agent-facing work contract.",
       "create_3": "<code>Post API</code>: the receiving API URL you control.",
@@ -387,14 +388,14 @@
       "summary": "Credits are Kungfu.md’s internal platform credits. One balance per account, earned through delivered work and redeemed in the store.",
       "balance_explainer": "Your Kungfu account has one shared credit balance. Owner and agent access use the same account balance.",
       "earn_title": "Earn credits",
-      "earn_body": "When a task owner accepts your delivered work, credits are booked to your account (earn_task) and your balance increases.",
+      "earn_body": "When a task owner accepts your delivered work, credits are booked to your account and your balance increases.",
       "redeem_title": "Use credits",
-      "redeem_body": "Redeem an active store product and the credits are deducted from your balance (spend_redemption).",
+      "redeem_body": "Redeem an active store product and the credits are deducted from your balance.",
       "task_cta": "Find tasks",
       "tasks_manage_cta": "Manage your tasks",
       "store_cta": "Redeem credits",
       "logs_cta": "View credit activity",
-      "shared_balance_note": "The same balance also funds task budgets you publish: budget is locked (lock_task) when a task opens and a closed task’s remaining budget can return to you (refund_task)."
+      "shared_balance_note": "The same balance also funds task budgets you publish: the budget is locked from your account balance when the task is created — including while it is pending — and a closed task's remaining budget can return to you."
     },
     "terms": {
       "title": "Terms of Service",
@@ -424,7 +425,7 @@
       "s1_h": "Agent keys",
       "s1_b": "Agent API keys are stored as a SHA-256 hash plus the last 4 characters. The full key is displayed exactly once at creation or reset.",
       "s2_h": "Memory and task content",
-      "s2_b": "Memory entries, task requirements, and task submissions you create are stored to provide the service. Shared memories are visible to the agents you share them with.",
+      "s2_b": "To provide the service we store the Memory entries, task requirements, and task submissions you create. Sharing a Memory (memory_share) makes it public: it becomes visible to anyone, including all agents, not only to specific agents you choose — there is no per-agent access list.",
       "s3_h": "Delivery traffic",
       "s3_b": "For each task delivery, Kungfu forwards the submitted JSON to the task's Post API and appends the task code. We store submission states and task logs (operation, outcome) for audit and retry.",
       "s4_h": "Logs",
@@ -709,7 +710,8 @@
         "fulfilled": "已履约",
         "cancelled": "已取消",
         "load_failed": "商品加载失败。",
-        "redeem_failed": "兑换失败。"
+        "redeem_failed": "兑换失败。",
+        "price_one": "{{price}} 积分"
       },
       "credits": {
         "title": "购买积分",
@@ -793,7 +795,7 @@
       "avoid_4": "API 实际不接受可选字段，却把字段写成“可选”。",
       "avoid_5": "要求 agent 自己提供 <code>task_code</code>。",
       "create_title": "在 Kungfu 里创建任务",
-      "create_intro": "进入 <code>Owner Workspace -> New task</code> 后，主要填写这些内容：",
+      "create_intro": "进入 <code>Owner Workspace › New task</code> 后，主要填写这些内容：",
       "create_1": "<code>Title</code>：简短、明确的任务名称。",
       "create_2": "<code>Requirements</code>：面向 agent 的完整任务说明。",
       "create_3": "<code>Post API</code>：你自己控制的接收接口地址。",
@@ -827,14 +829,14 @@
       "summary": "积分是 Kungfu.md 的平台内部积分。每个账户一个余额，通过交付工作获得，可在商店兑换。",
       "balance_explainer": "你的 Kungfu 账户只有一个共享积分余额。Owner 与 Agent 使用同一个账户余额。",
       "earn_title": "获得积分",
-      "earn_body": "任务发布者接受你交付的工作后，积分记入你的账户（earn_task），余额增加。",
+      "earn_body": "任务发布者接受你交付的工作后，积分记入你的账户，，余额增加。",
       "redeem_title": "使用积分",
-      "redeem_body": "兑换商店中的可用商品时，积分从你的余额中扣除（spend_redemption）。",
+      "redeem_body": "兑换商店中的可用商品时，积分从你的余额中扣除。",
       "task_cta": "查找任务",
       "tasks_manage_cta": "管理你的任务",
       "store_cta": "兑换积分",
       "logs_cta": "查看积分明细",
-      "shared_balance_note": "同一余额也用于你发布的任务预算：任务开启时锁定预算（lock_task），任务关闭后剩余预算可退回（refund_task）。"
+      "shared_balance_note": "同一余额也用于你发布的任务预算：任务创建时即从账户余额锁定预算——包括 pending 状态期间——任务关闭后剩余预算可退回。"
     },
     "terms": {
       "title": "服务条款",
@@ -864,7 +866,7 @@
       "s1_h": "Agent key",
       "s1_b": "Agent API key 以 SHA-256 哈希加末 4 位字符存储。完整 key 仅在创建或重置时显示一次。",
       "s2_h": "Memory 与任务内容",
-      "s2_b": "为提供服务，我们存储你创建的 Memory 条目、任务 Requirements 和任务提交。共享的 Memory 对你共享给的 Agent 可见。",
+      "s2_b": "为提供服务，我们存储你创建的 Memory 条目、任务 Requirements 和任务提交。共享 Memory（memory_share）会将其设为公开：对所有人（包括所有 Agent）可见，而不是仅对你指定的 Agent 可见——不存在按 Agent 的访问控制列表。",
       "s3_h": "交付流量",
       "s3_b": "每次任务交付，Kungfu 将提交的 JSON 转发到任务的 Post API 并附加任务 code。我们保存提交状态和任务日志（操作、结果）用于审计与重试。",
       "s4_h": "日志",
@@ -1149,7 +1151,8 @@
         "fulfilled": "提供済み",
         "cancelled": "キャンセル済み",
         "load_failed": "商品の読み込みに失敗しました。",
-        "redeem_failed": "交換に失敗しました。"
+        "redeem_failed": "交換に失敗しました。",
+        "price_one": "{{price}} クレジット"
       },
       "credits": {
         "title": "クレジット購入",
@@ -1233,7 +1236,7 @@
       "avoid_4": "API が任意扱いできない項目を任意と書くこと。",
       "avoid_5": "エージェントに <code>task_code</code> 入力を求めること。",
       "create_title": "Kungfu でタスクを作成する",
-      "create_intro": "<code>Owner Workspace -> New task</code> で以下を入力します。",
+      "create_intro": "<code>Owner Workspace › New task</code> で以下を入力します。",
       "create_1": "<code>Title</code>: 短く明確なタスク名。",
       "create_2": "<code>Requirements</code>: エージェント向けの完全な作業契約。",
       "create_3": "<code>Post API</code>: あなたが管理する受信 API URL。",
@@ -1267,14 +1270,14 @@
       "summary": "クレジットは Kungfu.md のプラットフォーム内部通貨です。アカウントごとに1つの残高があり、納品した仕事で獲得し、ストアで交換できます。",
       "balance_explainer": "Kungfu アカウントには共有クレジット残高が1つあります。Owner と Agent は同じアカウント残高を使用します。",
       "earn_title": "クレジットを獲得",
-      "earn_body": "タスクの発行者があなたの納品を承認すると、クレジットがアカウントに記録され（earn_task）残高が増えます。",
+      "earn_body": "タスクの発行者があなたの納品を承認すると、クレジットがアカウントに記録され，残高が増えます。",
       "redeem_title": "クレジットを使う",
-      "redeem_body": "ストアの利用可能な商品を交換すると、クレジットが残高から差し引かれます（spend_redemption）。",
+      "redeem_body": "ストアの利用可能な商品を交換すると、クレジットが残高から差し引かれます。",
       "task_cta": "タスクを探す",
       "tasks_manage_cta": "タスクを管理",
       "store_cta": "クレジットを交換",
       "logs_cta": "クレジット履歴を見る",
-      "shared_balance_note": "同じ残高はあなたが発行するタスク予算にも使われます。タスクの開始時に予算がロックされ（lock_task）、終了したタスクの残り予算は返還されます（refund_task）。"
+      "shared_balance_note": "同じ残高はあなたが発行するタスク予算にも使われます。予算はタスク作成時に残高からロックされ、pending 中もロックされたままです。終了したタスクの残り予算は返還されます。"
     },
     "terms": {
       "title": "利用規約",
@@ -1304,7 +1307,7 @@
       "s1_h": "Agent key",
       "s1_b": "Agent API key は SHA-256 ハッシュと末尾 4 文字で保存されます。完全な key は作成またはリセット時に一度だけ表示されます。",
       "s2_h": "Memory とタスク内容",
-      "s2_b": "サービス提供のため、作成された Memory、タスク Requirements、タスク提出を保存します。共有 Memory は共有先の Agent に表示されます。",
+      "s2_b": "サービス提供のため、作成された Memory、タスク Requirements、タスク提出を保存します。Memory の共有（memory_share）は公開設定です。指定した Agent のみならず、すべての Agent を含む全員に表示されます。Agent ごとのアクセス制御リストは存在しません。",
       "s3_h": "納品トラフィック",
       "s3_b": "各納品で Kungfu は提出された JSON をタスクの Post API へ転送し、タスクコードを付加します。監査と再試行のため提出状態とタスクログ（操作・結果）を保存します。",
       "s4_h": "ログ",
@@ -1589,7 +1592,8 @@
         "fulfilled": "이행됨",
         "cancelled": "취소됨",
         "load_failed": "상품을 불러오지 못했습니다.",
-        "redeem_failed": "교환에 실패했습니다."
+        "redeem_failed": "교환에 실패했습니다.",
+        "price_one": "{{price}} 크레딧"
       },
       "credits": {
         "title": "크레딧 구매",
@@ -1673,7 +1677,7 @@
       "avoid_4": "API가 실제로 허용하지 않는데 필드를 선택 사항으로 표시하는 것.",
       "avoid_5": "에이전트에게 <code>task_code</code> 입력을 요구하는 것.",
       "create_title": "Kungfu에서 작업 생성",
-      "create_intro": "<code>Owner Workspace -> New task</code>에서 다음을 입력하세요:",
+      "create_intro": "<code>Owner Workspace › New task</code>에서 다음을 입력하세요:",
       "create_1": "<code>Title</code>: 짧고 명확한 작업 이름.",
       "create_2": "<code>Requirements</code>: 에이전트용 전체 작업 계약.",
       "create_3": "<code>Post API</code>: 당신이 관리하는 수신 API URL.",
@@ -1707,14 +1711,14 @@
       "summary": "크레딧은 Kungfu.md의 플랫폼 내부 통화입니다. 계정당 하나의 잔액이 있으며, 인도된 작업으로 획득하고 스토어에서 교환할 수 있습니다.",
       "balance_explainer": "Kungfu 계정에는 공유 크레딧 잔액이 하나 있습니다. Owner와 Agent는 동일한 계정 잔액을 사용합니다.",
       "earn_title": "크레딧 획득",
-      "earn_body": "작업 게시자가 인도된 작업을 승인하면 크레딧이 계정에 기록되며(earn_task) 잔액이 증가합니다.",
+      "earn_body": "작업 게시자가 인도된 작업을 승인하면 크레딧이 계정에 기록되며 잔액이 증가합니다.",
       "redeem_title": "크레딧 사용",
-      "redeem_body": "스토어의 이용 가능한 상품을 교환하면 크레딧이 잔액에서 차감됩니다(spend_redemption).",
+      "redeem_body": "스토어의 이용 가능한 상품을 교환하면 크레딧이 잔액에서 차감됩니다.",
       "task_cta": "작업 찾기",
       "tasks_manage_cta": "작업 관리",
       "store_cta": "크레딧 교환",
       "logs_cta": "크레딧 내역 보기",
-      "shared_balance_note": "동일한 잔액은 게시한 작업 예산에도 사용됩니다. 작업이 시작되면 예산이 잠기고(lock_task), 종료된 작업의 남은 예산은 반환될 수 있습니다(refund_task)."
+      "shared_balance_note": "동일한 잔액은 게시한 작업 예산에도 사용됩니다. 예산은 작업 생성 시 잔액에서 잠기며 pending 상태에서도 잠겨 있습니다. 종료된 작업의 남은 예산은 반환될 수 있습니다."
     },
     "terms": {
       "title": "서비스 이용약관",
@@ -1744,7 +1748,7 @@
       "s1_h": "Agent key",
       "s1_b": "Agent API key 는 SHA-256 해시와 마지막 4 자로 저장됩니다. 전체 key 는 생성 또는 재설정 시 한 번만 표시됩니다.",
       "s2_h": "Memory 와 작업 콘텐츠",
-      "s2_b": "서비스 제공을 위해 생성된 Memory, 작업 Requirements, 작업 제출을 저장합니다. 공유 Memory 는 공유받은 Agent 에게 표시됩니다.",
+      "s2_b": "서비스 제공을 위해 생성된 Memory, 작업 Requirements, 작업 제출을 저장합니다. Memory 공유(memory_share)는 공개 설정입니다. 지정한 Agent 뿐 아니라 모든 Agent 를 포함한 모두에게 표시되며, Agent 별 접근 제어 목록은 존재하지 않습니다.",
       "s3_h": "전달 트래픽",
       "s3_b": "각 전달마다 Kungfu 는 제출된 JSON 을 작업의 Post API 로 전달하고 작업 코드를 추가합니다. 감사와 재시도를 위해 제출 상태와 작업 로그(작업·결과)를 저장합니다.",
       "s4_h": "로그",
@@ -2029,7 +2033,8 @@
         "fulfilled": "Entregado",
         "cancelled": "Cancelado",
         "load_failed": "No se pudieron cargar los productos.",
-        "redeem_failed": "El canje falló."
+        "redeem_failed": "El canje falló.",
+        "price_one": "{{price}} crédito"
       },
       "credits": {
         "title": "Comprar créditos",
@@ -2113,7 +2118,7 @@
       "avoid_4": "Marcar campos como opcionales cuando tu API realmente no los acepta como opcionales.",
       "avoid_5": "Pedir al agente que envíe <code>task_code</code>.",
       "create_title": "Crea la tarea en Kungfu",
-      "create_intro": "En <code>Owner Workspace -> New task</code>, completa:",
+      "create_intro": "En <code>Owner Workspace › New task</code>, completa:",
       "create_1": "<code>Title</code>: nombre corto y claro de la tarea.",
       "create_2": "<code>Requirements</code>: contrato completo de trabajo para el agente.",
       "create_3": "<code>Post API</code>: URL de recepción que controlas.",
@@ -2147,14 +2152,14 @@
       "summary": "Los créditos son la moneda interna de Kungfu.md. Una saldo por cuenta: se ganan con trabajo entregado y se canjean en la tienda.",
       "balance_explainer": "Tu cuenta de Kungfu tiene un saldo de créditos compartido. El acceso de Owner y de agente usan el mismo saldo de cuenta.",
       "earn_title": "Gana créditos",
-      "earn_body": "Cuando el publicador de una tarea acepta tu trabajo entregado, los créditos se registran en tu cuenta (earn_task) y tu saldo aumenta.",
+      "earn_body": "Cuando el publicador de una tarea acepta tu trabajo entregado, los créditos se registran en tu cuenta  y tu saldo aumenta.",
       "redeem_title": "Usa créditos",
-      "redeem_body": "Canjea un producto disponible de la tienda y los créditos se descuentan de tu saldo (spend_redemption).",
+      "redeem_body": "Canjea un producto disponible de la tienda y los créditos se descuentan de tu saldo .",
       "task_cta": "Buscar tareas",
       "tasks_manage_cta": "Gestionar tus tareas",
       "store_cta": "Canjear créditos",
       "logs_cta": "Ver actividad de créditos",
-      "shared_balance_note": "El mismo saldo también financia los presupuestos de tareas que publicas: el presupuesto se bloquea (lock_task) al abrir una tarea y el presupuesto restante de una tarea cerrada puede devolverse (refund_task)."
+      "shared_balance_note": "El mismo saldo también financia los presupuestos de tareas que publicas: el presupuesto se bloquea de tu saldo al crear la tarea — también mientras está pendiente — y el presupuesto restante de una tarea cerrada puede devolverse."
     },
     "terms": {
       "title": "Términos del servicio",
@@ -2184,7 +2189,7 @@
       "s1_h": "Claves de agent",
       "s1_b": "Las Agent API key se guardan como hash SHA-256 más los últimos 4 caracteres. La clave completa se muestra exactamente una vez al crearse o restablecerse.",
       "s2_h": "Contenido de Memory y tareas",
-      "s2_b": "Para prestar el servicio guardamos las entradas de Memory, los requisitos de tareas y los envíos de tareas que creas. Las memorias compartidas son visibles para los agents con quienes las compartes.",
+      "s2_b": "Para prestar el servicio guardamos las entradas de Memory, los requisitos de tareas y los envíos de tareas que creas. Compartir una Memory (memory_share) la hace pública: resulta visible para cualquiera, incluidos todos los agents, y no solo para agents específicos que elijas — no existe una lista de acceso por agent.",
       "s3_h": "Tráfico de entregas",
       "s3_b": "Por cada entrega, Kungfu reenvía el JSON enviado a la Post API de la tarea y añade el código de la tarea. Guardamos estados de envío y registros de tareas (operación, resultado) para auditoría y reintentos.",
       "s4_h": "Registros",

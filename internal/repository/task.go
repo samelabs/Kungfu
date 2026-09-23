@@ -129,9 +129,13 @@ type TaskWithStats struct {
 	FailureCount int64
 }
 
-// -- 6. listOwnerTasksWithStats --
+// listOwnerTasksWithStats --
 // ListOwnerTasksWithStats returns an owner's tasks joined with aggregated log counts.
 // A LEFT JOIN is used so tasks with no logs still appear (log_count defaults to 0).
+//
+// success_count uses the SAME authority as the homepage Completed figure
+// (tb_transactions earn_task — real completed agent deliveries; owner_test
+// never wrote earn_task). log_count/failure_count stay on the raw log sink.
 func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]TaskWithStats, error) {
 	// tb_task_logs always exists in the PG schema (001_schema.sql), so no existence guard is needed.
 	rows, err := q.Query(ctx, `
@@ -139,17 +143,29 @@ func ListOwnerTasksWithStats(ctx context.Context, q pg.Querier, botID int64) ([]
 		       t.pinned, t.status, t.review_note, t.created_at, t.updated_at, t.reviewed_at,
 		       t.opened_at, t.closed_at,
 		       COALESCE(ls.log_count, 0) AS log_count,
-		       COALESCE(ls.success_count, 0) AS success_count,
+		       COALESCE(cc.completed, 0) + COALESCE(dc.completed, 0) AS success_count,
 		       COALESCE(ls.failure_count, 0) AS failure_count
 		FROM tb_tasks t
 		LEFT JOIN (
 			SELECT task_code,
 			       COUNT(*) AS log_count,
-			       SUM(CASE WHEN action = 'post_succeeded' THEN 1 ELSE 0 END) AS success_count,
 			       SUM(CASE WHEN success = FALSE THEN 1 ELSE 0 END) AS failure_count
 			FROM tb_task_logs
 			GROUP BY task_code
 		) ls ON ls.task_code = t.code
+		LEFT JOIN (
+			SELECT ref_id AS task_code, COUNT(*) AS completed
+			FROM tb_transactions
+			WHERE type = 'earn_task' AND ref_type = 'task'
+			GROUP BY ref_id
+		) cc ON cc.task_code = t.code
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS completed
+			FROM tb_transactions tx
+			JOIN tb_task_submissions s ON s.code = tx.ref_id
+			WHERE tx.type = 'earn_task' AND tx.ref_type = 'task_submission'
+			  AND s.task_code = t.code
+		) dc ON true
 		WHERE t.bot_id = $1
 		ORDER BY t.created_at DESC`, botID)
 	if err != nil {
@@ -199,17 +215,29 @@ func FindOwnerTaskWithStatsByCode(ctx context.Context, q pg.Querier, botID int64
 		       t.pinned, t.status, t.review_note, t.created_at, t.updated_at, t.reviewed_at,
 		       t.opened_at, t.closed_at,
 		       COALESCE(ls.log_count, 0) AS log_count,
-		       COALESCE(ls.success_count, 0) AS success_count,
+		       COALESCE(cc.completed, 0) + COALESCE(dc.completed, 0) AS success_count,
 		       COALESCE(ls.failure_count, 0) AS failure_count
 		FROM tb_tasks t
 		LEFT JOIN (
 			SELECT task_code,
 			       COUNT(*) AS log_count,
-			       SUM(CASE WHEN action = 'post_succeeded' THEN 1 ELSE 0 END) AS success_count,
 			       SUM(CASE WHEN success = FALSE THEN 1 ELSE 0 END) AS failure_count
 			FROM tb_task_logs
 			GROUP BY task_code
 		) ls ON ls.task_code = t.code
+		LEFT JOIN (
+			SELECT ref_id AS task_code, COUNT(*) AS completed
+			FROM tb_transactions
+			WHERE type = 'earn_task' AND ref_type = 'task'
+			GROUP BY ref_id
+		) cc ON cc.task_code = t.code
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS completed
+			FROM tb_transactions tx
+			JOIN tb_task_submissions s ON s.code = tx.ref_id
+			WHERE tx.type = 'earn_task' AND tx.ref_type = 'task_submission'
+			  AND s.task_code = t.code
+		) dc ON true
 		WHERE t.code = $1 AND t.bot_id = $2`, code, botID)
 	if err != nil {
 		return nil, err
@@ -602,16 +630,33 @@ type HomepageTask struct {
 
 // QueryHomepageTasks returns up to 8 open tasks for the homepage board.
 // minBudget is passed explicitly by the caller (task rule source).
+//
+// success_count authority (real completed deliveries, agent economics
+// only): legacy pre-durable completions via earn_task transactions
+// (ref_type='task' — owner_test NEVER wrote earn_task, in both the PHP
+// and first Go eras) PLUS durable-era settled agent submissions
+// (ref_type='task_submission'). The two eras are disjoint by ref_type,
+// so the sum never double-counts. Raw tb_task_logs post_succeeded rows
+// are NOT the authority: the log sink is kind-blind and a successful
+// owner_test today would otherwise inflate the public Completed figure.
 func QueryHomepageTasks(ctx context.Context, q pg.Querier, minBudget int64) ([]HomepageTask, error) {
 	rows, err := q.Query(ctx, `
 		SELECT t.code, t.title, t.pinned, t.requirements, t.price, t.budget,
-		       COALESCE(ls.success_count, 0) AS success_count
+		       COALESCE(cc.completed, 0) + COALESCE(dc.completed, 0) AS success_count
 		FROM tb_tasks t
 		LEFT JOIN (
-		    SELECT task_code, SUM(CASE WHEN action = 'post_succeeded' THEN 1 ELSE 0 END) AS success_count
-		    FROM tb_task_logs
-		    GROUP BY task_code
-		) ls ON ls.task_code = t.code
+		    SELECT ref_id AS task_code, COUNT(*) AS completed
+		    FROM tb_transactions
+		    WHERE type = 'earn_task' AND ref_type = 'task'
+		    GROUP BY ref_id
+		) cc ON cc.task_code = t.code
+		LEFT JOIN LATERAL (
+		    SELECT COUNT(*) AS completed
+		    FROM tb_transactions tx
+		    JOIN tb_task_submissions s ON s.code = tx.ref_id
+		    WHERE tx.type = 'earn_task' AND tx.ref_type = 'task_submission'
+		      AND s.task_code = t.code
+		) dc ON true
 		WHERE t.status = 'open' AND t.price > 0
 		  AND (t.budget - t.reserved_budget) >= $1
 		  AND (t.budget - t.reserved_budget) >= t.price

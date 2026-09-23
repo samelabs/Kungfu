@@ -94,6 +94,19 @@ func a4InsertLog(t *testing.T, pool *pg.Pool, code string, action string, succes
 	}
 }
 
+// a4InsertEarnTask seeds a legacy-era completion fact (earn_task with
+// ref_type='task'), the success_count authority.
+func a4InsertEarnTask(t *testing.T, pool *pg.Pool, code string, botID int64, ageSecs int) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_transactions (bot_id, type, amount, balance_after, ref_type, ref_id, created_at)
+		VALUES ($1, 'earn_task', 5, 100, 'task', $2, NOW() - make_interval(secs => $3::int))`,
+		botID, code, ageSecs)
+	if err != nil {
+		t.Fatalf("insert earn_task: %v", err)
+	}
+}
+
 // TestGetTaskStatsMatchListStats: detail stats are real and identical to list.
 func TestGetTaskStatsMatchListStats(t *testing.T) {
 	pool := a4TestPool(t)
@@ -101,7 +114,11 @@ func TestGetTaskStatsMatchListStats(t *testing.T) {
 	ctx := context.Background()
 	code := a4SeedTask(t, pool, botID)
 
-	// 2 post_succeeded + 1 failure + 1 other
+	// 2 legacy earn_task completions + 1 failure + 1 other log.
+	// success_count authority is earn_task (agent economics), NOT raw
+	// post_succeeded logs (kind-blind sink; owner_test would pollute it).
+	a4InsertEarnTask(t, pool, code, botID, 10)
+	a4InsertEarnTask(t, pool, code, botID, 20)
 	a4InsertLog(t, pool, code, "post_succeeded", true, 10)
 	a4InsertLog(t, pool, code, "post_succeeded", true, 20)
 	a4InsertLog(t, pool, code, "post_failed", false, 30)
