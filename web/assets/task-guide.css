@@ -1,0 +1,91 @@
+/* ════════════════════════════════════════════════════════════
+   task-guide.css — shared visual structure for the five
+   task_guide_*.html pages. Serves alongside /assets/site.css +
+   /assets/owner.css (.shell/.panel/.btn/.owner-header/.site-footer
+   come from there); this file restores the guide-specific
+   .kicker/.hero/.facts/.fact/.compact-list/.doc-layout/.stack
+   structure that used to live inline in each locale page.
+   ════════════════════════════════════════════════════════════ */
+
+.kicker {
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #2f7c73;
+}
+
+.hero {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.hero p {
+    max-width: 620px;
+    margin-bottom: 0;
+}
+
+.doc-layout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.stack {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+}
+
+.facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.fact {
+    border: 1px solid rgba(32, 35, 33, .10);
+    border-radius: 16px;
+    padding: 12px;
+    background: rgba(255, 252, 247, .72);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .64);
+}
+
+.fact b {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #2f7c73;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.fact span {
+    color: #5c6762;
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.compact-list {
+    margin-left: 18px;
+}
+
+.compact-list li {
+    margin: 4px 0;
+}
+
+@media (max-width: 800px) {
+    .doc-layout,
+    .facts {
+        grid-template-columns: 1fr;
+    }
+
+    .hero {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

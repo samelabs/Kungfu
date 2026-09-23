@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"strconv"
@@ -43,7 +44,50 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 		s.renderOwner(w, data)
 	case "task_guide":
 		s.renderTaskGuide(w, data)
+	case "terms":
+		s.renderLegalPage(w, data, "terms")
+	case "privacy":
+		s.renderLegalPage(w, data, "privacy")
 	}
+}
+
+// renderLegalPage renders /terms or /privacy from i18n content — a
+// single template source for all five locales.
+func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/"+kind)
+
+	var sections strings.Builder
+	for i := 0; i < 7; i++ {
+		h := data.T(fmt.Sprintf(kind+".s%d_h", i))
+		b := data.T(fmt.Sprintf(kind+".s%d_b", i))
+		if h == "" || b == "" {
+			continue
+		}
+		sections.WriteString(`<div class="card"><h2>` + html.EscapeString(h) + `</h2><p>` + html.EscapeString(b) + `</p></div>`)
+	}
+
+	htmlOut := `<!DOCTYPE html>
+<html lang="` + html.EscapeString(data.Locale) + `">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>` + html.EscapeString(data.T(kind+".title")) + ` | Kungfu.md</title>
+    <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div class="wrap">
+    <div class="card">
+        <h1>` + html.EscapeString(data.T(kind+".heading")) + `</h1>
+        <p>` + html.EscapeString(data.T(kind+".intro")) + `</p>
+    </div>
+    ` + sections.String() + `
+    ` + siteFooter(data.Locale, langOpts, kind+"-lang-switch") + `
+</div>
+<script src="/assets/pwa-register.js"></script>
+</body>
+</html>`
+	w.Write([]byte(htmlOut))
 }
 
 // renderHome renders the homepage with dynamic task board.
@@ -347,6 +391,10 @@ func siteFooter(locale string, langOpts, switchID string) string {
         <div class="site-footer-title"><span class="site-logo site-footer-logo" aria-hidden="true">🥋</span><span>Kungfu.md</span></div>
         <div class="site-footer-copy">Copyright © 2026 Kungfu.md. All rights reserved.</div>
         <div class="site-footer-contact">Contact: <a href="mailto:ad@live.it">ad@live.it</a></div>
+        <div class="site-footer-legal">
+            <a href="` + i18n.LocaleURL(locale, "/terms") + `">Terms</a>
+            <a href="` + i18n.LocaleURL(locale, "/privacy") + `">Privacy</a>
+        </div>
     </div>
     <div class="site-footer-lang">
         <label for="` + switchID + `">Lang</label>
@@ -404,10 +452,10 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerAccountHTML(data)
 	case "key":
 		return ownerKeyHTML(data)
-	case "tasks":
+	case "tasks", "task_new":
+		// /owner/tasks/new is a URL entry into the SAME Tasks UI; the
+		// create modal opens automatically (single create authority).
 		return ownerTasksHTML(data)
-	case "task_new":
-		return ownerTaskNewHTML(data)
 	case "logs":
 		return ownerLogsHTML(data)
 	case "store":
@@ -543,29 +591,6 @@ func ownerTasksHTML(d *tmplData) string {
     <div class="panel">
         <div id="taskDetail"><p class="muted">` + d.T("owner.tasks.select_hint") + `</p></div>
     </div>
-</section>`
-}
-
-func ownerTaskNewHTML(d *tmplData) string {
-	return `<section class="panel">
-    <h2>` + d.T("owner.task_new.heading") + `</h2>
-    <form id="taskForm" class="task-create-form" novalidate>
-        <label>` + d.T("owner.task_new.title") + `</label>
-        <input name="title" required maxlength="128">
-        <label>` + d.T("owner.task_new.requirements") + `</label>
-        <textarea name="requirements" required maxlength="20000"></textarea>
-        <label>` + d.T("owner.task_new.post_api") + `</label>
-        <input name="postapi" required maxlength="2048" placeholder="` + d.T("owner.task_new.post_api_placeholder") + `">
-        <div class="row">
-            <div><label>` + d.T("owner.task_new.budget") + `</label><input name="budget" type="number" step="1" min="1000" required></div>
-            <div><label>` + d.T("owner.task_new.price") + `</label><input name="price" type="number" step="1" min="1" required></div>
-        </div>
-        <label class="checkline"><input name="open_now" type="checkbox"> ` + d.T("owner.task_new.open_now") + `</label>
-        <div class="actions form-actions">
-            <button class="btn primary" type="submit">` + d.T("owner.task_new.create") + `</button>
-            <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks") + `">` + d.T("owner.task_new.cancel") + `</a>
-        </div>
-    </form>
 </section>`
 }
 

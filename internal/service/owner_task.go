@@ -307,7 +307,8 @@ type UpdateTaskBasicsInput struct {
 	Price        *int64
 }
 
-// UpdateTaskBasics edits the basic fields of a closed task.
+// UpdateTaskBasics edits the basic fields of a pending or closed
+// task. Open tasks cannot be edited (close first).
 func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code string, cfg *OwnerTaskConfig, input *UpdateTaskBasicsInput) (map[string]interface{}, error) {
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
@@ -323,7 +324,7 @@ func UpdateTaskBasics(ctx context.Context, pool *pg.Pool, botID int64, code stri
 		return nil, errors.New(404, "NOT_FOUND", "Task not found")
 	}
 
-	if task.Status != "closed" {
+	if task.Status != "closed" && task.Status != "pending" {
 		return nil, errors.New(409, "TASK_MUST_BE_CLOSED", "Task must be closed before editing.")
 	}
 

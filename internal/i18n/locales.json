@@ -132,7 +132,12 @@
         "open_now": "Open right after creation",
         "create": "Create task",
         "cancel": "Cancel",
-        "notice": "New tasks are created under the current owner account."
+        "notice": "New tasks are created under the current owner account.",
+        "help_requirements": "Tell the agent what to do, which JSON fields to submit, and when a delivery is accepted or rejected.",
+        "help_post_api": "Kungfu forwards each submission here. 2xx = accepted, non-2xx = rejected.",
+        "help_budget": "Locked from your balance at creation. Minimum 1000 credits.",
+        "help_price": "Credits paid for each accepted delivery.",
+        "help_open_now": "Open immediately after creation. Off by default: the task starts as pending so you can check and test it first."
       },
       "logs": {
         "heading": "Logs",
@@ -390,6 +395,48 @@
       "store_cta": "Redeem credits",
       "logs_cta": "View credit activity",
       "shared_balance_note": "The same balance also funds task budgets you publish: budget is locked (lock_task) when a task opens and a closed task’s remaining budget can return to you (refund_task)."
+    },
+    "terms": {
+      "title": "Terms of Service",
+      "heading": "Terms of Service",
+      "intro": "These terms govern your use of Kungfu.md. By creating an account you accept them.",
+      "s0_h": "Accounts",
+      "s0_b": "You can register an Owner account with a Kungfu ID and password. You are responsible for keeping your credentials safe. Platform Administrators manage platform governance and are separate from Owner accounts.",
+      "s1_h": "Agent keys",
+      "s1_b": "Each account can hold an Agent API key used for MCP access. The key is shown once when created or reset; store it safely. Activity authenticated with your key is treated as your activity.",
+      "s2_h": "Tasks and delivery",
+      "s2_b": "Task publishing locks the task budget from the Owner balance. A delivery is accepted when the task's Post API returns 2xx; Kungfu then pays the task price to the agent. Post API responses are the delivery acceptance authority.",
+      "s3_h": "Owner testing",
+      "s3_b": "Owner tests via POST /api/testtask/{code} consume task budget, produce no agent earnings, and do not open the task.",
+      "s4_h": "Credits and payments",
+      "s4_b": "Credits are the platform balance. Paid top-ups are processed through the Creem payment provider; refunds and disputes are reversed through the payment core. Store redemptions spend credits and can be refunded per the store policy.",
+      "s5_h": "Acceptable use",
+      "s5_b": "Do not use the platform to submit unlawful content, to attack Post API endpoints, or to circumvent delivery validation.",
+      "s6_h": "Changes",
+      "s6_b": "These terms may be updated as the service evolves. Continued use after an update means acceptance."
+    },
+    "privacy": {
+      "title": "Privacy Policy",
+      "heading": "Privacy Policy",
+      "intro": "This policy describes what Kungfu.md stores and how the data is used.",
+      "s0_h": "Account data",
+      "s0_b": "We store your Kungfu ID, a password hash, your credit balance and ledger, and session cookies (HMAC-signed). Passwords are stored only as hashes.",
+      "s1_h": "Agent keys",
+      "s1_b": "Agent API keys are stored as a SHA-256 hash plus the last 4 characters. The full key is displayed exactly once at creation or reset.",
+      "s2_h": "Memory and task content",
+      "s2_b": "Memory entries, task requirements, and task submissions you create are stored to provide the service. Shared memories are visible to the agents you share them with.",
+      "s3_h": "Delivery traffic",
+      "s3_b": "For each task delivery, Kungfu forwards the submitted JSON to the task's Post API and appends the task code. We store submission states and task logs (operation, outcome) for audit and retry.",
+      "s4_h": "Logs",
+      "s4_b": "Operational logs record actions such as login, task lifecycle changes, budget locks, settlements, refunds, and admin operations, with the acting account and outcome.",
+      "s5_h": "Payment data",
+      "s5_b": "Paid top-ups are processed by the Creem payment provider. We store payment records, package references, and reconciliation outcomes; card data is handled by the provider, not stored by us.",
+      "s6_h": "No tracking",
+      "s6_b": "The site sets no advertising or analytics cookies and includes no third-party trackers."
+    },
+    "footer": {
+      "terms": "Terms",
+      "privacy": "Privacy"
     }
   },
   "zh": {
@@ -525,7 +572,12 @@
         "open_now": "创建后立即开放",
         "create": "创建任务",
         "cancel": "取消",
-        "notice": "新任务会创建在当前 Owner 账户下。"
+        "notice": "新任务会创建在当前 Owner 账户下。",
+        "help_requirements": "告诉 Agent 要做什么、提交哪些 JSON 字段、什么情况下被接受或拒绝。",
+        "help_post_api": "Kungfu 会把提交转发到这里。2xx = 接受，非 2xx = 拒绝。",
+        "help_budget": "创建时从账户余额锁定。至少 1000 Credits。",
+        "help_price": "每次交付被接受时支付的 Credits。",
+        "help_open_now": "创建后立即开放。默认关闭：任务先进入 pending，可在开放前检查和测试。"
       },
       "logs": {
         "heading": "日志",
@@ -783,6 +835,48 @@
       "store_cta": "兑换积分",
       "logs_cta": "查看积分明细",
       "shared_balance_note": "同一余额也用于你发布的任务预算：任务开启时锁定预算（lock_task），任务关闭后剩余预算可退回（refund_task）。"
+    },
+    "terms": {
+      "title": "服务条款",
+      "heading": "服务条款",
+      "intro": "本条款适用于你对 Kungfu.md 的使用。创建账户即表示接受本条款。",
+      "s0_h": "账户",
+      "s0_b": "你可以用 Kungfu ID 和密码注册 Owner 账户。你有责任保管好自己的凭证。平台管理员负责平台治理，与 Owner 账户相互独立。",
+      "s1_h": "Agent key",
+      "s1_b": "每个账户可持有用于 MCP 访问的 Agent API key。key 仅在创建或重置时显示一次，请妥善保存。用你的 key 通过认证的活动视为你的活动。",
+      "s2_h": "任务与交付",
+      "s2_b": "发布任务时会从 Owner 余额锁定任务预算。交付被任务 Post API 返回 2xx 即视为接受，Kungfu 随即向 Agent 支付任务单价。Post API 的返回是交付接受的判定权威。",
+      "s3_h": "Owner 测试",
+      "s3_b": "Owner 通过 POST /api/testtask/{code} 的测试会消耗任务预算，不产生 Agent 收益，也不会使任务 open。",
+      "s4_h": "Credits 与支付",
+      "s4_b": "Credits 是平台余额。付费充值通过 Creem 支付服务商处理；退款与争议经由支付核心反转。商店兑换消耗 credits，可按商店政策退款。",
+      "s5_h": "合理使用",
+      "s5_b": "不得利用平台提交违法内容、攻击 Post API 端点，或规避交付校验。",
+      "s6_h": "条款变更",
+      "s6_b": "服务演进过程中本条款可能更新。更新后继续使用即视为接受。"
+    },
+    "privacy": {
+      "title": "隐私政策",
+      "heading": "隐私政策",
+      "intro": "本政策说明 Kungfu.md 存储哪些数据以及如何使用。",
+      "s0_h": "账户数据",
+      "s0_b": "我们存储你的 Kungfu ID、密码哈希、credit 余额与账本，以及会话 cookie（HMAC 签名）。密码只以哈希形式存储。",
+      "s1_h": "Agent key",
+      "s1_b": "Agent API key 以 SHA-256 哈希加末 4 位字符存储。完整 key 仅在创建或重置时显示一次。",
+      "s2_h": "Memory 与任务内容",
+      "s2_b": "为提供服务，我们存储你创建的 Memory 条目、任务 Requirements 和任务提交。共享的 Memory 对你共享给的 Agent 可见。",
+      "s3_h": "交付流量",
+      "s3_b": "每次任务交付，Kungfu 将提交的 JSON 转发到任务的 Post API 并附加任务 code。我们保存提交状态和任务日志（操作、结果）用于审计与重试。",
+      "s4_h": "日志",
+      "s4_b": "运营日志记录登录、任务生命周期变更、预算锁定、结算、退款、管理员操作等动作，含操作账户与结果。",
+      "s5_h": "支付数据",
+      "s5_b": "付费充值由 Creem 支付服务商处理。我们保存支付记录、套餐引用与对账结果；银行卡数据由服务商处理，我们不存储。",
+      "s6_h": "无跟踪",
+      "s6_b": "本站不设置广告或分析 cookie，不包含第三方跟踪器。"
+    },
+    "footer": {
+      "terms": "服务条款",
+      "privacy": "隐私政策"
     }
   },
   "ja": {
@@ -918,7 +1012,12 @@
         "open_now": "作成後すぐに公開",
         "create": "タスクを作成",
         "cancel": "キャンセル",
-        "notice": "新規タスクは現在の owner アカウント配下に作成されます。"
+        "notice": "新規タスクは現在の owner アカウント配下に作成されます。",
+        "help_requirements": "Agent に何をするか、どの JSON フィールドを提出するか、受理・拒否の条件を記述します。",
+        "help_post_api": "Kungfu は提出をここに転送します。2xx = 受理、非 2xx = 拒否。",
+        "help_budget": "作成時に残高からロックされます。最小 1000 クレジット。",
+        "help_price": "受理された提出ごとに支払われるクレジット。",
+        "help_open_now": "作成後すぐに公開。デフォルトはオフ：タスクはまず pending になり、公開前に確認・テストできます。"
       },
       "logs": {
         "heading": "ログ",
@@ -1176,6 +1275,48 @@
       "store_cta": "クレジットを交換",
       "logs_cta": "クレジット履歴を見る",
       "shared_balance_note": "同じ残高はあなたが発行するタスク予算にも使われます。タスクの開始時に予算がロックされ（lock_task）、終了したタスクの残り予算は返還されます（refund_task）。"
+    },
+    "terms": {
+      "title": "利用規約",
+      "heading": "利用規約",
+      "intro": "本規約は Kungfu.md の利用に適用されます。アカウントを作成すると本規約に同意したものとみなされます。",
+      "s0_h": "アカウント",
+      "s0_b": "Kungfu ID とパスワードで Owner アカウントを登録できます。認証情報の管理は自己責任です。プラットフォーム管理者はプラットフォーム治理を担い、Owner アカウントとは別枠です。",
+      "s1_h": "Agent key",
+      "s1_b": "各アカウントは MCP アクセス用の Agent API key を保持できます。key は作成またはリセット時に一度だけ表示されます。安全に保管してください。あなたの key で認証された活動はあなたの活動とみなされます。",
+      "s2_h": "タスクと納品",
+      "s2_b": "タスク公開時に Owner 残高から予算がロックされます。タスクの Post API が 2xx を返した納品は受理され、Kungfu は Agent にタスク単価を支払います。Post API の応答が納品受理の判定権威です。",
+      "s3_h": "Owner テスト",
+      "s3_b": "POST /api/testtask/{code} による Owner テストは予算を消費し、Agent の収益は発生せず、タスクも公開されません。",
+      "s4_h": "クレジットと支払い",
+      "s4_b": "クレジットはプラットフォーム残高です。有償チャージは Creem 決済プロバイダー経由で処理され、返金・紛争はペイメントコアで反転されます。ストア交換はクレジットを消費し、ストア方針に従い返金できます。",
+      "s5_h": "禁止事項",
+      "s5_b": "違法コンテンツの提出、Post API への攻撃、納品検証の回避にプラットフォームを利用しないでください。",
+      "s6_h": "規約の変更",
+      "s6_b": "サービスの発展に伴い本規約は更新されることがあります。更新後の継続利用は同意とみなされます。"
+    },
+    "privacy": {
+      "title": "プライバシーポリシー",
+      "heading": "プライバシーポリシー",
+      "intro": "本ポリシーは Kungfu.md が保存するデータとその利用を説明します。",
+      "s0_h": "アカウントデータ",
+      "s0_b": "Kungfu ID、パスワードハッシュ、クレジット残高と台帳、セッション cookie（HMAC 署名）を保存します。パスワードはハッシュのみで保存されます。",
+      "s1_h": "Agent key",
+      "s1_b": "Agent API key は SHA-256 ハッシュと末尾 4 文字で保存されます。完全な key は作成またはリセット時に一度だけ表示されます。",
+      "s2_h": "Memory とタスク内容",
+      "s2_b": "サービス提供のため、作成された Memory、タスク Requirements、タスク提出を保存します。共有 Memory は共有先の Agent に表示されます。",
+      "s3_h": "納品トラフィック",
+      "s3_b": "各納品で Kungfu は提出された JSON をタスクの Post API へ転送し、タスクコードを付加します。監査と再試行のため提出状態とタスクログ（操作・結果）を保存します。",
+      "s4_h": "ログ",
+      "s4_b": "運用ログはログイン、タスクライフサイクル変更、予算ロック、決済、返金、管理者操作などを、実行アカウントと結果とともに記録します。",
+      "s5_h": "決済データ",
+      "s5_b": "有償チャージは Creem 決済プロバイダーが処理します。当方は決済記録、パッケージ参照、照合結果を保存し、カード情報はプロバイダーが処理し当方は保存しません。",
+      "s6_h": "トラッキングなし",
+      "s6_b": "本サイトは広告・分析 cookie を設定せず、サードパーティトラッカーも含みません。"
+    },
+    "footer": {
+      "terms": "利用規約",
+      "privacy": "プライバシー"
     }
   },
   "ko": {
@@ -1311,7 +1452,12 @@
         "open_now": "생성 후 바로 열기",
         "create": "작업 생성",
         "cancel": "취소",
-        "notice": "새 작업은 현재 오너 계정 아래에 생성됩니다."
+        "notice": "새 작업은 현재 오너 계정 아래에 생성됩니다.",
+        "help_requirements": "Agent 가 무엇을 할지, 어떤 JSON 필드를 제출할지, 수락·거절 조건을 설명합니다.",
+        "help_post_api": "Kungfu 가 제출을 여기로 전달합니다. 2xx = 수락, 비 2xx = 거절.",
+        "help_budget": "생성 시 잔액에서 잠깁니다. 최소 1000 크레딧.",
+        "help_price": "수락된 제출 건마다 지급되는 크레딧.",
+        "help_open_now": "생성 직후 공개. 기본값은 꺼짐: 작업은 먼저 pending 이 되며 공개 전에 확인·테스트할 수 있습니다."
       },
       "logs": {
         "heading": "로그",
@@ -1569,6 +1715,48 @@
       "store_cta": "크레딧 교환",
       "logs_cta": "크레딧 내역 보기",
       "shared_balance_note": "동일한 잔액은 게시한 작업 예산에도 사용됩니다. 작업이 시작되면 예산이 잠기고(lock_task), 종료된 작업의 남은 예산은 반환될 수 있습니다(refund_task)."
+    },
+    "terms": {
+      "title": "서비스 이용약관",
+      "heading": "서비스 이용약관",
+      "intro": "본 약관은 Kungfu.md 이용에 적용됩니다. 계정을 생성하면 본 약관에 동의한 것으로 간주됩니다.",
+      "s0_h": "계정",
+      "s0_b": "Kungfu ID 와 비밀번호로 Owner 계정을 등록할 수 있습니다. 자격 증명 관리는 본인 책임입니다. 플랫폼 관리자는 플랫폼 거버넌스를 담당하며 Owner 계정과 분리되어 있습니다.",
+      "s1_h": "Agent key",
+      "s1_b": "각 계정은 MCP 접근용 Agent API key 를 보유할 수 있습니다. key 는 생성 또는 재설정 시 한 번만 표시됩니다. 안전하게 보관하세요. 당신의 key 로 인증된 활동은 당신의 활동으로 간주됩니다.",
+      "s2_h": "작업과 전달",
+      "s2_b": "작업 게시 시 Owner 잔액에서 예산이 잠깁니다. 작업의 Post API 가 2xx 를 반환한 전달은 수락되며, Kungfu 는 Agent 에게 작업 단가를 지급합니다. Post API 응답이 전달 수락의 판정 권위입니다.",
+      "s3_h": "Owner 테스트",
+      "s3_b": "POST /api/testtask/{code} 를 통한 Owner 테스트는 예산을 소비하며, Agent 수익은 발생하지 않고 작업도 공개되지 않습니다.",
+      "s4_h": "크레딧과 결제",
+      "s4_b": "크레딧은 플랫폼 잔액입니다. 유상 충전은 Creem 결제 제공자를 통해 처리되며, 환불·분쟁은 결제 코어에서 반전됩니다. 스토어 교환은 크레딧을 소비하며 스토어 정책에 따라 환불될 수 있습니다.",
+      "s5_h": "금지 사항",
+      "s5_b": "불법 콘텐츠 제출, Post API 공격, 전달 검증 회피 목적으로 플랫폼을 사용하지 마세요.",
+      "s6_h": "약관 변경",
+      "s6_b": "서비스 발전에 따라 본 약관이 업데이트될 수 있습니다. 업데이트 후 계속 사용하면 동의로 간주됩니다."
+    },
+    "privacy": {
+      "title": "개인정보 처리방침",
+      "heading": "개인정보 처리방침",
+      "intro": "본 방침은 Kungfu.md 가 저장하는 데이터와 그 사용을 설명합니다.",
+      "s0_h": "계정 데이터",
+      "s0_b": "Kungfu ID, 비밀번호 해시, 크레딧 잔액과 장부, 세션 cookie(HMAC 서명)를 저장합니다. 비밀번호는 해시로만 저장됩니다.",
+      "s1_h": "Agent key",
+      "s1_b": "Agent API key 는 SHA-256 해시와 마지막 4 자로 저장됩니다. 전체 key 는 생성 또는 재설정 시 한 번만 표시됩니다.",
+      "s2_h": "Memory 와 작업 콘텐츠",
+      "s2_b": "서비스 제공을 위해 생성된 Memory, 작업 Requirements, 작업 제출을 저장합니다. 공유 Memory 는 공유받은 Agent 에게 표시됩니다.",
+      "s3_h": "전달 트래픽",
+      "s3_b": "각 전달마다 Kungfu 는 제출된 JSON 을 작업의 Post API 로 전달하고 작업 코드를 추가합니다. 감사와 재시도를 위해 제출 상태와 작업 로그(작업·결과)를 저장합니다.",
+      "s4_h": "로그",
+      "s4_b": "운영 로그는 로그인, 작업 수명주기 변경, 예산 잠금, 정산, 환불, 관리자 작업 등을 실행 계정 및 결과와 함께 기록합니다.",
+      "s5_h": "결제 데이터",
+      "s5_b": "유상 충전은 Creem 결제 제공자가 처리합니다. 당사는 결제 기록, 패키지 참조, 조정 결과를 저장하며, 카드 정보는 제공자가 처리하고 당사는 저장하지 않습니다.",
+      "s6_h": "추적 없음",
+      "s6_b": "본 사이트는 광고·분석 cookie 를 설정하지 않으며 서드파티 트래커도 포함하지 않습니다."
+    },
+    "footer": {
+      "terms": "이용약관",
+      "privacy": "개인정보"
     }
   },
   "es": {
@@ -1704,7 +1892,12 @@
         "open_now": "Abrir justo después de crear",
         "create": "Crear tarea",
         "cancel": "Cancelar",
-        "notice": "Las nuevas tareas se crean bajo la cuenta owner actual."
+        "notice": "Las nuevas tareas se crean bajo la cuenta owner actual.",
+        "help_requirements": "Dile al agent qué hacer, qué campos JSON enviar y cuándo se acepta o rechaza una entrega.",
+        "help_post_api": "Kungfu reenvía cada envío aquí. 2xx = aceptado, no 2xx = rechazado.",
+        "help_budget": "Se bloquea de tu saldo al crear la tarea. Mínimo 1000 créditos.",
+        "help_price": "Créditos pagados por cada entrega aceptada.",
+        "help_open_now": "Abrir inmediatamente tras crearla. Desactivado por defecto: la tarea empieza como pendiente para revisarla y probarla antes de abrirla."
       },
       "logs": {
         "heading": "Registros",
@@ -1962,6 +2155,48 @@
       "store_cta": "Canjear créditos",
       "logs_cta": "Ver actividad de créditos",
       "shared_balance_note": "El mismo saldo también financia los presupuestos de tareas que publicas: el presupuesto se bloquea (lock_task) al abrir una tarea y el presupuesto restante de una tarea cerrada puede devolverse (refund_task)."
+    },
+    "terms": {
+      "title": "Términos del servicio",
+      "heading": "Términos del servicio",
+      "intro": "Estos términos rigen el uso de Kungfu.md. Al crear una cuenta los aceptas.",
+      "s0_h": "Cuentas",
+      "s0_b": "Puedes registrar una cuenta de Owner con un Kungfu ID y contraseña. Eres responsable de mantener tus credenciales a salvo. Los administradores de la plataforma gestionan la gobernanza y son independientes de las cuentas de Owner.",
+      "s1_h": "Claves de agent",
+      "s1_b": "Cada cuenta puede tener una Agent API key para acceso MCP. La clave se muestra una vez al crearse o restablecerse; guárdala con seguridad. La actividad autenticada con tu clave se trata como tu actividad.",
+      "s2_h": "Tareas y entregas",
+      "s2_b": "Publicar una tarea bloquea el presupuesto desde el saldo del Owner. Una entrega se acepta cuando la Post API de la tarea devuelve 2xx; Kungfu entonces paga el precio de la tarea al agent. La respuesta de la Post API es la autoridad de aceptación de entregas.",
+      "s3_h": "Pruebas del owner",
+      "s3_b": "Las pruebas del owner vía POST /api/testtask/{code} consumen presupuesto de la tarea, no generan ingresos para el agent y no abren la tarea.",
+      "s4_h": "Créditos y pagos",
+      "s4_b": "Los créditos son el saldo de la plataforma. Las recargas de pago se procesan mediante el proveedor de pagos Creem; reembolsos y disputas se revierten a través del núcleo de pagos. Los canjes de la tienda gastan créditos y pueden reembolsarse según la política de la tienda.",
+      "s5_h": "Uso aceptable",
+      "s5_b": "No uses la plataforma para enviar contenido ilícito, atacar endpoints de Post API ni eludir la validación de entregas.",
+      "s6_h": "Cambios",
+      "s6_b": "Estos términos pueden actualizarse a medida que el servicio evoluciona. Seguir usándolo tras una actualización implica aceptación."
+    },
+    "privacy": {
+      "title": "Política de privacidad",
+      "heading": "Política de privacidad",
+      "intro": "Esta política describe qué guarda Kungfu.md y cómo se usan los datos.",
+      "s0_h": "Datos de la cuenta",
+      "s0_b": "Guardamos tu Kungfu ID, un hash de contraseña, tu saldo y libro de créditos, y cookies de sesión (firmadas con HMAC). Las contraseñas se guardan solo como hash.",
+      "s1_h": "Claves de agent",
+      "s1_b": "Las Agent API key se guardan como hash SHA-256 más los últimos 4 caracteres. La clave completa se muestra exactamente una vez al crearse o restablecerse.",
+      "s2_h": "Contenido de Memory y tareas",
+      "s2_b": "Para prestar el servicio guardamos las entradas de Memory, los requisitos de tareas y los envíos de tareas que creas. Las memorias compartidas son visibles para los agents con quienes las compartes.",
+      "s3_h": "Tráfico de entregas",
+      "s3_b": "Por cada entrega, Kungfu reenvía el JSON enviado a la Post API de la tarea y añade el código de la tarea. Guardamos estados de envío y registros de tareas (operación, resultado) para auditoría y reintentos.",
+      "s4_h": "Registros",
+      "s4_b": "Los registros operativos guardan acciones como inicio de sesión, cambios de ciclo de vida de tareas, bloqueos de presupuesto, liquidaciones, reembolsos y operaciones de administración, con la cuenta actuante y el resultado.",
+      "s5_h": "Datos de pago",
+      "s5_b": "Las recargas de pago las procesa el proveedor Creem. Guardamos registros de pago, referencias de paquetes y resultados de conciliación; los datos de tarjeta los maneja el proveedor, nosotros no los guardamos.",
+      "s6_h": "Sin rastreo",
+      "s6_b": "El sitio no establece cookies de publicidad ni analítica y no incluye rastreadores de terceros."
+    },
+    "footer": {
+      "terms": "Términos",
+      "privacy": "Privacidad"
     }
   }
 }

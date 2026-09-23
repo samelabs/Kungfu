@@ -45,6 +45,14 @@ func (s *Server) handleTaskGuide(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, r, "task_guide", "")
 }
 
+// handleLegalPage renders /terms or /privacy from the single i18n
+// template source.
+func (s *Server) handleLegalPage(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.renderTemplate(w, r, kind, "")
+	}
+}
+
 // -- Owner API Handlers (stubs - to be filled after service subagent completes) --
 
 func (s *Server) handleOwnerSessionGet(w http.ResponseWriter, r *http.Request) {

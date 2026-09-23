@@ -337,9 +337,6 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
     margin: 0;
     accent-color: var(--accent);
 }
-.task-create-form {
-    max-width: 760px;
-}
 .form-actions {
     justify-content: flex-start;
 }
@@ -806,3 +803,11 @@ body.modal-open { overflow: hidden; }
 
 /* Shell-level persistent hydration error (#shellStatus) */
 #shellStatus .section-state { margin: 1rem 0; }
+
+/* ── Create/edit form field helper copy ── */
+.field-help {
+    margin: 2px 0 6px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--muted, #6c716c);
+}

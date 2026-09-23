@@ -47,6 +47,7 @@ async function selectTask(code) {
 function renderTaskDetail(task) {
     const isClosed = task.status === 'closed';
     const isOpen = task.status === 'open';
+    const isPending = task.status === 'pending';
     // budget is a canonical decimal string; compare without Number()
     // (BigInt only for the >0 test — never stringified back).
     const budgetStr = String(task.budget);
@@ -59,8 +60,8 @@ function renderTaskDetail(task) {
         </div>
         <div class="task-action-bar">
             ${isOpen ? `<button class="btn danger" type="button" data-act="close">${escapeHtml(t('tasks.close'))}</button>` : ''}
-            ${isClosed ? `<button class="btn primary" type="button" data-act="open">${escapeHtml(t('tasks.open'))}</button>` : ''}
-            ${isClosed ? `<button class="btn" type="button" data-act="edit">${escapeHtml(t('tasks.edit_basics'))}</button>` : ''}
+            ${isClosed || isPending ? `<button class="btn primary" type="button" data-act="open">${escapeHtml(t('tasks.open'))}</button>` : ''}
+            ${isClosed || isPending ? `<button class="btn" type="button" data-act="edit">${escapeHtml(t('tasks.edit_basics'))}</button>` : ''}
             ${isOpen ? `<button class="btn" type="button" data-act="budget">${escapeHtml(t('tasks.add_budget'))}</button>` : ''}
             ${canRefund ? `<button class="btn" type="button" data-act="refund">${escapeHtml(t('tasks.refund'))}</button>` : ''}
         </div>
@@ -137,14 +138,17 @@ function openTaskModal(mode, task) {
                     <label>${escapeHtml(t('task_new.title'))}</label>
                     <input name="title" required maxlength="128">
                     <label>${escapeHtml(t('task_new.requirements'))}</label>
+                    <p class="field-help">${escapeHtml(t('task_new.help_requirements'))}</p>
                     <textarea name="requirements" required maxlength="20000" rows="4"></textarea>
                     <label>${escapeHtml(t('task_new.post_api'))}</label>
+                    <p class="field-help">${escapeHtml(t('task_new.help_post_api'))}</p>
                     <input name="postapi" required maxlength="2048" placeholder="${escapeHtml(t('task_new.post_api_placeholder'))}">
                     <div class="row">
-                        <div><label>${escapeHtml(t('task_new.budget'))}</label><input name="budget" type="number" step="1" min="1000" required></div>
-                        <div><label>${escapeHtml(t('task_new.price'))}</label><input name="price" type="number" step="1" min="1" required></div>
+                        <div><label>${escapeHtml(t('task_new.budget'))}</label><p class="field-help">${escapeHtml(t('task_new.help_budget'))}</p><input name="budget" type="number" step="1" min="1000" required></div>
+                        <div><label>${escapeHtml(t('task_new.price'))}</label><p class="field-help">${escapeHtml(t('task_new.help_price'))}</p><input name="price" type="number" step="1" min="1" required></div>
                     </div>
                     <label class="checkline"><input name="open_now" type="checkbox"> ${escapeHtml(t('task_new.open_now'))}</label>
+                    <p class="field-help">${escapeHtml(t('task_new.help_open_now'))}</p>
                     <div class="actions form-actions">
                         <button class="btn primary" type="submit">${escapeHtml(t('task_new.create'))}</button>
                     </div>

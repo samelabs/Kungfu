@@ -260,6 +260,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
 	r.Get("/owner/store", s.handleOwnerPage("store"))
 	r.Get("/owner/task-guide", s.handleTaskGuide)
+	r.Get("/terms", s.handleLegalPage("terms"))
+	r.Get("/privacy", s.handleLegalPage("privacy"))
 
 	// 404 for everything else
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

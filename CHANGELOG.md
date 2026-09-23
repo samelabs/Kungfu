@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authenticated shell waits for the authoritative `/api/account` fact before revealing account UI; balance display remains the canonical account fact
 - loading / empty / unavailable / error states are distinct across Store / Credits / Tasks / Logs, each with persistent Retry where a read can fail
 - JS/CSS served with revalidation semantics and service-worker network-first caching for code assets; stale manual `?v=` asset busting removed
+- Task publishing creation/status/Guide flow aligned with actual budget, delivery and idempotency semantics
+- Terms/Privacy pages and consistent legal footer added across public/Owner surfaces
 
 ## [v1.3.0] — 2026-09-19
 

@@ -48,11 +48,15 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
 function renderPage() {
     if (SECTION === 'overview') renderOverview();
     if (SECTION === 'key') renderKey();
-    if (SECTION === 'tasks') {
-        return runSection('tasks', loadTasks, '#taskList', () => renderTasks(), {
+    if (SECTION === 'tasks' || SECTION === 'task_new') {
+        // /owner/tasks/new is the same Tasks UI; the canonical create
+        // modal opens automatically once the section renders.
+        const outcome = runSection('tasks', loadTasks, '#taskList', () => renderTasks(), {
             isEmpty: () => !state.tasks.length,
             emptyKey: 'tasks.empty'
         });
+        if (SECTION === 'task_new') openTaskModal('create');
+        return outcome;
     }
     if (SECTION === 'logs') {
         // The logs table lives inside #logsTableWrap; the shared box

@@ -107,6 +107,22 @@
     color: var(--body-soft, #6d7772);
     font-size: 12px;
 }
+.site-footer-legal {
+    display: flex;
+    gap: 12px;
+    color: var(--body-soft, #6d7772);
+    font-size: 12px;
+}
+.site-footer-legal a {
+    color: var(--accent-ink, #2f5650);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(47, 124, 115, .26);
+    font-weight: 600;
+}
+.site-footer-legal a:hover {
+    color: var(--accent-strong, #25665e);
+    border-color: rgba(37, 102, 94, .58);
+}
 .site-footer-contact a {
     color: var(--accent-ink, #2f5650);
     text-decoration: none;
