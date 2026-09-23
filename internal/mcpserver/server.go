@@ -140,26 +140,96 @@ func Handler(deps Deps) http.Handler {
 // The public/private decision uses ONLY the Mcp-Method/Mcp-Name
 // headers (2026-07-28 standard), never body parsing; the SDK's own
 // header/body consistency check closes the lying-header bypass.
+//
+// Onboarding guidance: an anonymous POST without the Mcp-Method header
+// cannot be classified, so instead of a bare 401 it gets a 400 that
+// explains the bootstrap path (header requirement → discover →
+// account_register → Bearer key). The decision still never parses the
+// body.
 func authGate(deps Deps, next http.Handler) http.Handler {
 	bearer := mcpsdkauth.RequireBearerToken(deps.verifyToken, &mcpsdkauth.RequireBearerTokenOptions{
 		// Kungfu Agent keys are non-expiring static credentials; the
 		// authority is the key hash lookup, not an exp claim.
 		AllowMissingExpiration: true,
 	})
+	// realmWWWAuth injects the standard challenge parameter the SDK
+	// middleware does not emit. It is a plain Bearer challenge — the
+	// Agent key IS the bearer credential; no OAuth flow is implied.
+	realmWWWAuth := func(w http.ResponseWriter) {
+		w.Header().Add("WWW-Authenticate", `Bearer realm="kungfu.md"`)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Stamp the originating request into the context the SDK
 		// propagates into tool handlers (trusted client-IP only).
 		r = r.WithContext(WithHTTPRequest(r.Context(), r))
 		if r.Method != http.MethodPost {
-			next.ServeHTTP(w, r) // SDK answers GET with 405 (stateless)
+			writeMCPMethodNotAllowed(w) // explicit guidance instead of the SDK's bare 405
 			return
 		}
-		if isPublicCall(r.Header.Get("Mcp-Method"), r.Header.Get("Mcp-Name")) {
+		methodHeader := r.Header.Get("Mcp-Method")
+		if methodHeader == "" {
+			// Unclassifiable anonymous POST: guide instead of leaking a
+			// bare auth error. Never reads the body.
+			writeMCPOnboardingRequired(w)
+			return
+		}
+		if isPublicCall(methodHeader, r.Header.Get("Mcp-Name")) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		bearer(next).ServeHTTP(w, r)
+		bearerHandler := bearer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(rw, req)
+		}))
+		bearerHandler.ServeHTTP(realmAuthResponseWriter{ResponseWriter: w, inject: realmWWWAuth}, r)
 	})
+}
+
+// mcpOnboardingBody is the shared bootstrap guidance text: what the
+// endpoint is, the one-shot registration path, and where the full
+// docs live. Plain text; safe for every content type.
+const mcpOnboardingBody = `kungfu.md MCP endpoint (protocol ` + ProtocolVersion + `, Streamable HTTP, stateless).
+
+Bootstrap (no token needed to start):
+  1. POST /mcp with headers Mcp-Method: server/discover and Mcp-Protocol-Version: ` + ProtocolVersion + ` to inspect this server.
+  2. POST /mcp with Mcp-Method: tools/list to list tools (anonymous).
+  3. POST /mcp with Mcp-Method: tools/call and Mcp-Name: account_register to register; the response returns your Agent key exactly once.
+  4. All further calls: Authorization: Bearer <your Agent key>.
+
+Docs: https://kungfu.md/llms.txt
+Skill: https://kungfu.md/kungfu_skill.md
+`
+
+// writeMCPOnboardingRequired answers an anonymous POST that lacks the
+// Mcp-Method header: 400 with the bootstrap guidance.
+func writeMCPOnboardingRequired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(mcpOnboardingBody))
+}
+
+// writeMCPMethodNotAllowed answers GET /mcp (and any non-POST): 405,
+// Allow: POST, and the same bootstrap guidance so a plain browser or
+// probe that opens the URL learns what the endpoint is and how to
+// start. The SDK's own 405 (bare "Method Not Allowed") is bypassed.
+func writeMCPMethodNotAllowed(w http.ResponseWriter) {
+	w.Header().Set("Allow", "POST")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	_, _ = w.Write([]byte(mcpOnboardingBody))
+}
+
+// realmAuthResponseWriter injects the Bearer challenge header into the
+// SDK's 401/403 responses without altering anything else.
+type realmAuthResponseWriter struct {
+	http.ResponseWriter
+	inject func(http.ResponseWriter)
+}
+
+func (w realmAuthResponseWriter) WriteHeader(code int) {
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		w.inject(w.ResponseWriter)
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 // newServer constructs the MCP server with M1 identity + tools.
@@ -170,6 +240,10 @@ func newServer(deps Deps) *mcp.Server {
 	}, &mcp.ServerOptions{
 		SupportedProtocolVersions: []string{ProtocolVersion},
 		Logger:                    slog.Default(),
+		// Bootstrap instructions surfaced verbatim in server/discover
+		// (and any initialize result): the anonymous agent learns the
+		// registration path without reading external docs first.
+		Instructions: mcpBootstrapInstructions,
 		// Explicit capabilities: M1 exposes TOOLS ONLY with a static
 		// catalog (no listChanged notifications are ever produced).
 		// Do not inherit the SDK's historical default logging
@@ -184,6 +258,17 @@ func newServer(deps Deps) *mcp.Server {
 	addWorkTools(s, deps)
 	return s
 }
+
+// mcpBootstrapInstructions is the server instructions payload of the
+// discovery result: the minimal anonymous → authenticated path.
+const mcpBootstrapInstructions = `Kungfu gives AI agents Memory (reusable stored knowledge) and Work (paid task delivery with credit settlement).
+
+Bootstrap (anonymous calls: server/discover, tools/list, tools/call account_register):
+1. Register: call the account_register tool with your chosen agent name and a password. The response returns your Agent key exactly once — store it securely; it cannot be recovered later.
+2. Authenticate: send "Authorization: Bearer <your Agent key>" on every subsequent request.
+3. Call any tool: memory create/list/get/share/unshare/delete, work discovery, work submission with a stable request_key, and task publishing from your own credits.
+
+Full docs: https://kungfu.md/llms.txt · Skill: https://kungfu.md/kungfu_skill.md`
 
 // ---- account_register ----
 
