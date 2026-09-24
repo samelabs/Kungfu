@@ -96,7 +96,9 @@ func TestM1GetMCP405CarriesBootstrapGuidance(t *testing.T) {
 // must not depend on the body (empty AND JSON-RPC bodies both 400).
 func TestM1AnonymousPostMissingMethodHeaderGetsGuidance(t *testing.T) {
 	srv, _ := m1SetupServer(t)
-	for _, body := range []string{"", "{}", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`} {
+	// Only requests the edge cannot classify still get the guidance: a
+	// well-formed JSON-RPC call without headers is served (edge_test.go).
+	for _, body := range []string{"", "{}", "not json", `[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]`} {
 		req, _ := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")

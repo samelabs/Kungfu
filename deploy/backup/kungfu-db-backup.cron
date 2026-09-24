@@ -1,0 +1,1 @@
+30 3 * * * postgres /usr/local/bin/kungfu-db-backup >> /var/log/kungfu-db-backup.log 2>&1

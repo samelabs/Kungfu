@@ -5,6 +5,48 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Deployment notes
+
+- Apply migrations `013_payment_settings.sql` and `014_admin_operations_permissions.sql`
+- Set `SETTINGS_ENC_KEY` (64 hex chars, `openssl rand -hex 32`) and keep it stable
+- Remove every `CREEM_*` environment variable (startup now fails if one is set), then enter the Creem settings at `/samelabs/settings/payment`; checkout stays unavailable until they are saved
+- The platform admin moved from `/admin` to `/samelabs` (API: `/api/samelabs/*`); the old paths return 404
+
+### Development chain
+
+- Releases are deployed with `scripts/deploy.sh` (main + green CI only, commit-stamped build, migration guard, automatic rollback); local work uses `scripts/dev.sh` (Docker only). See `docs/DEVELOPMENT.md`
+- `/healthz` and `/readyz` report `data.commit`, the source revision of the running binary
+- Pages reference assets by content fingerprint (`?v=<hash>`); matching requests are cached as immutable. This also recovers browsers that held year-long cached JS/CSS from the old nginx rule
+- Service worker v5
+- `deploy/` holds reference copies of the production nginx, systemd and backup configuration
+
+### MCP: plain HTTP calls
+
+- One `POST /mcp` of one JSON-RPC object with `Content-Type: application/json` (plus the Bearer key for protected tools) is now a complete call; responses are a single `application/json` document instead of SSE framing
+- `Accept`, `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version` and `params._meta` are filled in when a client leaves them out; values a client does send are still validated exactly as before (header/body mismatch and unsupported protocol versions are rejected)
+- `llms.txt`, `kungfu_skill.md`, `openai.json`, the endpoint's own guidance text and the server instructions now document one calling contract: request shape, `structuredContent`, `isError` tool failures, and HTTP 400/401/405/413
+- `memory_put` input schema states its limits (content 50 characters to 100 KB, title, tags, description)
+
+### Platform admin (`/samelabs`)
+
+- Rebuilt as server-rendered pages with plain form posts (CSRF-protected, audited); the admin single-page app and its scripts are removed
+- New: dashboard counters; task governance (list, detail with submissions, pin to the homepage, close with a reason the owner sees — no credits move); memory governance (view content, make private, remove); account detail with tasks, memories, ledger and payments
+- New: payment settings page; Creem API key and webhook secret are stored encrypted (AES-256-GCM) and only shown masked
+- Switching checkout off stops new purchases only; webhooks for existing payments keep being processed
+
+### Owner and public site
+
+- Owners can no longer reopen a task the platform closed; the task shows the platform's reason and when the remaining budget can be refunded
+- Registration explains the Kungfu ID and password rules and, once the account exists, shows only the one-time key and the way forward
+- Overview: clearer labels (Memories, Shared, Your tasks) and a getting-started card until the first task is published
+- New task form shows the available balance; Store disables products the balance cannot cover and shows the shortfall
+- Credit history shows readable transaction types instead of internal ledger codes
+- Mobile: single-row scrollable navigation and a 2×2 stats grid
+- Chinese copy uses 积分 consistently
+- Homepage agent routing recognises httpx, aiohttp, axios, undici, Deno and Node's built-in fetch, and sends `Vary: User-Agent, Accept`
+
 ## [v1.3.1] — 2026-09-22
 
 ### Admin simplification

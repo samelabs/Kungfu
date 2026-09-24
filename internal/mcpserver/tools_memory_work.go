@@ -104,10 +104,10 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
 		Code        string   `json:"code,omitempty" jsonschema:"existing memory code to update; omit to create"`
-		Title       string   `json:"title"`
-		Tags        []string `json:"tags"`
-		Description string   `json:"description,omitempty"`
-		Content     string   `json:"content"`
+		Title       string   `json:"title" jsonschema:"short title (at most 128 characters)"`
+		Tags        []string `json:"tags" jsonschema:"up to 10 tags, each at most 32 characters"`
+		Description string   `json:"description,omitempty" jsonschema:"optional summary (at most 500 characters)"`
+		Content     string   `json:"content" jsonschema:"the memory body: at least 50 characters, at most 100 KB; never include keys or secrets"`
 	}) (*mcp.CallToolResult, MemoryPutOutput, error) {
 		bot, err := deps.resolveVerified(ctx)
 		if err != nil {

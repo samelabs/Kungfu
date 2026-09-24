@@ -168,10 +168,12 @@ migrations/        PostgreSQL schema
 
 ### Development
 
+The whole chain — local work, CI, and production deploys — is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). With only Docker installed:
+
 ```bash
-go build -o kungfu-server ./cmd/server   # Build
-gofmt -l .                                # Format check
-go vet ./...                              # Lint
+scripts/dev.sh test     # the CI gate: gofmt, vet, all tests on a fresh PostgreSQL
+scripts/dev.sh up       # local server on http://127.0.0.1:8090
+scripts/deploy.sh       # deploy origin/main (green CI only) to production
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for code standards and PR process.

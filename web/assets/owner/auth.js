@@ -45,6 +45,13 @@ function bindRegisterForm() {
             warn.textContent = t('auth.key_one_time_warning');
             const form = qs('#registerForm');
             if (form) {
+                // The account exists now: retire the form so only the
+                // one-time key and the way forward remain.
+                form.hidden = true;
+                const heading = form.parentElement && form.parentElement.querySelector('h2');
+                if (heading) heading.textContent = t('auth.registered_heading');
+                warn.className = 'key-warning';
+                keyLine.classList.add('key-reveal');
                 form.after(warn);
                 warn.after(keyLine);
                 keyLine.after(continueBtn);
@@ -67,7 +74,7 @@ function bindRegisterForm() {
                 if (!sessionJson.success) return showToast(noticeText(sessionJson.error || sessionJson), 'error');
                 await activateSession();
             });
-            showToast(noticeText(t('auth.registered_key_below')), 'ok');
+            continueBtn.focus();
         } catch (error) {
             showToast(noticeText(String(error)), 'error');
         }

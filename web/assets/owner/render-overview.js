@@ -14,6 +14,9 @@ function renderOverview() {
         keyBox.textContent = state.keyMasked || t('js.owner_key_hidden');
         keyBox.classList.toggle('is-empty', !state.keyMasked);
     }
+    // First steps stay visible until the owner has published a task.
+    const start = qs('#ownerStart');
+    if (start) start.hidden = Number(stats.platform_task_count || 0) > 0;
     // passive overview state — no feedback toast
 }
 

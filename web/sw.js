@@ -14,8 +14,11 @@
 //   v3 — cache-first scripts/styles (stale-code bug), migrated away.
 //   v4 — network-first scripts/styles; old v3 caches deleted on
 //        activate so they cannot keep polluting pages.
+//   v5 — pages reference fingerprinted asset URLs (?v=<content hash>);
+//        v4 caches (which could hold year-long proxy-cached copies)
+//        are dropped, and the shell is fetched bypassing the HTTP cache.
 
-const SW_VERSION = 'kungfu-pwa-v4';
+const SW_VERSION = 'kungfu-pwa-v5';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
 
@@ -38,7 +41,8 @@ const SHELL_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_ASSETS))
+    caches.open(SHELL_CACHE).then((cache) =>
+      cache.addAll(SHELL_ASSETS.map((url) => new Request(url, {cache: 'reload'}))))
   );
   self.skipWaiting();
 });

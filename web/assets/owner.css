@@ -853,3 +853,47 @@ ol.guide-flow li::before {
     font-size: 15px;
     letter-spacing: .03em;
 }
+
+/* ── Closure polish ───────────────────────────────────────────── */
+/* budget/price columns: label, input, then help — inputs line up */
+.row > div { display: flex; flex-direction: column; gap: 6px; }
+.row > div > label { margin-top: 0; }
+.field-help.strong { color: var(--heading-ink, #365750); font-weight: 600; }
+
+/* platform closure note on a task (platformNote) */
+.detail-box.platform-note { background: #fef3f2; border-color: #fecdca; margin: 0 0 12px; }
+.detail-box.platform-note h3 { color: var(--danger); }
+.detail-box.platform-note p { color: #7a271a; }
+.refund-wait { margin: -4px 0 12px; font-size: 13px; }
+
+/* store: action column with shortfall hint */
+.store-product-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.store-shortfall { font-size: 12px; }
+@media (max-width: 720px) {
+    .store-product-actions { align-items: stretch; text-align: center; }
+}
+
+/* first steps on the overview */
+.start-panel h2 { margin-bottom: 12px; }
+.start-steps { list-style: none; counter-reset: step; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
+.start-steps li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr; column-gap: 12px; row-gap: 2px; align-items: start; }
+.start-steps li::before {
+    content: counter(step); grid-row: span 2; display: grid; place-items: center;
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft, rgba(47,124,115,.12));
+    color: var(--accent, #2f7c73); font-weight: 700; font-size: 13px;
+}
+.start-steps b { color: var(--heading-ink, #365750); }
+.start-steps span { color: var(--body-ink, #5c6762); font-size: 14px; }
+
+/* one-time key after registration */
+.key-warning { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: #fffaeb; border: 1px solid #fedf89; color: #93370d; font-weight: 600; }
+.keybox.key-reveal { font-size: 14px; word-break: break-all; margin-bottom: 12px; }
+
+/* mobile: one scrollable nav row; stats as a 2×2 grid */
+@media (max-width: 720px) {
+    .nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .nav::-webkit-scrollbar { display: none; }
+    .nav > .btn, .nav > a.btn { flex: 0 0 auto; white-space: nowrap; }
+    .nav #logoutBtn { margin-left: auto; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

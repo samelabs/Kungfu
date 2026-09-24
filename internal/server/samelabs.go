@@ -275,7 +275,7 @@ func (s *Server) slRender(w http.ResponseWriter, status int, tmpl string, v *slV
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Robots-Tag", "noindex, nofollow")
 	w.WriteHeader(status)
-	_, _ = w.Write(buf.Bytes())
+	_, _ = w.Write(web.FingerprintHTML(buf.Bytes()))
 }
 
 // slErrorPage maps a domain error onto a page.

@@ -4,6 +4,8 @@ Status: **Operational authority for the current release.** README stays the prod
 
 Audience: the operator executing a production deployment and the PM closing commercial acceptance.
 
+**Routine releases** use `scripts/deploy.sh` (see [DEVELOPMENT.md](DEVELOPMENT.md)): it builds the exact `main` commit with the commit stamped into the binary, backs up the database before new migrations, applies them as the application role, and rolls back automatically if `/readyz` does not report the new commit. Production runs the binary under systemd (`kungfu-go`); the container image is built and smoke-tested by CI only. This runbook remains the authority for first-time cutovers and commercial acceptance evidence.
+
 ---
 
 ## 0. Release Identity (required for every acceptance)
