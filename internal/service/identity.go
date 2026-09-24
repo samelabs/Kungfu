@@ -1,0 +1,330 @@
+package service
+
+import (
+	"context"
+	"crypto/subtle"
+	"strings"
+
+	"kungfu.md/internal/credits"
+
+	"kungfu.md/internal/auth"
+	"kungfu.md/internal/errors"
+	"kungfu.md/internal/pg"
+	"kungfu.md/internal/ratelimit"
+	"kungfu.md/internal/repository"
+	"kungfu.md/internal/security"
+)
+
+// Identity services handle owner authentication and account management:
+//   - OwnerSession (login / current / logout)
+//   - Account (overview)
+//   - Key (current key)
+//   - ChangePassword
+//   - ResetKey
+
+// -- OwnerSession --
+
+// dummyBcryptHash is a valid cost-10 bcrypt hash of an unguessable random
+// secret. It is verified when the login name does not resolve to an active
+// bot, so that missing users burn the same bcrypt work factor as real ones
+// (anti username-enumeration timing measure).
+const dummyBcryptHash = "$2a$10$Y32i7tXf1eM73f06uFMlMulohgIXrlbeYW.9HWWd4q5zbwJ957vKO"
+
+// OwnerSessionResult formats log entries for the owner dashboard.
+type OwnerSessionResult struct {
+	BotID   int64  `json:"bot_id"`
+	BotName string `json:"bot_name"`
+	Status  string `json:"status"`
+}
+
+// OwnerLogin authenticates an owner by name+password.
+// Accepts pg.Querier (satisfied by *pg.Pool) so the credentials lookup and the
+// audit-log write can be exercised in tests with a fake querier.
+func OwnerLogin(ctx context.Context, q pg.Querier, name, password string) (*OwnerSessionResult, error) {
+	name = strings.TrimSpace(name)
+
+	// Validate name
+	if valid, errs := auth.ValidateBotName(name); !valid {
+		return nil, errors.New(400, "INVALID_NAME", errs[0])
+	}
+
+	// Validate password
+	if valid, errs := auth.ValidatePassword(password); !valid {
+		return nil, errors.New(400, "INVALID_PASSWORD", errs[0])
+	}
+
+	// Reject API keys in credentials
+	if security.ContainsAPIKey([]interface{}{name, password}) {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "human credentials must not contain API keys")
+	}
+
+	// Find bot by name
+	bot, err := repository.FindActiveBotCredentialsByName(ctx, q, name)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error during login")
+	}
+	if bot == nil {
+		// Run a real bcrypt comparison against a constant cost-10 hash even when
+		// the user does not exist, so that response timing does not reveal
+		// whether the name exists (username-enumeration timing oracle).
+		_ = auth.VerifyPassword(password, dummyBcryptHash)
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+	if bot.PasswordHash == "" {
+		_ = auth.VerifyPassword(password, dummyBcryptHash)
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+	if !auth.VerifyPassword(password, bot.PasswordHash) {
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+
+	// Owner session cookie is set by the handler layer.
+	// In Go, session management is handled at the HTTP layer (JWT/cookie middleware).
+	// The service layer returns the identity; the handler issues the session token.
+
+	logOperation(ctx, q, &bot.ID, "owner_login", nil, nil,
+		map[string]interface{}{"bot_name": bot.BotName}, true)
+
+	return &OwnerSessionResult{
+		BotID:   bot.ID,
+		BotName: bot.BotName,
+		Status:  bot.Status,
+	}, nil
+}
+
+// OwnerLogout invalidates the owner session.
+// In Go, session invalidation is handled at the HTTP layer (clear cookie/token).
+// This is a no-op placeholder for service-layer symmetry.
+func OwnerLogout(ctx context.Context, q pg.Querier, botID int64) map[string]interface{} {
+	if botID > 0 {
+		logOperation(ctx, q, &botID, "owner_logout", nil, nil, nil, true)
+	}
+	return map[string]interface{}{}
+}
+
+// -- Account --
+
+// AccountOverview formats log entries for the owner dashboard.
+// Returns the owner's account summary with kungfu/task stats.
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability; any stats
+// query failure fails the whole overview (500) instead of reporting fake 0s.
+func AccountOverview(ctx context.Context, q pg.Querier, botID int64) (map[string]interface{}, error) {
+	bot, err := repository.FindActiveBotAccountByID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	if bot == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Bot not found")
+	}
+
+	balance, balErr := credits.Balance(ctx, q, botID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+
+	stats, err := repository.KungfuStatsByBotID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	platformTaskCount, err := repository.PlatformTaskCountByBotID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+
+	return map[string]interface{}{
+		"bot_id":   botID,
+		"bot_name": bot.BotName,
+		"status":   bot.Status,
+		"balance":  balance,
+		"stats": map[string]interface{}{
+			"kungfu_count":        stats.Total,
+			"public_kungfu_count": stats.PublicTotal,
+			"platform_task_count": platformTaskCount,
+		},
+	}, nil
+}
+
+// AgentAccountStatus is the ONE typed agent account-status
+// composition: active bot identity + authoritative Credits balance.
+// Both the Owner browser surface and the MCP account_status tool call it — there is no
+// second account-status mechanism. READ ONLY.
+type AgentAccountStatus struct {
+	BotID   int64
+	BotName string
+	Balance int64
+	Status  string
+}
+
+// ComposeAgentAccountStatus composes the account status for an
+// authenticated agent: repository identity read + Credits balance,
+// accepting pg.Querier (satisfied by *pg.Pool) for testability.
+func ComposeAgentAccountStatus(ctx context.Context, q pg.Querier, botID int64) (*AgentAccountStatus, error) {
+	bot, err := repository.FindActiveBotSummaryByID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	if bot == nil {
+		return nil, errors.New(401, "INVALID_KEY", "Agent key is invalid or expired")
+	}
+	balance, balErr := credits.Balance(ctx, q, bot.ID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
+	}
+	return &AgentAccountStatus{
+		BotID:   bot.ID,
+		BotName: bot.BotName,
+		Balance: balance,
+		Status:  bot.Status,
+	}, nil
+}
+
+// -- Key --
+
+// CurrentOwnerKey returns the owner's current API key.
+// Accepts pg.Querier (satisfied by *pg.Pool) for testability.
+func CurrentOwnerKey(ctx context.Context, q pg.Querier, botID int64) (map[string]interface{}, error) {
+	bot, err := repository.FindActiveBotKeyByID(ctx, q, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving key")
+	}
+	if bot == nil {
+		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
+	}
+
+	// Balance composed from the credits domain (identity no longer carries it).
+	balance, balErr := credits.Balance(ctx, q, botID)
+	if balErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving key")
+	}
+
+	logOperation(ctx, q, &botID, "key_get", nil, nil,
+		map[string]interface{}{
+			"bot_name": bot.BotName,
+			"source":   "owner_session",
+		}, true)
+
+	// Metadata projection only: the full key is not recoverable from
+	// the stored digest. key_masked is display-only.
+	return map[string]interface{}{
+		"bot_name":      bot.BotName,
+		"key_masked":    auth.AgentKeyMasked(bot.APIKeyLast4),
+		"key_last4":     bot.APIKeyLast4,
+		"key_issued_at": bot.KeyIssuedAt,
+		"balance":       balance,
+		"status":        bot.Status,
+	}, nil
+}
+
+// -- ChangePassword --
+
+// ChangePassword formats log entries for the owner dashboard.
+// Requires name + current password + new password.
+func ChangePassword(ctx context.Context, pool *pg.Pool, name, password, newPassword string) (map[string]interface{}, error) {
+	name = strings.TrimSpace(name)
+
+	// Validate name
+	if valid, errs := auth.ValidateBotName(name); !valid {
+		return nil, errors.New(400, "INVALID_NAME", errs[0])
+	}
+
+	// Validate current password
+	if valid, errs := auth.ValidatePassword(password); !valid {
+		return nil, errors.New(400, "INVALID_PASSWORD", errs[0])
+	}
+
+	// Reject API keys in content
+	if security.ContainsAPIKey([]interface{}{name, password, newPassword}) {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "human credentials must not contain API keys")
+	}
+
+	// Validate new password
+	if valid, errs := auth.ValidatePassword(newPassword); !valid {
+		return nil, errors.New(400, "INVALID_PASSWORD", errs[0])
+	}
+
+	// New must differ from old
+	if subtle.ConstantTimeCompare([]byte(password), []byte(newPassword)) == 1 {
+		return nil, errors.New(400, "PASSWORD_UNCHANGED", "New password must be different from current password")
+	}
+
+	// Verify credentials
+	bot, err := repository.FindActiveBotCredentialsByName(ctx, pool, name)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error changing password")
+	}
+	if bot == nil || bot.PasswordHash == "" || !auth.VerifyPassword(password, bot.PasswordHash) {
+		return nil, errors.New(401, "INVALID_CREDENTIALS", "Bot name or password is incorrect")
+	}
+
+	// Hash new password
+	newHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error hashing password")
+	}
+
+	if err := repository.UpdatePasswordHashByID(ctx, pool, bot.ID, newHash); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating password")
+	}
+
+	logOperation(ctx, pool, &bot.ID, "change_password", nil, nil,
+		map[string]interface{}{"bot_name": bot.BotName}, true)
+
+	return map[string]interface{}{
+		"bot_name": bot.BotName,
+		"message":  "Password changed. Current agent key remains valid until reset-key is called.",
+	}, nil
+}
+
+// -- ResetKey --
+
+// ResetKey formats log entries for the owner dashboard.
+// Requires the current RAW key (second credential) + rate limit.
+// The stored SHA-256 digest is the only at-rest key material.
+func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, botID int64, currentKey string) (map[string]interface{}, error) {
+	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error resetting key")
+	}
+	if bot == nil {
+		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
+	}
+
+	currentKey = strings.TrimSpace(currentKey)
+	if currentKey == "" {
+		return nil, errors.New(400, "MISSING_FIELD", "Missing required field: current_key")
+	}
+
+	// Validate key format (canonical auth helper; case-insensitive hex)
+	if !auth.ValidateKeyFormat(currentKey) {
+		return nil, errors.New(400, "INVALID_KEY", "Current key format is invalid")
+	}
+
+	// Verify the supplied raw key against the stored digest
+	// (constant-time). The plaintext key no longer exists at rest.
+	if subtle.ConstantTimeCompare(bot.APIKeyHash, auth.HashAgentKey(currentKey)) != 1 {
+		return nil, errors.New(401, "INVALID_KEY", "Current key is incorrect")
+	}
+
+	// Rate limit check
+	if limiter != nil && !limiter.CheckAgent(botID, "reset_key") {
+		details := limiter.CheckAgentWithDetails(botID, "reset_key")
+		return nil, errors.NewRateLimitError(details.RetryAfter, details.Limit, details.Window)
+	}
+
+	// Generate the new raw key once; persist only digest + last4 +
+	// issuance time atomically. The raw key is returned once below.
+	newKey := auth.GenerateKey()
+	if err := repository.UpdateAgentKeyHashByID(ctx, pool, botID, auth.HashAgentKey(newKey), auth.AgentKeyLast4(newKey)); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error updating key")
+	}
+
+	logOperation(ctx, pool, &botID, "reset_key", nil, nil,
+		map[string]interface{}{"new_key_masked": security.MaskKey(newKey)}, true)
+
+	return map[string]interface{}{
+		"bot_name": bot.BotName,
+		"new_key":  newKey,
+		"message":  "Key has been reset. Old agent key is immediately invalid.",
+		"warning":  "Give only the new key to agents. Never put it in URLs or business content.",
+	}, nil
+}

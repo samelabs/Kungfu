@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="sl-grid main-side">
+<section class="sl-card flush">
+  <table class="sl-table"><thead><tr><th>Admin</th><th>Roles</th><th>Status</th><th>Last sign-in</th></tr></thead><tbody>
+  {{range .Data.Users}}<tr><td><a href="/samelabs/admins/{{.Admin.ID}}">{{.Admin.DisplayName}}</a><div class="sl-muted">@{{.Admin.Username}}</div></td><td>{{range .Roles}}<span class="sl-tag">{{.}}</span>{{else}}<span class="sl-muted">no role</span>{{end}}</td><td>{{template "badge" .Admin.Status}}</td><td>{{ptime .Admin.LastLoginAt}}</td></tr>{{end}}
+  </tbody></table>
+</section>
+{{if .Can "admin.users.manage"}}
+<section class="sl-card">
+  <h2>New admin</h2>
+  <form class="sl-form" method="post" action="/samelabs/admins">
+    {{template "csrf" .CSRF}}
+    <label>Username<input name="username" minlength="3" maxlength="64" pattern="[A-Za-z0-9._\-]{3,64}" autocomplete="off" required><small>Letters, digits, dot, dash, underscore.</small></label>
+    <label>Display name<input name="display_name" maxlength="128" required></label>
+    <label>Initial password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+    <button class="sl-btn primary" type="submit">Create admin</button>
+  </form>
+</section>
+{{end}}
+</div>
+{{end}}

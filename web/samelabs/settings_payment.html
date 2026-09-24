@@ -1,0 +1,43 @@
+{{define "content"}}{{$v := .Data.View}}
+{{if not $v.EncryptionReady}}<div class="sl-flash error" role="alert">SETTINGS_ENC_KEY is not set on the server, so secrets cannot be stored. Set it (64 hex characters, <code>openssl rand -hex 32</code>) and restart.</div>{{end}}
+{{if and $v.Configured (not $v.SecretsReadable)}}<div class="sl-flash error" role="alert">The stored API key or webhook secret cannot be decrypted with the current SETTINGS_ENC_KEY. Payments are off until you enter both again.</div>{{end}}
+<form class="sl-form wide" method="post" action="/samelabs/settings/payment">
+  {{template "csrf" .CSRF}}
+  <div class="sl-grid two">
+    <section class="sl-card">
+      <h2>Checkout</h2>
+      <label class="sl-switch"><input type="checkbox" name="enabled" value="1" {{if $v.Enabled}}checked{{end}}> Owners can buy credits</label>
+      <p class="sl-muted">Switching this off only stops new purchases. Payments already made keep being confirmed, refunded or disputed through the webhook.</p>
+      <label>Mode
+        <select name="mode"><option value="test" {{if eq $v.Mode "test"}}selected{{end}}>Test (test-api.creem.io)</option><option value="prod" {{if eq $v.Mode "prod"}}selected{{end}}>Live (api.creem.io)</option></select>
+      </label>
+      <label>Return URL after checkout<input name="success_url" type="url" value="{{$v.SuccessURL}}" placeholder="https://kungfu.md/owner/credits?payment=success" required></label>
+    </section>
+    <section class="sl-card">
+      <h2>Credentials</h2>
+      <p class="sl-muted">Stored encrypted. Leave blank to keep the current value.</p>
+      <label>API key<input name="api_key" type="password" autocomplete="off" placeholder="{{if $v.APIKeyMasked}}Current: {{$v.APIKeyMasked}}{{else}}creem_…{{end}}"></label>
+      <label>Webhook secret<input name="webhook_secret" type="password" autocomplete="off" placeholder="{{if $v.WebhookSecretMasked}}Current: {{$v.WebhookSecretMasked}}{{else}}whsec_…{{end}}"></label>
+      <p class="sl-muted">Webhook URL for the Creem dashboard: <code>https://kungfu.md/api/webhooks/creem</code></p>
+    </section>
+  </div>
+  <section class="sl-card">
+    <h2>Credit packages</h2>
+    <p class="sl-muted">Each package is one Creem one-time product. Creem sets the price; this sets how many credits it grants. Leave a row empty to drop it.</p>
+    <table class="sl-table form">
+      <thead><tr><th>Code</th><th>Creem product id</th><th>Credits</th></tr></thead>
+      <tbody>
+      {{range $i, $row := .Data.Rows}}<tr>
+        <td><input name="pkg_code" value="{{$row.Code}}" {{if eq $i 0}}placeholder="starter"{{end}} pattern="[a-z0-9][a-z0-9_\-]{0,31}" aria-label="Package code"></td>
+        <td><input name="pkg_product" value="{{$row.ProductID}}" {{if eq $i 0}}placeholder="prod_…"{{end}} aria-label="Creem product id"></td>
+        <td><input name="pkg_credits" value="{{if $row.Credits}}{{$row.Credits}}{{end}}" inputmode="numeric" pattern="[0-9]*" {{if eq $i 0}}placeholder="1000"{{end}} aria-label="Credits"></td>
+      </tr>{{end}}
+      </tbody>
+    </table>
+  </section>
+  <div class="sl-form-foot">
+    <button class="sl-btn primary" type="submit" {{if not $v.EncryptionReady}}disabled{{end}}>Save payment settings</button>
+    {{if $v.UpdatedAt}}<span class="sl-muted">Last saved {{ptime $v.UpdatedAt}} UTC{{with $v.UpdatedBy}} by @{{.}}{{end}}</span>{{end}}
+  </div>
+</form>
+{{end}}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Kungfu.md Go Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/kungfu.md
+EnvironmentFile=/etc/kungfu-go.env
+ExecStart=/var/www/kungfu.md/kungfu-server
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

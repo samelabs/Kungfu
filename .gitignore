@@ -1,0 +1,28 @@
+# Binary (build output at repo root only; must not match internal/server/)
+kungfu-server
+/server
+*.exe
+
+# Environment / secrets
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# Temporary
+*.bak
+*~
+
+# Internal dev docs (not public)
+AGENT.md
+devlog/

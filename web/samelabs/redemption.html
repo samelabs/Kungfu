@@ -1,0 +1,47 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/store/redemptions">← Redemptions</a>{{end}}
+{{define "content"}}{{$x := .Data}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>{{$x.ProductTitle}}</h2>{{template "badge" $x.Status}}</div>
+    <dl class="sl-kv">
+      <dt>Code</dt><dd class="mono">{{$x.Code}}</dd>
+      <dt>Account</dt><dd><a href="/samelabs/accounts/{{$x.BotID}}">#{{$x.BotID}}</a></dd>
+      <dt>Cost</dt><dd>{{num $x.CreditsCost}} credits (held since the request)</dd>
+      <dt>Requested</dt><dd>{{time $x.CreatedAt}}</dd>
+      <dt>Reviewed</dt><dd>{{ptime $x.ReviewedAt}}{{with $x.ReviewNote}} — {{.}}{{end}}</dd>
+      <dt>Fulfilled</dt><dd>{{ptime $x.FulfilledAt}}{{with $x.FulfillmentNote}} — {{.}}{{end}}</dd>
+      <dt>Cancelled</dt><dd>{{ptime $x.CancelledAt}}</dd>
+    </dl>
+  </section>
+  {{if .Can "store.redemptions.manage"}}
+  <aside class="sl-stack">
+    {{if eq $x.Status "pending_review"}}
+    <section class="sl-card">
+      <h2>Review</h2>
+      <form class="sl-form" method="post" action="/samelabs/store/redemptions/{{$x.Code}}/approve">{{template "csrf" $.CSRF}}
+        <label>Note (optional)<input name="note" maxlength="500"></label>
+        <button class="sl-btn primary" type="submit">Approve</button></form>
+      <form class="sl-form" method="post" action="/samelabs/store/redemptions/{{$x.Code}}/reject" data-confirm="Reject and refund the credits?">{{template "csrf" $.CSRF}}
+        <label>Reason (optional)<input name="note" maxlength="500"></label>
+        <button class="sl-btn danger" type="submit">Reject and refund</button></form>
+    </section>
+    {{end}}
+    {{if eq $x.Status "approved"}}
+    <section class="sl-card">
+      <h2>Fulfil</h2>
+      <form class="sl-form" method="post" action="/samelabs/store/redemptions/{{$x.Code}}/fulfill">{{template "csrf" $.CSRF}}
+        <label>Delivery note (optional)<input name="note" maxlength="500"></label>
+        <button class="sl-btn primary" type="submit">Mark fulfilled</button></form>
+    </section>
+    {{end}}
+    {{if or (eq $x.Status "pending_review") (eq $x.Status "approved")}}
+    <section class="sl-card danger">
+      <h2>Cancel</h2>
+      <p class="sl-muted">Cancels the redemption and refunds the credits.</p>
+      <form method="post" action="/samelabs/store/redemptions/{{$x.Code}}/cancel" data-confirm="Cancel and refund?">{{template "csrf" $.CSRF}}<button class="sl-btn danger" type="submit">Cancel and refund</button></form>
+    </section>
+    {{end}}
+  </aside>
+  {{end}}
+</div>
+{{end}}

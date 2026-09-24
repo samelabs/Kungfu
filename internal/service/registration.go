@@ -1,0 +1,132 @@
+package service
+
+import (
+	"context"
+	stderrors "errors"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"kungfu.md/internal/auth"
+	"kungfu.md/internal/credits"
+	"kungfu.md/internal/errors"
+	"kungfu.md/internal/pg"
+	"kungfu.md/internal/repository"
+	"kungfu.md/internal/security"
+)
+
+// SignupGrant is the credit amount granted to a freshly registered bot.
+const SignupGrant = 66
+
+// RegistrationResult is the return value of Register.
+type RegistrationResult struct {
+	BotName string `json:"bot_name"`
+	Key     string `json:"key"`
+	Balance int64  `json:"balance"`
+	Message string `json:"message"`
+}
+
+// Register creates a new bot account.
+// nameExistsProbe is the seam the regression tests use to inject a
+// failing name-existence query. Production always uses repository.BotNameExists.
+var nameExistsProbe = repository.BotNameExists
+
+// Register creates a new bot account.
+func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*RegistrationResult, error) {
+	name = strings.TrimSpace(name)
+
+	// Validate bot name (6-32 chars)
+	valid, errs := auth.ValidateBotName(name)
+	if !valid {
+		return nil, errors.New(400, "INVALID_NAME", errs[0])
+	}
+
+	// Validate password
+	valid, errs = auth.ValidatePassword(password)
+	if !valid {
+		return nil, errors.New(400, "INVALID_PASSWORD", errs[0])
+	}
+
+	// Reject API keys in content
+	if err := security.RejectAPIKeyInContent(name, "name"); err != nil {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "name must not contain API keys")
+	}
+	if err := security.RejectAPIKeyInContent(password, "password"); err != nil {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "password must not contain API keys")
+	}
+
+	// Check name existence (DB failure must not masquerade as "name free")
+	exists, err := nameExistsProbe(ctx, pool, name)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+	if exists {
+		return nil, errors.NewWithDetails(409, "NAME_TAKEN",
+			"Bot name '"+name+"' is already taken",
+			map[string]interface{}{
+				"suggestion": "Try '" + name + "_v2' or other variations",
+			})
+	}
+
+	// Generate the raw key exactly once, derive its digest + display
+	// metadata immediately, and persist ONLY those. The raw key exists
+	// transiently in process memory and is returned once below.
+	rawKey := auth.GenerateKey()
+	keyHash := auth.HashAgentKey(rawKey)
+	keyLast4 := auth.AgentKeyLast4(rawKey)
+	hashedPassword, err := auth.HashPassword(password)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	// Bot creation (balance=0) and the signup grant (+66) share one DB
+	// transaction: either both the bot row and the grant_signup genesis
+	// ledger entry exist, or neither does.
+	tx, txErr := pool.TxBegin(ctx)
+	if txErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+	defer func() { _ = pg.Rollback(tx) }()
+
+	botID, err := repository.InsertRegisteredBot(ctx, tx, name, keyHash, keyLast4, hashedPassword, ip)
+	if err != nil {
+		// Check for unique constraint violation
+		if isUniqueViolation(err) {
+			return nil, errors.New(409, "NAME_TAKEN", "Registration failed: name already taken (concurrency conflict)")
+		}
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	// credits.Record returns the resulting balance of the SAME
+	// transaction that grants signup credits — the authoritative
+	// committed balance, not a second invented fact.
+	balance, err := credits.Record(ctx, pool, tx, botID, "grant_signup", SignupGrant, nil, nil)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
+	}
+
+	// Operation log
+	logOperation(ctx, pool, &botID, "register", nil, nil,
+		map[string]interface{}{"bot_name": name}, true)
+
+	return &RegistrationResult{
+		BotName: name,
+		Key:     rawKey,
+		Balance: balance, // committed balance produced by the grant tx
+		Message: "Registration successful. Give only the key to agents; keep the password for human key management.",
+	}, nil
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if stderrors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
+}

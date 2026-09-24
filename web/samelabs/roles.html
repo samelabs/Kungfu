@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="sl-grid main-side">
+<section class="sl-card flush">
+  <table class="sl-table"><thead><tr><th>Role</th><th>Permissions</th><th>Status</th></tr></thead><tbody>
+  {{range .Data.Roles}}<tr><td><a href="/samelabs/roles/{{.Role.ID}}">{{.Role.Name}}</a><div class="sl-muted mono">{{.Role.Code}}{{if .Role.IsSystem}} · system{{end}}</div></td><td>{{range .Permissions}}<span class="sl-tag">{{.}}</span>{{else}}<span class="sl-muted">none</span>{{end}}</td><td>{{template "badge" .Role.Status}}</td></tr>{{end}}
+  </tbody></table>
+</section>
+{{if .Can "admin.roles.manage"}}
+<section class="sl-card">
+  <h2>New role</h2>
+  <form class="sl-form" method="post" action="/samelabs/roles">
+    {{template "csrf" .CSRF}}
+    <label>Code<input name="code" minlength="3" maxlength="64" pattern="[a-z0-9._\-]{3,64}" required placeholder="support"></label>
+    <label>Name<input name="name" maxlength="128" required placeholder="Support"></label>
+    <label>Description<input name="description" maxlength="500"></label>
+    <button class="sl-btn primary" type="submit">Create role</button>
+  </form>
+</section>
+{{end}}
+</div>
+{{end}}

@@ -1,0 +1,147 @@
+package server
+
+// Factual contract regression: every public surface that describes the
+// task budget lock must state the REAL authority — the full task budget
+// is locked at TASK CREATION time (inside the CreateTask transaction,
+// before the task row exists), and remains locked while the task is
+// pending. Opening/publishing the task is NOT the moment the budget
+// gets locked.
+//
+// The invariant spans surfaces: if Credits says creation-time lock and
+// Terms drifts back to publish/open-time (or vice versa) the site is
+// lying to users on one of them. This test locks BOTH sides, in all
+// five locales, at the i18n source AND against the rendered /credits
+// and /terms HTML.
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"kungfu.md/internal/i18n"
+)
+
+// Per-locale markers that must appear in the budget-lock wording.
+// Each marker asserts "locked at creation" AND "still locked while
+// pending" semantics in that locale's own wording.
+var budgetLockCreationMarkers = map[string][]string{
+	"en": {"Creating a task locks the full task budget", "stays locked while the task is pending"},
+	"zh": {"创建任务时即从 Owner 余额锁定完整任务预算", "pending 状态期间预算保持锁定"},
+	"ja": {"タスク作成時に", "タスク予算の全額が直ちにロック", "pending の間も予算はロックされたまま"},
+	"ko": {"작업을 생성하면", "예산 전액이 즉시 잠깁니다", "pending 상태인 동안에도 예산은 잠겨 있으며"},
+	"es": {"Crear una tarea bloquea el presupuesto completo", "permanece bloqueado mientras la tarea está pending"},
+}
+
+// Phrases that would re-introduce the WRONG authority (lock at
+// publish/open time) on the budget-lock sentences. Locale-specific
+// publish/open phrasing used by the retired copy.
+var budgetLockWrongAuthority = map[string][]string{
+	"en": {"publishing locks", "opening locks the task budget", "publishing the task locks"},
+	"zh": {"发布任务时会从 Owner 余额锁定", "任务开启时锁定"},
+	"ja": {"タスク公開時に", "予算がロックされます。タスクの Post API"}, // 公開時 lock claim
+	"ko": {"작업 게시 시", "예산이 잠깁니다. 작업의 Post API"},
+	"es": {"Publicar una tarea bloquea el presupuesto", "al abrir la tarea se bloquea"},
+}
+
+func TestTermsBudgetLockAuthorityAllLocales(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "ja", "ko", "es"} {
+		t.Run(locale, func(t *testing.T) {
+			s := i18n.T(locale, "terms.s2_b")
+			if s == "" || s == "terms.s2_b" {
+				t.Fatalf("terms.s2_b missing for %s", locale)
+			}
+			for _, want := range budgetLockCreationMarkers[locale] {
+				if !strings.Contains(s, want) {
+					t.Fatalf("%s terms.s2_b missing creation-lock marker %q — the budget-lock authority may have drifted back to publish/open-time. Actual: %s", locale, want, s)
+				}
+			}
+			for _, banned := range budgetLockWrongAuthority[locale] {
+				if strings.Contains(s, banned) {
+					t.Fatalf("%s terms.s2_b contains banned publish/open-time lock phrasing %q — real authority is creation-time lock. Actual: %s", locale, banned, s)
+				}
+			}
+		})
+	}
+}
+
+func TestCreditsBudgetLockMatchesTermsAuthority(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "ja", "ko", "es"} {
+		t.Run(locale, func(t *testing.T) {
+			c := i18n.T(locale, "credits.shared_balance_note")
+			if c == "" || c == "credits.shared_balance_note" {
+				t.Fatalf("credits.shared_balance_note missing for %s", locale)
+			}
+			// Credits must state creation-time lock too (its wording is
+			// free-form per locale but must carry the same two facts).
+			for _, want := range budgetLockCreationMarkers[locale][:2] {
+				_ = want // markers below are Credits-specific (shorter note)
+			}
+			switch locale {
+			case "en":
+				if !strings.Contains(c, "locked from your account balance when the task is created") {
+					t.Fatalf("en credits note lost creation-time lock: %s", c)
+				}
+			case "zh":
+				if !strings.Contains(c, "任务创建时") {
+					t.Fatalf("zh credits note lost creation-time lock: %s", c)
+				}
+			case "ja":
+				if !strings.Contains(c, "タスク作成時") && !strings.Contains(c, "作成時に") {
+					t.Fatalf("ja credits note lost creation-time lock: %s", c)
+				}
+			case "ko":
+				if !strings.Contains(c, "작업 생성 시") {
+					t.Fatalf("ko credits note lost creation-time lock: %s", c)
+				}
+			case "es":
+				if !strings.Contains(c, "al crear la tarea") {
+					t.Fatalf("es credits note lost creation-time lock: %s", c)
+				}
+			}
+			// And must NOT carry publish/open-time lock claims.
+			for _, banned := range budgetLockWrongAuthority[locale] {
+				if strings.Contains(c, banned) {
+					t.Fatalf("%s credits note contains banned publish/open-time lock phrasing %q: %s", locale, banned, c)
+				}
+			}
+		})
+	}
+}
+
+// Rendered-HTML check: the /terms and /credits pages must actually
+// emit the creation-time wording (not just carry it in the source).
+func TestTermsCreditsRenderBudgetLockAuthority(t *testing.T) {
+	s := storeTestServer(t)
+	router := s.buildRouter()
+
+	// /terms renders terms.s2_b (full creation-lock sentence);
+	// /credits renders the shorter shared_balance_note. Both must state
+	// creation-time lock; neither may carry publish/open-time lock claims.
+	cases := []struct {
+		path        string
+		wantMarkers []string
+	}{
+		{"/terms", budgetLockCreationMarkers["en"]},
+		{"/credits", []string{"locked from your account balance when the task is created", "including while it is pending"}},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", tc.path, rec.Code)
+		}
+		body := rec.Body.String()
+		for _, want := range tc.wantMarkers {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s rendered HTML missing creation-lock marker %q (en default locale)", tc.path, want)
+			}
+		}
+		for _, banned := range budgetLockWrongAuthority["en"] {
+			if strings.Contains(body, banned) {
+				t.Fatalf("%s rendered HTML contains banned publish/open-time phrasing %q", tc.path, banned)
+			}
+		}
+	}
+}

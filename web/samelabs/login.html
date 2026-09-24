@@ -1,0 +1,14 @@
+{{define "content"}}
+<div class="sl-login">
+  <div class="sl-login-brand"><span class="sl-logo" aria-hidden="true">K</span><div><strong>Kungfu</strong><small>SameLabs console</small></div></div>
+  <form class="sl-card sl-form" method="post" action="/samelabs/login">
+    <h1>Sign in</h1>
+    {{with .Flash}}<div class="sl-flash {{.Kind}}" role="status">{{.Text}}</div>{{end}}
+    {{with .Error}}<div class="sl-flash error" role="alert">{{.}}</div>{{end}}
+    <input type="hidden" name="next" value="{{.Data.Next}}">
+    <label>Username<input name="username" value="{{.Data.Username}}" autocomplete="username" required autofocus></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="sl-btn primary block" type="submit">Sign in</button>
+  </form>
+</div>
+{{end}}

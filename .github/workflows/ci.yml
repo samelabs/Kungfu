@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kungfu_ci
+          POSTGRES_PASSWORD: ci_pw
+          POSTGRES_DB: kungfu_md
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kungfu_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      KF_TEST_DATABASE_URL: postgres://kungfu_ci:ci_pw@127.0.0.1:5432/kungfu_md
+      DB_PASS: ci_pw
+      SESSION_SECRET: ci-session-secret-not-for-production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Initialize test database from migrations
+        run: |
+          # Run the full migration chain in filename order; a fresh
+          # PostgreSQL must reach the latest schema from zero.
+          for f in migrations/*.sql; do
+            echo "applying $f"
+            psql "$KF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+          psql "$KF_TEST_DATABASE_URL" -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO kungfu_ci; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO kungfu_ci;"
+
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (with real PostgreSQL integration)
+        run: |
+          set -o pipefail
+          go test ./... -v 2>&1 | tee /tmp/test-output.log
+
+      - name: Guard integration tests must not skip
+        run: |
+          if grep -q "KF_TEST_DATABASE_URL not set" /tmp/test-output.log; then
+            echo "Integration tests skipped - KF_TEST_DATABASE_URL must be set in CI."
+            exit 1
+          fi
+
+      - name: go build
+        run: go build ./...
+
+      - name: Container image build
+        run: |
+          docker build -t "kungfu-ci:${GITHUB_SHA}" .
+
+      - name: Container image structural contract
+        run: |
+          set -euo pipefail
+          IMG="kungfu-ci:${GITHUB_SHA}"
+          USER_VAL=$(docker inspect -f '{{.Config.User}}' "$IMG")
+          ENTRY=$(docker inspect -f '{{json .Config.Entrypoint}}' "$IMG")
+          EXPOSE=$(docker inspect -f '{{json .Config.ExposedPorts}}' "$IMG")
+          ENV_JSON=$(docker inspect -f '{{json .Config.Env}}' "$IMG")
+          echo "User=$USER_VAL Entrypoint=$ENTRY ExposedPorts=$EXPOSE"
+          case "$USER_VAL" in
+            ""|root|0|0:0) echo "image must run non-root, got User=$USER_VAL"; exit 1 ;;
+          esac
+          test "$ENTRY" = '["/usr/local/bin/kungfu-server"]'
+          echo "$EXPOSE" | grep -q '"8090/tcp"'
+          echo "$ENV_JSON" | grep -q '"LISTEN_ADDR=0.0.0.0:8090"'
+
+      - name: Container smoke (healthz + readyz + SIGTERM)
+        run: |
+          set -euo pipefail
+          IMG="kungfu-ci:${GITHUB_SHA}"
+          NAME="kungfu-smoke-${GITHUB_SHA}"
+          cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name "$NAME" --network host \
+            -e DB_HOST=127.0.0.1 \
+            -e DB_PORT=5432 \
+            -e DB_NAME=kungfu_md \
+            -e DB_USER=kungfu_ci \
+            -e DB_PASS="$DB_PASS" \
+            -e DB_SSLMODE=disable \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            "$IMG"
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8090/healthz >/tmp/healthz.body \
+               && curl -sf http://127.0.0.1:8090/readyz >/tmp/readyz.body; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            echo "container did not become healthy"
+            docker logs "$NAME" || true
+            exit 1
+          fi
+          grep -q '"status": "ok"' /tmp/healthz.body
+          grep -q '"status": "ready"' /tmp/readyz.body
+          docker stop -t 15 "$NAME"
+          trap - EXIT
+          docker rm "$NAME" >/dev/null

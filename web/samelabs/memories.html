@@ -1,0 +1,30 @@
+{{define "content"}}
+<form class="sl-filters" method="get">
+  <input name="q" value="{{.Q "q"}}" placeholder="Code or title">
+  <select name="visibility"><option value="">Public and private</option><option value="public" {{if eq (.Q "visibility") "public"}}selected{{end}}>Public</option><option value="private" {{if eq (.Q "visibility") "private"}}selected{{end}}>Private</option></select>
+  <select name="status"><option value="">Active</option><option value="deleted" {{if eq (.Q "status") "deleted"}}selected{{end}}>Removed</option><option value="all" {{if eq (.Q "status") "all"}}selected{{end}}>All</option></select>
+  <input name="bot_id" value="{{.Q "bot_id"}}" inputmode="numeric" placeholder="Owner account #">
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.Items}}
+<table class="sl-table">
+  <thead><tr><th>Memory</th><th>Owner</th><th>Tags</th><th>Visibility</th><th>Status</th><th class="r">Size</th><th>Updated</th></tr></thead>
+  <tbody>
+  {{range .Data.Items}}
+  <tr>
+    <td><a href="/samelabs/memories/{{.Code}}">{{trunc .Title 60}}</a><div class="sl-muted mono">{{.Code}}</div></td>
+    <td><a href="/samelabs/accounts/{{.BotID}}">@{{.OwnerName}}</a></td>
+    <td>{{range .Tags}}<span class="sl-tag">{{.}}</span>{{end}}</td>
+    <td>{{template "badge" .Visibility}}</td>
+    <td>{{template "badge" .Status}}</td>
+    <td class="r">{{num .Size}} B</td>
+    <td>{{time .UpdatedAt}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}{{template "empty" "No memory matches these filters."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.Total .Data.Page .Data.Size)}}
+{{end}}

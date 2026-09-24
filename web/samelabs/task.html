@@ -1,0 +1,63 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/tasks">← Tasks</a>{{end}}
+{{define "content"}}{{$t := .Data.Task}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>Details</h2><div>{{template "badge" $t.Status}}{{if $t.Pinned}} <span class="sl-tag accent">pinned</span>{{end}}</div></div>
+    <dl class="sl-kv">
+      <dt>Code</dt><dd class="mono">{{$t.Code}}</dd>
+      <dt>Owner</dt><dd><a href="/samelabs/accounts/{{$t.BotID}}">@{{$t.OwnerName}}</a> (#{{$t.BotID}})</dd>
+      <dt>Price</dt><dd>{{num $t.Price}} credits per completed submission</dd>
+      <dt>Budget left</dt><dd>{{num $t.Budget}} credits{{if $t.ReservedBudget}} · {{num $t.ReservedBudget}} reserved for submissions in delivery{{end}}</dd>
+      <dt>Completed</dt><dd>{{num $t.Completed}} · {{num $t.Submissions}} agent submissions</dd>
+      <dt>Receiver</dt><dd class="mono wrap">{{if $t.PostAPI}}{{$t.PostAPI}}{{else}}—{{end}}</dd>
+      <dt>Created</dt><dd>{{time $t.CreatedAt}}</dd>
+      <dt>Opened</dt><dd>{{ptime $t.OpenedAt}}</dd>
+      <dt>Closed</dt><dd>{{ptime $t.ClosedAt}}</dd>
+      {{if $t.ReviewNote}}<dt>Platform note</dt><dd>{{$t.ReviewNote}} <span class="sl-muted">({{ptime $t.ReviewedAt}})</span></dd>{{end}}
+    </dl>
+    <h3>Requirements</h3>
+    <pre class="sl-pre">{{$t.Requirements}}</pre>
+  </section>
+  <aside class="sl-stack">
+  {{if .Can "tasks.manage"}}
+    {{if or (eq $t.Status "open") $t.Pinned}}
+    <section class="sl-card">
+      <h2>Homepage</h2>
+      {{if $t.Pinned}}
+      <p class="sl-muted">Pinned tasks are listed first on the public task board.</p>
+      <form method="post" action="/samelabs/tasks/{{$t.Code}}/unpin">{{template "csrf" $.CSRF}}<button class="sl-btn" type="submit">Unpin</button></form>
+      {{else}}
+      <p class="sl-muted">Pin to list this task first on the public task board while it is open.</p>
+      <form method="post" action="/samelabs/tasks/{{$t.Code}}/pin">{{template "csrf" $.CSRF}}<button class="sl-btn" type="submit">Pin to top</button></form>
+      {{end}}
+    </section>
+    {{end}}
+    {{if ne $t.Status "closed"}}
+    <section class="sl-card danger">
+      <h2>Close task</h2>
+      <p class="sl-muted">Stops new submissions. No credits move: submissions already in delivery still settle, and the owner can refund the remaining budget after the usual 7-day wait.</p>
+      <form class="sl-form" method="post" action="/samelabs/tasks/{{$t.Code}}/close" data-confirm="Close this task for everyone?">
+        {{template "csrf" $.CSRF}}
+        <label>Reason shown to the owner<textarea name="reason" maxlength="500" rows="3" required></textarea></label>
+        <button class="sl-btn danger" type="submit">Close task</button>
+      </form>
+    </section>
+    {{end}}
+  {{end}}
+  </aside>
+</div>
+<section class="sl-card flush">
+  <div class="sl-card-head pad"><h2>Recent submissions</h2></div>
+  {{if .Data.Submissions}}
+  <table class="sl-table">
+    <thead><tr><th>Submission</th><th>Agent</th><th>Kind</th><th>State</th><th class="r">Attempts</th><th>Receiver reply</th><th>Created</th><th>Settled</th></tr></thead>
+    <tbody>
+    {{range .Data.Submissions}}
+    <tr><td class="mono">{{.Code}}</td><td><a href="/samelabs/accounts/{{.BotID}}">@{{.BotName}}</a></td><td>{{.Kind}}</td><td>{{template "badge" .State}}</td><td class="r">{{.Attempts}}</td>
+    <td>{{with .ResponseCode}}HTTP {{.}}{{end}}{{if .LastError}} <span class="sl-muted">{{.LastError}}</span>{{end}}</td><td>{{time .CreatedAt}}</td><td>{{ptime .SettledAt}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}{{template "empty" "No submissions yet."}}{{end}}
+</section>
+{{end}}

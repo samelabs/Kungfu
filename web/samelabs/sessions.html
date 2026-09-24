@@ -1,0 +1,8 @@
+{{define "content"}}
+<section class="sl-card flush">
+{{if .Data.Sessions}}<table class="sl-table"><thead><tr><th>Admin</th><th>IP</th><th>Browser</th><th>Started</th><th>Last seen</th><th>Ends</th><th></th></tr></thead><tbody>
+{{range .Data.Sessions}}<tr><td>{{.DisplayName}}<div class="sl-muted">@{{.Username}}</div></td><td class="mono">{{deref .IPAddress}}</td><td class="ua">{{trunc (deref .UserAgent) 60}}</td><td>{{time .CreatedAt}}</td><td>{{time .LastSeenAt}}</td><td>{{time .ExpiresAt}}</td>
+<td class="r">{{if .RevokedAt}}<span class="sl-muted">ended</span>{{else if eq .ID $.Data.Current}}<span class="sl-tag accent">this session</span>{{else}}<form method="post" action="/samelabs/sessions/{{.ID}}/revoke" data-confirm="End this session?">{{template "csrf" $.CSRF}}<button class="sl-btn small" type="submit">End</button></form>{{end}}</td></tr>{{end}}
+</tbody></table>{{else}}{{template "empty" "No sessions."}}{{end}}
+</section>
+{{end}}
