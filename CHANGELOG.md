@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove every `CREEM_*` environment variable (startup now fails if one is set), then enter the Creem settings at `/samelabs/settings/payment`; checkout stays unavailable until they are saved
 - The platform admin moved from `/admin` to `/samelabs` (API: `/api/samelabs/*`); the old paths return 404
 
+### Development chain
+
+- Releases are deployed with `scripts/deploy.sh` (main + green CI only, commit-stamped build, migration guard, automatic rollback); local work uses `scripts/dev.sh` (Docker only). See `docs/DEVELOPMENT.md`
+- `/healthz` and `/readyz` report `data.commit`, the source revision of the running binary
+- Pages reference assets by content fingerprint (`?v=<hash>`); matching requests are cached as immutable. This also recovers browsers that held year-long cached JS/CSS from the old nginx rule
+- Service worker v5
+- `deploy/` holds reference copies of the production nginx, systemd and backup configuration
+
 ### MCP: plain HTTP calls
 
 - One `POST /mcp` of one JSON-RPC object with `Content-Type: application/json` (plus the Bearer key for protected tools) is now a complete call; responses are a single `application/json` document instead of SSE framing
