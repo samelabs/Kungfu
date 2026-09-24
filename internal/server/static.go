@@ -67,7 +67,13 @@ func serveAssets() http.HandlerFunc {
 		// Code assets (JS/CSS) must always revalidate: a stale cached
 		// script must never survive a deployment. Images/fonts are
 		// content-stable and keep a fresh cache window.
-		if ext == "js" || ext == "css" {
+		// A request whose ?v= matches the file's content fingerprint is
+		// immutable by construction (the URL changes with the content),
+		// so it may be cached for a year. Unversioned code requests keep
+		// no-cache.
+		if v := r.URL.Query().Get("v"); v != "" && web.AssetURL(r.URL.Path) == r.URL.Path+"?v="+v {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else if ext == "js" || ext == "css" {
 			w.Header().Set("Cache-Control", "no-cache")
 		} else {
 			w.Header().Set("Cache-Control", "public, max-age=300")

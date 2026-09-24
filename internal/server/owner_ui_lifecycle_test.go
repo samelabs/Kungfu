@@ -7,6 +7,7 @@ package server
 // code; server no-cache for JS/CSS).
 
 import (
+	"kungfu.md/web"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,12 +55,15 @@ func swSource(t *testing.T) string {
 
 // ── Asset cache invalidation ────────────────────────────────────────
 
-// NoOwnerShellManualVersionBust: the Owner shell must not carry a
-// hand-bumped ?v=N cache-bust query on any asset URL.
+// NoOwnerShellManualVersionBust: the Owner shell carries no hand-bumped
+// cache-bust query — the only ?v= values allowed are the automatic
+// content fingerprints (web.AssetURL).
 func TestNoOwnerShellManualVersionBust(t *testing.T) {
 	body := renderOwnerShellForTest(t, "en", "overview")
-	if regexp.MustCompile(`\?v=\d+`).MatchString(body) {
-		t.Fatal("owner shell still contains a manual ?v=N cache-bust query")
+	for _, m := range regexp.MustCompile(`(/assets/[^"?]+)\?v=([^"&]+)`).FindAllStringSubmatch(body, -1) {
+		if web.AssetURL(m[1]) != m[1]+"?v="+m[2] {
+			t.Fatalf("asset %s carries a non-fingerprint version %q", m[1], m[2])
+		}
 	}
 	for _, asset := range []string{"core.js", "lifecycle.js", "api.js", "init.js"} {
 		if !strings.Contains(body, "/assets/owner/"+asset) {
@@ -101,8 +105,9 @@ func TestCodeAssetsRevalidate(t *testing.T) {
 // and migrate away from the old v3 caches.
 func TestSWNetworkFirstForCode(t *testing.T) {
 	sw := swSource(t)
-	if !strings.Contains(sw, "kungfu-pwa-v4") {
-		t.Fatal("SW must bump cache version to migrate old v3 caches")
+	m := regexp.MustCompile(`const SW_VERSION = 'kungfu-pwa-v(\d+)'`).FindStringSubmatch(sw)
+	if m == nil || len(m[1]) == 0 || (len(m[1]) == 1 && m[1] < "4") {
+		t.Fatal("SW cache version must be v4 or later to migrate old v3 caches")
 	}
 	if strings.Contains(sw, "kungfu-pwa-v3'") {
 		t.Fatal("SW must not reference the old v3 cache as active version")

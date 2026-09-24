@@ -101,7 +101,7 @@ func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind str
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`
-	w.Write([]byte(htmlOut))
+	w.Write(web.FingerprintHTML([]byte(htmlOut)))
 }
 
 // renderHome renders the homepage with dynamic task board.
@@ -199,7 +199,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 </body>
 </html>`
 
-	w.Write([]byte(html))
+	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
 // buildTaskBoardHTML queries the DB and renders the homepage task board.
@@ -294,7 +294,7 @@ func (s *Server) renderCredits(w http.ResponseWriter, data *tmplData) {
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`
-	w.Write([]byte(html))
+	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
 // renderOwner renders the owner SPA shell.
@@ -381,7 +381,7 @@ window.OWNER_I18N = ` + ownerI18N + `;
 </body>
 </html>`
 
-	w.Write([]byte(html))
+	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
 // renderTaskGuide renders the owner task guide page.
@@ -391,14 +391,14 @@ func (s *Server) renderTaskGuide(w http.ResponseWriter, data *tmplData) {
 	guideData, err := web.StaticFile(filename)
 	if err == nil && guideData != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(guideData)
+		w.Write(web.FingerprintHTML(guideData))
 		return
 	}
 	// Fallback to English
 	guideData, _ = web.StaticFile("task_guide_en.html")
 	if guideData != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(guideData)
+		w.Write(web.FingerprintHTML(guideData))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
