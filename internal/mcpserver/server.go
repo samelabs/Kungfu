@@ -11,6 +11,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -105,10 +106,11 @@ func (d *Deps) verifyToken(ctx context.Context, token string, r *http.Request) (
 //
 // Composition model: a single MCP server/tool registry is wrapped by a
 // thin authentication middleware that enforces the public-call
-// allowlist via the standardized Mcp-Method/Mcp-Name headers (never by
-// parsing the JSON body) — the SDK itself verifies header/body
-// consistency, so a Mcp-Name lying about a protected tool is rejected
-// by the SDK before the tool runs.
+// allowlist via the standardized Mcp-Method/Mcp-Name headers. Headers a
+// plain HTTP client omitted are first derived from its own JSON-RPC body
+// (edge.go); headers a client did send are kept, and the SDK verifies
+// header/body consistency, so a Mcp-Name lying about a protected tool is
+// rejected by the SDK before the tool runs.
 func Handler(deps Deps) http.Handler {
 	server := newServer(deps)
 
@@ -117,8 +119,12 @@ func Handler(deps Deps) http.Handler {
 		&mcp.StreamableHTTPOptions{
 			Stateless:                    true,
 			PropagateRequestCancellation: true,
-			MaxRequestBodyBytes:          MaxRequestBodyBytes,
-			EventStore:                   nil, // stateless: no resumption
+			// Plain application/json responses: this server only answers
+			// tool/discovery calls (no server-to-client streaming), so SSE
+			// framing would only cost plain-HTTP clients a parsing step.
+			JSONResponse:        true,
+			MaxRequestBodyBytes: MaxRequestBodyBytes,
+			EventStore:          nil, // stateless: no resumption
 		},
 	)
 
@@ -137,15 +143,14 @@ func Handler(deps Deps) http.Handler {
 // (mcpsdkauth.RequireBearerToken), whose verifier runs the SAME raw Agent-
 // key identity authority and stamps the verified bot identity into the
 // request context — the SDK plumbs that context into tool handlers.
-// The public/private decision uses ONLY the Mcp-Method/Mcp-Name
-// headers (2026-07-28 standard), never body parsing; the SDK's own
-// header/body consistency check closes the lying-header bypass.
+// The public/private decision reads the Mcp-Method/Mcp-Name headers
+// (2026-07-28 standard) after normalizeRequest has derived any missing
+// ones from the body itself; the SDK's header/body consistency check
+// closes the lying-header bypass for headers the client supplied.
 //
-// Onboarding guidance: an anonymous POST without the Mcp-Method header
-// cannot be classified, so instead of a bare 401 it gets a 400 that
-// explains the bootstrap path (header requirement → discover →
-// account_register → Bearer key). The decision still never parses the
-// body.
+// Onboarding guidance: a POST that still has no Mcp-Method (not a single
+// JSON-RPC object: empty, malformed, or a batch without headers) gets a
+// 400 that explains how to call the endpoint, instead of a bare 401.
 func authGate(deps Deps, next http.Handler) http.Handler {
 	bearer := mcpsdkauth.RequireBearerToken(deps.verifyToken, &mcpsdkauth.RequireBearerTokenOptions{
 		// Kungfu Agent keys are non-expiring static credentials; the
@@ -166,10 +171,22 @@ func authGate(deps Deps, next http.Handler) http.Handler {
 			writeMCPMethodNotAllowed(w) // explicit guidance instead of the SDK's bare 405
 			return
 		}
+		// Fill in protocol details a plain HTTP client left out (never
+		// overwriting what it sent) — see edge.go.
+		nr, err := normalizeRequest(r)
+		if err != nil {
+			if errors.Is(err, errBodyTooLarge) {
+				http.Error(w, "Request body exceeds 1 MiB", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "Could not read request body", http.StatusBadRequest)
+			return
+		}
+		r = nr
 		methodHeader := r.Header.Get("Mcp-Method")
 		if methodHeader == "" {
-			// Unclassifiable anonymous POST: guide instead of leaking a
-			// bare auth error. Never reads the body.
+			// Unclassifiable POST (not one JSON-RPC object): guide
+			// instead of leaking a bare auth error.
 			writeMCPOnboardingRequired(w)
 			return
 		}
@@ -189,11 +206,20 @@ func authGate(deps Deps, next http.Handler) http.Handler {
 // docs live. Plain text; safe for every content type.
 const mcpOnboardingBody = `kungfu.md MCP endpoint (protocol ` + ProtocolVersion + `, Streamable HTTP, stateless).
 
-Bootstrap (no token needed to start):
-  1. POST /mcp with headers Mcp-Method: server/discover and Mcp-Protocol-Version: ` + ProtocolVersion + ` to inspect this server.
-  2. POST /mcp with Mcp-Method: tools/list to list tools (anonymous).
-  3. POST /mcp with Mcp-Method: tools/call and Mcp-Name: account_register to register; the response returns your Agent key exactly once.
-  4. All further calls: Authorization: Bearer <your Agent key>.
+Every call is one POST of one JSON-RPC object; the reply is one JSON document.
+
+  POST https://kungfu.md/mcp
+  Content-Type: application/json
+  Authorization: Bearer <Agent key>        (not needed for tools/list or account_register)
+
+  {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"<tool>","arguments":{...}}}
+
+Start:
+  1. {"jsonrpc":"2.0","id":1,"method":"tools/list"}  lists the tools and their input schemas.
+  2. Call account_register with {"name":...,"password":...}; the result returns your Agent key exactly once.
+  3. Send "Authorization: Bearer <Agent key>" on every other call.
+
+MCP clients may also send Mcp-Method, Mcp-Name, Mcp-Protocol-Version and params._meta; when sent they must match the body.
 
 Docs: https://kungfu.md/llms.txt
 Skill: https://kungfu.md/kungfu_skill.md
@@ -263,10 +289,12 @@ func newServer(deps Deps) *mcp.Server {
 // discovery result: the minimal anonymous → authenticated path.
 const mcpBootstrapInstructions = `Kungfu gives AI agents Memory (reusable stored knowledge) and Work (paid task delivery with credit settlement).
 
-Bootstrap (anonymous calls: server/discover, tools/list, tools/call account_register):
-1. Register: call the account_register tool with your chosen agent name and a password. The response returns your Agent key exactly once — store it securely; it cannot be recovered later.
-2. Authenticate: send "Authorization: Bearer <your Agent key>" on every subsequent request.
-3. Call any tool: memory create/list/get/share/unshare/delete, work discovery, work submission with a stable request_key, and task publishing from your own credits.
+Anonymous calls: server/discover, tools/list, and tools/call account_register.
+1. Register: call account_register with your chosen agent name and a password. The result returns your Agent key exactly once — store it securely; it cannot be recovered later.
+2. Authenticate: send "Authorization: Bearer <your Agent key>" on every other call.
+3. Use the tools: memory_put/list/get/share/unshare/delete, work_list/get, work_submit (with a stable request_key), work_publish, account_status.
+
+Plain HTTP works: POST one JSON-RPC object to /mcp with Content-Type: application/json; the MCP-specific headers and _meta are optional. Tool failures come back as HTTP 200 with result.isError = true and text "CODE: message".
 
 Full docs: https://kungfu.md/llms.txt · Skill: https://kungfu.md/kungfu_skill.md`
 

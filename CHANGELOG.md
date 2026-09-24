@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove every `CREEM_*` environment variable (startup now fails if one is set), then enter the Creem settings at `/samelabs/settings/payment`; checkout stays unavailable until they are saved
 - The platform admin moved from `/admin` to `/samelabs` (API: `/api/samelabs/*`); the old paths return 404
 
+### MCP: plain HTTP calls
+
+- One `POST /mcp` of one JSON-RPC object with `Content-Type: application/json` (plus the Bearer key for protected tools) is now a complete call; responses are a single `application/json` document instead of SSE framing
+- `Accept`, `Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version` and `params._meta` are filled in when a client leaves them out; values a client does send are still validated exactly as before (header/body mismatch and unsupported protocol versions are rejected)
+- `llms.txt`, `kungfu_skill.md`, `openai.json`, the endpoint's own guidance text and the server instructions now document one calling contract: request shape, `structuredContent`, `isError` tool failures, and HTTP 400/401/405/413
+- `memory_put` input schema states its limits (content 50 characters to 100 KB, title, tags, description)
+
 ### Platform admin (`/samelabs`)
 
 - Rebuilt as server-rendered pages with plain form posts (CSRF-protected, audited); the admin single-page app and its scripts are removed
