@@ -22,7 +22,8 @@ The toolchain image (`scripts/tools.Dockerfile`) pins the Go version from `go.mo
 ## 2. Branch, PR, CI
 
 - Branch from `main`, open a PR. CI (`.github/workflows/ci.yml`) runs the same gate plus a container build and smoke test.
-- Merge only when CI is green. `main` is the only deployable branch.
+- `main` is protected for everyone, admins included: changes land only through a PR whose `test` check passed on top of the latest `main`; no direct pushes, no force pushes, no deletion.
+- PRs are squash-merged (one commit per PR on `main`) and their branch is deleted on merge. `main` is the only long-lived branch and the only deployable one.
 
 Rules the tests and the deploy script enforce:
 
