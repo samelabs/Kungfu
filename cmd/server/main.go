@@ -21,7 +21,7 @@ import (
 // single ServeLifecycle shutdown orchestration on real OS signals.
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("[kungfu.md] Starting Kungfu %s", version.Get())
+	log.Printf("[kungfu.md] Starting Kungfu %s (commit %s)", version.Get(), version.Commit())
 
 	// Startup step 1: config load — required config missing/malformed
 	// fails closed here, before any resource is opened.

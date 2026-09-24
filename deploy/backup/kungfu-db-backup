@@ -1,0 +1,12 @@
+#!/bin/sh
+# Daily kungfu_md backup (custom format, restorable with pg_restore).
+# Keeps 14 days. Installed 2026-09-24 during production standardization.
+set -eu
+cd /
+DIR=/var/backups/kungfu/daily
+F="$DIR/kungfu_md_$(date -u +%Y%m%dT%H%M%SZ).dump"
+pg_dump -Fc -d kungfu_md -f "$F.part"
+pg_restore -l "$F.part" >/dev/null
+mv "$F.part" "$F"
+find "$DIR" -name "kungfu_md_*.dump" -mtime +14 -delete
+echo "$(date -u +%FT%TZ) ok $F $(stat -c %s "$F") bytes"

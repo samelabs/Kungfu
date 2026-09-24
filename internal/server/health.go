@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+
+	"kungfu.md/internal/version"
 )
 
 // handleHealth is the liveness probe: the HTTP process/router can
@@ -9,7 +11,7 @@ import (
 // service, domain, Creem, PostAPI, or the rate limiter. There is no
 // mutable healthy flag — liveness is "this handler ran".
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	SuccessResponse(w, map[string]interface{}{"status": "ok"}, "")
+	SuccessResponse(w, map[string]interface{}{"status": "ok", "commit": version.Commit()}, "")
 }
 
 // handleReady is the readiness probe. The only process-level runtime
@@ -22,5 +24,5 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		ErrorResponse(w, 503, "NOT_READY", "Service not ready", nil)
 		return
 	}
-	SuccessResponse(w, map[string]interface{}{"status": "ready"}, "")
+	SuccessResponse(w, map[string]interface{}{"status": "ready", "commit": version.Commit()}, "")
 }
