@@ -728,7 +728,7 @@ func TestSSRFHostAuthorityUnchangedAtTransportLevel(t *testing.T) {
 
 	withResolver(cr, func() {
 		withDialer(rd, func() {
-			res := PostJSON(context.Background(), "http://example.test:8080/hook", []byte(`{}`), AgentSubmitErrorConfig())
+			res := PostJSON(context.Background(), "http://example.test:8080/hook", []byte(`{}`), nil, AgentSubmitErrorConfig())
 			_ = res // transport errors against the fake conn are fine
 		})
 	})
@@ -799,7 +799,7 @@ func TestSSRFLoopbackServerDenied(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	res := PostJSON(context.Background(), srv.URL, []byte(`{}`), AgentSubmitErrorConfig())
+	res := PostJSON(context.Background(), srv.URL, []byte(`{}`), nil, AgentSubmitErrorConfig())
 	if res.Success {
 		t.Fatal("loopback PostAPI target must be denied by the outbound policy")
 	}
