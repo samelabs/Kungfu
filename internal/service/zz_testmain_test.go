@@ -6,16 +6,72 @@ package service
 // (internal/delivery TestSSRFLoopbackBypassNeverInProduction) asserts
 // no production file references it, and the shipped server always
 // enforces the public-routable PostAPI policy.
+//
+// It also generates a self-signed server certificate for 127.0.0.1 and
+// points SSL_CERT_FILE at it BEFORE any TLS handshake, so httptest TLS
+// receivers get https:// URLs that both pass §3 receiver validation and
+// verify against the hardened delivery client.
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"net"
 	"os"
 	"testing"
+	"time"
 
 	"kungfu.md/internal/delivery"
 )
 
+var pubTestTLSCert tls.Certificate
+
 func TestMain(m *testing.M) {
+	pubTestTLSCert = mustGenerateTestCert()
 	restore := delivery.AllowLoopbackForTest()
 	code := m.Run()
 	restore()
 	os.Exit(code)
+}
+
+func mustGenerateTestCert() tls.Certificate {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	var pemBuf bytes.Buffer
+	if err := pem.Encode(&pemBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		panic(err)
+	}
+	f, err := os.CreateTemp("", "wo2b-test-cert-*.pem")
+	if err != nil {
+		panic(err)
+	}
+	if _, err := f.Write(pemBuf.Bytes()); err != nil {
+		panic(err)
+	}
+	_ = f.Close()
+	// Go's x509 root pool loads lazily on first use: setting this now
+	// makes every TLS handshake in this binary trust the test cert.
+	os.Setenv("SSL_CERT_FILE", f.Name())
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }

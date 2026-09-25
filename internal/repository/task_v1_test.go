@@ -58,7 +58,7 @@ func taskV1SeededTask(t *testing.T, pool *pg.Pool, publisherID int64, lock int64
 	t.Helper()
 	ctx := context.Background()
 	code := fmt.Sprintf("wo1-%d", time.Now().UnixNano())
-	taskID, err := InsertTask(ctx, pool, NewTaskRow{Code: code, PublisherID: publisherID})
+	taskID, err := InsertTask(ctx, pool, NewTaskRow{Code: code, PublisherID: publisherID, Contract: []byte(`{}`)})
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}

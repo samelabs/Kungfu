@@ -50,27 +50,30 @@ var ErrInsufficientReservation = errors.New("release exceeds task reservation")
 // tb_task
 // ---------------------------------------------------------------------------
 
-// TaskRow is a row of tb_task.
+// TaskRow is a row of tb_task. DraftContract is the raw current
+// contract JSON (016) — authoritative while draft or paused.
 type TaskRow struct {
-	ID           int64
-	Code         string
-	PublisherID  int64
-	Status       string
-	Version      int32
-	BudgetLocked int64
-	Settled      int64
-	Reserved     int64
-	Refunded     int64
-	PausedReason *string
-	ClosedReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            int64
+	Code          string
+	PublisherID   int64
+	Status        string
+	Version       int32
+	BudgetLocked  int64
+	Settled       int64
+	Reserved      int64
+	Refunded      int64
+	PausedReason  *string
+	ClosedReason  *string
+	DraftContract []byte
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // NewTaskRow is the insert input for a draft task.
 type NewTaskRow struct {
 	Code        string
 	PublisherID int64
+	Contract    []byte
 }
 
 // InsertTask creates a draft task with zeroed counters. Budget
@@ -78,26 +81,84 @@ type NewTaskRow struct {
 func InsertTask(ctx context.Context, q pg.Querier, in NewTaskRow) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO tb_task (code, publisher_id, status, version)
-		VALUES ($1, $2, 'draft', 0)
-		RETURNING id`, in.Code, in.PublisherID).Scan(&id)
+		INSERT INTO tb_task (code, publisher_id, status, version, draft_contract)
+		VALUES ($1, $2, 'draft', 0, $3)
+		RETURNING id`, in.Code, in.PublisherID, in.Contract).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task: %w", err)
 	}
 	return id, nil
 }
 
+// UpdateDraftContract replaces the draft contract JSON (draft/paused
+// editing). The caller owns the status precondition.
+func UpdateDraftContract(ctx context.Context, q pg.Querier, taskID int64, contract []byte) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_task SET draft_contract = $2, updated_at = NOW()
+		WHERE id = $1`, taskID, contract)
+	if err != nil {
+		return fmt.Errorf("update draft_contract: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("task %d not found", taskID)
+	}
+	return nil
+}
+
+// SetTaskVersion points the task at its now-effective version. Pair
+// with ApplyTaskStatus(open) inside the same transaction.
+func SetTaskVersion(ctx context.Context, q pg.Querier, taskID int64, version int32) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_task SET version = $2, updated_at = NOW()
+		WHERE id = $1`, taskID, version)
+	if err != nil {
+		return fmt.Errorf("set task version: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("task %d not found", taskID)
+	}
+	return nil
+}
+
+// TaskCodeExists reports whether a task code is taken (publiccode
+// uniqueness probe).
+func TaskCodeExists(ctx context.Context, q pg.Querier, code string) (bool, error) {
+	var exists bool
+	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tb_task WHERE code = $1)`, code).Scan(&exists)
+	return exists, err
+}
+
+// ListTasksByPublisher returns one publisher's tasks, newest first.
+func ListTasksByPublisher(ctx context.Context, q pg.Querier, publisherID int64) ([]TaskRow, error) {
+	rows, err := q.Query(ctx, taskSelect+`
+		WHERE publisher_id = $1
+		ORDER BY created_at DESC, id DESC`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TaskRow
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
 const taskSelect = `
 	SELECT id, code, publisher_id, status, version,
 	       budget_locked, settled, reserved, refunded,
-	       paused_reason, closed_reason, created_at, updated_at
+	       paused_reason, closed_reason, draft_contract, created_at, updated_at
 	FROM tb_task`
 
 func scanTask(row pgx.Row) (*TaskRow, error) {
 	var t TaskRow
 	if err := row.Scan(&t.ID, &t.Code, &t.PublisherID, &t.Status, &t.Version,
 		&t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
-		&t.PausedReason, &t.ClosedReason, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.PausedReason, &t.ClosedReason, &t.DraftContract, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &t, nil

@@ -59,12 +59,23 @@ var sharedClient *http.Client
 // truncation contracts unchanged.
 const maxExistingResponseBytes = 65535
 
-// PostJSON sends a POST request with a JSON body, classifying failures via errCfg.
+// PostJSON sends a POST request with a JSON body and arbitrary
+// headers, classifying failures via errCfg. It is the single
+// transport path shared by every outbound PostAPI call (SSRF dial
+// authority, 10s/5s timeouts, bounded response read); callers add
+// only their headers.
+//
+// Contract:
+//   - Content-Type: application/json (always set here)
+//   - Content-Length header set explicitly
+//   - 10 second total timeout, 5 second connect timeout
+//   - Does NOT follow redirects (returns the raw response)
+//
 // The caller's context governs the request lifecycle: cancellation or
 // deadline of ctx terminates the transport work via
 // http.NewRequestWithContext. The 10s client timeout remains a lower
 // safety net, NOT the primary budget.
-func PostJSON(ctx context.Context, url string, body []byte, errCfg ErrorConfig) PostResult {
+func PostJSON(ctx context.Context, url string, body []byte, headers map[string]string, errCfg ErrorConfig) PostResult {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return PostResult{
@@ -76,6 +87,9 @@ func PostJSON(ctx context.Context, url string, body []byte, errCfg ErrorConfig) 
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := sharedClient.Do(req)
 	if err != nil {
@@ -96,28 +110,7 @@ func PostJSON(ctx context.Context, url string, body []byte, errCfg ErrorConfig) 
 	}
 	defer resp.Body.Close()
 
-	// Bounded read: the largest downstream consumer of a response body is
-	// the TestTask DB log column (65535 bytes); reading one byte past that
-	// cap detects "over-long" while never buffering an arbitrarily large
-	// remote response (100MB response != 100MB memory). A bounded read
-	// error (e.g. ErrUnexpectedEOF on a truncated stream) still yields
-	// whatever was read; HTTP 2xx/non-2xx semantics are unchanged and the
-	// existing upper-layer truncation contracts (16000/65535/4000) stay
-	// authoritative for display/logging.
-	maxBody := maxExistingResponseBytes
-	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxBody)+1))
-	if len(respBodyBytes) > maxBody {
-		respBodyBytes = respBodyBytes[:maxBody]
-	}
-	var respBody *string
-	if len(respBodyBytes) > 0 {
-		s := string(respBodyBytes)
-		respBody = &s
-	} else {
-		empty := ""
-		respBody = &empty
-	}
-
+	_, respBody := readBounded(resp.Body)
 	respCode := resp.StatusCode
 
 	// Check for non-2xx (rejected)
@@ -146,62 +139,10 @@ func PostJSON(ctx context.Context, url string, body []byte, errCfg ErrorConfig) 
 // the header carries the submission's opaque stable identity so a
 // compliant receiver can deduplicate side effects end-to-end.
 //
-// This is the only new delivery capability: it reuses the hardened
-// PostJSON transport (SSRF dial authority, timeouts, bounded read)
-// unchanged.
+// It is a thin wrapper over PostJSON (same SSRF dial authority,
+// timeouts and bounded read).
 func PostJSONWithKey(ctx context.Context, url string, body []byte, idempotencyKey string, errCfg ErrorConfig) PostResult {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return PostResult{
-			Success:      false,
-			ErrorCode:    errCfg.NetworkCode,
-			ErrorMessage: errCfg.NetworkMessagePrefix + err.Error(),
-		}
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
-	req.Header.Set("Idempotency-Key", idempotencyKey)
-
-	resp, err := sharedClient.Do(req)
-	if err != nil {
-		// Network error (curl error equivalent)
-		var respCode *int
-		// If we got a response, extract the code (Go gives us this in some error cases)
-		if resp != nil && resp.StatusCode > 0 {
-			code := resp.StatusCode
-			respCode = &code
-			resp.Body.Close()
-		}
-		return PostResult{
-			Success:      false,
-			ResponseCode: respCode,
-			ErrorCode:    errCfg.NetworkCode,
-			ErrorMessage: errCfg.NetworkMessagePrefix + err.Error(),
-		}
-	}
-	defer resp.Body.Close()
-
-	_, respBody := readBounded(resp.Body)
-	respCode := resp.StatusCode
-
-	if respCode < 200 || respCode >= 300 {
-		return PostResult{
-			Success:      false,
-			ResponseCode: &respCode,
-			ResponseBody: respBody,
-			ErrorCode:    errCfg.RejectedCode,
-			ErrorMessage: errCfg.RejectedMessage,
-		}
-	}
-
-	return PostResult{
-		Success:      true,
-		ResponseCode: &respCode,
-		ResponseBody: respBody,
-		ErrorCode:    "",
-		ErrorMessage: "",
-	}
+	return PostJSON(ctx, url, body, map[string]string{"Idempotency-Key": idempotencyKey}, errCfg)
 }
 
 // IsDefinitiveNotDelivered classifies a failed PostResult (no reliable HTTP
