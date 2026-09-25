@@ -63,13 +63,13 @@ func invalidTaskState(status string) *errors.AppError {
 func lockOwnedTask(ctx context.Context, q pg.Querier, publisherID int64, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCodeForUpdate(ctx, q, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New(404, "NOT_FOUND", "Task not found")
+		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if t == nil {
-		return nil, errors.New(404, "NOT_FOUND", "Task not found")
+		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.PublisherID != publisherID {
 		return nil, errors.New(403, "NOT_OWNER", "Not your task")
@@ -527,7 +527,7 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 			map[string]interface{}{"reserved": t.Reserved})
 	}
 	if t.BudgetLocked-t.Settled-t.Reserved-t.Refunded <= 0 {
-		return nil, invalidTaskState(t.Status)
+		return nil, errors.New(409, "NOTHING_TO_REFUND", "No available budget to refund")
 	}
 	if _, err := repository.RefundTaskAvailable(ctx, pool, tx, t.ID, publisherID); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -547,13 +547,13 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New(404, "NOT_FOUND", "Task not found")
+		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if t == nil {
-		return nil, errors.New(404, "NOT_FOUND", "Task not found")
+		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.PublisherID != publisherID {
 		return nil, errors.New(403, "NOT_OWNER", "Not your task")

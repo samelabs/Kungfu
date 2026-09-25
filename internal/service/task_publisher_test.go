@@ -531,9 +531,9 @@ func TestPublisherCloseAndRefund(t *testing.T) {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 
-	// Second refund: nothing available → INVALID_STATE.
-	if _, err := RefundTask(ctx, pool, publisher, code); appErrOf(t, err).Code != "INVALID_STATE" {
-		t.Fatalf("second refund: %v, want INVALID_STATE", err)
+	// Second refund: nothing available → NOTHING_TO_REFUND.
+	if _, err := RefundTask(ctx, pool, publisher, code); appErrOf(t, err).Code != "NOTHING_TO_REFUND" {
+		t.Fatalf("second refund: %v, want NOTHING_TO_REFUND", err)
 	}
 }
 

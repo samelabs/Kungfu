@@ -15,6 +15,7 @@ ALTER TABLE tb_task ADD COLUMN IF NOT EXISTS draft_contract JSONB;
 -- contract written by CreateTask.
 UPDATE tb_task SET draft_contract = '{}'::jsonb WHERE draft_contract IS NULL;
 
+ALTER TABLE tb_task ALTER COLUMN draft_contract SET DEFAULT '{}'::jsonb;
 ALTER TABLE tb_task ALTER COLUMN draft_contract SET NOT NULL;
 
 COMMIT;
