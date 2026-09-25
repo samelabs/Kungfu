@@ -464,11 +464,11 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 	var id int64
 	err := tx.QueryRow(ctx, `
 		INSERT INTO tb_task_submission
-			(task_id, version, agent_id, request_key, payload, payload_hash, amount, state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'delivering')
+			(task_id, version, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'delivering', $8, $9)
 		RETURNING submission_id`,
 		in.TaskID, in.Version, in.AgentID, in.RequestKey,
-		in.Payload, in.PayloadHash, in.Amount).Scan(&id)
+		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task_submission: %w", err)
 	}
