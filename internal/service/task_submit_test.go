@@ -47,8 +47,11 @@ func submitOnce(t *testing.T, pool *pg.Pool, agent int64, code string, mutate fu
 	if mutate != nil {
 		mutate(&in)
 	}
-	return SubmitWork(context.Background(), pool, agent, in, time.Now())
+	return SubmitWork(context.Background(), pool, agent, in, testAgentRefKey, time.Now())
 }
+
+// testAgentRefKey keys the anonymous agent_ref in tests.
+var testAgentRefKey = []byte("wo5a-agent-ref-key")
 
 // submitState asserts the error code and that nothing was written.
 func submitState(t *testing.T, pool *pg.Pool, code string, err error, wantCode string) {
@@ -85,7 +88,7 @@ func TestSubmitInvalidRequestKey(t *testing.T) {
 	// priority: the format error fires even for a nonexistent task
 	_, err = SubmitWork(context.Background(), pool, agent, SubmitInput{
 		Code: "nope00000000", RequestKey: "bad key!", Payload: []byte(submitPayloadOK),
-	}, time.Now())
+	}, testAgentRefKey, time.Now())
 	if appErrOf(t, err).Code != "INVALID_REQUEST_KEY" {
 		t.Fatalf("nonexistent task with a bad key: %v, want INVALID_REQUEST_KEY", err)
 	}
@@ -115,13 +118,13 @@ func TestSubmitIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if first.State != task.SubDelivering || first.Amount != 5 || first.Version != 1 {
+	if first.State != task.SubUnderReview || first.Amount != 5 || first.Version != 1 {
 		t.Fatalf("view = %+v", first)
 	}
 
 	key := fmt.Sprintf("idem-%d", time.Now().UnixNano())
 	in := SubmitInput{Code: code, RequestKey: key, Payload: []byte(submitPayloadOK)}
-	a, err := SubmitWork(ctx, pool, agent, in, time.Now())
+	a, err := SubmitWork(ctx, pool, agent, in, testAgentRefKey, time.Now())
 	if err != nil {
 		t.Fatalf("submit a: %v", err)
 	}
@@ -129,7 +132,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	b, err := SubmitWork(ctx, pool, agent, SubmitInput{
 		Code: code, RequestKey: key,
 		Payload: []byte(`{"bullets":["s1","s2","s3"],"url":"https://example.com/a"}`),
-	}, time.Now())
+	}, testAgentRefKey, time.Now())
 	if err != nil {
 		t.Fatalf("submit b: %v", err)
 	}
@@ -141,7 +144,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	if _, err := CloseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	c, err := SubmitWork(ctx, pool, agent, in, time.Now())
+	c, err := SubmitWork(ctx, pool, agent, in, testAgentRefKey, time.Now())
 	if err != nil {
 		t.Fatalf("closed-task retry: %v", err)
 	}
@@ -154,7 +157,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	_, err = SubmitWork(ctx, pool, agent, SubmitInput{
 		Code: code, RequestKey: key,
 		Payload: []byte(`{"url":"https://example.com/other","bullets":["s1","s2","s3"]}`),
-	}, time.Now())
+	}, testAgentRefKey, time.Now())
 	submitErr := appErrOf(t, err)
 	if submitErr.Code != "IDEMPOTENCY_CONFLICT" {
 		t.Fatalf("code = %v, want IDEMPOTENCY_CONFLICT", err)
@@ -171,7 +174,7 @@ func TestSubmitTaskNotFound(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	_, err := SubmitWork(context.Background(), pool, agent, SubmitInput{
 		Code: "nope00000000", RequestKey: "k-404", Payload: []byte(submitPayloadOK),
-	}, time.Now())
+	}, testAgentRefKey, time.Now())
 	if appErrOf(t, err).Code != "TASK_NOT_FOUND" {
 		t.Fatalf("code = %v, want TASK_NOT_FOUND", err)
 	}
@@ -352,7 +355,8 @@ func TestSubmitWithClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit with claim: %v", err)
 	}
-	if view.Version != 1 || view.Amount != 5 || view.State != task.SubDelivering {
+	// async without receiver: intake goes straight to review (§5.4)
+	if view.Version != 1 || view.Amount != 5 || view.State != task.SubUnderReview {
 		t.Fatalf("view = %+v", view)
 	}
 	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID)
@@ -625,7 +629,7 @@ func TestSubmitConcurrentSameKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			views[i], errs[i] = SubmitWork(ctx, pool, agent, in, time.Now())
+			views[i], errs[i] = SubmitWork(ctx, pool, agent, in, testAgentRefKey, time.Now())
 		}(i)
 	}
 	wg.Wait()

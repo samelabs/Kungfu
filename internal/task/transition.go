@@ -97,10 +97,10 @@ var claimTransitions = map[[2]string]string{
 }
 
 // submissionTransitions is the §5.4 edge set. settled / rejected /
-// failed are terminal. From uncertain, only a re-delivery result
-// (or the 24h unresolved limit) leaves the state; another timeout
-// keeps it uncertain without a state write, so (uncertain, timeout)
-// is not an edge.
+// failed are terminal. From uncertain, only a re-delivery RESULT
+// (2xx / 4xx / 202 / definitive failure) or the 24h unresolved limit
+// leaves the state; another timeout keeps it uncertain without a
+// state write, so (uncertain, timeout) is not an edge.
 var submissionTransitions = map[[2]string]string{
 	{SubDelivering, EventDeliver2XX}:     SubSettled,
 	{SubDelivering, EventDeliver4XX}:     SubRejected,
@@ -109,10 +109,11 @@ var submissionTransitions = map[[2]string]string{
 	{SubDelivering, EventTimeout}:        SubUncertain,
 	{SubDelivering, EventDeliveryFailed}: SubFailed,
 
-	{SubUncertain, EventDeliver2XX}: SubSettled,
-	{SubUncertain, EventDeliver4XX}: SubRejected,
-	{SubUncertain, EventDeliver202}: SubUnderReview,
-	{SubUncertain, EventUnresolved}: SubFailed,
+	{SubUncertain, EventDeliver2XX}:     SubSettled,
+	{SubUncertain, EventDeliver4XX}:     SubRejected,
+	{SubUncertain, EventDeliver202}:     SubUnderReview,
+	{SubUncertain, EventDeliveryFailed}: SubFailed, // re-delivery with a definitive failure (§7.2)
+	{SubUncertain, EventUnresolved}:     SubFailed,
 
 	{SubUnderReview, EventAccept}:        SubSettled,
 	{SubUnderReview, EventReject}:        SubRejected,

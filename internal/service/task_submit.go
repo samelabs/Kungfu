@@ -41,30 +41,44 @@ type SubmitInput struct {
 	Revises    *int64
 }
 
-// submissionView is the intake return structure.
+// submissionView is the intake + delivery return structure.
 type submissionView struct {
-	SubmissionID int64     `json:"submission_id"`
-	TaskCode     string    `json:"task_code"`
-	Version      int32     `json:"version"`
-	State        string    `json:"state"`
-	Amount       int64     `json:"amount"`
-	CreatedAt    time.Time `json:"created_at"`
+	SubmissionID   int64      `json:"submission_id"`
+	TaskCode       string     `json:"task_code"`
+	Version        int32      `json:"version"`
+	State          string     `json:"state"`
+	Amount         int64      `json:"amount"`
+	Verdict        []byte     `json:"verdict,omitempty"`
+	Paid           int64      `json:"paid"`
+	Failure        *string    `json:"failure,omitempty"`
+	ReviewDeadline *time.Time `json:"review_deadline,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 func newSubmissionView(s *repository.SubmissionRow, code string) submissionView {
-	return submissionView{
-		SubmissionID: s.SubmissionID,
-		TaskCode:     code,
-		Version:      s.Version,
-		State:        s.State,
-		Amount:       s.Amount,
-		CreatedAt:    s.CreatedAt,
+	v := submissionView{
+		SubmissionID:   s.SubmissionID,
+		TaskCode:       code,
+		Version:        s.Version,
+		State:          s.State,
+		Amount:         s.Amount,
+		Verdict:        s.Verdict,
+		Failure:        s.Failure,
+		ReviewDeadline: s.ReviewDeadline,
+		CreatedAt:      s.CreatedAt,
 	}
+	if s.State == task.SubSettled {
+		v.Paid = s.Amount
+	}
+	return v
 }
 
 // SubmitWork is the §5.3 intake. Acceptance steps run in the spec's
-// order; the write phase re-verifies c–f under the task row lock.
-func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInput, now time.Time) (submissionView, error) {
+// order; the write phase re-verifies c–f under the task row lock. The
+// accepted submission is then delivered SYNCHRONOUSLY (§5.4) and the
+// post-delivery view returned; agentRefKey keys the per-task anonymous
+// agent_ref (§7.1).
+func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInput, agentRefKey []byte, now time.Time) (submissionView, error) {
 	// (a) request_key format and payload size — before any query.
 	if !requestKeyPattern.MatchString(in.RequestKey) {
 		return submissionView{}, errors.New(400, "INVALID_REQUEST_KEY",
@@ -267,11 +281,9 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 
-	sub, err := repository.FindSubmissionByID(ctx, pool, subID)
-	if err != nil || sub == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	return newSubmissionView(sub, locked.Code), nil
+	// Synchronous delivery (§5.4): async-without-receiver goes straight
+	// to review; sync / async-with-receiver POSTs to the receiver.
+	return DeliverSubmission(ctx, pool, subID, agentRefKey, now)
 }
 
 // resolveSubmissionVersion determines the submission's version and
