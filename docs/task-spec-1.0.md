@@ -108,6 +108,9 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 `work_get(code)` 返回当前版本的完整 Contract（不含 `receiver.url`）、`version`、Harness 目录（`ref_id`、`title`、`bytes`）。持有 Claim 的执行者读取的是 Claim 所属版本。
 `work_harness(code, ref_id)` 返回该版本 Harness 快照内容。
 
+work_list 按开放时间倒序，至多 100 条。draft 任务对执行者不可见（TASK_NOT_FOUND）；其他状态均可 work_get / work_harness，返回含 status。
+work_harness 的 ref_id 不存在返回 HARNESS_REF_NOT_FOUND。
+
 ### 5.2 Claim
 
 | 操作 | 前置条件 | 效果 |
@@ -329,6 +332,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `IDEMPOTENCY_CONFLICT` | 同 key 不同 payload | `revise` |
 
 `SUBMISSION_NOT_FOUND` | 查询的 Submission 不存在 | —（修正 submission_id）
+`HARNESS_REF_NOT_FOUND` | work_harness 的 ref_id 不在该版本快照中 | —（修正 ref_id）
 
 `failed` 的原因以 `failure` 字段给出：`RECEIVER_UNREACHABLE` / `RECEIVER_FAULT` / `RECEIVER_PROTOCOL` / `DELIVERY_UNRESOLVED`。
 
