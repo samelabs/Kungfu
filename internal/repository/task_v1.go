@@ -338,6 +338,63 @@ func RenewClaim(ctx context.Context, q pg.Querier, claimID int64, from string, e
 	return nil
 }
 
+// AgentSubmissionCounts is the per-(task, agent) submission tally
+// behind the §5.3 step-5 limit check (§6.3).
+type AgentSubmissionCounts struct {
+	Settled  int64
+	Inflight int64 // delivering + uncertain + under_review
+	Rejected int64
+}
+
+// CountAgentSubmissions tallies one agent's submissions on one task by
+// outcome class.
+func CountAgentSubmissions(ctx context.Context, q pg.Querier, taskID, agentID int64) (AgentSubmissionCounts, error) {
+	var c AgentSubmissionCounts
+	err := q.QueryRow(ctx, `
+		SELECT
+		  COUNT(*) FILTER (WHERE state = 'settled'),
+		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain', 'under_review')),
+		  COUNT(*) FILTER (WHERE state = 'rejected')
+		FROM tb_task_submission
+		WHERE task_id = $1 AND agent_id = $2`, taskID, agentID).
+		Scan(&c.Settled, &c.Inflight, &c.Rejected)
+	if err != nil {
+		return AgentSubmissionCounts{}, fmt.Errorf("count agent submissions: %w", err)
+	}
+	return c, nil
+}
+
+// ListExpiredActiveClaims returns up to `limit` active claims whose
+// expires_at has passed (oldest first — the §5.2 expiry reclaimer's
+// work list).
+func ListExpiredActiveClaims(ctx context.Context, q pg.Querier, now time.Time, limit int) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT claim_id FROM tb_task_claim
+		WHERE status = 'active' AND expires_at <= $1
+		ORDER BY expires_at, claim_id
+		LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list expired claims: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// FindActiveClaimByTaskAgent returns the agent's active claim on the
+// task, or nil (spec §5.2: at most one active claim per agent+task).
+func FindActiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64) (*ClaimRow, error) {
+	return scanClaim(q.QueryRow(ctx, claimSelect+`
+		WHERE task_id = $1 AND agent_id = $2 AND status = 'active'`, taskID, agentID))
+}
+
 // ApplyClaimStatus validates `event` against the §5.2 kernel and
 // moves the claim from `from` as a compare-and-swap. Counter moves
 // (reservation hand-off) are separate primitives composed by the
