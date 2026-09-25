@@ -122,7 +122,7 @@ func main() {
 		httpServer:       httpServer,
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, reviewStop},
+		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, reviewStop, retentionStop},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})
