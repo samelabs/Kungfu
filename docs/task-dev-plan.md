@@ -1,0 +1,171 @@
+# Task 1.0 开发工单
+
+依据：`docs/task-spec-1.0.md`（下称「规范」）。规范与本文件冲突时以规范为准；规范本身有歧义时停止并报告，不自行裁量。
+
+## 总规则（每个工单都适用）
+
+1. **无兼容包袱**：现有任务实现（`tb_tasks`、`tb_task_submissions`、`tb_task_logs`、`/api/owner/tasks*`、`/api/testtask/*`、`work_publish`、`internal/service/{owner_task,task_submission,task_board,test_task,task_rules,task_check}.go`、`internal/repository/{task,task_submission,task_log}.go`）整体被替换，不保留旧字段、旧状态、旧接口，不写兼容分支。
+2. **范围隔离**：Storage（Memory）、账户、支付（Creem）、商店、后台 RBAC 不改；仅按工单明确列出的接点调用。
+3. **分支与合入**：每个工单一个分支 `task10/<wo-id>`，一个 PR；`scripts/dev.sh test` 全绿方可提交 PR；PR 描述逐条对应工单的验收项。
+4. **迁移**：新增 `migrations/015_task_v1.sql` 起的迁移；删除旧任务表在同一迁移中完成；只追加，不修改已合入迁移。
+5. **测试**：业务规则放在 service 层并以真实 PostgreSQL 做集成测试；规范 §10 的每条不变式必须有对应断言；不写读取源码文本的测试。
+6. **命名**：状态、错误码、字段名与规范逐字一致。
+7. **不做**：不改对外文案（WO-9 统一生成），不实现规范未写的能力，不引入规范未列的状态。
+
+## 依赖顺序
+
+```
+WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
+                                    ↘ WO-7 → WO-8 → WO-9 → WO-10
+```
+
+---
+
+## WO-1 数据模型与状态机内核
+
+**目标**：落地规范 §2 实体、§4 与 §5.4 状态机、§10 不变式，作为后续工单唯一的数据与状态来源。
+
+**交付**
+- 迁移 015：删除 `tb_tasks`、`tb_task_submissions`、`tb_task_logs` 及相关约束；新建 `tb_task`、`tb_task_version`（Contract JSONB + Harness 快照）、`tb_task_claim`、`tb_task_submission`、`tb_task_submission_event`、`tb_task_report`。金额列 BIGINT；表归属应用角色。
+- CHECK 约束：状态枚举；`reserved ≥ 0`；`available ≥ 0` 由触发器或事务内断言保证；Submission 唯一键 (`agent`, `task`, `request_key`)。
+- `internal/task/`（新包）：状态与转换定义为纯函数 `Transition(from, event) (to, error)`；非法转换返回错误。
+- repository：按新表提供读写；所有预留/释放/结算在单事务内与 Ledger（`lock_task`、`fund_task`、`earn_task`、`refund_task`）一起完成。
+- 删除旧任务相关代码与测试，保持编译通过（依赖它们的 MCP/HTTP 暂时移除注册，WO-7 恢复）。
+
+**验收**
+- 状态机表驱动测试覆盖规范 §4、§5.4 的每一条合法转换与非法转换。
+- 不变式检查函数 `CheckInvariants(ctx, taskID)` 实现规范 §10 第 1、2、3、6、9 条，供后续测试调用。
+
+## WO-2 契约校验与发布者生命周期
+
+**目标**：规范 §3、§4（除平台暂停外）。
+
+**交付**
+- 引入 JSON Schema 校验库（draft 2020-12，纯 Go，如 `github.com/santhosh-tekuri/jsonschema/v6`）；Schema 编译结果按版本缓存。
+- `ValidateContract`：规范 §3 字段约束与一致性 1–4，返回全部错误 `{field, message}`。
+- `task_create`（锁定预算）、`task_update`、`task_open`（校验 → Harness 快照 → 测试投递 → 生成版本）、`task_pause`、`task_close`、`task_fund`、`task_refund`、`task_get`、`task_list` 的 service 实现。
+- Harness 快照：读取发布者本人 Memory，复制内容到 `tb_task_version`；非本人或不存在的 ref 为校验错误。
+- 测试投递：使用现有 `internal/delivery` 的 SSRF 防护客户端，请求格式按规范 §7.1 并带 `Kungfu-Test: 1`。
+
+**验收**
+- 每个转换的前置条件违反时返回规范列出的错误码（`INVALID_STATE`、`INSUFFICIENT_CREDITS`、`VALIDATION_FAILED`、`TEST_DELIVERY_FAILED`、`HAS_RESERVATIONS`）。
+- sync 任务含 `judgment` 标准时校验失败；`accepted=true` 的 example 不过 schema 时校验失败。
+- paused 修改后再 open 生成新版本，旧版本数据不变。
+- 每个测试结束调用 `CheckInvariants`。
+
+## WO-3 Claim
+
+**目标**：规范 §5.2。
+
+**交付**
+- `work_claim`、`work_claim_renew`、`work_release`；到期回收器（后台循环，复用现有后台任务生命周期），到期写 expired 并释放预留。
+- pause/close 后 active Claim 可提交、不可续期。
+
+**验收**
+- 同一执行者同一任务至多一个 active Claim。
+- 续期不超过 `deadline`；到期后提交返回 `CLAIM_INVALID`。
+- 并发：`slots = 1` 时两个执行者同时 Claim，恰一成功。
+- 释放/到期后 `reserved` 回落，`CheckInvariants` 通过。
+
+## WO-4 提交受理
+
+**目标**：规范 §5.3 受理顺序 1–8 与 Submission 创建。
+
+**交付**
+- `work_submit` service：严格按受理顺序；幂等检查基于 `payload_hash`（规范化 JSON 的 SHA-256）。
+- 凭据形态检测复用 `internal/security`，返回命中的 JSON Pointer。
+- Schema 校验错误转为 `{pointer, message}` 列表。
+- 创建 Submission、写首条事件、预留（或承接 Claim 预留）同一事务。
+
+**验收**
+- 受理顺序每一步各有测试，失败时不创建 Submission、不改 `reserved`。
+- 同 key 同 payload 在任务关闭后仍返回原 Submission；同 key 不同 payload 返回 `IDEMPOTENCY_CONFLICT`。
+- 上限计数包含进行中的 Submission。
+- 携带旧版本 Claim 的提交按旧版本 schema 校验。
+
+## WO-5 投递、判定与结算
+
+**目标**：规范 §5.4、§6、§7。
+
+**交付**
+- 投递器：请求格式 §7.1（含 `agent_ref` = HMAC(task, agent)）；回复映射 §7.2 全表。
+- `uncertain` 恢复循环：30 秒间隔、24 小时上限后 `failed`（`DELIVERY_UNRESOLVED`）；进程重启后可继续（以数据库为准）。
+- `under_review`：截止时间写入；超时回收器按 `source=timeout` 结算。
+- `task_verdict`、`task_submissions`；Verdict 校验（criteria 已声明、reason 长度、annotations 规则）。
+- 结算：接受与 `earn_task` 同事务；驳回/失败释放预留；每次状态变迁写事件。
+- 接收端连续 5 次 `failed`（协议错误或故障）自动暂停任务，`paused_reason = RECEIVER_FAULT`。
+
+**验收**
+- 规范 §7.2 每一行回复各一个测试（使用本地测试接收端）。
+- 超时接受、协议错误、连续故障暂停各有测试。
+- 进程在 `delivering` 中断后重启，Submission 进入 `uncertain` 并最终确定。
+- 全部测试结束 `CheckInvariants` 通过，包括第 4 条时限（以可控时钟测试）。
+
+## WO-6 统计、上限与举报
+
+**目标**：规范 §6.3、`work_report`、§9 数据保留。
+
+**交付**
+- 任务统计（近 30 天）：`accept_rate`、`median_verdict_seconds`、`timeout_rate`、`failure_rate`；`work_list` 的本执行者计数与 `remaining`。
+- `work_report` 写 `tb_task_report`。
+- 保留清理：终态满 30 天清除 payload 保留 hash；任务关闭满 30 天清除版本快照内容。
+
+**验收**
+- 统计口径与规范公式一致的单元测试。
+- 清理后 Verdict、hash、事件仍在。
+
+## WO-7 协议表达：MCP 与 HTTP
+
+**目标**：规范 §8。
+
+**交付**
+- 单一工具注册表：每个工具定义一次（名称、输入 schema、描述、handler），同时挂载到 MCP 与 `POST /api/v1/<tool>`（Bearer 鉴权，与 MCP 同一身份校验）。
+- 执行者返回结构 §8.2；`next_action` 按 §8.3 由状态与错误码唯一决定（纯函数，表驱动测试）。
+- 未受理错误：MCP `isError=true` + 同一 `structuredContent`；HTTP 4xx + 同一 JSON。
+- 工具描述包含前置条件、可能状态、可能 `next_action`，由规范条目生成。
+- 删除旧 `work_publish`；保留账户与 Memory 工具不变。
+
+**验收**
+- 每个工具经 MCP 与 HTTP 各调用一次，返回结构逐字段一致。
+- 错误目录每个 code 至少一个经协议层触发的测试。
+
+## WO-8 控制台
+
+**目标**：发布者与平台的人工入口。
+
+**交付**
+- Owner 工作台「任务」重做：任务列表与状态；创建/编辑使用 Contract JSON 编辑（带校验结果展示）与字段表单二选一；开放/暂停/关闭/追加/退款；待判定队列（查看 payload、按 criteria 驳回并填写 reason、接受）；统计展示。
+- `/samelabs`：任务页适配新模型（状态、版本、统计、关闭原因）；新增举报队列（查看、驳回举报、关闭任务）。
+- 首页任务板改用新模型（open 且 `slots ≥ 1`）。
+
+**验收**
+- 控制台所有操作调用 WO-2/5 的 service，不另写业务规则。
+- 浏览器验收：桌面与 390px 宽度下完成一次 async 任务的创建、开放、判定。
+
+## WO-9 对外表达与参考接收端
+
+**目标**：由规范生成全部对外文本；降低发布方搭建判定器的门槛。
+
+**交付**
+- `web/llms.txt`、`web/kungfu_skill.md`、`web/openai.json`、MCP `instructions`、Owner 任务指南：按规范重写，客观、规则化，内容只来自规范。
+- `examples/receiver/`：参考接收端（Go 单文件）：按规范 §7 协议收发；内置规则判定（schema、正则、必填）与模型评分（细则 + 阈值，模型调用可配置）；输出规范 §6.1 Verdict；附部署说明。
+
+**验收**
+- 文本中出现的每个工具名、状态、错误码、字段名均可在规范中找到。
+- 参考接收端通过 WO-10 的端到端测试。
+
+## WO-10 端到端执行者旅程
+
+**目标**：以执行者视角验证整条工作流。
+
+**交付**：`internal/e2e/`（或 `cmd/` 下测试）以 HTTP 接入 + 参考接收端运行以下旅程，每条结束执行 `CheckInvariants`：
+1. sync：发现 → 读取 Harness → 提交 → 接受 → 结算。
+2. sync：驳回（带 annotations）→ `revise` 修订重交 → 接受。
+3. async：提交 → `under_review` → 发布者判定接受；另一条超时接受。
+4. Claim：领取 → 续期 → 提交；领取后到期 → `CLAIM_INVALID`。
+5. 投递中断 → `uncertain` → 恢复确定。
+6. 接收端连续故障 → 任务自动暂停 → 执行者收到 `TASK_NOT_OPEN`。
+7. 上限：驳回达到 `max_rejected_per_agent` → `SUBMISSION_LIMIT`。
+8. 平台预检：`SCHEMA_MISMATCH` 附 pointer → 修正后接受。
+
+**验收**：全部旅程通过；每条旅程中执行者仅依据返回的 `next_action` 决定下一步即可完成。
