@@ -624,6 +624,91 @@ func CountAgentSubmissionsBy(ctx context.Context, q pg.Querier, agentID int64, t
 	return n, nil
 }
 
+// FindOpenReportByReporterTask returns the agent's still-open report
+// on a task, or nil (§8.1 work_report idempotency).
+func FindOpenReportByReporterTask(ctx context.Context, q pg.Querier, taskID, reporterID int64) (int64, bool, error) {
+	var id int64
+	err := q.QueryRow(ctx, `
+		SELECT id FROM tb_task_report
+		WHERE task_id = $1 AND reporter_id = $2 AND status = 'open'
+		ORDER BY id LIMIT 1`, taskID, reporterID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("find open report: %w", err)
+	}
+	return id, true, nil
+}
+
+// PurgeExpiredPayloads nulls the payload of terminal submissions whose
+// terminal entry is at or before `cutoff` (§9), returning the number
+// purged. payload_hash, verdict and events are kept.
+func PurgeExpiredPayloads(ctx context.Context, q pg.Querier, cutoff time.Time, batch int) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_task_submission s
+		SET payload = NULL
+		WHERE s.submission_id IN (
+			SELECT sub.submission_id FROM tb_task_submission sub
+			WHERE sub.payload IS NOT NULL
+			  AND sub.state IN ('settled', 'rejected', 'failed')
+			  AND (SELECT e.at FROM tb_task_submission_event e
+			        WHERE e.submission_id = sub.submission_id
+			        ORDER BY e.seq DESC LIMIT 1) <= $1::timestamptz
+			ORDER BY sub.submission_id
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)`, cutoff, batch)
+	if err != nil {
+		return 0, fmt.Errorf("purge expired payloads: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ListClosedTasksWithSnapshots returns closed tasks (updated_at at or
+// before `cutoff`) that still carry unpurged version snapshots. The
+// task's updated_at is the close marker: closed is terminal, and the
+// only later write is the one-off refund — a conservative (later)
+// estimate of the close time.
+func ListClosedTasksWithSnapshots(ctx context.Context, q pg.Querier, cutoff time.Time, batch int) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT t.id FROM tb_task t
+		WHERE t.status = 'closed'
+		  AND t.updated_at <= $1::timestamptz
+		  AND EXISTS (SELECT 1 FROM tb_task_version v
+		               WHERE v.task_id = t.id AND (v.harness <> '[]'::jsonb OR v.contract->'examples' <> '[]'::jsonb))
+		ORDER BY t.id
+		LIMIT $2`, cutoff, batch)
+	if err != nil {
+		return nil, fmt.Errorf("list closed tasks with snapshots: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// PurgeTaskVersionSnapshots empties one task's snapshot material
+// (§9): harness → [], contract.examples → []; schema and criteria stay
+// for audit.
+func PurgeTaskVersionSnapshots(ctx context.Context, q pg.Querier, taskID int64) error {
+	_, err := q.Exec(ctx, `
+		UPDATE tb_task_version
+		SET harness = '[]'::jsonb,
+		    contract = jsonb_set(contract, '{examples}', '[]'::jsonb)
+		WHERE task_id = $1`, taskID)
+	if err != nil {
+		return fmt.Errorf("purge version snapshots: %w", err)
+	}
+	return nil
+}
+
 // RecentTerminalStates returns the states of the most recent
 // terminal submissions of a task (settled / rejected / failed), newest
 // first — the §7.3 receiver-fault window.

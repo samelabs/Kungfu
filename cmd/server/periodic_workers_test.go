@@ -45,3 +45,35 @@ func TestPeriodicWorkersStopCleanly(t *testing.T) {
 	default:
 	}
 }
+
+// The retention worker (WO-6b) rides the same lifecycle.
+func TestRetentionWorkerStopCleanly(t *testing.T) {
+	failures := make(chan error, 5)
+	stop := make(chan struct{})
+	var ticks int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runPeriodic("retention", stop, failures, 2*time.Millisecond, func() {
+			atomic.AddInt32(&ticks, 1)
+		})
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&ticks) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("retention worker never ticked")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(stop)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("retention worker did not stop")
+	}
+	select {
+	case err := <-failures:
+		t.Fatalf("clean stop must not be a failure, got %v", err)
+	default:
+	}
+}
