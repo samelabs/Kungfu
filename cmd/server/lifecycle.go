@@ -174,13 +174,22 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 // that. This is the runner for the one managed GC loop, not a
 // generic worker framework.
 func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time.Duration, gc func()) {
+	runPeriodic("rate_limiter_gc", stop, failures, interval, gc)
+}
+
+// runPeriodic runs any periodic background worker on the shared
+// lifecycle contract: tick -> fn, stop -> return; a panic in fn is
+// caught by this boundary and reported (bounded, without the panic
+// value) on failures as a fatal background error routed through the
+// single ServeLifecycle shutdown path.
+func runPeriodic(name string, stop <-chan struct{}, failures chan<- error, interval time.Duration, fn func()) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("[kungfu.md] background worker=rate_limiter_gc panicked (panic_type=%T)\n%s",
-				rec, debug.Stack())
+			log.Printf("[kungfu.md] background worker=%s panicked (panic_type=%T)\n%s",
+				name, rec, debug.Stack())
 			// Bounded report: the panic VALUE stays out of the
 			// returned error; only the worker identity and type.
-			failures <- fmt.Errorf("background worker rate_limiter_gc panicked (panic_type=%T)", rec)
+			failures <- fmt.Errorf("background worker %s panicked (panic_type=%T)", name, rec)
 		}
 	}()
 	ticker := time.NewTicker(interval)
@@ -188,7 +197,7 @@ func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time
 	for {
 		select {
 		case <-ticker.C:
-			gc()
+			fn()
 		case <-stop:
 			return
 		}

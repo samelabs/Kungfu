@@ -13,6 +13,7 @@ import (
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/server"
+	"kungfu.md/internal/service"
 	"kungfu.md/internal/version"
 )
 
@@ -47,8 +48,20 @@ func main() {
 	// on backgroundErrors, and routed through ServeLifecycle's single
 	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
-	backgroundErrors := make(chan error, 1)
+	backgroundErrors := make(chan error, 2) // one slot per background worker
 	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
+
+	// Claim expiry (spec §5.2): expired active claims are marked
+	// expired and their reservation released. A failed pass is logged
+	// and retried on the next tick — only a panic is fatal (through
+	// runPeriodic's boundary and the single shutdown path).
+	claimExpiryStop := make(chan struct{})
+	go runPeriodic("claim_expiry", claimExpiryStop, backgroundErrors, 30*time.Second, func() {
+		expired, err := service.ExpireClaims(context.Background(), pool, time.Now(), 100)
+		if err != nil {
+			log.Printf("[kungfu.md] claim expiry pass failed (expired=%d): %v", expired, err)
+		}
+	})
 
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -75,7 +88,7 @@ func main() {
 		httpServer:       httpServer,
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop},
+		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

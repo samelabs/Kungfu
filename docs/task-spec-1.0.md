@@ -118,6 +118,8 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 | 到期 | `expires_at` 已过且未使用 | 状态 expired；预留释放 |
 | 提交时使用 | Claim active 且属于本人本任务 | 状态 used；预留转为该 Submission 的预留 |
 
+本执行者在该任务已有 active Claim 时，`work_claim` 返回该 Claim（幂等），不新建、不重复预留。
+
 `claim.required = true` 时，提交必须携带有效 `claim_id`。`claim.required = false` 时，Claim 可选；未携带时于受理时预留。
 
 ### 5.3 Submission
