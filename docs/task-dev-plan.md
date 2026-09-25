@@ -169,3 +169,9 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 8. 平台预检：`SCHEMA_MISMATCH` 附 pointer → 修正后接受。
 
 **验收**：全部旅程通过；每条旅程中执行者仅依据返回的 `next_action` 决定下一步即可完成。
+
+## 决策记录
+
+- WO-1：账本结算类型为 `earn_task`。后台任务治理、Owner 投递日志、首页任务板、仪表盘的 draft/paused 计数在 WO-8 按新模型重建；pinned 删除。
+- WO-2a：可选数值字段用指针区分缺省与显式值；“字符”按 rune 计；schema 根必须显式声明 `type: object`；harness_refs 归属与 receiver 可达性在 WO-2b 校验。
+- 部署：WO-7 完成前不部署生产。

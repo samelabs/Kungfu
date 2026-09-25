@@ -37,7 +37,7 @@ Kungfu 是面向 Agent 的分布式 harness：发布者定义工作流，执行�
 | SubmissionEvent | 只追加：`submission_id`、`seq`、`from_state`、`to_state`、`cause`、`at`；每次状态变迁一条 |
 | Verdict | `accepted`、`criteria[]`、`reason`、`retryable`、`annotations[]`、`source ∈ {receiver, publisher, timeout}` |
 | Report | `task`、`reporter`、`reason`、`status ∈ {open, dismissed, actioned}` |
-| Ledger | `lock_task` / `fund_task` / `settle_task` / `refund_task` 记录，与账户余额同事务 |
+| Ledger | `lock_task` / `fund_task` / `earn_task` / `refund_task` 记录，与账户余额同事务 |
 
 ---
 
@@ -343,7 +343,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 
 1. `budget_locked = settled + reserved + refunded + available`，且 `available ≥ 0`、`reserved ≥ 0`。
 2. `reserved = Σ active Claim.amount + Σ 状态 ∈ {delivering, uncertain, under_review} 的 Submission.amount`。
-3. 每个 Submission 至多一条结算记录；结算额 = 该 Submission 的 `amount`。
+3. 每个 Submission 至多一条结算记录（`earn_task`，ref_type=`task_submission`，ref_id=submission_id）；结算额 = 该 Submission 的 `amount`。
 4. 每个非终态都有确定的离开条件与时限：Claim ≤ `claim.max_duration`；`under_review` ≤ `review_window`；`uncertain` ≤ 24 小时；`delivering` ≤ 15 秒后转为结果或 `uncertain`。
 9. 每个 Submission 的状态等于其最后一条 SubmissionEvent 的 `to_state`；事件只追加。
 5. 每个 `rejected` 都带有效 Verdict；每个 `failed` 都带 `failure`。
