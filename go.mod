@@ -6,6 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	golang.org/x/crypto v0.54.0
 )
 
