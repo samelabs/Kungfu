@@ -111,10 +111,12 @@ func TestSubmissionTransitionLegal(t *testing.T) {
 		{SubDelivering, EventNoReceiver, SubUnderReview},
 		{SubDelivering, EventTimeout, SubUncertain},
 		{SubDelivering, EventDeliveryFailed, SubFailed},
-		// from uncertain: re-delivery result ("重投得到结果 → 同上") or 24h limit
+		// from uncertain: re-delivery result ("重投得到结果 → 同上" —
+		// including a definitive failure per §7.2) or the 24h limit
 		{SubUncertain, EventDeliver2XX, SubSettled},
 		{SubUncertain, EventDeliver4XX, SubRejected},
 		{SubUncertain, EventDeliver202, SubUnderReview},
+		{SubUncertain, EventDeliveryFailed, SubFailed},
 		{SubUncertain, EventUnresolved, SubFailed},
 		// from under_review: accept / reject / review-window timeout (= accepted)
 		{SubUnderReview, EventAccept, SubSettled},
@@ -143,7 +145,6 @@ func TestSubmissionTransitionIllegal(t *testing.T) {
 		// only a result or the 24h limit leaves the state
 		{SubUncertain, EventTimeout},
 		{SubUncertain, EventNoReceiver},
-		{SubUncertain, EventDeliveryFailed},
 		// under_review: wrong timeout kind; delivery events don't apply
 		{SubUnderReview, EventTimeout},
 		{SubUnderReview, EventDeliver2XX},

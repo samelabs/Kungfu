@@ -388,6 +388,30 @@ func ListExpiredActiveClaims(ctx context.Context, q pg.Querier, now time.Time, l
 	return out, rows.Err()
 }
 
+// RecentTerminalStates returns the states of the most recent
+// terminal submissions of a task (settled / rejected / failed), newest
+// first — the §7.3 receiver-fault window.
+func RecentTerminalStates(ctx context.Context, q pg.Querier, taskID int64, limit int) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT state FROM tb_task_submission
+		WHERE task_id = $1 AND state IN ('settled', 'rejected', 'failed')
+		ORDER BY updated_at DESC, submission_id DESC
+		LIMIT $2`, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent terminal states: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // FindActiveClaimByTaskAgent returns the agent's active claim on the
 // task, or nil (spec §5.2: at most one active claim per agent+task).
 func FindActiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64) (*ClaimRow, error) {
