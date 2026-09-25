@@ -411,8 +411,8 @@ func compileContractSchema(raw json.RawMessage, add func(field, format string, a
 
 // scanCredentialStrings applies the credential-shape detector to every
 // string of the contract and to every string inside examples[].payload
-// and output.schema (consistency 4). JSON Pointer suffixes locate hits
-// inside raw JSON.
+// and output.schema (consistency 4), via the shared ScanCredentials
+// walk; hits inside raw JSON carry their RFC 6901 pointer.
 func scanCredentialStrings(c Contract, add func(field, format string, args ...any)) {
 	for _, s := range []struct {
 		field string
@@ -443,8 +443,9 @@ func scanCredentialStrings(c Contract, add func(field, format string, args ...an
 		if security.ContainsAPIKey(ex.Note) {
 			add(fmt.Sprintf("examples[%d].note", i), "must not contain credential-shaped strings")
 		}
-		if json.Valid(ex.Payload) {
-			walkJSONStrings(ex.Payload, fmt.Sprintf("examples[%d].payload", i), add)
+		field := fmt.Sprintf("examples[%d].payload", i)
+		for _, ptr := range ScanCredentials(ex.Payload) {
+			add(field+ptr, "must not contain credential-shaped strings")
 		}
 	}
 	for i, ref := range c.HarnessRefs {
@@ -452,49 +453,9 @@ func scanCredentialStrings(c Contract, add func(field, format string, args ...an
 			add(fmt.Sprintf("harness_refs[%d]", i), "must not contain credential-shaped strings")
 		}
 	}
-	if json.Valid(c.Output.Schema) {
-		walkJSONStrings(c.Output.Schema, "output.schema", add)
+	for _, ptr := range ScanCredentials(c.Output.Schema) {
+		add("output.schema"+ptr, "must not contain credential-shaped strings")
 	}
-}
-
-// walkJSONStrings visits every string value of a raw JSON document and
-// reports credential-shaped hits as field + "/" + RFC 6901 JSON
-// Pointer (tokens escaped; the joining slashes are structural).
-func walkJSONStrings(raw json.RawMessage, field string, add func(field, format string, args ...any)) {
-	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return
-	}
-	join := func(pointer, token string) string {
-		if pointer == "" {
-			return token
-		}
-		return pointer + "/" + token
-	}
-	var walk func(node any, pointer string)
-	walk = func(node any, pointer string) {
-		switch v := node.(type) {
-		case map[string]any:
-			// keys are visited too: a credential as a property name is
-			// just as leaked
-			for k, item := range v {
-				child := join(pointer, escapeJSONPointerToken(k))
-				if security.ContainsAPIKey(k) {
-					add(field+"/"+child, "must not contain credential-shaped strings")
-				}
-				walk(item, child)
-			}
-		case []any:
-			for i, item := range v {
-				walk(item, join(pointer, fmt.Sprintf("%d", i)))
-			}
-		case string:
-			if security.ContainsAPIKey(v) {
-				add(field+"/"+pointer, "must not contain credential-shaped strings")
-			}
-		}
-	}
-	walk(doc, "")
 }
 
 // escapeJSONPointerToken escapes one RFC 6901 reference token (~ → ~0,
