@@ -205,6 +205,8 @@ delivering ──2xx────────────────────
 
 `task_verdict` 对不符合 6.1 的 Verdict 返回 `VERDICT_INVALID`，Submission 保持 `under_review`。
 
+`task_verdict` 到达时若已超过 `review_deadline`，平台先按超时视为接受并结算，再返回 `NOT_UNDER_REVIEW`（details.state）。
+
 ### 6.2a 判定器
 
 发布者的判定器是对结果的 harness。无论规则判定（schema、正则、确定性校验）还是模型判定（按细则评分并与阈值比较），输出必须是 6.1 的 Verdict。平台提供参考接收端实现（规则判定 + 模型评分细则），发布者配置 criteria 与细则即可部署。平台不运行发布者的判定器。
@@ -325,6 +327,8 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `CREDENTIAL_IN_PAYLOAD` | 含凭据形态字符串，附 `details.pointer` | `revise` |
 | `INVALID_REQUEST_KEY` | 格式不符 | `revise` |
 | `IDEMPOTENCY_CONFLICT` | 同 key 不同 payload | `revise` |
+
+`SUBMISSION_NOT_FOUND` | 查询的 Submission 不存在 | —（修正 submission_id）
 
 `failed` 的原因以 `failure` 字段给出：`RECEIVER_UNREACHABLE` / `RECEIVER_FAULT` / `RECEIVER_PROTOCOL` / `DELIVERY_UNRESOLVED`。
 
