@@ -502,6 +502,128 @@ func CountTaskSubmissions(ctx context.Context, q pg.Querier, taskID int64, state
 	return n, nil
 }
 
+// TaskStats is the §6.3 30-day statistic set of one task.
+type TaskStats struct {
+	Settled              int64
+	Rejected             int64
+	Failed               int64
+	TimeoutAccepted      int64 // settled with verdict source = timeout
+	TerminalTotal        int64
+	MedianVerdictSeconds *float64 // over settled+rejected durations; nil when none
+}
+
+// TaskStats computes the §6.3 statistics for terminals entered at or
+// after `since`: verdict latency runs from the first event to the
+// settled/rejected event; timeout acceptance is a settled verdict with
+// source = timeout.
+func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Time) (TaskStats, error) {
+	var s TaskStats
+	var median *float64
+	err := q.QueryRow(ctx, `
+		SELECT
+		  COUNT(*) FILTER (WHERE state = 'settled'),
+		  COUNT(*) FILTER (WHERE state = 'rejected'),
+		  COUNT(*) FILTER (WHERE state = 'failed'),
+		  COUNT(*) FILTER (WHERE state = 'settled' AND verdict->>'source' = 'timeout'),
+		  COUNT(*),
+		  percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds)
+		FROM (
+		  SELECT sub.state, sub.verdict,
+		         EXTRACT(EPOCH FROM (
+		           (SELECT e.at FROM tb_task_submission_event e
+		             WHERE e.submission_id = sub.submission_id
+		               AND e.to_state IN ('settled', 'rejected')
+		             ORDER BY e.seq DESC LIMIT 1)
+		           -
+		           (SELECT e.at FROM tb_task_submission_event e
+		             WHERE e.submission_id = sub.submission_id
+		             ORDER BY e.seq LIMIT 1)
+		         ))::double precision AS seconds,
+		         (SELECT e.at FROM tb_task_submission_event e
+		           WHERE e.submission_id = sub.submission_id
+		           ORDER BY e.seq DESC LIMIT 1) AS terminal_at
+		  FROM tb_task_submission sub
+		  WHERE sub.task_id = $1 AND sub.state IN ('settled', 'rejected', 'failed')
+		) t
+		WHERE terminal_at IS NOT NULL AND terminal_at >= $2`,
+		taskID, since).
+		Scan(&s.Settled, &s.Rejected, &s.Failed, &s.TimeoutAccepted, &s.TerminalTotal, &median)
+	if err != nil {
+		return TaskStats{}, fmt.Errorf("task stats: %w", err)
+	}
+	s.MedianVerdictSeconds = median
+	return s, nil
+}
+
+// ListOpenTasksForAgent returns open tasks the agent does NOT own,
+// newest open first (the current version's creation time is the open
+// time). Slot and limit filtering belong to the caller.
+func ListOpenTasksForAgent(ctx context.Context, q pg.Querier, agentID int64, limit int) ([]TaskRow, error) {
+	rows, err := q.Query(ctx, taskSelect+`
+		WHERE status = 'open' AND publisher_id <> $1
+		ORDER BY (SELECT v.created_at FROM tb_task_version v
+		           WHERE v.task_id = tb_task.id AND v.version = tb_task.version) DESC NULLS LAST,
+		         id DESC
+		LIMIT $2`, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TaskRow
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
+// ListAgentSubmissions returns one agent's submissions newest first,
+// optionally narrowed to one task.
+func ListAgentSubmissions(ctx context.Context, q pg.Querier, agentID int64, taskID *int64, limit, offset int) ([]SubmissionRow, error) {
+	sql := submissionSelect + ` WHERE agent_id = $1`
+	args := []any{agentID}
+	if taskID != nil {
+		sql += ` AND task_id = $2`
+		args = append(args, *taskID)
+	}
+	sql += ` ORDER BY created_at DESC, submission_id DESC LIMIT $` + fmt.Sprint(len(args)+1)
+	args = append(args, limit)
+	sql += ` OFFSET $` + fmt.Sprint(len(args)+1)
+	args = append(args, offset)
+	rows, err := q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SubmissionRow
+	for rows.Next() {
+		s, err := scanSubmission(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
+// CountAgentSubmissionsBy totals ListAgentSubmissions without paging.
+func CountAgentSubmissionsBy(ctx context.Context, q pg.Querier, agentID int64, taskID *int64) (int64, error) {
+	sql := `SELECT COUNT(*) FROM tb_task_submission WHERE agent_id = $1`
+	args := []any{agentID}
+	if taskID != nil {
+		sql += ` AND task_id = $2`
+		args = append(args, *taskID)
+	}
+	var n int64
+	if err := q.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // RecentTerminalStates returns the states of the most recent
 // terminal submissions of a task (settled / rejected / failed), newest
 // first — the §7.3 receiver-fault window.
