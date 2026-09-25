@@ -164,7 +164,6 @@ func TestSectionsUseSharedLifecycle(t *testing.T) {
 	for name, forbidden := range map[string][]string{
 		"render-store.js":   {`t('store.loading')`, `t('store.empty')`},
 		"render-credits.js": {`t('credits.loading')`, `t('credits.unavailable')`},
-		"render-tasks.js":   {`t('tasks.empty')`},
 		"render-logs.js":    {`t('logs.empty')`},
 	} {
 		src := ownerAsset(t, name)
@@ -295,7 +294,7 @@ func TestCreditsEmptyMapsToUnavailable(t *testing.T) {
 	if strings.Contains(credBlock, "emptyKey: 'credits.unavailable'") {
 		t.Fatal("unavailable must not be faked through an empty-state text key")
 	}
-	// Store/Tasks/Logs keep plain empty.
+	// Store/Logs keep plain empty.
 	block := func(section string) string {
 		i := strings.Index(initSrc, "runSection('"+section+"'")
 		if i < 0 {
@@ -303,23 +302,21 @@ func TestCreditsEmptyMapsToUnavailable(t *testing.T) {
 		}
 		return initSrc[i : i+400]
 	}
-	storeBlock := block("store")
-	tasksBlock := block("tasks")
-	logsBlock := block("logs")
-	for name, block := range map[string]string{"store": storeBlock, "tasks": tasksBlock, "logs": logsBlock} {
-		if block == "" {
+	for name, section := range map[string]string{"store": "store", "logs": "logs"} {
+		b := block(section)
+		if b == "" {
 			t.Fatalf("%s runSection call not found", name)
 		}
-		if strings.Contains(block, "emptyState") {
+		if strings.Contains(b, "emptyState") {
 			t.Fatalf("%s success-empty must stay plain empty", name)
 		}
 	}
 }
 
 // LogsReadsUseSharedLifecycle: every page-level logs read (type
-// change, task filter, pagination) goes through the shared
-// runSection/sectionBox lifecycle with persistent Retry; no direct
-// loadLogs+renderLogs path and no toast-only error path remains.
+// change, pagination) goes through the shared runSection/sectionBox
+// lifecycle with persistent Retry; no direct loadLogs+renderLogs path
+// and no toast-only error path remains.
 func TestLogsReadsUseSharedLifecycle(t *testing.T) {
 	logsSrc := ownerAsset(t, "logs.js")
 	if strings.Contains(logsSrc, "showToast") {
@@ -332,8 +329,8 @@ func TestLogsReadsUseSharedLifecycle(t *testing.T) {
 	if !strings.Contains(logsSrc, "runSection('logs'") {
 		t.Fatal("logs.js must route reads through runSection")
 	}
-	// All three handlers use logsReload.
-	for _, handler := range []string{"bindLogsTypeButtons", "bindLogsTaskFilter", "bindLogsPagination"} {
+	// Both remaining handlers use logsReload.
+	for _, handler := range []string{"bindLogsTypeButtons", "bindLogsPagination"} {
 		block := regexp.MustCompile(regexp.QuoteMeta(handler) + `\(\) \{[\s\S]*?\n\}`).FindString(logsSrc)
 		if block == "" {
 			t.Fatalf("logs handler %s not found", handler)
@@ -527,23 +524,21 @@ func TestLogsRollbackOnLoadFailure(t *testing.T) {
 
 // LogsTaskFilterSelectionConsistency: after a filter-change load
 // failure the DOM selection is restored together with state.
-func TestLogsTaskFilterSelectionConsistency(t *testing.T) {
+func TestLogsFailedReadRollsStateBack(t *testing.T) {
 	out := execLifecycleSources(t, `
 ;(async () => {
-    const prev = {type: 'task', page: 1, taskCode: ''};
-    state.logs.taskCode = 'TASK-X'; // user picked a filter
-    qs('#logTaskFilter').value = 'TASK-X';
+    const prev = {type: 'credits', page: 1};
+    state.logs.type = 'agent';
+    state.logs.page = 3;
     failNext = true;
     await logsReload(prev);
-    console.log('STATE_CODE=' + (state.logs.taskCode === '' ? 'restored' : 'stale'));
-    console.log('DOM_CODE=' + (qs('#logTaskFilter').value === '' ? 'restored' : 'stale'));
-    console.log('CONSISTENT=' + (state.logs.taskCode === qs('#logTaskFilter').value));
+    console.log('TYPE=' + (state.logs.type === 'credits' ? 'restored' : 'stale'));
+    console.log('PAGE=' + (state.logs.page === 1 ? 'restored' : 'stale'));
 })().catch(e => { console.error('HARNESS_FAIL', e); process.exit(1); });
 `)
 	for _, want := range []string{
-		"STATE_CODE=restored",
-		"DOM_CODE=restored",
-		"CONSISTENT=true",
+		"TYPE=restored",
+		"PAGE=restored",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in harness output, got:\n%s", want, out)

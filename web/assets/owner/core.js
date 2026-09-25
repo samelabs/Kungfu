@@ -17,16 +17,12 @@ const state = {
         buying: null,
         lastPayment: null
     },
-    tasks: [],
-    selectedTask: null,
     logs: {
         type: 'credits',
         page: 1,
         pageSize: 20,
         totalPages: 1,
         total: 0,
-        taskCode: '',
-        tasks: [],
         items: [],
         balance: 0
     }
@@ -60,11 +56,6 @@ function humanStatus(value) {
     const key = `status.${String(value || '').toLowerCase()}`;
     const translated = t(key);
     return translated === key ? String(value || '') : translated;
-}
-function humanTaskStatus(value) {
-    const key = `tasks.status_${String(value || '').toLowerCase()}`;
-    const translated = t(key);
-    return translated === key ? humanStatus(value) : translated;
 }
 function humanLogAction(value) {
     const raw = String(value || '');

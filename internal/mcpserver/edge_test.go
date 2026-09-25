@@ -131,7 +131,7 @@ func TestEdgeKeepsClientSuppliedStrictness(t *testing.T) {
 }
 
 func TestEdgeReencodingPreservesIntegers(t *testing.T) {
-	in := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_publish","arguments":{"budget":9007199254740993,"price":1}}}`
+	in := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"memory_list","arguments":{"limit":9007199254740993}}}`
 	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(in))
 	out, err := normalizeRequest(req)
 	if err != nil {
@@ -140,14 +140,14 @@ func TestEdgeReencodingPreservesIntegers(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(out.Body)
 	got := buf.String()
-	if !strings.Contains(got, `"budget":9007199254740993`) {
+	if !strings.Contains(got, `"limit":9007199254740993`) {
 		t.Fatalf("integer changed by re-encoding: %s", got)
 	}
 	if !strings.Contains(got, `"io.modelcontextprotocol/protocolVersion":"2026-07-28"`) {
 		t.Fatalf("_meta not filled: %s", got)
 	}
 	h := out.Header
-	if h.Get("Mcp-Method") != "tools/call" || h.Get("Mcp-Name") != "work_publish" ||
+	if h.Get("Mcp-Method") != "tools/call" || h.Get("Mcp-Name") != "memory_list" ||
 		h.Get("Mcp-Protocol-Version") != ProtocolVersion || h.Get("Content-Type") != "application/json" {
 		t.Fatalf("headers not derived: %v", h)
 	}

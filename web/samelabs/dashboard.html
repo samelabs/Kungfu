@@ -5,7 +5,7 @@
 {{end}}
 {{if .Can "tasks.read"}}
   {{with $c := .Data.Counts}}
-  <a class="sl-stat" href="/samelabs/tasks?status=open"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksPending}} pending · {{num $c.TasksClosed}} closed</small></a>
+  <div class="sl-stat"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksClosed}} closed</small></div>
   <div class="sl-stat"><span>Completed (7 days)</span><b>{{num $c.SubmissionsSettled7d}}</b><small>{{num $c.SubmissionsInFlight}} in delivery · {{num $c.SubmissionsRejected7d}} rejected</small></div>
   {{end}}
 {{end}}
@@ -21,16 +21,6 @@
 </div>
 
 <div class="sl-grid two">
-{{if .Can "tasks.read"}}
-  <section class="sl-card">
-    <div class="sl-card-head"><h2>Latest tasks</h2><a href="/samelabs/tasks">All tasks →</a></div>
-    {{if .Data.RecentTasks}}
-    <table class="sl-table"><tbody>
-    {{range .Data.RecentTasks}}<tr><td><a href="/samelabs/tasks/{{.Code}}">{{trunc .Title 48}}</a><div class="sl-muted">@{{.OwnerName}} · {{time .CreatedAt}}</div></td><td class="r">{{template "badge" .Status}}</td></tr>{{end}}
-    </tbody></table>
-    {{else}}{{template "empty" "No tasks yet."}}{{end}}
-  </section>
-{{end}}
 {{if .Can "store.redemptions.read"}}
   <section class="sl-card">
     <div class="sl-card-head"><h2>Waiting for review</h2><a href="/samelabs/store/redemptions?status=pending_review">All redemptions →</a></div>

@@ -94,32 +94,6 @@ func jsonNum(t *testing.T, s string) interface{} {
 	return m["n"]
 }
 
-// HTTP end-to-end: a canonical integer STRING for budget is accepted
-// exactly; an integral-decimal string is rejected without mutation.
-func TestOwnerTaskBudgetStringExact(t *testing.T) {
-	e := newEconEnv(t, 5000)
-	rec, _ := e.ownerPOST(t, "/api/owner/tasks",
-		`{"title":"S","requirements":"r","postapi":"https://example.com/h","budget":"1500","price":10,"open_now":false}`)
-	if rec.Code != 200 {
-		t.Fatalf("canonical integer string budget rejected: %d %s", rec.Code, rec.Body.String())
-	}
-	var dbBudget int64
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT budget FROM tb_tasks WHERE bot_id=$1 ORDER BY id DESC LIMIT 1`, e.botID).
-		Scan(&dbBudget); err != nil || dbBudget != 1500 {
-		t.Fatalf("db budget = %d (err %v), want 1500", dbBudget, err)
-	}
-	before := e.countTasks(t)
-	rec, _ = e.ownerPOST(t, "/api/owner/tasks",
-		`{"title":"S","requirements":"r","postapi":"https://example.com/h","budget":"1500.0","price":10,"open_now":false}`)
-	if rec.Code == 200 {
-		t.Fatal("integral-decimal string accepted — must be rejected (never float-converted)")
-	}
-	if after := e.countTasks(t); after != before {
-		t.Fatalf("mutation on rejected string budget: %d -> %d", before, after)
-	}
-}
-
 // ---- 3. structural ban on float in production Credit parsers ------------
 
 func TestCreditParsersContainNoFloatPath(t *testing.T) {

@@ -34,14 +34,6 @@
   {{end}}
   </aside>
 </div>
-
-{{if .Can "tasks.read"}}
-<section class="sl-card flush">
-  <div class="sl-card-head pad"><h2>Published tasks</h2><a href="/samelabs/tasks?bot_id={{$a.ID}}">All →</a></div>
-  {{if .Data.Tasks}}<table class="sl-table"><tbody>{{range .Data.Tasks}}<tr><td><a href="/samelabs/tasks/{{.Code}}">{{trunc .Title 60}}</a></td><td class="r">{{num .Budget}} left</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}</tbody></table>
-  {{else}}{{template "empty" "No tasks."}}{{end}}
-</section>
-{{end}}
 {{if .Can "memories.read"}}
 <section class="sl-card flush">
   <div class="sl-card-head pad"><h2>Memories</h2><a href="/samelabs/memories?bot_id={{$a.ID}}&amp;status=all">All →</a></div>

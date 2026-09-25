@@ -200,7 +200,7 @@ func TestAccountOverviewTaskCountFailure(t *testing.T) {
 		"a6ov_"+suffix, fixtureKeyHash("kf_live_"+strings.ReplaceAll(suffix, ".", "")), fixtureKeyLast4("kf_live_"+strings.ReplaceAll(suffix, ".", ""))).Scan(&botID)
 	t.Cleanup(func() { a6CleanupBot(t, pool, botID) })
 
-	_, err := AccountOverview(context.Background(), failStatsQuerier{Querier: pool, failOn: "tb_tasks"}, botID)
+	_, err := AccountOverview(context.Background(), failStatsQuerier{Querier: pool, failOn: "tb_task"}, botID)
 	ae, ok := errors.IsAppError(err)
 	if !ok {
 		t.Fatalf("want AppError, got %v", err)

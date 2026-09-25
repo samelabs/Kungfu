@@ -33,7 +33,7 @@ func TestCreditsPageRendersRealMechanisms(t *testing.T) {
 	}
 
 	// Live entry points.
-	for _, want := range []string{"/owner/store", "/owner/tasks", "/owner/logs"} {
+	for _, want := range []string{"/owner/store", "/owner/logs"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("entry point %s missing", want)
 		}

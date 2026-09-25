@@ -33,7 +33,7 @@ func TestOwnerUINoticeCSSAuthorityRemoved(t *testing.T) {
 func TestOwnerUINoticeContainersRemovedFromTemplates(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
-	for _, path := range []string{"/owner", "/owner/tasks", "/owner/logs", "/owner/credits", "/owner/store", "/owner/key", "/owner/account", "/owner/login"} {
+	for _, path := range []string{"/owner", "/owner/logs", "/owner/credits", "/owner/store", "/owner/key", "/owner/account", "/owner/login"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		router.ServeHTTP(rec, req)
@@ -137,14 +137,6 @@ func TestOwnerUINoBalanceFormatPolicy(t *testing.T) {
 			t.Fatalf("%s still uses formatCredits", f)
 		}
 	}
-	// selectTask (read/navigation) must not produce a success toast.
-	rt, err := os.ReadFile(filepath.Join(jsDir, "render-tasks.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(rt), "t('tasks.created')") {
-		t.Fatal("tasks.created key must not be referenced")
-	}
 }
 
 // C1-6b: no historical .notice containers in DYNAMIC Owner JS markup,
@@ -164,35 +156,6 @@ func TestOwnerUINoNoticeInDynamicOwnerJSMarkup(t *testing.T) {
 		}
 		if strings.Contains(string(src), `class="notice`) || strings.Contains(string(src), `class=\'notice`) {
 			t.Fatalf("%s still generates class=\"notice\" markup", f)
-		}
-	}
-}
-
-// C1-7: the task modal renders translated text, never raw translation
-// keys.
-func TestOwnerUITaskModalRendersTranslatedText(t *testing.T) {
-	s := storeTestServer(t)
-	router := s.buildRouter()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/owner/tasks", nil)
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	body := rec.Body.String()
-	// The JS source embedded in the page must not carry owner.-scoped
-	// task_new keys (the production i18n regression).
-	if strings.Contains(body, "t('owner.task_new") || strings.Contains(body, `t("owner.task_new`) {
-		t.Fatal("task modal JS uses out-of-scope owner.task_new keys")
-	}
-	// The scope's task_new keys must exist in the embedded i18n payload
-	// delivered to the client.
-	if !strings.Contains(body, `"task_new"`) {
-		t.Fatal("task_new i18n scope missing from OWNER_I18N payload")
-	}
-	for _, raw := range []string{">owner.task_new.heading<", ">OWNER.TASK_NEW.TITLE<"} {
-		if strings.Contains(body, raw) {
-			t.Fatalf("raw translation key leaked into page: %s", raw)
 		}
 	}
 }

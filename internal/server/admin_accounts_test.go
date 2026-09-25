@@ -162,21 +162,21 @@ func TestAccountsAdminAccountDetailAggregatesDistinct(t *testing.T) {
 	p := newAccountProbe(t, e)
 
 	if _, err := e.s.Pool.Exec(context.Background(), `
-		INSERT INTO tb_tasks (code, bot_id, title, requirements, postapi, budget, price, status)
-		VALUES ('t01100000001', $1, 'detail probe task', 'x', 'https://example.com', 100, 0, 'open')`, p.id); err != nil {
+		INSERT INTO tb_task (code, publisher_id, status, budget_locked)
+		VALUES ('t01100000001', $1, 'open', 100)`, p.id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = e.s.Pool.Exec(context.Background(), `DELETE FROM tb_tasks WHERE bot_id=$1`, p.id)
+		_, _ = e.s.Pool.Exec(context.Background(), `DELETE FROM tb_task WHERE publisher_id=$1`, p.id)
 	})
 	if _, err := e.s.Pool.Exec(context.Background(), `
-		INSERT INTO tb_task_submissions (code, task_id, task_code, bot_id, kind, client_request_key, payload_hash, postapi_snapshot, price_snapshot, reserved_amount, state)
-		VALUES ('s01100000001', (SELECT id FROM tb_tasks WHERE bot_id=$1 ORDER BY id DESC LIMIT 1), 't01100000001', $1, 'agent', 'r01100000001', '\x00', 'https://example.com', 1, 1, 'rejected')`, p.id); err != nil {
+		INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
+		VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), 1, $1, 'r01100000001', '\x00', 1, 'rejected')`, p.id); err != nil {
 		t.Fatalf("seed submission: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = e.s.Pool.Exec(context.Background(),
-			`DELETE FROM tb_task_submissions WHERE bot_id=$1`, p.id)
+			`DELETE FROM tb_task_submission WHERE agent_id=$1`, p.id)
 	})
 
 	rec := e.do(t, "GET", fmt.Sprintf("/api/samelabs/accounts/%d", p.id), "", false)

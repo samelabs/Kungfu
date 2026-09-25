@@ -26,11 +26,6 @@ func (s *Server) registerSamelabs(r chi.Router) {
 	r.Post(slBase+"/account/password", s.slChangePassword)
 
 	// operations
-	r.Get(slBase+"/tasks", s.slGet("tasks", "Tasks", "tasks", s.slTasks))
-	r.Get(slBase+"/tasks/{code}", s.slGet("tasks", "Task", "task", s.slTask))
-	r.Post(slBase+"/tasks/{code}/close", s.slPost(s.slTaskClose))
-	r.Post(slBase+"/tasks/{code}/pin", s.slPost(s.slTaskPin(true)))
-	r.Post(slBase+"/tasks/{code}/unpin", s.slPost(s.slTaskPin(false)))
 
 	r.Get(slBase+"/memories", s.slGet("memories", "Memories", "memories", s.slMemories))
 	r.Get(slBase+"/memories/{code}", s.slGet("memories", "Memory", "memory", s.slMemory))
@@ -172,10 +167,9 @@ func (s *Server) slChangePassword(w http.ResponseWriter, r *http.Request) {
 // -- dashboard --
 
 type slDashboardData struct {
-	Counts      *repository.AdminDashboardCounts
-	Finance     *admin.FinanceSummary
-	Pending     []model.Redemption
-	RecentTasks []repository.AdminTaskRow
+	Counts  *repository.AdminDashboardCounts
+	Finance *admin.FinanceSummary
+	Pending []model.Redemption
 }
 
 func (s *Server) slDashboard(r *http.Request, p *admin.Principal) (interface{}, error) {
@@ -211,54 +205,15 @@ func (s *Server) slDashboard(r *http.Request, p *admin.Principal) (interface{}, 
 			d.Pending = pd
 		}
 	}
-	if p.HasPermission("tasks.read") {
-		if rt, _, err := admin.ListTasks(ctx, s.Pool, p, repository.AdminTaskFilter{Page: 1, PageSize: 6}); err != nil {
-			return nil, err
-		} else {
-			d.RecentTasks = rt
-		}
-	}
 	return d, nil
 }
 
-// -- tasks --
-
+// slList is the shared paginated list shape for samelabs pages.
 type slList[T any] struct {
 	Items []T
 	Total int64
 	Page  int
 	Size  int
-}
-
-func (s *Server) slTasks(r *http.Request, p *admin.Principal) (interface{}, error) {
-	q := r.URL.Query()
-	page := slPage(q)
-	items, total, err := admin.ListTasks(r.Context(), s.Pool, p, repository.AdminTaskFilter{
-		Status: q.Get("status"), Q: q.Get("q"), BotID: slInt64(q.Get("bot_id")), Pinned: q.Get("pinned") == "1",
-		Page: page, PageSize: slPageSize,
-	})
-	return slList[repository.AdminTaskRow]{Items: items, Total: total, Page: page, Size: slPageSize}, err
-}
-
-func (s *Server) slTask(r *http.Request, p *admin.Principal) (interface{}, error) {
-	return admin.GetTask(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
-}
-
-func (s *Server) slTaskClose(r *http.Request, p *admin.Principal) (string, string, error) {
-	code := chi.URLParam(r, "code")
-	return slBase + "/tasks/" + url.PathEscape(code), "Task closed. The owner sees your reason.",
-		admin.CloseTask(r.Context(), s.Pool, p, code, r.PostFormValue("reason"))
-}
-
-func (s *Server) slTaskPin(pin bool) slAction {
-	return func(r *http.Request, p *admin.Principal) (string, string, error) {
-		code := chi.URLParam(r, "code")
-		msg := "Task unpinned."
-		if pin {
-			msg = "Task pinned to the top of the homepage board."
-		}
-		return slBase + "/tasks/" + url.PathEscape(code), msg, admin.SetTaskPinned(r.Context(), s.Pool, p, code, pin)
-	}
 }
 
 // -- memories --
@@ -303,7 +258,6 @@ func (s *Server) slAccounts(r *http.Request, p *admin.Principal) (interface{}, e
 
 type slAccountData struct {
 	Account  *admin.AccountDetailView
-	Tasks    []repository.AdminTaskRow
 	Memories []repository.AdminMemoryRow
 	Ledger   []admin.FinanceLedgerEntry
 	Payments []admin.FinancePayment
@@ -322,11 +276,6 @@ func (s *Server) slAccount(r *http.Request, p *admin.Principal) (interface{}, er
 		return nil, notFound("Account")
 	}
 	d := slAccountData{Account: a}
-	if p.HasPermission("tasks.read") {
-		if d.Tasks, _, err = admin.ListTasks(ctx, s.Pool, p, repository.AdminTaskFilter{BotID: id, Page: 1, PageSize: 10}); err != nil {
-			return nil, err
-		}
-	}
 	if p.HasPermission("memories.read") {
 		if d.Memories, _, err = admin.ListMemories(ctx, s.Pool, p, repository.AdminMemoryFilter{BotID: id, Status: "all", Page: 1, PageSize: 10}); err != nil {
 			return nil, err

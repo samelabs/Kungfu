@@ -87,13 +87,23 @@ func ownerOverviewWire(result map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// ownerTasksWire maps the task-list/task-get service result (tasks
-// array + task object shapes) to the browser contract.
-func ownerTasksWire(result map[string]interface{}) map[string]interface{} {
-	return wireNestedTaskMap(result)
+// isEconomicKey reports whether a JSON key carries a Credit (or fiat
+// minor-unit) integer in Owner/Admin browser payloads. Keys not listed
+// here are ordinary integers and stay numeric.
+func isEconomicKey(k string) bool {
+	switch k {
+	case "budget", "price", "amount", "balance_after", "balance",
+		"reward", "credits", "credits_price", "credits_cost",
+		"amount_minor", "transaction_amount_minor", "amount_paid_minor",
+		"refunded_amount_minor":
+		return true
+	}
+	return false
 }
 
-func wireNestedTaskMap(m map[string]interface{}) map[string]interface{} {
+// wireNestedEconMap recursively maps a service result: nested maps and
+// item lists pass through, and economic-int keys stringify via econString.
+func wireNestedEconMap(m map[string]interface{}) map[string]interface{} {
 	if m == nil {
 		return nil
 	}
@@ -101,19 +111,18 @@ func wireNestedTaskMap(m map[string]interface{}) map[string]interface{} {
 	for k, v := range m {
 		switch t := v.(type) {
 		case map[string]interface{}:
-			out[k] = wireNestedTaskMap(t)
+			out[k] = wireNestedEconMap(t)
 		case []map[string]interface{}:
-			// typed service slice (ListTasks tasks)
 			items := make([]interface{}, 0, len(t))
 			for i := range t {
-				items = append(items, wireNestedTaskMap(t[i]))
+				items = append(items, wireNestedEconMap(t[i]))
 			}
 			out[k] = items
 		case []interface{}:
 			items := make([]interface{}, 0, len(t))
 			for _, it := range t {
 				if im, ok := it.(map[string]interface{}); ok {
-					items = append(items, wireNestedTaskMap(im))
+					items = append(items, wireNestedEconMap(im))
 				} else {
 					items = append(items, it)
 				}
@@ -132,20 +141,6 @@ func wireNestedTaskMap(m map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// isEconomicKey reports whether a JSON key carries a Credit (or fiat
-// minor-unit) integer in Owner/Admin browser payloads. Keys not listed
-// here are ordinary integers and stay numeric.
-func isEconomicKey(k string) bool {
-	switch k {
-	case "budget", "price", "amount", "balance_after", "balance",
-		"reward", "credits", "credits_price", "credits_cost",
-		"amount_minor", "transaction_amount_minor", "amount_paid_minor",
-		"refunded_amount_minor":
-		return true
-	}
-	return false
-}
-
 // ownerLogsWire maps the owner-logs service result: stringify the
 // per-item economic integers and the balance summary.
 func ownerLogsWire(result map[string]interface{}) map[string]interface{} {
@@ -158,14 +153,14 @@ func ownerLogsWire(result map[string]interface{}) map[string]interface{} {
 		case []map[string]interface{}:
 			items := make([]interface{}, 0, len(t))
 			for i := range t {
-				items = append(items, wireNestedTaskMap(t[i]))
+				items = append(items, wireNestedEconMap(t[i]))
 			}
 			out[k] = items
 		case []interface{}:
 			items := make([]interface{}, 0, len(t))
 			for _, it := range t {
 				if im, ok := it.(map[string]interface{}); ok {
-					items = append(items, wireNestedTaskMap(im))
+					items = append(items, wireNestedEconMap(im))
 				} else {
 					items = append(items, it)
 				}
