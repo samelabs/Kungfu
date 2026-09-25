@@ -388,6 +388,120 @@ func ListExpiredActiveClaims(ctx context.Context, q pg.Querier, now time.Time, l
 	return out, rows.Err()
 }
 
+// LeaseRecoverableSubmissions leases (SKIP LOCKED) up to `limit`
+// submissions the recovery pass owns next, refreshing updated_at to
+// `now` as the lease:
+//   - uncertain not touched for ≥ 30s (redelivery cadence)
+//   - delivering not touched for ≥ 15s (§10.4: delivering ≤ 15 秒)
+func LeaseRecoverableSubmissions(ctx context.Context, q pg.Querier, now time.Time, limit int) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		UPDATE tb_task_submission s
+		SET updated_at = $1
+		WHERE s.submission_id IN (
+			SELECT submission_id FROM tb_task_submission
+			WHERE (state = 'uncertain' AND updated_at <= $1::timestamptz - interval '30 seconds')
+			   OR (state = 'delivering' AND updated_at <= $1::timestamptz - interval '15 seconds')
+			ORDER BY updated_at, submission_id
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING s.submission_id`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("lease recoverable submissions: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// UncertainSince is the time the submission FIRST entered uncertain
+// (§5.4: the 24h unresolved window starts there).
+func UncertainSince(ctx context.Context, q pg.Querier, submissionID int64) (time.Time, error) {
+	var at time.Time
+	err := q.QueryRow(ctx, `
+		SELECT at FROM tb_task_submission_event
+		WHERE submission_id = $1 AND to_state = 'uncertain'
+		ORDER BY seq LIMIT 1`, submissionID).Scan(&at)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return at, nil
+}
+
+// ListOverdueReviews returns under_review submissions whose review
+// window has passed (§5.4 review timeout).
+func ListOverdueReviews(ctx context.Context, q pg.Querier, now time.Time, limit int) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT submission_id FROM tb_task_submission
+		WHERE state = 'under_review' AND review_deadline <= $1
+		ORDER BY review_deadline, submission_id
+		LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list overdue reviews: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// ListTaskSubmissions returns one task's submissions newest first,
+// optionally filtered by state.
+func ListTaskSubmissions(ctx context.Context, q pg.Querier, taskID int64, state string, limit, offset int) ([]SubmissionRow, error) {
+	sql := submissionSelect + ` WHERE task_id = $1`
+	args := []any{taskID}
+	if state != "" {
+		sql += ` AND state = $` + fmt.Sprint(len(args)+1)
+		args = append(args, state)
+	}
+	sql += ` ORDER BY created_at DESC, submission_id DESC LIMIT $` + fmt.Sprint(len(args)+1)
+	args = append(args, limit)
+	sql += ` OFFSET $` + fmt.Sprint(len(args)+1)
+	args = append(args, offset)
+	rows, err := q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SubmissionRow
+	for rows.Next() {
+		s, err := scanSubmission(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
+// CountTaskSubmissions totals ListTaskSubmissions without paging.
+func CountTaskSubmissions(ctx context.Context, q pg.Querier, taskID int64, state string) (int64, error) {
+	sql := `SELECT COUNT(*) FROM tb_task_submission WHERE task_id = $1`
+	args := []any{taskID}
+	if state != "" {
+		sql += ` AND state = $2`
+		args = append(args, state)
+	}
+	var n int64
+	if err := q.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // RecentTerminalStates returns the states of the most recent
 // terminal submissions of a task (settled / rejected / failed), newest
 // first — the §7.3 receiver-fault window.

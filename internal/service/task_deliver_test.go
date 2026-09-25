@@ -34,17 +34,21 @@ type progReceiver struct {
 	respBody string
 	sleep    time.Duration
 	url      string
+	keyHits  map[string]int // Idempotency-Key -> request count
 }
 
 func startProgReceiver(t *testing.T) *progReceiver {
 	t.Helper()
-	r := &progReceiver{status: http.StatusOK, respBody: `{"ok":true}`}
+	r := &progReceiver{status: http.StatusOK, respBody: `{"ok":true}`, keyHits: map[string]int{}}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
 		r.mu.Lock()
 		s, rb, sleep := r.status, r.respBody, r.sleep
 		r.headers = req.Header.Clone()
 		r.body = body
+		if k := req.Header.Get("Idempotency-Key"); k != "" {
+			r.keyHits[k]++
+		}
 		r.mu.Unlock()
 		if sleep > 0 {
 			time.Sleep(sleep)
@@ -70,6 +74,13 @@ func (r *progReceiver) last() (http.Header, []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.headers.Clone(), r.body
+}
+
+// hitsFor is how many requests carried this Idempotency-Key.
+func (r *progReceiver) hitsFor(key string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.keyHits[key]
 }
 
 // deliverSyncTask opens a SYNC task whose receiver is the programmable

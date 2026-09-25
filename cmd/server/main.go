@@ -48,7 +48,7 @@ func main() {
 	// on backgroundErrors, and routed through ServeLifecycle's single
 	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
-	backgroundErrors := make(chan error, 2) // one slot per background worker
+	backgroundErrors := make(chan error, 4) // one slot per background worker
 	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
 
 	// Claim expiry (spec §5.2): expired active claims are marked
@@ -60,6 +60,29 @@ func main() {
 		expired, err := service.ExpireClaims(context.Background(), pool, time.Now(), 100)
 		if err != nil {
 			log.Printf("[kungfu.md] claim expiry pass failed (expired=%d): %v", expired, err)
+		}
+	})
+
+	// Submission recovery (§5.4): stuck deliverings become uncertain,
+	// uncertains are redelivered every 30s and resolve within 24h.
+	// agent_ref derives under the session secret (same key as the
+	// synchronous path will use; WO-7 wires the protocol layer).
+	agentRefKey := []byte(cfg.SessionSecret)
+	recoveryStop := make(chan struct{})
+	go runPeriodic("submission_recovery", recoveryStop, backgroundErrors, 30*time.Second, func() {
+		n, err := service.RecoverSubmissions(context.Background(), pool, agentRefKey, time.Now(), 50)
+		if err != nil {
+			log.Printf("[kungfu.md] submission recovery pass failed (handled=%d): %v", n, err)
+		}
+	})
+
+	// Review-window timeouts (§5.4): overdue reviews are accepted and
+	// settled with source = timeout.
+	reviewStop := make(chan struct{})
+	go runPeriodic("review_timeout", reviewStop, backgroundErrors, 60*time.Second, func() {
+		n, err := service.ExpireReviews(context.Background(), pool, time.Now(), 100)
+		if err != nil {
+			log.Printf("[kungfu.md] review timeout pass failed (expired=%d): %v", n, err)
 		}
 	})
 
@@ -88,7 +111,7 @@ func main() {
 		httpServer:       httpServer,
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop},
+		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, reviewStop},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})
