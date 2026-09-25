@@ -58,12 +58,12 @@ func migTestPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-// creditColumns returns the (table, column, data_type) triples for every
-// Credit-valued column of the target model.
+// creditColumns returns the (table, column) pairs for every
+// Credit-valued column of the live model. (The v1 tb_tasks columns
+// are gone with migration 015; the Task 1.0 tables are created
+// BIGINT natively.)
 var creditColumns = [][2]string{
 	{"tb_bots", "balance"},
-	{"tb_tasks", "budget"},
-	{"tb_tasks", "price"},
 	{"tb_transactions", "amount"},
 	{"tb_transactions", "balance_after"},
 	{"tb_payments", "credits"},
@@ -72,7 +72,7 @@ var creditColumns = [][2]string{
 }
 
 // TestFreshChainCreatesBigintCreditColumns: after the full chain
-// (001→009) every Credits column is BIGINT — never NUMERIC.
+// every Credits column is BIGINT — never NUMERIC.
 func TestFreshChainCreatesBigintCreditColumns(t *testing.T) {
 	pool := migTestPool(t)
 
@@ -179,7 +179,6 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 
 	for _, stmt := range []string{
 		`ALTER TABLE tb_bots ALTER COLUMN balance TYPE numeric(20,4)`,
-		`ALTER TABLE tb_tasks ALTER COLUMN budget TYPE numeric(20,4), ALTER COLUMN price TYPE numeric(20,4)`,
 		`ALTER TABLE tb_transactions ALTER COLUMN amount TYPE numeric(20,4), ALTER COLUMN balance_after TYPE numeric(20,4)`,
 		`ALTER TABLE tb_payments ALTER COLUMN credits TYPE numeric(20,4)`,
 		`ALTER TABLE tb_store_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
@@ -197,8 +196,6 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 		INSERT INTO tb_bots (bot_name, password_hash, api_key_hash, api_key_last4, balance)
 		VALUES ('m1','x',$1,'ab12',66.0000),
 		       ('m2','x',$2,'cd34',-40.0000);
-		INSERT INTO tb_tasks (code, bot_id, title, requirements, budget, price)
-		SELECT 't00000000001', id, 'T', 'r', 2000.0000, 100.0000 FROM tb_bots WHERE bot_name='m1';
 		INSERT INTO tb_transactions (bot_id, type, amount, balance_after)
 		SELECT id,'grant_signup',66.0000,66.0000 FROM tb_bots WHERE bot_name='m1';
 		INSERT INTO tb_transactions (bot_id, type, amount, balance_after)
@@ -272,10 +269,11 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 // TestMigration009ExplicitRollbackOnLaterFailure proves the shipped 009
 // SQL owns its transaction: a deterministic failure injected at the
 // FINAL ALTER statement (tb_redemptions.credits_cost) — after earlier
-// 009 ALTERs (tb_bots.balance, tb_tasks, tb_transactions, tb_payments,
+// 009 ALTERs (tb_bots.balance, tb_transactions, tb_payments,
 // tb_store_products) have already executed successfully inside the same
-// transaction — rolls back the ENTIRE migration: all 8 Credits columns
-// stay NUMERIC(20,4), seeded data unchanged. This exercises explicit
+// transaction — rolls back the ENTIRE migration: all Credits columns
+// stay NUMERIC(20,4), seeded data unchanged. (The v1 tb_tasks columns
+// no longer exist after 015 and are no longer part of the simulation.) This exercises explicit
 // transaction rollback, NOT the fractional preflight (which fails
 // before any ALTER). The event trigger inspects
 // pg_event_trigger_ddl_commands() and raises ONLY when the altered
@@ -322,7 +320,6 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 	}
 	for _, stmt := range []string{
 		`ALTER TABLE tb_bots ALTER COLUMN balance TYPE numeric(20,4)`,
-		`ALTER TABLE tb_tasks ALTER COLUMN budget TYPE numeric(20,4), ALTER COLUMN price TYPE numeric(20,4)`,
 		`ALTER TABLE tb_transactions ALTER COLUMN amount TYPE numeric(20,4), ALTER COLUMN balance_after TYPE numeric(20,4)`,
 		`ALTER TABLE tb_payments ALTER COLUMN credits TYPE numeric(20,4)`,
 		`ALTER TABLE tb_store_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
@@ -346,7 +343,7 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 	// Deterministic failure at the FINAL ALTER in shipped 009: the
 	// event-trigger function raises ONLY when the DDL command's target
 	// object is tb_redemptions (the last affected table in 009). The
-	// earlier ALTER TABLE commands in 009 (tb_bots, tb_tasks,
+	// earlier ALTER TABLE commands in 009 (tb_bots,
 	// tb_transactions, tb_payments, tb_store_products) run to completion
 	// inside the open transaction BEFORE the failure fires.
 	if _, err := db.Exec(ctx, `
@@ -394,7 +391,6 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 	// the transaction.
 	for _, col := range [][2]string{
 		{"tb_bots", "balance"},
-		{"tb_tasks", "budget"}, {"tb_tasks", "price"},
 		{"tb_transactions", "amount"}, {"tb_transactions", "balance_after"},
 		{"tb_payments", "credits"},
 		{"tb_store_products", "credits_price"},

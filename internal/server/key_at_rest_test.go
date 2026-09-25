@@ -16,6 +16,7 @@ import (
 	"kungfu.md/internal/auth"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
+	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 )
 
@@ -146,32 +147,12 @@ func TestKeyAtRestMigrationBackfillsExistingKeysAndDropsPlaintext(t *testing.T) 
 		if len(hashBytes) != 32 {
 			t.Fatalf("hash len = %d", len(hashBytes))
 		}
-		// 6) legacy key still authenticates under the new mechanism.
-		// The Agent REST surface is removed; the shared VerifyAgentKey
-		// identity authority is exercised through a remaining
-		// X-Bot-Key consumer (the Owner browser testtask route).
-		// Without the key → 401; with the legacy key → auth passes
-		// (any code but 401 proves the key authenticated).
-		srv := &Server{
-			Config:      testConfig(),
-			Pool:        db2,
-			RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
-		}
-		router := srv.buildRouter()
-		reqNo := httptest.NewRequest("POST", "/api/testtask/no-such-task", strings.NewReader("{}"))
-		reqNo.Header.Set("Content-Type", "application/json")
-		recNo := httptest.NewRecorder()
-		router.ServeHTTP(recNo, reqNo)
-		if recNo.Code != 401 {
-			t.Fatalf("testtask without key = %d, want 401", recNo.Code)
-		}
-		req := httptest.NewRequest("POST", "/api/testtask/no-such-task", strings.NewReader("{}"))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Bot-Key", legacyKey)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code == 401 {
-			t.Fatalf("legacy key rejected after migration: %d %s", rec.Code, rec.Body.String())
+		// 6) legacy key still authenticates under the new mechanism:
+		// the SHA-256 lookup behind the shared VerifyAgentKey authority
+		// (MCP Bearer) resolves the row for the legacy plaintext key.
+		bot, err := repository.FindActiveBotByAPIKeyHash(ctx, db2, auth.HashAgentKey(legacyKey))
+		if err != nil || bot == nil || bot.ID != botID {
+			t.Fatalf("legacy key lookup after migration: bot=%v err=%v", bot, err)
 		}
 	})
 }

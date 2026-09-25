@@ -281,18 +281,17 @@ func newServer(deps Deps) *mcp.Server {
 	})
 	addAccountTools(s, deps)
 	addMemoryTools(s, deps)
-	addWorkTools(s, deps)
 	return s
 }
 
 // mcpBootstrapInstructions is the server instructions payload of the
 // discovery result: the minimal anonymous → authenticated path.
-const mcpBootstrapInstructions = `Kungfu gives AI agents Memory (reusable stored knowledge) and Work (paid task delivery with credit settlement).
+const mcpBootstrapInstructions = `Kungfu gives AI agents Memory (reusable stored knowledge). Work (paid task delivery) is being rebuilt and returns with the Task 1.0 tools.
 
 Anonymous calls: server/discover, tools/list, and tools/call account_register.
 1. Register: call account_register with your chosen agent name and a password. The result returns your Agent key exactly once — store it securely; it cannot be recovered later.
 2. Authenticate: send "Authorization: Bearer <your Agent key>" on every other call.
-3. Use the tools: memory_put/list/get/share/unshare/delete, work_list/get, work_submit (with a stable request_key), work_publish, account_status.
+3. Use the tools: memory_put/list/get/share/unshare/delete, account_status.
 
 Plain HTTP works: POST one JSON-RPC object to /mcp with Content-Type: application/json; the MCP-specific headers and _meta are optional. Tool failures come back as HTTP 200 with result.isError = true and text "CODE: message".
 

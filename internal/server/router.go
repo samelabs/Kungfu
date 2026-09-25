@@ -118,7 +118,6 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/.well-known/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/kungfu_skill.md", serveStaticFile("kungfu_skill.md", "text/markdown; charset=utf-8", ""))
-	r.Get("/owner_task_guide.md", serveStaticFile("owner_task_guide.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))
 	r.Get("/sw.js", serveStaticFile("sw.js", "application/javascript; charset=utf-8", "no-cache, no-store, must-revalidate"))
 
@@ -166,17 +165,6 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/api/key", s.handleKey)
 	r.Post("/api/change-password", ownerMutation(s.handleChangePassword))
 	r.Post("/api/reset-key", ownerMutation(s.handleResetKey))
-
-	r.Get("/api/owner/tasks", s.handleOwnerTasksList)
-	r.Get("/api/owner/tasks/{code}", s.handleOwnerTaskGet)
-	r.Post("/api/owner/tasks", ownerMutation(s.handleOwnerTaskCreate))
-	r.Post("/api/owner/tasks/{code}/open", ownerMutation(s.handleOwnerTaskOpen))
-	r.Post("/api/owner/tasks/{code}/close", ownerMutation(s.handleOwnerTaskClose))
-	r.Post("/api/owner/tasks/{code}/add-budget", ownerMutation(s.handleOwnerTaskAddBudget))
-	r.Post("/api/owner/tasks/{code}/refund", ownerMutation(s.handleOwnerTaskRefund))
-	r.Post("/api/owner/tasks/{code}/edit", ownerMutation(s.handleOwnerTaskEdit))
-
-	r.Post("/api/testtask/{code}", ownerMutation(s.handleTestTask))
 
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
@@ -268,12 +256,9 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/owner/register", s.handleOwnerPage("register"))
 	r.Get("/owner/account", s.handleOwnerPage("account"))
 	r.Get("/owner/key", s.handleOwnerPage("key"))
-	r.Get("/owner/tasks", s.handleOwnerPage("tasks"))
 	r.Get("/owner/credits", s.handleOwnerPage("owner_credits"))
-	r.Get("/owner/tasks/new", s.handleOwnerPage("task_new"))
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
 	r.Get("/owner/store", s.handleOwnerPage("store"))
-	r.Get("/owner/task-guide", s.handleTaskGuide)
 	r.Get("/terms", s.handleLegalPage("terms"))
 	r.Get("/privacy", s.handleLegalPage("privacy"))
 

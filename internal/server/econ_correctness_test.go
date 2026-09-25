@@ -19,58 +19,6 @@ import (
 
 // ---- 1. UI control-flow guard ------------------------------------------
 
-// TestCreateSubmitValidPathReachesPOST proves bindCreateSubmit's VALID
-// path flows to the requestJson('/api/owner/tasks', POST) call — the
-// old unconditional trailing `return;` made the POST unreachable.
-// Method: extract the bindCreateSubmit function body and verify the
-// control-flow structure (budget guard is a BLOCK that returns, the
-// POST call follows it at the same statement level), plus the request
-// call text and the open_now assignment before it.
-func TestCreateSubmitValidPathReachesPOST(t *testing.T) {
-	src := readOwnerAsset(t, "render-tasks.js")
-	body := extractJSFunc(t, src, "bindCreateSubmit")
-
-	// The request call must exist in this function.
-	postIdx := strings.Index(body, "requestJson('/api/owner/tasks', {method: 'POST'")
-	if postIdx < 0 {
-		t.Fatal("bindCreateSubmit must POST /api/owner/tasks")
-	}
-	// open_now is set before the POST on the valid path.
-	openIdx := strings.Index(body, "data.open_now =")
-	if openIdx < 0 || openIdx > postIdx {
-		t.Fatal("open_now assignment must precede the POST (valid path)")
-	}
-	// The budget guard must be a braced block with its own return —
-	// a single-line `if (...) return toast(); return;` shape is the
-	// regression: the second return fires unconditionally. Lock the
-	// FIXED shape: guard block containing showToast + return, closed
-	// before open_now.
-	guardOpen := strings.Index(body, "if (!/^-?(0|[1-9][0-9]*)$/")
-	if guardOpen < 0 || guardOpen > openIdx {
-		t.Fatal("budget canonical check must precede open_now")
-	}
-	guardClose := strings.Index(body[guardOpen:], "}")
-	if guardClose < 0 || guardOpen+guardClose > openIdx {
-		t.Fatal("budget guard block must close before the valid path continues")
-	}
-	// The regression shape was `return showToast(...); return;` — a
-	// STATEMENT-LEVEL unconditional return right after the budget
-	// guard, before open_now. Error-path `return;` inside braces
-	// (e.g. `if (!json.success) { ...; return; }`) is legitimate.
-	// Assert: no return statement appears BETWEEN the guard block
-	// close and the open_now assignment.
-	between := body[guardOpen+guardClose+1 : openIdx]
-	for _, bad := range []string{"return"} {
-		if strings.Contains(between, bad) {
-			t.Fatalf("statement between budget guard and open_now aborts the valid path: %q", between)
-		}
-	}
-	// Valid path calls requestJson inside try (delivery actually runs).
-	if !strings.Contains(body[openIdx:], "requestJson('/api/owner/tasks'") {
-		t.Fatal("POST not reachable after open_now assignment")
-	}
-}
-
 func readOwnerAsset(t *testing.T, name string) string {
 	t.Helper()
 	return s61Read(t, "web/assets/owner/"+name)

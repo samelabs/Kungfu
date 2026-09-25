@@ -15,7 +15,7 @@ func TestHTMLReferencesFingerprintedAssets(t *testing.T) {
 	s := newAdminTestServer(t)
 	router := s.buildRouter()
 	ref := regexp.MustCompile(`(?:href|src)="(/assets/[^"]+)"`)
-	for _, path := range []string{"/", "/credits", "/owner", "/owner/tasks", "/owner/task-guide", "/terms", "/samelabs/login"} {
+	for _, path := range []string{"/", "/credits", "/owner", "/terms", "/samelabs/login"} {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/120.0")
 		req.Header.Set("Accept", "text/html")

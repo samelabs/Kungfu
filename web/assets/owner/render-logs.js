@@ -6,16 +6,12 @@ function renderLogs() {
     const pageInfo = qs('#logsPageInfo');
     const prevBtn = qs('#logsPrevBtn');
     const nextBtn = qs('#logsNextBtn');
-    const taskFilter = qs('#logTaskFilter');
 
     if (summary) {
         if (state.logs.type === 'credits') {
             summary.textContent = t('logs.balance_summary', {balance: state.logs.balance, total: state.logs.total});
-        } else if (state.logs.type === 'agent') {
-            summary.textContent = t('logs.agent_summary', {total: state.logs.total});
         } else {
-            const filter = state.logs.taskCode ? t('logs.task_filter_suffix', {taskCode: state.logs.taskCode}) : '';
-            summary.textContent = t('logs.task_summary', {total: state.logs.total, filter});
+            summary.textContent = t('logs.agent_summary', {total: state.logs.total});
         }
     }
 
@@ -33,19 +29,6 @@ function renderLogs() {
         const isActive = button.dataset.logType === state.logs.type;
         button.classList.toggle('primary', isActive);
     });
-
-    if (taskFilter) {
-        if (state.logs.type === 'task') {
-            taskFilter.hidden = false;
-            const options = [`<option value="">${escapeHtml(t('logs.all_tasks'))}</option>`].concat(
-                state.logs.tasks.map((task) => `<option value="${escapeHtml(task.code)}">${escapeHtml(task.code)} · ${escapeHtml(task.title)}</option>`)
-            );
-            taskFilter.innerHTML = options.join('');
-            taskFilter.value = state.logs.taskCode;
-        } else {
-            taskFilter.hidden = true;
-        }
-    }
 
     // Loading/empty/error states are owned by the shared section
     // lifecycle (sectionBox). The renderer only paints ready tables;
@@ -105,27 +88,6 @@ function renderLogs() {
         return;
     }
 
-    wrap.innerHTML = `
-        <table class="logs-table">
-            <thead>
-                <tr>
-                    <th>${escapeHtml(t('logs.th_id'))}</th><th>${escapeHtml(t('logs.th_task'))}</th><th>${escapeHtml(t('logs.th_action'))}</th><th>${escapeHtml(t('logs.th_result'))}</th><th>${escapeHtml(t('logs.th_detail'))}</th><th>${escapeHtml(t('logs.th_time'))}</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${state.logs.items.map((row) => `
-                    <tr>
-                        <td>${row.id}</td>
-                        <td>${escapeHtml(row.task_code)}</td>
-                        <td>${escapeHtml(humanLogAction(row.action || '-'))}</td>
-                        <td>${row.success ? escapeHtml(t('logs.ok')) : escapeHtml(t('logs.error', {code: row.error_code || 'UNKNOWN'}))}</td>
-                        <td>${escapeHtml(row.error_message || row.response_body || (row.payload_json ? JSON.stringify(row.payload_json) : '-'))}</td>
-                        <td>${escapeHtml(row.created_at)}</td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
 }
 
 // ledgerTypeLabel turns an internal ledger type into owner-facing text;

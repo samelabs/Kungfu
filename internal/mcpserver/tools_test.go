@@ -126,7 +126,7 @@ func TestMCPToolsEveryNewToolRequiresAuth(t *testing.T) {
 	pool, ts := toolsSetup(t)
 	_ = pool
 	tools := []string{"memory_list", "memory_get", "memory_put", "memory_share",
-		"memory_unshare", "memory_delete", "work_list", "work_get", "work_submit", "work_publish"}
+		"memory_unshare", "memory_delete"}
 	for _, tool := range tools {
 		sc, _ := m2CallTool(t, ts, "", tool, map[string]interface{}{})
 		if sc != 401 {
@@ -316,155 +316,6 @@ func TestMCPToolsMemoryRateLimitsPreserved(t *testing.T) {
 	}
 }
 
-func TestMCPToolsWorkPublishOwnershipAndEconomics(t *testing.T) {
-	pool, ts := toolsSetup(t)
-	_, keyA, botA := m2Bot(t, pool, ts.srv, "pa")
-	_, keyB, botB := m2Bot(t, pool, ts.srv, "pb")
-
-	txCtx := context.Background()
-	balance := func(botID int64) int64 {
-		var b int64
-		pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botID).Scan(&b)
-		return b
-	}
-	lockCount := func(botID int64) int {
-		var n int
-		pool.QueryRow(txCtx,
-			"SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1 AND type='lock_task'", botID).Scan(&n)
-		return n
-	}
-
-	// Test fixture: raise botA's balance above the minimum task budget
-	// (the same direct-seed pattern service tests use; Credits.Record
-	// remains the production authority and is untouched).
-	if _, err := pool.Exec(txCtx,
-		"UPDATE tb_bots SET balance = 2000 WHERE id = $1", botA); err != nil {
-		t.Fatalf("fixture balance: %v", err)
-	}
-	var balA int64
-	pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botA).Scan(&balA)
-	budget := int64(1500)
-
-	// Malicious extra identity fields are rejected at the typed-schema
-	// layer (additionalProperties=false) — they can NEVER influence
-	// ownership because they never reach the tool.
-	sc, body := m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
-		"title": "m2 task", "requirements": "do the thing",
-		"postapi": "https://example.test/hook", "budget": budget, "price": 5,
-		"open_now": true, "bot_id": botB, "owner_id": botB,
-	})
-	if !toolFailed(body) {
-		t.Fatalf("identity-bearing extra fields must be rejected: %d %s", sc, body)
-	}
-	// Clean publish: ownership derives ONLY from the verified credential.
-	sc, body = m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
-		"title": "m2 task", "requirements": "do the thing",
-		"postapi": "https://example.test/hook", "budget": budget, "price": 5,
-		"open_now": true,
-	})
-	if sc != 200 || toolFailed(body) {
-		t.Fatalf("work_publish failed: %s", body)
-	}
-	// task owned by A (the caller), never B
-	var owner int64
-	var taskCode string
-	err := pool.QueryRow(txCtx,
-		"SELECT bot_id, code FROM tb_tasks WHERE title='m2 task' ORDER BY id DESC LIMIT 1").Scan(&owner, &taskCode)
-	if err != nil {
-		t.Fatalf("task row: %v", err)
-	}
-	if owner != botA {
-		t.Fatalf("task owner = %d, want caller %d (bot_id injection worked!)", owner, botA)
-	}
-	// exact lock_task ledger fact: single row with publisher,
-	// amount=-budget, ref_type=task, ref_id=task code
-	if n := lockCount(botA); n != 1 {
-		t.Fatalf("lock_task entries = %d, want 1", n)
-	}
-	var ltBot int64
-	var ltAmount int64
-	var ltRefType *string
-	var ltRefID *string
-	err2 := pool.QueryRow(txCtx,
-		"SELECT bot_id, amount, ref_type, ref_id FROM tb_transactions WHERE bot_id=$1 AND type='lock_task'", botA).
-		Scan(&ltBot, &ltAmount, &ltRefType, &ltRefID)
-	if err2 != nil {
-		t.Fatalf("lock_task row: %v", err2)
-	}
-	if ltBot != botA || ltAmount != -budget || ltRefType == nil || *ltRefType != "task" || ltRefID == nil || *ltRefID != taskCode {
-		t.Fatalf("lock_task fact mismatch: bot=%d amount=%d ref_type=%v ref_id=%v (want bot=%d amount=%d ref=task/%s)",
-			ltBot, ltAmount, ltRefType, ltRefID, botA, -budget, taskCode)
-	}
-	var balA2 int64
-	pool.QueryRow(txCtx, "SELECT balance FROM tb_bots WHERE id=$1", botA).Scan(&balA2)
-	if diff := balA - balA2; diff != budget {
-		t.Fatalf("balance decreased by %d, want %d", diff, budget)
-	}
-	if n := lockCount(botB); n != 0 {
-		t.Fatalf("botB got %d lock_task entries — ownership leaked", n)
-	}
-
-	// work_list shows the open task; work_get returns it without mutation
-	sc, body = m2CallTool(t, ts, keyB, "work_list", map[string]interface{}{})
-	if sc != 200 || !strings.Contains(body, taskCode) {
-		t.Fatalf("work_list missing task: %d %.200s", sc, body)
-	}
-	sc, body = m2CallTool(t, ts, keyB, "work_get", map[string]interface{}{"code": taskCode})
-	if sc != 200 || toolFailed(body) || !strings.Contains(body, "m2 task") {
-		t.Fatalf("work_get: %d %s", sc, extractJSON(body)[:min(400, len(extractJSON(body)))])
-	}
-	// no claim state: task row must have no ownership mutation columns;
-	// the existing schema has none — prove status is unchanged (open).
-	var status string
-	pool.QueryRow(txCtx, "SELECT status FROM tb_tasks WHERE code=$1", taskCode).Scan(&status)
-	if status != "open" {
-		t.Fatalf("work_get mutated task status: %q", status)
-	}
-
-	// insufficient balance: publish fails, no task, no debit
-	bigBudget := balA2*10 + 100
-	before := balance(botA)
-	sc, body = m2CallTool(t, ts, keyA, "work_publish", map[string]interface{}{
-		"title": "m2 broke task", "requirements": "x",
-		"postapi": "https://example.test/hook", "budget": bigBudget, "price": 5,
-		"open_now": true,
-	})
-	if !strings.Contains(body, "INSUFFICIENT_CREDITS") {
-		t.Fatalf("insufficient publish should fail with INSUFFICIENT_CREDITS: %d %.300s", sc, body)
-	}
-	if balance(botA) != before {
-		t.Fatal("failed publish debited balance")
-	}
-	var cnt int
-	pool.QueryRow(txCtx, "SELECT COUNT(*) FROM tb_tasks WHERE title='m2 broke task'").Scan(&cnt)
-	if cnt != 0 {
-		t.Fatal("failed publish created a task row")
-	}
-}
-
-func TestMCPToolsWorkPublishValidationDelegated(t *testing.T) {
-	pool, ts := toolsSetup(t)
-	_, key, _ := m2Bot(t, pool, ts.srv, "pv")
-
-	// non-http(s) postapi rejected by existing service
-	sc, body := m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
-		"title": "bad proto", "requirements": "x",
-		"postapi": "ftp://example.test/hook", "budget": 1, "price": 5, "open_now": true,
-	})
-	if !toolFailed(body) && sc < 400 {
-		t.Fatalf("ftp postapi accepted: %d %s", sc, extractJSON(body)[:min(500, len(extractJSON(body)))])
-	}
-
-	// negative budget: rejected by the existing service validation (out-of-range numeric, not non-finite)
-	sc, body = m2CallTool(t, ts, key, "work_publish", map[string]interface{}{
-		"title": "bad budget", "requirements": "x",
-		"postapi": "https://example.test/hook", "budget": -5, "price": 5, "open_now": true,
-	})
-	if !toolFailed(body) && sc < 400 {
-		t.Fatalf("non-finite budget accepted: %d %.200s", sc, body)
-	}
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -479,9 +330,8 @@ func toolFailed(body string) bool {
 
 const chr34 = string(rune(34))
 
-// R3: schema evidence — work_publish input rejects additional
-// properties and declares no identity fields; memory_put tags are
-// required; Tool outputs are schema-backed (not generic objects).
+// R3: schema evidence — memory_put tags are required; Tool outputs
+// are schema-backed (not generic objects).
 func TestMCPToolsToolSchemaContract(t *testing.T) {
 	pool := m1TestPool(t)
 	h := m1Handler(t, pool, nil)
@@ -531,25 +381,6 @@ func TestMCPToolsToolSchemaContract(t *testing.T) {
 		byName[wire[i].Name] = &wire[i]
 	}
 
-	// work_publish input: no identity fields, additionalProperties=false
-	wp := byName["work_publish"]
-	if wp == nil || wp.InputSchema == nil {
-		t.Fatal("work_publish schema missing")
-	}
-	for _, forbidden := range []string{"bot_id", "owner_id", "credits", "status", "pinned", "opened_at", "closed_at"} {
-		if _, exists := wp.InputSchema.Properties[forbidden]; exists {
-			t.Fatalf("work_publish input declares forbidden property %s", forbidden)
-		}
-	}
-	if ap, ok := wp.InputSchema.AdditionalProperties.(bool); !ok || ap {
-		t.Fatalf("work_publish additionalProperties must be false, got %v", wp.InputSchema.AdditionalProperties)
-	}
-	// postapi description lives in the description transport field
-	papi, _ := wp.InputSchema.Properties["postapi"].(map[string]interface{})
-	if desc, _ := papi["description"].(string); !strings.Contains(desc, "HTTP or HTTPS") {
-		t.Fatalf("postapi description must say HTTP or HTTPS: %v", desc)
-	}
-
 	// memory_put: tags required
 	mp := byName["memory_put"]
 	if mp == nil || mp.InputSchema == nil {
@@ -567,7 +398,7 @@ func TestMCPToolsToolSchemaContract(t *testing.T) {
 
 	// Outputs expose outputSchema (typed DTOs, not generic objects)
 	for _, name := range []string{"memory_list", "memory_get", "memory_put", "memory_share",
-		"memory_unshare", "memory_delete", "work_list", "work_get", "work_submit", "work_publish"} {
+		"memory_unshare", "memory_delete"} {
 		tl := byName[name]
 		if tl == nil {
 			t.Fatalf("tool %s missing", name)
@@ -578,12 +409,6 @@ func TestMCPToolsToolSchemaContract(t *testing.T) {
 	}
 
 	// annotation truthfulness
-	if ws := byName["work_submit"]; ws == nil || ws.Annotations == nil || ws.Annotations.OpenWorldHint == nil || !*ws.Annotations.OpenWorldHint {
-		t.Fatal("work_submit openWorldHint must be true (PostAPI delivery)")
-	}
-	if wp.Annotations == nil || wp.Annotations.OpenWorldHint == nil || *wp.Annotations.OpenWorldHint {
-		t.Fatal("work_publish openWorldHint must be false (publish sends nothing outbound)")
-	}
 	for _, name := range []string{"memory_share", "memory_unshare"} {
 		tl := byName[name]
 		if tl == nil || tl.Annotations == nil || tl.Annotations.IdempotentHint == nil || !*tl.Annotations.IdempotentHint {
@@ -691,68 +516,6 @@ func TestMCPToolsMemoryProjectionExactServiceFacts(t *testing.T) {
 	}
 }
 
-func TestMCPToolsWorkProjectionExactServiceFacts(t *testing.T) {
-	pool, ts := toolsSetup(t)
-	_, keyPub, botPub := m2Bot(t, pool, ts.srv, "wk")
-	_, keyB, _ := m2Bot(t, pool, ts.srv, "wb")
-	txCtx := context.Background()
-	if _, err := pool.Exec(txCtx, "UPDATE tb_bots SET balance = 5000 WHERE id = $1", botPub); err != nil {
-		t.Fatal(err)
-	}
-
-	var pub WorkPublishOutput
-	m2Typed(t, ts, keyPub, "work_publish", map[string]interface{}{
-		"title": "closure work", "requirements": "req text",
-		"postapi": "https://example.test/hook", "budget": 1500, "price": 100, "open_now": true,
-	}, &pub)
-	if pub.Code == "" || pub.Status != "open" {
-		t.Fatalf("publish: %+v", pub)
-	}
-
-	// work_list item: exactly the board facts, no budget/postapi/owner
-	var list WorkListOutput
-	m2Typed(t, ts, keyB, "work_list", map[string]interface{}{}, &list)
-	var item *WorkItem
-	for i := range list.Items {
-		if list.Items[i].Code == pub.Code {
-			item = &list.Items[i]
-		}
-	}
-	if item == nil {
-		t.Fatalf("published work missing from list: %+v", list)
-	}
-	if item.Title != "closure work" || item.Requirements != "req text" || item.Price != 100 || item.Status != "open" {
-		t.Fatalf("list item facts: %+v", item)
-	}
-	rawItem, _ := json.Marshal(item)
-	for _, forbidden := range []string{"budget", "postapi", "bot_id", "owner_id"} {
-		if strings.Contains(string(rawItem), forbidden) {
-			t.Fatalf("work list item exposes %s: %s", forbidden, rawItem)
-		}
-	}
-	// meta: total+returned, no has_more
-	if list.Total < 1 || list.Returned < 1 {
-		t.Fatalf("list meta: %+v", list)
-	}
-	rawList, _ := json.Marshal(list)
-	if strings.Contains(string(rawList), "has_more") {
-		t.Fatalf("work list meta exposes invented has_more: %s", rawList)
-	}
-
-	// work_get: same facts
-	var get WorkGetOutput
-	m2Typed(t, ts, keyB, "work_get", map[string]interface{}{"code": pub.Code}, &get)
-	if get.Code != pub.Code || get.Title != "closure work" || get.Pinned != 0 {
-		t.Fatalf("get facts: %+v", get)
-	}
-	rawGet, _ := json.Marshal(get)
-	for _, forbidden := range []string{"budget", "postapi", "bot_id", "owner_id"} {
-		if strings.Contains(string(rawGet), forbidden) {
-			t.Fatalf("work get exposes %s: %s", forbidden, rawGet)
-		}
-	}
-}
-
 // Malformed required facts fail safely: the projection can never
 // manufacture a successful zero-value DTO.
 func TestMCPToolsMalformedProjectionFailsSafely(t *testing.T) {
@@ -783,19 +546,6 @@ func TestMCPToolsMalformedProjectionFailsSafely(t *testing.T) {
 	// delete missing message
 	if _, err := projectDelete(map[string]interface{}{"code": "x", "title": "t"}); err == nil {
 		t.Fatal("delete missing message accepted")
-	}
-	// work list item missing status
-	badTask := map[string]interface{}{
-		"tasks": []interface{}{map[string]interface{}{"code": "x", "title": "t", "requirements": "r", "price": 1.0, "pinned": 0, "created_at": "1", "updated_at": "1"}},
-		"meta":  map[string]interface{}{"total": 1, "returned": 1},
-	}
-	if _, err := projectWorkList(badTask); err == nil {
-		t.Fatal("task missing status accepted")
-	}
-	// work list invented has_more is NOT read: meta without returned fails
-	noRet := map[string]interface{}{"tasks": []interface{}{}, "meta": map[string]interface{}{"total": 0}}
-	if _, err := projectWorkList(noRet); err == nil {
-		t.Fatal("meta missing returned accepted")
 	}
 	// error shape is the safe INTERNAL_ERROR mapping
 	err := mapProjErr(nil)

@@ -242,11 +242,10 @@ func TestMCPToolsListDeterministicOrder(t *testing.T) {
 	// The official SDK's tools/list returns the registry SORTED by
 	// tool name — that sorted order is the SDK's own deterministic
 	// contract (single registry, no second registry added). The exact
-	// 12-tool set in the SDK-deterministic order:
+	// 8-tool set in the SDK-deterministic order:
 	want := []string{
 		"account_register", "account_status",
 		"memory_delete", "memory_get", "memory_list", "memory_put", "memory_share", "memory_unshare",
-		"work_get", "work_list", "work_publish", "work_submit",
 	}
 
 	listNames := func() []string {

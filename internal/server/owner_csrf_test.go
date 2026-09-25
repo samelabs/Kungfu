@@ -48,7 +48,6 @@ func s64SeedBot(t *testing.T, pool *pg.Pool, s *Server, suffix string) (*Server,
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_transactions WHERE bot_id=$1`, id)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_tasks WHERE bot_id=$1`, id)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_logs WHERE bot_id=$1`, id)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id=$1`, id)
 	})
@@ -78,7 +77,7 @@ func s64Mutate(t *testing.T, s *Server, cookie *http.Cookie, method, path, conte
 // 1. form-urlencoded CSRF shape on a previously bodyless mutation.
 func TestOwnerCSRFOwnerMutationRejectsFormURLEncoded(t *testing.T) {
 	s, _, cookie := s64Server(t)
-	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/tasks/TCK000000001/close",
+	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/payments/checkout",
 		"application/x-www-form-urlencoded", "code=x")
 	if rec.Code != 415 {
 		t.Fatalf("form POST = %d, want 415 (body: %s)", rec.Code, rec.Body.String())
@@ -91,7 +90,7 @@ func TestOwnerCSRFOwnerMutationRejectsFormURLEncoded(t *testing.T) {
 // 2. text/plain form-encodable type.
 func TestOwnerCSRFOwnerMutationRejectsTextPlain(t *testing.T) {
 	s, _, cookie := s64Server(t)
-	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/tasks/TCK000000001/close",
+	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/payments/checkout",
 		"text/plain", "x")
 	if rec.Code != 415 {
 		t.Fatalf("text/plain POST = %d, want 415", rec.Code)
@@ -112,8 +111,8 @@ func TestOwnerCSRFOwnerMutationRejectsMissingContentType(t *testing.T) {
 func TestOwnerCSRFOwnerMutationAcceptsApplicationJSON(t *testing.T) {
 	s, _, cookie := s64Server(t)
 	for _, tc := range []struct{ m, p string }{
-		{"POST", "/api/owner/tasks"}, {"DELETE", "/api/owner/session"},
-		{"POST", "/api/owner/tasks/TCK000000001/refund"},
+		{"POST", "/api/reset-key"}, {"DELETE", "/api/owner/session"},
+		{"POST", "/api/owner/payments/checkout"},
 	} {
 		rec := s64Mutate(t, s, cookie, tc.m, tc.p, "application/json", "{}")
 		if rec.Code == 415 {
@@ -125,7 +124,7 @@ func TestOwnerCSRFOwnerMutationAcceptsApplicationJSON(t *testing.T) {
 // 5. parameters such as charset stay acceptable.
 func TestOwnerCSRFOwnerMutationAcceptsJSONWithParameters(t *testing.T) {
 	s, _, cookie := s64Server(t)
-	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/tasks",
+	rec := s64Mutate(t, s, cookie, "POST", "/api/owner/payments/checkout",
 		"application/json; charset=utf-8", "{}")
 	if rec.Code == 415 {
 		t.Fatalf("parameterized JSON rejected: %d %s", rec.Code, rec.Body.String())
@@ -135,7 +134,7 @@ func TestOwnerCSRFOwnerMutationAcceptsJSONWithParameters(t *testing.T) {
 // 6. Owner reads never require Content-Type.
 func TestOwnerCSRFOwnerReadsUnaffected(t *testing.T) {
 	s, _, cookie := s64Server(t)
-	for _, p := range []string{"/api/owner/tasks", "/api/account", "/api/key"} {
+	for _, p := range []string{"/api/owner/logs", "/api/account", "/api/key"} {
 		rec := s64Mutate(t, s, cookie, "GET", p, "", "")
 		if rec.Code == 415 {
 			t.Fatalf("GET %s hit the mutation gate", p)
@@ -190,13 +189,6 @@ func TestOwnerCSRFAllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 		`r.Delete("/api/owner/session", ownerMutation(`,
 		`r.Post("/api/change-password", ownerMutation(`,
 		`r.Post("/api/reset-key", ownerMutation(`,
-		`r.Post("/api/owner/tasks", ownerMutation(`,
-		`r.Post("/api/owner/tasks/{code}/open", ownerMutation(`,
-		`r.Post("/api/owner/tasks/{code}/close", ownerMutation(`,
-		`r.Post("/api/owner/tasks/{code}/add-budget", ownerMutation(`,
-		`r.Post("/api/owner/tasks/{code}/refund", ownerMutation(`,
-		`r.Post("/api/owner/tasks/{code}/edit", ownerMutation(`,
-		`r.Post("/api/testtask/{code}", ownerMutation(`,
 		`r.Post("/api/owner/payments/checkout", ownerMutation(`,
 		`r.Post("/api/owner/store/redemptions", ownerMutation(`,
 	}
@@ -207,7 +199,7 @@ func TestOwnerCSRFAllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 	}
 	// no ungated duplicates remain for the same paths
 	for _, path := range []string{
-		`"/api/owner/tasks/{code}/open"`, `"/api/reset-key"`, `"/api/owner/payments/checkout"`,
+		`"/api/reset-key"`, `"/api/owner/payments/checkout"`,
 	} {
 		i := strings.Index(src, path)
 		if i == -1 {
@@ -224,7 +216,7 @@ func TestOwnerCSRFAllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 // 11. No permissive credentialed CORS exists for Owner mutations.
 func TestOwnerCSRFNoPermissiveCredentialedCORS(t *testing.T) {
 	s, _, cookie := s64Server(t)
-	req := httptest.NewRequest("OPTIONS", "/api/owner/tasks", nil)
+	req := httptest.NewRequest("OPTIONS", "/api/owner/payments/checkout", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	req.Header.Set("Access-Control-Request-Headers", "content-type")
@@ -238,7 +230,7 @@ func TestOwnerCSRFNoPermissiveCredentialedCORS(t *testing.T) {
 		t.Fatalf("permissive credentialed CORS: ACAO=%q ACAC=%q", acao, acac)
 	}
 	// and a cross-origin JSON POST still does not get permissive CORS
-	rec2 := s64Mutate(t, s, cookie, "POST", "/api/owner/tasks", "application/json", "{}")
+	rec2 := s64Mutate(t, s, cookie, "POST", "/api/owner/payments/checkout", "application/json", "{}")
 	acao2 := rec2.Header().Get("Access-Control-Allow-Origin")
 	if strings.EqualFold(acao2, "*") || strings.EqualFold(rec2.Header().Get("Access-Control-Allow-Credentials"), "true") {
 		t.Fatalf("permissive credentialed CORS on mutation: ACAO=%q", acao2)

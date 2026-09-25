@@ -85,8 +85,7 @@ func TestRetainedSurfacesStay(t *testing.T) {
 		{"GET", "/api/owner/session", 401},   // unauthenticated JSON, not 404
 		{"GET", "/api/samelabs/session", 401},
 		{"GET", "/api/account", 401},
-		{"POST", "/api/owner/register", 400},    // live owner surface (bad body, not 404/405)
-		{"POST", "/api/testtask/somecode", 401}, // owner bot-auth surface stays
+		{"POST", "/api/owner/register", 400}, // live owner surface (bad body, not 404/405)
 	} {
 		var req *http.Request
 		if tc.method == "POST" {

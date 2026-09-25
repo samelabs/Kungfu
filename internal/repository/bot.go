@@ -190,8 +190,8 @@ func PlatformTaskCountByBotID(ctx context.Context, q pg.Querier, botID int64) (i
 	var count int64
 	err := q.QueryRow(ctx, `
 		SELECT COUNT(*) AS total
-		FROM tb_tasks
-		WHERE bot_id = $1`, botID).Scan(&count)
+		FROM tb_task
+		WHERE publisher_id = $1`, botID).Scan(&count)
 	return count, err
 }
 

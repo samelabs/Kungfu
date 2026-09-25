@@ -1,6 +1,6 @@
 package mcpserver
 
-// Memory + work tools. Pure adapter code: every tool resolves the
+// Memory tools. Pure adapter code: every tool resolves the
 // verified identity from the Bearer mechanism, applies the business
 // rate-limit authority through the injected limiter, calls the
 // EXISTING service authorities directly (no facade, no alternate
@@ -10,11 +10,9 @@ package mcpserver
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"kungfu.md/internal/errors"
 	"kungfu.md/internal/service"
 )
 
@@ -221,142 +219,6 @@ func addMemoryTools(s *mcp.Server, deps Deps) {
 		out, perr := projectDelete(result)
 		if perr != nil {
 			return nil, MemoryDeleteOutput{}, mapProjErr(perr)
-		}
-		return nil, out, nil
-	})
-}
-
-func addWorkTools(s *mcp.Server, deps Deps) {
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "work_list",
-		Description: "List currently open and fundable work.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  true,
-			OpenWorldHint: boolPtr(false),
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, WorkListOutput, error) {
-		if _, err := deps.resolveVerified(ctx); err != nil {
-			return nil, WorkListOutput{}, err
-		}
-		result, err := service.ListOpenTasks(ctx, deps.Pool)
-		if err != nil {
-			return nil, WorkListOutput{}, mapAppError(err)
-		}
-		out, perr := projectWorkList(result)
-		if perr != nil {
-			return nil, WorkListOutput{}, mapProjErr(perr)
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "work_get",
-		Description: "Get one open work item by code. No assignment or reservation is created.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  true,
-			OpenWorldHint: boolPtr(false),
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
-		Code string `json:"code"`
-	}) (*mcp.CallToolResult, WorkGetOutput, error) {
-		if _, err := deps.resolveVerified(ctx); err != nil {
-			return nil, WorkGetOutput{}, err
-		}
-		result, err := service.GetOpenTask(ctx, deps.Pool, in.Code)
-		if err != nil {
-			return nil, WorkGetOutput{}, mapAppError(err)
-		}
-		out, perr := projectWorkGet(result)
-		if perr != nil {
-			return nil, WorkGetOutput{}, mapProjErr(perr)
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "work_submit",
-		Description: "Submit your completed work result to Kungfu. Kungfu privately delivers accepted submissions to the task owner's configured receiver.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    false,
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(true), // Kungfu performs outbound delivery
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
-		Code       string                 `json:"code"`
-		Payload    map[string]interface{} `json:"payload" jsonschema:"your task result body"`
-		RequestKey string                 `json:"request_key" jsonschema:"client-generated stable idempotency key (1-128 ASCII chars A-Z a-z 0-9 . _ ~ -); reuse the SAME key to retry an unresolved submission"`
-	}) (*mcp.CallToolResult, WorkSubmitOutput, error) {
-		bot, err := deps.resolveVerified(ctx)
-		if err != nil {
-			return nil, WorkSubmitOutput{}, err
-		}
-		if !deps.limiter().CheckAgent(bot.ID, "task_submit") {
-			return nil, WorkSubmitOutput{}, rateLimited()
-		}
-		// The payload is the Agent's result body, passed as-is to the
-		// existing Submit authority. delivery.BuildPayload (inside the
-		// service) remains the sole component that adds task_code.
-		result, err := service.Submit(ctx, deps.Pool, in.Code, bot.ID, in.RequestKey, in.Payload)
-		if err != nil {
-			return nil, WorkSubmitOutput{}, mapAppError(err)
-		}
-		// Terminal rejected replay: surface the durable rejected-
-		// submission fact as an error result (424), never a plain
-		// success output — no re-POST, no new reservation, no settlement.
-		if result.State == "rejected" {
-			return nil, WorkSubmitOutput{}, mapAppError(errors.New(http.StatusFailedDependency,
-				"TASK_DELIVERY_FAILED", "Task submission delivery failed"))
-		}
-		out, perr := projectWorkSubmit(result)
-		if perr != nil {
-			return nil, WorkSubmitOutput{}, mapProjErr(perr)
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "work_publish",
-		Description: "Publish new work to the task market, funded from your own account balance.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    false,
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(false), // publish itself sends nothing outbound
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
-		Title        string `json:"title"`
-		Requirements string `json:"requirements"`
-		PostAPI      string `json:"postapi" jsonschema:"private result receiver configured by the publisher (HTTP or HTTPS URL); not exposed to worker agents"`
-		Budget       int64  `json:"budget" jsonschema:"whole-credit task budget (integer, minimum 1000)"`
-		Price        int64  `json:"price" jsonschema:"whole credits paid per successful submission (integer)"`
-		OpenNow      bool   `json:"open_now" jsonschema:"open immediately (fundable) or keep pending"`
-	}) (*mcp.CallToolResult, WorkPublishOutput, error) {
-		bot, err := deps.resolveVerified(ctx)
-		if err != nil {
-			return nil, WorkPublishOutput{}, err
-		}
-		// Ownership derives ONLY from the verified credential — the
-		// typed input schema (additionalProperties=false) rejects
-		// injected identity fields before the tool runs.
-		// service.CreateTask owns validation, status selection,
-		// lock_task debit, and the transaction.
-		result, err := service.CreateTask(ctx, deps.Pool, bot.ID,
-			&service.OwnerTaskConfig{MaxTitleLength: deps.Limits.MaxTitleLength},
-			&service.CreateTaskInput{
-				Title:        in.Title,
-				Requirements: in.Requirements,
-				PostAPI:      in.PostAPI,
-				Budget:       in.Budget,
-				Price:        in.Price,
-				OpenNow:      in.OpenNow,
-			})
-		if err != nil {
-			return nil, WorkPublishOutput{}, mapAppError(err)
-		}
-		out, perr := projectWorkPublish(result)
-		if perr != nil {
-			return nil, WorkPublishOutput{}, mapProjErr(perr)
 		}
 		return nil, out, nil
 	})

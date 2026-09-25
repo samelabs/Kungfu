@@ -1,14 +1,12 @@
 package admin
 
-// Platform operations (014): dashboard, task governance, memory
-// governance. Reads are permission-gated; every mutation is audited in
-// the same transaction (WithAuditTx). Task governance changes status and
-// pinning only — it never touches Credits, and the owner keeps the
-// normal refund path for a closed task.
+// Platform operations (014): dashboard and memory governance. Reads
+// are permission-gated; every mutation is audited in the same
+// transaction (WithAuditTx). Task governance pages are removed with
+// the v1 task model and return with the Task 1.0 console (WO-8).
 
 import (
 	"context"
-	"strings"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
@@ -26,127 +24,6 @@ func Dashboard(ctx context.Context, pool *pg.Pool, principal *Principal) (*repos
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	return c, nil
-}
-
-// -- tasks --
-
-var taskStatuses = map[string]bool{"": true, "pending": true, "open": true, "closed": true}
-
-// ListTasks requires tasks.read.
-func ListTasks(ctx context.Context, pool *pg.Pool, principal *Principal, f repository.AdminTaskFilter) ([]repository.AdminTaskRow, int64, error) {
-	if err := RequirePermission(ctx, pool, principal, "tasks.read"); err != nil {
-		return nil, 0, err
-	}
-	if !taskStatuses[f.Status] {
-		return nil, 0, errors.New(400, "INVALID_STATUS", "status must be one of: pending, open, closed")
-	}
-	rows, total, err := repository.AdminListTasks(ctx, pool, f)
-	if err != nil {
-		return nil, 0, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	return rows, total, nil
-}
-
-// TaskDetail is a task with its recent submissions.
-type TaskDetail struct {
-	Task        *repository.AdminTaskRow
-	Submissions []repository.AdminSubmissionRow
-}
-
-// GetTask requires tasks.read.
-func GetTask(ctx context.Context, pool *pg.Pool, principal *Principal, code string) (*TaskDetail, error) {
-	if err := RequirePermission(ctx, pool, principal, "tasks.read"); err != nil {
-		return nil, err
-	}
-	t, err := repository.AdminGetTask(ctx, pool, code)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	if t == nil {
-		return nil, errors.New(404, "NOT_FOUND", "Task not found")
-	}
-	subs, err := repository.AdminListTaskSubmissions(ctx, pool, t.ID, 50)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	return &TaskDetail{Task: t, Submissions: subs}, nil
-}
-
-func taskFacts(t *repository.AdminTaskRow) map[string]interface{} {
-	return map[string]interface{}{
-		"status": t.Status, "pinned": t.Pinned, "review_note": t.ReviewNote,
-		"owner_bot_id": t.BotID, "budget": t.Budget, "reserved_budget": t.ReservedBudget,
-	}
-}
-
-// CloseTask closes a task on platform authority with a reason the owner
-// can see. Status-only: budget and reservations are untouched; accepted
-// submissions still settle; the owner may refund after the cooldown.
-func CloseTask(ctx context.Context, pool *pg.Pool, principal *Principal, code, reason string) error {
-	if err := RequirePermission(ctx, pool, principal, "tasks.manage"); err != nil {
-		return err
-	}
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return errors.New(400, "REASON_REQUIRED", "Give the owner a reason for closing the task")
-	}
-	if len(reason) > 500 {
-		return errors.New(400, "REASON_TOO_LONG", "Reason must be at most 500 characters")
-	}
-	entry := &AuditEntry{Actor: principal.Admin, Action: "task.close", TargetType: "task", TargetID: code, Success: true}
-	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
-		t, err := repository.AdminLockTask(ctx, tx, code)
-		if err != nil {
-			return errors.New(500, "INTERNAL_ERROR", "Database error")
-		}
-		if t == nil {
-			return errors.New(404, "NOT_FOUND", "Task not found")
-		}
-		if t.Status == "closed" {
-			return errors.New(409, "TASK_ALREADY_CLOSED", "Task is already closed")
-		}
-		entry.Before = taskFacts(t)
-		if err := repository.CloseOwnerTask(ctx, tx, t.BotID, t.Code); err != nil {
-			return errors.New(500, "INTERNAL_ERROR", "Database error")
-		}
-		if err := repository.AdminSetTaskReview(ctx, tx, t.ID, reason); err != nil {
-			return errors.New(500, "INTERNAL_ERROR", "Database error")
-		}
-		after := taskFacts(t)
-		after["status"], after["review_note"] = "closed", reason
-		entry.After = after
-		return nil
-	})
-}
-
-// SetTaskPinned pins or unpins a task on the homepage board.
-func SetTaskPinned(ctx context.Context, pool *pg.Pool, principal *Principal, code string, pinned bool) error {
-	if err := RequirePermission(ctx, pool, principal, "tasks.manage"); err != nil {
-		return err
-	}
-	action := "task.unpin"
-	if pinned {
-		action = "task.pin"
-	}
-	entry := &AuditEntry{Actor: principal.Admin, Action: action, TargetType: "task", TargetID: code, Success: true}
-	return WithAuditTx(ctx, pool, entry, func(ctx context.Context, tx pg.Querier) error {
-		t, err := repository.AdminLockTask(ctx, tx, code)
-		if err != nil {
-			return errors.New(500, "INTERNAL_ERROR", "Database error")
-		}
-		if t == nil {
-			return errors.New(404, "NOT_FOUND", "Task not found")
-		}
-		entry.Before = map[string]interface{}{"pinned": t.Pinned}
-		entry.After = map[string]interface{}{"pinned": pinned}
-		if t.Pinned == pinned {
-			return nil
-		}
-		if err := repository.AdminSetTaskPinned(ctx, tx, t.ID, pinned); err != nil {
-			return errors.New(500, "INTERNAL_ERROR", "Database error")
-		}
-		return nil
-	})
 }
 
 // -- memories --

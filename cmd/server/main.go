@@ -13,7 +13,6 @@ import (
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/server"
-	"kungfu.md/internal/service"
 	"kungfu.md/internal/version"
 )
 
@@ -48,17 +47,8 @@ func main() {
 	// on backgroundErrors, and routed through ServeLifecycle's single
 	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
-	backgroundErrors := make(chan error, 2)
+	backgroundErrors := make(chan error, 1)
 	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
-
-	// Durable submission recovery: same single authority as synchronous
-	// delivery (see internal/service/recovery_worker.go). Started after
-	// server construction (DB is connected); stopped by the same single
-	// ServeLifecycle shutdown path; panics report through
-	// backgroundErrors instead of dying silently.
-	recoveryStop := make(chan struct{})
-	recoveryDone := service.RunSubmissionRecoveryWorker(recoveryStop, backgroundErrors, pool,
-		service.DefaultRecoveryWorkerConfig())
 
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -85,8 +75,7 @@ func main() {
 		httpServer:       httpServer,
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop, recoveryStop},
-		backgroundJoins:  []<-chan struct{}{recoveryDone},
+		backgroundStops:  []chan struct{}{gcStop},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

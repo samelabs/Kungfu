@@ -60,37 +60,6 @@ func TestAccountBalanceWireIsCanonicalString(t *testing.T) {
 	}
 }
 
-// TestTaskPriceBudgetWireExact drives task create at 2^53+1-scale
-// values and asserts both the response wire and the database carry
-// the exact integer via the string wire contract.
-func TestTaskPriceBudgetWireExact(t *testing.T) {
-	const exact = int64(9007199254740993)
-	e := newEconEnv(t, 9223372036854775807)
-	rec, _ := e.ownerPOST(t, "/api/owner/tasks",
-		`{"title":"W","requirements":"r","postapi":"https://example.com/h","budget":`+
-			jsonInt(exact)+`,"price":1,"open_now":false}`)
-	if rec.Code != 200 {
-		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
-	}
-	wire := decodeWireJSON(t, rec.Body.String())
-	dataM, _ := wire["data"].(map[string]interface{})
-	taskM, _ := dataM["task"].(map[string]interface{})
-	if bs, ok := taskM["budget"].(string); !ok || bs != jsonInt(exact) {
-		t.Fatalf("task response budget must be canonical string, got %T %v", taskM["budget"], taskM["budget"])
-	}
-	var dbBudget int64
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT budget FROM tb_tasks WHERE bot_id=$1 ORDER BY id DESC LIMIT 1`, e.botID).
-		Scan(&dbBudget); err != nil || dbBudget != exact {
-		t.Fatalf("db budget = %d (err %v), want exactly %d", dbBudget, err, exact)
-	}
-	// List view carries strings too.
-	rec3 := e.ownerGET(t, "/api/owner/tasks")
-	if !strings.Contains(rec3.Body.String(), `"budget": "`+jsonInt(exact)+`"`) {
-		t.Fatalf("tasks list budget must be canonical string: %s", rec3.Body.String())
-	}
-}
-
 // TestStoreCreditsPriceWireExact: owner store product price and
 // redemption cost reach the browser as canonical strings.
 func TestStoreCreditsPriceWireExact(t *testing.T) {

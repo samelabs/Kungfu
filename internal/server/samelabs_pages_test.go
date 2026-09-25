@@ -71,8 +71,8 @@ func seedConsoleData(t *testing.T, e *adminEnv) slSeed {
 		VALUES ($1, $2, '1234', 'x', 7777, 'active') RETURNING id`, name, h[:]).Scan(&sd.botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
-	if _, err := e.s.Pool.Exec(ctx, `INSERT INTO tb_tasks (code, bot_id, title, requirements, postapi, budget, price, status, opened_at)
-		VALUES ($1, $2, 'Console task', 'do it', 'https://example.com/hook', 3000, 100, 'open', NOW())`, sd.taskCode, sd.botID); err != nil {
+	if _, err := e.s.Pool.Exec(ctx, `INSERT INTO tb_task (code, publisher_id, status, budget_locked)
+		VALUES ($1, $2, 'open', 3000)`, sd.taskCode, sd.botID); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
 	if _, err := e.s.Pool.Exec(ctx, `INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility)
@@ -81,7 +81,7 @@ func seedConsoleData(t *testing.T, e *adminEnv) slSeed {
 	}
 	t.Cleanup(func() {
 		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_kungfus WHERE bot_id = $1`, sd.botID)
-		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_tasks WHERE bot_id = $1`, sd.botID)
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_task WHERE publisher_id = $1`, sd.botID)
 		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_bots WHERE id = $1`, sd.botID)
 	})
 	return sd
@@ -89,13 +89,13 @@ func seedConsoleData(t *testing.T, e *adminEnv) slSeed {
 
 func TestSamelabsRequiresSession(t *testing.T) {
 	e := newAdminEnv(t)
-	req := httptest.NewRequest("GET", "/samelabs/tasks?status=open", nil)
+	req := httptest.NewRequest("GET", "/samelabs/memories?visibility=public", nil)
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/samelabs/login?next=%2Fsamelabs%2Ftasks%3Fstatus%3Dopen" {
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/samelabs/login?next=%2Fsamelabs%2Fmemories%3Fvisibility%3Dpublic" {
 		t.Fatalf("anonymous page = %d → %q", rec.Code, rec.Header().Get("Location"))
 	}
-	req = httptest.NewRequest("POST", "/samelabs/tasks/x/close", strings.NewReader("reason=x"))
+	req = httptest.NewRequest("POST", "/samelabs/memories/x/remove", strings.NewReader("reason=x"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec = httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
@@ -119,7 +119,7 @@ func TestSamelabsSignIn(t *testing.T) {
 		t.Fatalf("bad password = %d", rec.Code)
 	}
 	for next, want := range map[string]string{
-		"/samelabs/tasks":        "/samelabs/tasks",
+		"/samelabs/memories":     "/samelabs/memories",
 		"https://evil.example/":  "/samelabs",
 		"//evil.example/x":       "/samelabs",
 		"/samelabsevil":          "/samelabs",
@@ -145,7 +145,7 @@ func TestSamelabsPagesRender(t *testing.T) {
 	e := newAdminEnv(t)
 	sd := seedConsoleData(t, e)
 	for _, path := range []string{
-		"/samelabs", "/samelabs/account", "/samelabs/tasks", "/samelabs/tasks/" + sd.taskCode,
+		"/samelabs", "/samelabs/account",
 		"/samelabs/memories", "/samelabs/memories/" + sd.memCode, "/samelabs/accounts",
 		fmt.Sprintf("/samelabs/accounts/%d", sd.botID), "/samelabs/finance", "/samelabs/finance?tab=adjustments",
 		"/samelabs/finance?tab=ledger", "/samelabs/store/products", "/samelabs/store/redemptions",
@@ -165,8 +165,8 @@ func TestSamelabsPagesRender(t *testing.T) {
 			}
 		}
 	}
-	if rec := e.page(t, "/samelabs/tasks/nope00000000"); rec.Code != 404 {
-		t.Fatalf("missing task = %d", rec.Code)
+	if rec := e.page(t, "/samelabs/memories/nope00000000"); rec.Code != 404 {
+		t.Fatalf("missing memory = %d", rec.Code)
 	}
 	if rec := e.page(t, "/samelabs/accounts/999999999"); rec.Code != 404 {
 		t.Fatalf("missing account = %d", rec.Code)
@@ -181,50 +181,21 @@ func TestSamelabsPagesRender(t *testing.T) {
 func TestSamelabsFormsRequireCSRF(t *testing.T) {
 	e := newAdminEnv(t)
 	sd := seedConsoleData(t, e)
-	var pinned bool
-	pinnedNow := func() bool {
-		_ = e.s.Pool.QueryRow(context.Background(), `SELECT pinned FROM tb_tasks WHERE code=$1`, sd.taskCode).Scan(&pinned)
-		return pinned
+	shared := func() bool {
+		var vis string
+		_ = e.s.Pool.QueryRow(context.Background(), `SELECT visibility FROM tb_kungfus WHERE code=$1`, sd.memCode).Scan(&vis)
+		return vis == "public"
 	}
-	if rec := e.form(t, "/samelabs/tasks/"+sd.taskCode+"/pin", nil, false); rec.Code != http.StatusForbidden || pinnedNow() {
-		t.Fatalf("pin without CSRF = %d pinned=%v", rec.Code, pinned)
+	if rec := e.form(t, "/samelabs/memories/"+sd.memCode+"/unshare", nil, false); rec.Code != http.StatusForbidden || !shared() {
+		t.Fatalf("unshare without CSRF = %d stillPublic=%v", rec.Code, shared())
 	}
 	bad := url.Values{"_csrf": {"forged"}}
-	if rec := e.form(t, "/samelabs/tasks/"+sd.taskCode+"/pin", bad, false); rec.Code != http.StatusForbidden || pinnedNow() {
-		t.Fatalf("pin with forged CSRF = %d", rec.Code)
+	if rec := e.form(t, "/samelabs/memories/"+sd.memCode+"/unshare", bad, false); rec.Code != http.StatusForbidden || !shared() {
+		t.Fatalf("unshare with forged CSRF = %d stillPublic=%v", rec.Code, shared())
 	}
-	rec := e.form(t, "/samelabs/tasks/"+sd.taskCode+"/pin", nil, true)
-	if rec.Code != http.StatusSeeOther || !pinnedNow() || flashOf(rec) == "" {
-		t.Fatalf("pin = %d pinned=%v", rec.Code, pinned)
-	}
-}
-
-func TestSamelabsTaskCloseMovesNoCredits(t *testing.T) {
-	e := newAdminEnv(t)
-	sd := seedConsoleData(t, e)
-	ctx := context.Background()
-	state := func() (status, note string, budget, balance int64) {
-		_ = e.s.Pool.QueryRow(ctx, `SELECT t.status, COALESCE(t.review_note,''), t.budget, b.balance
-			FROM tb_tasks t JOIN tb_bots b ON b.id = t.bot_id WHERE t.code=$1`, sd.taskCode).Scan(&status, &note, &budget, &balance)
-		return
-	}
-	// A reason is mandatory.
-	e.form(t, "/samelabs/tasks/"+sd.taskCode+"/close", url.Values{"reason": {"  "}}, true)
-	if st, _, _, _ := state(); st != "open" {
-		t.Fatal("closed without a reason")
-	}
-	rec := e.form(t, "/samelabs/tasks/"+sd.taskCode+"/close", url.Values{"reason": {"Breaks the rules"}}, true)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("close = %d", rec.Code)
-	}
-	st, note, budget, balance := state()
-	if st != "closed" || note != "Breaks the rules" || budget != 3000 || balance != 7777 {
-		t.Fatalf("after close: status=%s note=%q budget=%d balance=%d", st, note, budget, balance)
-	}
-	var audits int
-	_ = e.s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action='task.close' AND target_id=$1`, sd.taskCode).Scan(&audits)
-	if audits != 1 {
-		t.Fatalf("task.close audit rows = %d", audits)
+	rec := e.form(t, "/samelabs/memories/"+sd.memCode+"/unshare", nil, true)
+	if rec.Code != http.StatusSeeOther || shared() || flashOf(rec) == "" {
+		t.Fatalf("unshare = %d stillPublic=%v", rec.Code, shared())
 	}
 }
 
@@ -246,19 +217,20 @@ func TestSamelabsPermissionGating(t *testing.T) {
 	e := newAdminEnv(t)
 	sd := seedConsoleData(t, e)
 	ctx := context.Background()
-	// A second admin whose only role grants tasks.read.
-	role := fmt.Sprintf("tasks_ro_%d", time.Now().UnixNano()%1_000_000)
+	// A second admin whose only role grants memories.read.
+	role := fmt.Sprintf("mem_ro_%d", time.Now().UnixNano()%1_000_000)
 	var roleID int64
-	if err := e.s.Pool.QueryRow(ctx, `INSERT INTO tb_admin_roles (code, name) VALUES ($1, 'Tasks RO') RETURNING id`, role).Scan(&roleID); err != nil {
+	if err := e.s.Pool.QueryRow(ctx, `INSERT INTO tb_admin_roles (code, name) VALUES ($1, 'Mem RO') RETURNING id`, role).Scan(&roleID); err != nil {
 		t.Fatalf("role: %v", err)
 	}
-	_, _ = e.s.Pool.Exec(ctx, `INSERT INTO tb_admin_role_permissions (role_id, permission_code) VALUES ($1, 'tasks.read')`, roleID)
+	_, _ = e.s.Pool.Exec(ctx, `INSERT INTO tb_admin_role_permissions (role_id, permission_code) VALUES ($1, 'memories.read')`, roleID)
 	username, password := seedAdminForHTTP(t, e.s)
 	var adminID int64
 	_ = e.s.Pool.QueryRow(ctx, `SELECT id FROM tb_admins WHERE username=$1`, username).Scan(&adminID)
 	_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_user_roles WHERE admin_id=$1`, adminID)
 	_, _ = e.s.Pool.Exec(ctx, `INSERT INTO tb_admin_user_roles (admin_id, role_id) VALUES ($1, $2)`, adminID, roleID)
 	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_user_roles WHERE admin_id=$1`, adminID)
 		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_user_roles WHERE role_id=$1`, roleID)
 		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_role_permissions WHERE role_id=$1`, roleID)
 		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_roles WHERE id=$1`, roleID)
@@ -266,21 +238,21 @@ func TestSamelabsPermissionGating(t *testing.T) {
 	ro := &adminEnv{s: e.s, router: e.router, username: username, password: password}
 	ro.login(t)
 
-	tasks := ro.page(t, "/samelabs/tasks")
-	if tasks.Code != 200 || strings.Contains(tasks.Body.String(), `href="/samelabs/memories"`) {
-		t.Fatalf("read-only admin tasks page = %d, or nav shows Memories", tasks.Code)
+	memories := ro.page(t, "/samelabs/memories")
+	if memories.Code != 200 || strings.Contains(memories.Body.String(), `href="/samelabs/accounts"`) {
+		t.Fatalf("read-only admin memories page = %d, or nav shows Accounts", memories.Code)
 	}
-	if rec := ro.page(t, "/samelabs/memories"); rec.Code != http.StatusForbidden {
-		t.Fatalf("memories without permission = %d", rec.Code)
+	if rec := ro.page(t, "/samelabs/accounts"); rec.Code != http.StatusForbidden {
+		t.Fatalf("accounts without permission = %d", rec.Code)
 	}
-	if strings.Contains(ro.page(t, "/samelabs/tasks/"+sd.taskCode).Body.String(), "/close") {
-		t.Fatal("read-only admin sees the close form")
+	if strings.Contains(ro.page(t, "/samelabs/memories/"+sd.memCode).Body.String(), "/remove") {
+		t.Fatal("read-only admin sees the remove form")
 	}
-	rec := ro.form(t, "/samelabs/tasks/"+sd.taskCode+"/close", url.Values{"reason": {"x"}}, true)
-	var st string
-	_ = e.s.Pool.QueryRow(ctx, `SELECT status FROM tb_tasks WHERE code=$1`, sd.taskCode).Scan(&st)
-	if rec.Code != http.StatusSeeOther || st != "open" || flashOf(rec) == "" {
-		t.Fatalf("forbidden close = %d status=%s", rec.Code, st)
+	rec := ro.form(t, "/samelabs/memories/"+sd.memCode+"/remove", nil, true)
+	var vis string
+	_ = e.s.Pool.QueryRow(ctx, `SELECT visibility FROM tb_kungfus WHERE code=$1`, sd.memCode).Scan(&vis)
+	if rec.Code != http.StatusSeeOther || vis != "public" {
+		t.Fatalf("forbidden remove = %d visibility=%s", rec.Code, vis)
 	}
 }
 

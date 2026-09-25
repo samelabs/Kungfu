@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"kungfu.md/internal/i18n"
-	"kungfu.md/internal/repository"
-	"kungfu.md/internal/service"
 	"kungfu.md/web"
 )
 
@@ -42,8 +40,6 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 		s.renderCredits(w, data)
 	case "owner":
 		s.renderOwner(w, data)
-	case "task_guide":
-		s.renderTaskGuide(w, data)
 	case "terms":
 		s.renderLegalPage(w, data, "terms")
 	case "privacy":
@@ -187,7 +183,6 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
                 <span class="task-kicker">` + data.T("home.task_kicker") + `</span>
                 <div class="task-title-row">
                     <h2>` + data.T("home.task_board_title") + `</h2>
-                    <a class="task-guide-link" href="` + i18n.LocaleURL(data.Locale, "/owner/task-guide") + `">` + data.T("home.task_guide") + `</a>
                 </div>
             </div>
             <div class="stream-panel active" data-stream-panel="tasks">` + taskBoard + `</div>
@@ -202,43 +197,11 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
-// buildTaskBoardHTML queries the DB and renders the homepage task board.
+// buildTaskBoardHTML renders the homepage task board. The v1 task
+// board is gone with its tables; until the Task 1.0 board lands
+// (WO-8) the board renders the localized empty state only.
 func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
-	tasks, err := repository.QueryHomepageTasks(ctx, s.Pool, service.MinOpenBudget)
-	if err != nil || len(tasks) == 0 {
-		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
-	}
-
-	var b strings.Builder
-	recommendedLabel := i18n.T(locale, "home.task_recommended")
-	for _, t := range tasks {
-		recClass := ""
-		if t.Pinned {
-			recClass = " is-recommended"
-		}
-		title := html.EscapeString(t.Title)
-		req := html.EscapeString(truncateStr(t.Requirements, 180))
-		reward := formatCredits(t.Price)
-		budget := formatCredits(t.Budget)
-
-		b.WriteString(`<div class="task-item` + recClass + `" data-recommended-label="` + recommendedLabel + `">`)
-		b.WriteString(`<div class="task-title">` + title + `</div>`)
-		b.WriteString(`<div class="content">` + req + `</div>`)
-		b.WriteString(`<div class="task-facts">`)
-		rewardUnit := i18n.T(locale, "home.task_credit_plural")
-		if reward == "1" {
-			rewardUnit = i18n.T(locale, "home.task_credit_singular")
-		}
-		budgetUnit := i18n.T(locale, "home.task_credit_plural")
-		if budget == "1" {
-			budgetUnit = i18n.T(locale, "home.task_credit_singular")
-		}
-		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_reward") + `</b><span>` + reward + " " + rewardUnit + `</span></div>`)
-		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_budget") + `</b><span>` + budget + " " + budgetUnit + `</span></div>`)
-		b.WriteString(`<div class="task-fact"><b>` + i18n.T(locale, "home.task_completed") + `</b><span>` + intToStr(t.SuccessCount) + `</span></div>`)
-		b.WriteString(`</div></div>`)
-	}
-	return b.String()
+	return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
 }
 
 // renderCredits renders the public credits explainer page: the real
@@ -277,7 +240,6 @@ func (s *Server) renderCredits(w http.ResponseWriter, data *tmplData) {
         <p class="muted">` + data.T("credits.balance_explainer") + `</p>
         <div class="actions">
             <a class="btn primary" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("credits.task_cta") + `</a>
-            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("credits.tasks_manage_cta") + `</a>
             <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("credits.store_cta") + `</a>
             <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("credits.logs_cta") + `</a>
         </div>
@@ -367,10 +329,8 @@ window.OWNER_I18N = ` + ownerI18N + `;
 <script src="/assets/owner/lifecycle.js"></script>
 <script src="/assets/owner/api.js"></script>
 <script src="/assets/owner/render-overview.js"></script>
-<script src="/assets/owner/render-tasks.js"></script>
 <script src="/assets/owner/render-logs.js"></script>
 <script src="/assets/owner/auth.js"></script>
-<script src="/assets/owner/tasks.js"></script>
 <script src="/assets/owner/logs.js"></script>
 <script src="/assets/owner/render-store.js"></script>
 <script src="/assets/owner/store.js"></script>
@@ -382,27 +342,6 @@ window.OWNER_I18N = ` + ownerI18N + `;
 </html>`
 
 	w.Write(web.FingerprintHTML([]byte(html)))
-}
-
-// renderTaskGuide renders the owner task guide page.
-// Pre-rendered for each locale.
-func (s *Server) renderTaskGuide(w http.ResponseWriter, data *tmplData) {
-	filename := "task_guide_" + data.Locale + ".html"
-	guideData, err := web.StaticFile(filename)
-	if err == nil && guideData != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(web.FingerprintHTML(guideData))
-		return
-	}
-	// Fallback to English
-	guideData, _ = web.StaticFile("task_guide_en.html")
-	if guideData != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(web.FingerprintHTML(guideData))
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte("<html><body><h1>Task Guide</h1></body></html>"))
 }
 
 // --- Helper functions for HTML generation ---
@@ -445,23 +384,13 @@ func ownerNavHTML(data *tmplData) string {
 		}
 		return ""
 	}
-	isActiveMulti := func(ss ...string) string {
-		for _, s := range ss {
-			if data.Section == s {
-				return " active"
-			}
-		}
-		return ""
-	}
 	return `<nav class="nav" aria-label="Owner Workspace">
     <a class="btn` + isActive("overview") + `" href="` + i18n.LocaleURL(data.Locale, "/owner") + `">` + data.T("owner.nav.overview") + `</a>
     <a class="btn` + isActive("account") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/account") + `">` + data.T("owner.nav.account") + `</a>
     <a class="btn` + isActive("key") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/key") + `">` + data.T("owner.nav.key") + `</a>
-    <a class="btn` + isActiveMulti("tasks", "task_new") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
     <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("store") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("owner.nav.store") + `</a>
-    <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/task-guide") + `">` + data.T("owner.nav.task_guide") + `</a>
     <button class="btn danger" id="logoutBtn" type="button">` + data.T("owner.nav.logout") + `</button>
 </nav>`
 }
@@ -474,10 +403,6 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerAccountHTML(data)
 	case "key":
 		return ownerKeyHTML(data)
-	case "tasks", "task_new":
-		// /owner/tasks/new is a URL entry into the SAME Tasks UI; the
-		// create modal opens automatically (single create authority).
-		return ownerTasksHTML(data)
 	case "logs":
 		return ownerLogsHTML(data)
 	case "store":
@@ -565,10 +490,6 @@ func ownerOverviewHTML(d *tmplData) string {
         <li><b>` + d.T("owner.start.publish_title") + `</b><span>` + d.T("owner.start.publish_body") + `</span></li>
         <li><b>` + d.T("owner.start.credits_title") + `</b><span>` + d.T("owner.start.credits_body") + `</span></li>
     </ol>
-    <div class="actions">
-        <a class="btn primary" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks") + `">` + d.T("owner.start.publish_cta") + `</a>
-        <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/task-guide") + `">` + d.T("owner.start.guide_cta") + `</a>
-    </div>
 </section>`
 }
 
@@ -607,29 +528,6 @@ func ownerKeyHTML(d *tmplData) string {
 </section>`
 }
 
-func ownerTasksHTML(d *tmplData) string {
-	return `<section class="panel">
-    <div class="section-head">
-        <div class="section-head-copy">
-            <h2>` + d.T("owner.tasks.heading") + `</h2>
-            <p>` + d.T("owner.tasks.summary") + `</p>
-        </div>
-        <div class="section-head-actions">
-            <button class="btn primary" type="button" id="newTaskBtn">` + d.T("owner.tasks.new_task") + `</button>
-        </div>
-    </div>
-</section>
-<section class="task-layout">
-    <div class="panel">
-        <h2>` + d.T("owner.tasks.my_tasks") + `</h2>
-        <div class="task-list" id="taskList"></div>
-    </div>
-    <div class="panel" id="taskDetailPanel">
-        <div id="taskDetail"><p class="muted">` + d.T("owner.tasks.select_hint") + `</p></div>
-    </div>
-</section>`
-}
-
 func ownerStoreHTML(d *tmplData) string {
 	return `<section class="panel">
     <h2>` + d.T("owner.store.title") + `</h2>
@@ -663,10 +561,6 @@ func ownerLogsHTML(d *tmplData) string {
     <div class="actions">
         <button class="btn primary" type="button" data-log-type="credits">` + d.T("owner.logs.credits") + `</button>
         <button class="btn" type="button" data-log-type="agent">` + d.T("owner.logs.agent_logs") + `</button>
-        <button class="btn" type="button" data-log-type="task">` + d.T("owner.logs.task_logs") + `</button>
-    </div>
-    <div id="logsFilters" class="actions logs-filters">
-        <select id="logTaskFilter" hidden><option value="">` + d.T("owner.logs.all_tasks") + `</option></select>
     </div>
     <div id="logsSummary" class="keybox logs-summary">` + d.T("owner.logs.loading_logs") + `</div>
     <div id="logsTableWrap" class="detail-box logs-table-wrap"><div class="muted">` + d.T("owner.logs.loading") + `</div></div>

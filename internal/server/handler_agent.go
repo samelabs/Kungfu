@@ -57,23 +57,3 @@ func (s *Server) requireOwnerAuth(r *http.Request) (*model.Bot, error) {
 	}
 	return auth.RequireOwnerSession(r.Context(), lookupFn, r, s.Config.SessionSecret)
 }
-
-// requireBotAuth authenticates via X-Bot-Key header. This serves the
-// Owner browser surface's testtask endpoint; the Agent execution
-// protocol is MCP-only (Authorization: Bearer) and shares the same
-// VerifyAgentKey identity authority.
-func (s *Server) requireBotAuth(r *http.Request) (*model.Bot, error) {
-	ctx := r.Context()
-	lookupFn := func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
-		return repository.FindActiveBotByAPIKeyHash(ctx, s.Pool, keyHash)
-	}
-	bot, err := auth.VerifyBotAuth(ctx, lookupFn, r)
-	if err != nil {
-		return nil, err
-	}
-	updateFn := func(ctx context.Context, botID int64) error {
-		return repository.UpdateLastActiveAt(ctx, s.Pool, botID)
-	}
-	auth.MaybeUpdateLastActive(ctx, updateFn, bot.ID)
-	return bot, nil
-}

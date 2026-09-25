@@ -377,8 +377,6 @@ func (s *Server) slPost(fn slAction) http.HandlerFunc {
 // slItemTitle names detail pages after the item they show.
 func slItemTitle(data interface{}) string {
 	switch d := data.(type) {
-	case *admin.TaskDetail:
-		return d.Task.Title
 	case *repository.AdminMemoryRow:
 		return d.Title
 	case slAccountData:

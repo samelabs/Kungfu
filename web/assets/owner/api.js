@@ -48,21 +48,12 @@ async function loadAccount() {
     state.name = json.data.bot_name || state.name;
 }
 
-async function loadTasks() {
-    const json = await requestJson('/api/owner/tasks', {method: 'GET'});
-    if (!json.success) throw apiErrorFrom(json, 'js.task_load_failed');
-    state.tasks = json.data.tasks || [];
-}
-
 async function loadLogs() {
     const params = new URLSearchParams({
         type: state.logs.type,
         page: String(state.logs.page),
         page_size: String(state.logs.pageSize)
     });
-    if (state.logs.type === 'task' && state.logs.taskCode) {
-        params.set('task_code', state.logs.taskCode);
-    }
     const json = await requestJson(`/api/owner/logs?${params.toString()}`, {method: 'GET'});
     if (!json.success) throw apiErrorFrom(json, 'js.log_load_failed');
 
@@ -73,7 +64,4 @@ async function loadLogs() {
     // balance is a canonical decimal string (economic integer wire
     // contract) — preserved verbatim, never Number()-converted.
     state.logs.balance = typeof json.data.balance === 'string' ? json.data.balance : String(json.data.balance || 0);
-    if (Array.isArray(json.data.tasks)) {
-        state.logs.tasks = json.data.tasks;
-    }
 }

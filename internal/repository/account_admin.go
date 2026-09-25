@@ -52,8 +52,8 @@ type AdminAccount struct {
 // AdminAccountDetail adds the existing light aggregates for the
 // detail view. The two task facts are DIFFERENT business facts and
 // are never merged:
-//   - PublishedTaskCount: tb_tasks rows created by this bot
-//   - SubmissionCount:    tb_task_submissions rows submitted by this bot
+//   - PublishedTaskCount: tb_task rows published by this bot
+//   - SubmissionCount:    tb_task_submission rows submitted by this bot
 //   - KungfuCount:        tb_kungfus memory/kungfu rows owned by this bot
 type AdminAccountDetail struct {
 	AdminAccount
@@ -154,9 +154,9 @@ func AdminListAccounts(ctx context.Context, q pg.Querier, f AdminAccountFilter) 
 func AdminGetAccountDetail(ctx context.Context, q pg.Querier, botID int64) (*AdminAccountDetail, error) {
 	row := q.QueryRow(ctx, `
 		SELECT `+adminAccountColumns+`,
-			(SELECT COUNT(*) FROM tb_tasks WHERE tb_tasks.bot_id = tb_bots.id)               AS published_task_count,
-			(SELECT COUNT(*) FROM tb_task_submissions WHERE tb_task_submissions.bot_id = tb_bots.id) AS submission_count,
-			(SELECT COUNT(*) FROM tb_kungfus WHERE tb_kungfus.bot_id = tb_bots.id)           AS kungfu_count
+			(SELECT COUNT(*) FROM tb_task WHERE tb_task.publisher_id = tb_bots.id)     AS published_task_count,
+			(SELECT COUNT(*) FROM tb_task_submission WHERE tb_task_submission.agent_id = tb_bots.id) AS submission_count,
+			(SELECT COUNT(*) FROM tb_kungfus WHERE tb_kungfus.bot_id = tb_bots.id)     AS kungfu_count
 		FROM tb_bots
 		WHERE id = $1`, botID)
 	var d AdminAccountDetail

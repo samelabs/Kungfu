@@ -130,19 +130,18 @@ func TestAccountsAdminDetailAggregatesNeverMerged(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		if _, err := db.Exec(ctx, `
-			INSERT INTO tb_tasks (code, bot_id, title, requirements, postapi, budget, price, status)
-			VALUES ($2, $1, 't', 'd', 'https://example.com', 1, 0, 'open')`,
+			INSERT INTO tb_task (code, publisher_id, status, budget_locked)
+			VALUES ($2, $1, 'open', 1)`,
 			id, fmt.Sprintf("agg_task_%d", i)); err != nil {
 			t.Fatalf("seed task: %v", err)
 		}
 	}
 	for i := 0; i < 3; i++ {
-		code := fmt.Sprintf("sub%09d", i)
-		reqKey := "pr" + code
+		reqKey := fmt.Sprintf("pr_sub%09d", i)
 		if _, err := db.Exec(ctx, `
-			INSERT INTO tb_task_submissions (code, task_id, task_code, bot_id, kind, client_request_key, payload_hash, postapi_snapshot, price_snapshot, reserved_amount, state)
-			VALUES ($2, (SELECT id FROM tb_tasks WHERE bot_id=$1 ORDER BY id DESC LIMIT 1), 'ptaskcode011', $1, 'agent', $3, '\x00', 'https://example.com', 1, 1, 'rejected')`,
-			id, code, reqKey); err != nil {
+			INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
+			VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), 1, $1, $2, '\x00', 1, 'rejected')`,
+			id, reqKey); err != nil {
 			t.Fatalf("seed submission: %v", err)
 		}
 	}

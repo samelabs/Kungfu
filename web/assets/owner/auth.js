@@ -168,7 +168,6 @@ function bindLogout() {
         state.keyMasked = '';
     state.newKeyOnce = '';
         state.account = null;
-        state.tasks = [];
         showAuth();
     });
 }
