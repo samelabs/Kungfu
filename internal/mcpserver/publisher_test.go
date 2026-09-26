@@ -17,6 +17,7 @@ import (
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
+	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 	"kungfu.md/internal/task"
@@ -239,7 +240,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 	pool, deps, srv := registryEnv(t)
 	ctx := context.Background()
 
-	_, _, pubID := m2RegisterSeeded(t, srv, pool, 10_000)
+	_, _, pubID := m2RegisterSeeded(t, srv, pool, 200_000)
 	pubBot := wo7Bot(t, pool, pubID)
 	agentKey, _, agentID := m2RegisterSeeded(t, srv, pool, 0)
 	agentBot := wo7Bot(t, pool, agentID)
@@ -412,8 +413,16 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			}
 			return call(pubBot, "task_refund", map[string]any{"code": c})
 		}},
-		// NOTHING_TO_REFUND has no protocol trigger yet (RefundTask maps
-		// exhausted refunds to INVALID_STATE); listed in the report.
+		{"NOTHING_TO_REFUND", "", 409, func() (map[string]any, int) {
+			c := wo7OpenTask(t, pool, pubID)
+			if _, err := service.CloseTask(ctx, pool, pubID, c); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			if _, err := service.RefundTask(ctx, pool, pubID, c); err != nil {
+				t.Fatalf("first refund: %v", err)
+			}
+			return call(pubBot, "task_refund", map[string]any{"code": c})
+		}},
 	}
 
 	for _, tc := range cases {
@@ -645,4 +654,45 @@ func asContractMap(t *testing.T, c task.Contract) map[string]any {
 		t.Fatal(err)
 	}
 	return m
+}
+
+// TestRateLimitProtocol: a Deps with a 1-per-60s work_submit limiter —
+// the second consecutive work_submit is 429 RATE_LIMIT with
+// next_action=wait and a positive integer retry_after.
+func TestRateLimitProtocol(t *testing.T) {
+	pool := m1TestPool(t)
+	deps := m1Deps(t, pool, ratelimit.NewLimiter(map[string]ratelimit.Config{
+		"task_submit": {Window: 60, Limit: 1, Enabled: true},
+	}))
+	deps.AgentRefKey = []byte("wo7c-key")
+	srv := httptest.NewServer(Handler(deps))
+	t.Cleanup(srv.Close)
+
+	_, _, pubID := m2RegisterSeeded(t, srv, pool, 10_000)
+	agentKey, _, agentID := m2RegisterSeeded(t, srv, pool, 0)
+	agentBot := wo7Bot(t, pool, agentID)
+	code := wo7OpenTask(t, pool, pubID)
+
+	submit := func(key string) (map[string]any, int) {
+		raw, _ := json.Marshal(map[string]any{
+			"code": code, "request_key": fmt.Sprintf("rl-%d", time.Now().UnixNano()),
+			"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
+		})
+		env, status := CallTool(context.Background(), &deps, "work_submit", agentBot, raw)
+		return env, status
+	}
+	_, _ = submit(agentKey)
+
+	env, status := submit(agentKey)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 (%v)", status, env)
+	}
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "RATE_LIMIT" || env["next_action"] != "wait" {
+		t.Fatalf("envelope: %v", env)
+	}
+	ra := env["retry_after"]
+	if numOff(ra) <= 0 {
+		t.Fatalf("retry_after = %v, want a positive integer", ra)
+	}
 }

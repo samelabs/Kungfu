@@ -193,9 +193,19 @@ func TestRecoverStuckDelivering(t *testing.T) {
 	if _, err := RecoverSubmissions(ctx, pool, testAgentRefKey, time.Now(), 50); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
+	// WO-7c: the conversion ENDS the round — redelivery follows the 30s
+	// uncertain cadence on a later pass
 	sub, _ := repository.FindSubmissionByID(ctx, pool, subID)
+	if sub.State != task.SubUncertain {
+		t.Fatalf("state = %s, want uncertain (no immediate redelivery)", sub.State)
+	}
+	assertEvents(t, pool, subID, task.SubUncertain)
+	if _, err := RecoverSubmissions(ctx, pool, testAgentRefKey, time.Now().Add(31*time.Second), 50); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	sub, _ = repository.FindSubmissionByID(ctx, pool, subID)
 	if sub.State != task.SubSettled {
-		t.Fatalf("state = %s, want settled (delivering → uncertain → redelivered)", sub.State)
+		t.Fatalf("state after redelivery = %s, want settled", sub.State)
 	}
 	assertEvents(t, pool, subID, task.SubUncertain, task.SubSettled)
 	deliverInvariants(t, pool, code)

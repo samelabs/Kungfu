@@ -182,5 +182,6 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-6a：work_list 至多 100 条、候选窗口 500；my.remaining 为两类上限剩余的较小值，全不限为 null；统计窗口按进入终态时间；harness bytes 为快照内容字节数。已知优化项：ListWork 逐任务查询统计，规模增长后改为批量查询。
 - WO-7a：协议层统一 code→HTTP 状态表（429 仅 RATE_LIMIT）；retry_after：delivering 5、uncertain 30、under_review 60、failed 60 秒；未知工具 UNKNOWN_TOOL(404)。
 - WO-7b：执行者与发布者共用一个注册表；发布者工具 next_action 恒为 null；/api/v1 请求体超限为 PAYLOAD_TOO_LARGE(413)。
+- WO-7c：全局锁序 Task → Claim → Submission；无 Claim 提交以锁内版本为准；OpenTask 以草稿内容比较防并发修改；过期未清理的 Claim 在领取时就地过期；续期 TTL 取 Claim 所属版本；delivering 转 uncertain 后按 30 秒节奏重投；故障暂停在锁内按失败原因判定。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。
