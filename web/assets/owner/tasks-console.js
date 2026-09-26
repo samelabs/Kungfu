@@ -203,13 +203,13 @@ function tcvLoadSubmissions(code, state) {
     if (state) args.state = state;
     tcvCall('task_submissions', args).then((env) => {
         if (!env.ok) { box.innerHTML = tcvStatusLine(env); return; }
-        tcvRenderSubmissions(env.submissions || []);
+        tcvRenderSubmissions(env.submissions || [], code);
     }).catch((error) => {
         box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
     });
 }
 
-function tcvRenderSubmissions(rows) {
+function tcvRenderSubmissions(rows, code) {
     const box = qs('#tcvSubmissions');
     if (!rows.length) {
         box.innerHTML = `<p class="muted">${escapeHtml(t('tasks.empty'))}</p>`;
@@ -238,7 +238,7 @@ function tcvRenderSubmissions(rows) {
     qsa('[data-verdict-accept]').forEach((btn) =>
         btn.addEventListener('click', () => tcvVerdict(Number(btn.dataset.verdictAccept), true)));
     qsa('[data-verdict-reject]').forEach((btn) =>
-        btn.addEventListener('click', () => tcvVerdictForm(Number(btn.dataset.verdictReject))));
+        btn.addEventListener('click', () => tcvVerdictForm(Number(btn.dataset.verdictReject), code)));
 }
 
 function tcvVerdict(submissionID, accepted) {
@@ -246,22 +246,31 @@ function tcvVerdict(submissionID, accepted) {
         .then((env) => { tcvShowStatus(env); if (env.ok) { tcvEditorInit(); } });
 }
 
-function tcvVerdictForm(submissionID) {
+// tcvVerdictForm opens the reject form. The criteria checkboxes come
+// from the task's contract: task_get is read when the form opens
+// (WO-8b). If the read fails, a free-text criteria input stands in so
+// the form still works.
+function tcvVerdictForm(submissionID, code) {
     const box = qs('#tcvVerdictBox');
     if (!box) return;
     box.hidden = false;
     box.innerHTML = `
     <div class="panel">
         <h3>Reject #${submissionID}</h3>
-        <label>criteria (comma-separated, e.g. C1)</label>
-        <input id="tcvVCriteria" placeholder="C1">
+        <div id="tcvVCriteriaBox"><p class="muted">Loading criteria…</p></div>
         <label>reason (≤ 500)</label>
         <textarea id="tcvVReason" rows="2" maxlength="500"></textarea>
         <label><input type="checkbox" id="tcvVRetryable" checked> retryable</label>
         <div class="actions"><button class="btn danger" id="tcvVSubmit" type="button">Reject</button></div>
     </div>`;
+    const collect = () => {
+        const checked = qsa('#tcvVCriteriaBox input[type="checkbox"]:checked').map((c) => c.value);
+        if (checked.length) return checked;
+        const free = qs('#tcvVCriteria'); // fallback text input
+        return free ? free.value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    };
     qs('#tcvVSubmit').addEventListener('click', () => {
-        const criteria = qs('#tcvVCriteria').value.split(',').map((s) => s.trim()).filter(Boolean);
+        const criteria = collect();
         const reason = qs('#tcvVReason').value.trim();
         if (!criteria.length || !reason) {
             tcvShowStatus({ok: false, error: {code: 'VERDICT_INVALID', message: 'criteria and reason are required'}});
@@ -270,6 +279,23 @@ function tcvVerdictForm(submissionID) {
         tcvCall('task_verdict', {submission_id: submissionID, verdict: {
             accepted: false, criteria, reason, retryable: qs('#tcvVRetryable').checked
         }}).then((env) => { tcvShowStatus(env); if (env.ok) { box.hidden = true; tcvEditorInit(); } });
+    });
+    tcvCall('task_get', {code}).then((env) => {
+        const holder = qs('#tcvVCriteriaBox');
+        if (!holder) return;
+        const criteria = (env && env.criteria) || [];
+        if (!criteria.length) {
+            holder.innerHTML = `<input id="tcvVCriteria" placeholder="C1">`;
+            return;
+        }
+        holder.innerHTML = '<label>criteria violated</label>' + criteria.map((c) =>
+            `<label class="tcv-criterion"><input type="checkbox" value="${tcvEscapeHtml(c.id)}">` +
+            `<span class="mono">${tcvEscapeHtml(c.id)}</span> ${tcvEscapeHtml(c.description || '')}</label>`
+        ).join('');
+    }).catch(() => {
+        const holder = qs('#tcvVCriteriaBox');
+        if (!holder) return;
+        holder.innerHTML = '<label>criteria (comma-separated, e.g. C1)</label><input id="tcvVCriteria" placeholder="C1">';
     });
 }
 

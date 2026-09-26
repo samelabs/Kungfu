@@ -5,7 +5,8 @@
 {{end}}
 {{if .Can "tasks.read"}}
   {{with $c := .Data.Counts}}
-  <div class="sl-stat"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksClosed}} closed</small></div>
+  <a class="sl-stat" href="/samelabs/tasks"><span>Open tasks</span><b>{{num $c.TasksOpen}}</b><small>{{num $c.TasksClosed}} closed</small></a>
+  <a class="sl-stat" href="/samelabs/tasks?status=draft"><span>Draft / paused tasks</span><b>{{num $c.TasksDraft}} / {{num $c.TasksPaused}}</b><small>{{num $c.TasksDraft}} draft · {{num $c.TasksPaused}} paused</small></a>
   <div class="sl-stat"><span>Completed (7 days)</span><b>{{num $c.SubmissionsSettled7d}}</b><small>{{num $c.SubmissionsInFlight}} in delivery · {{num $c.SubmissionsRejected7d}} rejected</small></div>
   {{end}}
 {{end}}

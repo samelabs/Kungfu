@@ -10,6 +10,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -50,10 +51,21 @@ func (s *Server) handleOwnerTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, ownerToolBodyLimit+1))
-	if err != nil || len(body) > ownerToolBodyLimit {
+	if err != nil {
 		mcpserver.WriteOwnerToolJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"ok":    false,
 			"error": map[string]any{"code": "VALIDATION_FAILED", "message": "Unreadable request body"},
+		})
+		return
+	}
+	if len(body) > ownerToolBodyLimit {
+		// over the cap BEFORE any decoding: the same envelope and 413
+		// as /api/v1 (WO-8b parity fix)
+		mcpserver.WriteOwnerToolJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+			"ok":          false,
+			"error":       map[string]any{"code": "PAYLOAD_TOO_LARGE", "message": fmt.Sprintf("Request body exceeds %d bytes", ownerToolBodyLimit)},
+			"next_action": "revise",
+			"retry_after": nil,
 		})
 		return
 	}

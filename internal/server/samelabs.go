@@ -391,6 +391,11 @@ func slItemTitle(data interface{}) string {
 		return d.User.Admin.DisplayName
 	case slRoleData:
 		return d.Role.Role.Name
+	case slTaskData:
+		if d.Detail.Task.Title != "" {
+			return d.Detail.Task.Title
+		}
+		return "Task " + d.Detail.Task.Code
 	}
 	return ""
 }

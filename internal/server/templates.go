@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"kungfu.md/internal/i18n"
+	"kungfu.md/internal/repository"
 	"kungfu.md/web"
 )
 
@@ -197,12 +199,40 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
-// buildTaskBoardHTML renders the homepage task board. The v1 task
-// board is gone with its tables; until the Task 1.0 board lands
-// (WO-8) the board renders the localized empty state only.
+// buildTaskBoardHTML renders the homepage task board from the Task
+// 1.0 model (WO-8): ONE repository query, at most 20 tasks, open and
+// holding at least one open slot (§4 可接单), newest open first. Each
+// entry shows the title, unit price, remaining slots and code; with
+// no eligible task the localized empty state stands.
 func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
-	return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
+	rows, err := repository.ListOpenBoardTasks(ctx, s.Pool, taskBoardMax)
+	if err != nil {
+		log.Printf("task board: %v", err)
+		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_unavailable")) + "</p>"
+	}
+	if len(rows) == 0 {
+		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
+	}
+	var b strings.Builder
+	b.WriteString(`<ul class="task-board-list">`)
+	for _, r := range rows {
+		credit := i18n.T(locale, "home.task_credit_plural")
+		if r.Price == 1 {
+			credit = i18n.T(locale, "home.task_credit_singular")
+		}
+		b.WriteString(`<li class="task-board-item">` +
+			`<div class="task-board-row"><span class="task-board-title">` + html.EscapeString(r.Title) + `</span>` +
+			`<span class="task-board-price">` + html.EscapeString(fmt.Sprintf("%d %s", r.Price, credit)) + `</span></div>` +
+			`<div class="task-board-meta"><span class="mono task-board-code">` + html.EscapeString(r.Code) + `</span>` +
+			`<span>` + html.EscapeString(fmt.Sprintf("%d %s", r.Slots, i18n.T(locale, "home.task_slots"))) + `</span></div>` +
+			`</li>`)
+	}
+	b.WriteString(`</ul>`)
+	return b.String()
 }
+
+// taskBoardMax is the homepage board cap (WO-8b): one query, 20 rows.
+const taskBoardMax = 20
 
 // renderCredits renders the public credits explainer page: the real
 // economic mechanisms that exist today (earn_task, spend_redemption,

@@ -411,6 +411,14 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      background: rgba(47, 124, 115, .07);
      box-shadow: 0 10px 18px rgba(47, 124, 115, .10);
  }
+ .tcv-criterion {
+     display: flex;
+     align-items: baseline;
+     gap: 8px;
+     font-weight: 400;
+     padding: 3px 0;
+ }
+ .tcv-criterion input[type="checkbox"] { flex: 0 0 auto; }
  .task-title {
      display: flex;
      justify-content: space-between;

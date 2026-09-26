@@ -16,7 +16,9 @@
     <a class="sl-brand" href="/samelabs"><span class="sl-logo" aria-hidden="true">K</span><span class="sl-brand-text">Kungfu<small>SameLabs console</small></span></a>
     <nav class="sl-nav" aria-label="Console">
       <a class="{{if eq .Nav "dashboard"}}on{{end}}" href="/samelabs">Dashboard</a>
-      {{if or (.Can "memories.read") (.Can "accounts.read")}}<div class="sl-group">Operations</div>{{end}}
+      {{if or (.Can "memories.read") (.Can "accounts.read") (.Can "tasks.read") (.Can "reports.manage")}}<div class="sl-group">Operations</div>{{end}}
+      {{if .Can "tasks.read"}}<a class="{{if or (eq .Nav "tasks") (eq .Nav "task")}}on{{end}}" href="/samelabs/tasks">Tasks</a>{{end}}
+      {{if .Can "reports.manage"}}<a class="{{if eq .Nav "reports"}}on{{end}}" href="/samelabs/reports">Reports</a>{{end}}
       {{if .Can "memories.read"}}<a class="{{if eq .Nav "memories"}}on{{end}}" href="/samelabs/memories">Memories</a>{{end}}
       {{if .Can "accounts.read"}}<a class="{{if eq .Nav "accounts"}}on{{end}}" href="/samelabs/accounts">Accounts</a>{{end}}
       {{if or (.Can "store.redemptions.read") (.Can "store.products.read") (.Can "finance.read")}}<div class="sl-group">Commerce</div>{{end}}

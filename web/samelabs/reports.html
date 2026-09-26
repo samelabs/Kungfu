@@ -1,0 +1,24 @@
+{{define "content"}}
+<form class="sl-filters" method="get">
+  <select name="status">{{range $s := (list "open" "dismissed" "actioned" "all")}}<option value="{{$s}}" {{if eq ($.Q "status") $s}}selected{{end}}>{{$s}}</option>{{end}}</select>
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.List.Items}}<table class="sl-table"><thead><tr><th>Task</th><th>Reporter</th><th>Reason</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+{{range .Data.List.Items}}<tr>
+  <td><a class="mono" href="/samelabs/tasks/{{.TaskCode}}">{{.TaskCode}}</a><div class="sl-muted">{{template "badge" .TaskStatus}}</div></td>
+  <td><a href="/samelabs/accounts/{{.ReporterID}}">{{.ReporterName}}</a></td>
+  <td>{{trunc .Reason 160}}</td>
+  <td>{{template "badge" .Status}}</td>
+  <td>{{time .CreatedAt}}</td>
+  <td>
+    {{if and (eq .Status "open") ($.Can "reports.manage")}}
+    <form class="sl-inline" method="post" action="/samelabs/reports/{{.ID}}/dismiss">{{template "csrf" $.CSRF}}<button class="sl-btn" type="submit">Dismiss</button></form>
+    <form class="sl-inline" method="post" action="/samelabs/reports/{{.ID}}/close" data-confirm="Close the reported task? Its open reports become actioned.">{{template "csrf" $.CSRF}}<button class="sl-btn danger" type="submit">Close task</button></form>
+    {{else}}<span class="sl-muted">—</span>{{end}}
+  </td>
+</tr>{{end}}
+</tbody></table>{{else}}{{template "empty" "No report matches this filter."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.List.Total .Data.List.Page .Data.List.Size)}}
+{{end}}
