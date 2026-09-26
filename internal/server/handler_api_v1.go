@@ -16,6 +16,7 @@ import (
 
 	"kungfu.md/internal/auth"
 	"kungfu.md/internal/mcpserver"
+	"kungfu.md/internal/model"
 )
 
 // apiV1BodyLimit bounds one tool-call body (§5.3 payload 512 KB plus
@@ -24,7 +25,8 @@ const apiV1BodyLimit = 512*1024 + 4096
 
 func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "tool")
-	if _, ok := mcpserver.Tool(name); !ok {
+	def, ok := mcpserver.Tool(name)
+	if !ok {
 		writeAPIV1JSON(w, http.StatusNotFound,
 			map[string]any{"ok": false,
 				"error": map[string]any{"code": "UNKNOWN_TOOL", "message": "Unknown tool " + name},
@@ -32,15 +34,20 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bearer authentication — the same identity authority as /mcp.
-	key := bearerToken(r)
-	bot, err := auth.VerifyAgentKey(r.Context(), key, s.mcpAgentLookup)
-	if err != nil || bot == nil {
-		writeAPIV1JSON(w, http.StatusUnauthorized,
-			map[string]any{"ok": false,
-				"error": map[string]any{"code": "UNAUTHORIZED", "message": "Agent key is invalid or missing"},
-			})
-		return
+	// Public tools (the registry's single allowlist) skip the Bearer
+	// gate; account_register keeps its per-IP register rate limit.
+	var bot *model.Bot
+	if !def.Public {
+		key := bearerToken(r)
+		verified, err := auth.VerifyAgentKey(r.Context(), key, s.mcpAgentLookup)
+		if err != nil || verified == nil {
+			writeAPIV1JSON(w, http.StatusUnauthorized,
+				map[string]any{"ok": false,
+					"error": map[string]any{"code": "UNAUTHORIZED", "message": "Agent key is invalid or missing"},
+				})
+			return
+		}
+		bot = verified
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, apiV1BodyLimit+1))
@@ -74,7 +81,10 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deps := s.mcpDeps()
-	env, status := mcpserver.CallTool(r.Context(), deps, name, bot, args)
+	// public /api/v1 calls still carry the HTTP request context so the
+	// register limiter sees the trusted client IP
+	ctx := deps.WithHTTPRequest(r.Context(), r)
+	env, status := mcpserver.CallTool(ctx, deps, name, bot, args)
 	writeAPIV1JSON(w, status, env)
 }
 

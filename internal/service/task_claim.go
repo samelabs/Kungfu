@@ -69,24 +69,24 @@ func effectiveContract(ctx context.Context, q pg.Querier, t *repository.TaskRow)
 func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (claimView, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
 	t, err := repository.FindTaskByCodeForUpdate(ctx, tx, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return claimView{}, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return claimView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if t.Status != task.TaskOpen {
-		return claimView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
+		return claimView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
 			fmt.Sprintf("Task is %s, not open", t.Status),
 			map[string]interface{}{"status": t.Status})
 	}
 	if t.PublisherID == agentID {
-		return claimView{}, errors.New(403, "OWN_TASK", "You cannot claim your own task")
+		return claimView{}, errors.New(0, "OWN_TASK", "You cannot claim your own task")
 	}
 
 	// Idempotency (spec §5.2 amendment): an existing active claim is
@@ -95,36 +95,36 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	// transaction, its reservation released, and a fresh claim issued.
 	existing, err := repository.FindActiveClaimByTaskAgent(ctx, tx, t.ID, agentID)
 	if err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if existing != nil {
 		if existing.ExpiresAt.After(now) {
 			return newClaimView(existing, t.Code), nil
 		}
 		if err := repository.ApplyClaimStatus(ctx, tx, existing.ClaimID, task.ClaimActive, task.EventClaimExpire); err != nil {
-			return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		if err := repository.ReleaseTaskReservation(ctx, tx, t.ID, existing.Amount); err != nil {
-			return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 	}
 
 	contract, err := effectiveContract(ctx, tx, t)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Open task without a version")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Open task without a version")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	// §5.3 step 5 / §6.3 limits (settled + inflight vs accepted cap;
 	// rejected vs rejected cap).
 	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID)
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && counts.Settled+counts.Inflight >= *cap {
-		return claimView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return claimView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
 			map[string]interface{}{"limit": "accepted"})
 	}
@@ -133,7 +133,7 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		rejectedCap = *contract.Limits.MaxRejectedPerAgent
 	}
 	if counts.Rejected >= rejectedCap {
-		return claimView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return claimView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCap),
 			map[string]interface{}{"limit": "rejected"})
 	}
@@ -141,7 +141,7 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	// §4 derived: slots = ⌊available / price⌋ must be ≥ 1.
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	if contract.Price <= 0 || available/contract.Price < 1 {
-		return claimView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
+		return claimView{}, errors.New(0, "SLOTS_EXHAUSTED", "No claimable budget left")
 	}
 
 	ttl := int64(task.DefaultClaimTTLSeconds)
@@ -162,18 +162,18 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		Amount:    contract.Price,
 	})
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := repository.ReserveTaskAmount(ctx, tx, t.ID, contract.Price); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	claim, err := repository.FindClaimByID(ctx, pool, claimID)
 	if err != nil || claim == nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return newClaimView(claim, t.Code), nil
 }
@@ -187,46 +187,46 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now time.Time) (claimView, error) {
 	hint, err := repository.FindClaimByID(ctx, pool, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || hint == nil {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim not found")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim not found")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
 	t, err := repository.FindTaskByIDForUpdate(ctx, tx, hint.TaskID)
 	if err != nil || t == nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	claim, err := repository.FindClaimByIDForUpdate(ctx, tx, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim not found")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim not found")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if claim.AgentID != agentID || claim.Status != task.ClaimActive || !claim.ExpiresAt.After(now) {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim is not active for you")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim is not active for you")
 	}
 	if t.Status != task.TaskOpen {
-		return claimView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
+		return claimView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
 			fmt.Sprintf("Task is %s, not open", t.Status),
 			map[string]interface{}{"status": t.Status})
 	}
 	if !now.Before(claim.Deadline) {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim deadline reached")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim deadline reached")
 	}
 
 	// TTL comes from the CLAIM's version (§5.2), not the task's current
 	// version — a paused+reopened task may have changed its claim rules.
 	contract, err := versionContract(ctx, tx, t.ID, claim.Version)
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	ttl := int64(task.DefaultClaimTTLSeconds)
 	if contract.Claim.TTL != nil {
@@ -237,15 +237,15 @@ func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now 
 		expires = claim.Deadline
 	}
 	if err := repository.RenewClaim(ctx, tx, claimID, task.ClaimActive, expires); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	after, err := repository.FindClaimByID(ctx, pool, claimID)
 	if err != nil || after == nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return newClaimView(after, t.Code), nil
 }
@@ -256,44 +256,44 @@ func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now 
 func ReleaseClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now time.Time) (claimView, error) {
 	hint, err := repository.FindClaimByID(ctx, pool, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || hint == nil {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim not found")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim not found")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
 	t, err := repository.FindTaskByIDForUpdate(ctx, tx, hint.TaskID)
 	if err != nil || t == nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	claim, err := repository.FindClaimByIDForUpdate(ctx, tx, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim not found")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim not found")
 	}
 	if err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if claim.AgentID != agentID || claim.Status != task.ClaimActive {
-		return claimView{}, errors.New(404, "CLAIM_INVALID", "Claim is not active for you")
+		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim is not active for you")
 	}
 	if err := repository.ApplyClaimStatus(ctx, tx, claimID, task.ClaimActive, task.EventClaimRelease); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := repository.ReleaseTaskReservation(ctx, tx, claim.TaskID, claim.Amount); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	after, err := repository.FindClaimByID(ctx, pool, claimID)
 	if err != nil || after == nil {
-		return claimView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return newClaimView(after, t.Code), nil
 }

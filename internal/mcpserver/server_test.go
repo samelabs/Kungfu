@@ -243,10 +243,7 @@ func TestMCPToolsListDeterministicOrder(t *testing.T) {
 	// tool name — that sorted order is the SDK's own deterministic
 	// contract (single registry, no second registry added): the 8
 	// account/memory tools plus the 10 registry (Task 1.0) tools.
-	want := append([]string{
-		"account_register", "account_status",
-		"memory_delete", "memory_get", "memory_list", "memory_put", "memory_share", "memory_unshare",
-	}, ToolNames()...)
+	want := ToolNames() // the single registry (29 tools)
 	sort.Strings(want)
 
 	listNames := func() []string {
@@ -425,7 +422,7 @@ func TestMCPAuthBoundary(t *testing.T) {
 	if !strings.Contains(body3, fmt.Sprintf(`"bot_id":%d`, botID)) {
 		t.Fatalf("raw bearer did not resolve identity: %s", body3)
 	}
-	var rawOut statusOutput
+	var rawOut map[string]any
 	_ = json.Unmarshal([]byte(extractJSON(body3)), &rawOut)
 
 	// valid key via official SDK client
@@ -445,15 +442,15 @@ func TestMCPAuthBoundary(t *testing.T) {
 		t.Fatalf("account_status failed: %+v", res)
 	}
 	raw, _ := json.Marshal(res.StructuredContent)
-	var out statusOutput
+	var out map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("structured content: %v (%s)", err, raw)
 	}
-	if out.BotID != botID {
-		t.Fatalf("bot_id = %d, want %d (same identity as REST)", out.BotID, botID)
+	if got, _ := out["bot_id"].(float64); int64(got) != botID {
+		t.Fatalf("bot_id = %v, want %d (same identity as REST)", out["bot_id"], botID)
 	}
-	if out.Balance != service.SignupGrant {
-		t.Fatalf("balance = %v, want signup grant %v via Credits authority", out.Balance, service.SignupGrant)
+	if got, _ := out["balance"].(float64); int64(got) != service.SignupGrant {
+		t.Fatalf("balance = %v, want signup grant %v via Credits authority", out["balance"], service.SignupGrant)
 	}
 }
 

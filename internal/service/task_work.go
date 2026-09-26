@@ -114,7 +114,7 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) ([]map[string]any, error) {
 	rows, err := repository.ListOpenTasksForAgent(ctx, pool, agentID, listOpenWorkingSet)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	since := now.Add(-statsWindow)
 	out := make([]map[string]any, 0, workListMax)
@@ -131,14 +131,14 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) 
 			continue
 		}
 		if err != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		if slotsFor(t, contract) < 1 {
 			continue
 		}
 		counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID)
 		if err != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		my := myTally(counts, contract)
 		if my.Remaining != nil && *my.Remaining <= 0 {
@@ -146,7 +146,7 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) 
 		}
 		stats, err := repository.GetTaskStats(ctx, pool, t.ID, since)
 		if err != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		objective := []rune(contract.Objective)
 		if len(objective) > workObjectiveExcerpt {
@@ -191,7 +191,7 @@ type harnessEntry struct {
 func loadVersion(ctx context.Context, pool *pg.Pool, taskID int64, version int32) (*repository.TaskVersionRow, task.Contract, []harnessEntry, error) {
 	v, err := repository.FindTaskVersion(ctx, pool, taskID, version)
 	if goerrors.Is(err, pgx.ErrNoRows) || v == nil {
-		return nil, task.Contract{}, nil, errors.New(500, "INTERNAL_ERROR", "Version snapshot missing")
+		return nil, task.Contract{}, nil, errors.New(0, "INTERNAL_ERROR", "Version snapshot missing")
 	}
 	if err != nil {
 		return nil, task.Contract{}, nil, err
@@ -212,13 +212,13 @@ func loadVersion(ctx context.Context, pool *pg.Pool, taskID int64, version int32
 func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if t.Status == task.TaskDraft {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	return t, nil
 }
@@ -233,27 +233,27 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	}
 	version, err := agentVersion(ctx, pool, agentID, t)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	_, contract, harness, err := loadVersion(ctx, pool, t.ID, version)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	// §10.8: never expose the receiver — strip the key from the
 	// contract projection entirely
 	var contractProjection map[string]any
 	if err := json.Unmarshal(contractJSONOf(contract), &contractProjection); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	delete(contractProjection, "receiver")
 	stats, err := repository.GetTaskStats(ctx, pool, t.ID, now.Add(-statsWindow))
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	my, err := myTallyFor(ctx, pool, agentID, t, contract)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	directory := make([]map[string]any, 0, len(harness))
@@ -292,11 +292,11 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 	}
 	version, err := agentVersion(ctx, pool, agentID, t)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	_, _, harness, err := loadVersion(ctx, pool, t.ID, version)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	for _, h := range harness {
 		if h.RefID == refID {
@@ -307,7 +307,7 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 			}, nil
 		}
 	}
-	return nil, errors.New(404, "HARNESS_REF_NOT_FOUND",
+	return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
 		fmt.Sprintf("ref %q is not part of this task version", refID))
 }
 
@@ -330,36 +330,37 @@ func GetSubmissionStatus(ctx context.Context, pool *pg.Pool, agentID int64, subm
 	case submissionID != nil:
 		sub, err = repository.FindSubmissionByID(ctx, pool, *submissionID)
 		if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
-			return nil, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
+			return nil, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
 		}
 	case code != "" && requestKey != "":
 		t, terr := repository.FindTaskByCode(ctx, pool, code)
 		if goerrors.Is(terr, pgx.ErrNoRows) || t == nil {
-			return nil, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
+			return nil, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
 		}
 		if terr != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		sub, err = repository.FindSubmissionByIdentity(ctx, pool, t.ID, agentID, requestKey)
 		if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
-			return nil, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
+			return nil, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
 		}
 	default:
-		return nil, errors.New(400, "INVALID_REQUEST", "Give submission_id or code + request_key")
+		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Give submission_id or code + request_key",
+			map[string]any{"errors": []map[string]string{{"field": "submission_id", "message": "submission_id or code + request_key is required"}}})
 	}
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if sub.AgentID != agentID {
-		return nil, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
+		return nil, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
 	}
 	t, err := repository.FindTaskByID(ctx, pool, sub.TaskID)
 	if err != nil || t == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	events, err := repository.ListSubmissionEvents(ctx, pool, sub.SubmissionID)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	views := make([]eventView, 0, len(events))
 	for _, e := range events {
@@ -369,7 +370,7 @@ func GetSubmissionStatus(ctx context.Context, pool *pg.Pool, agentID int64, subm
 	out := map[string]any{}
 	raw, _ := json.Marshal(view)
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	out["events"] = views
 	return out, nil
@@ -382,10 +383,10 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 	if code != "" {
 		t, err := repository.FindTaskByCode(ctx, pool, code)
 		if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
-			return nil, 0, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+			return nil, 0, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 		}
 		if err != nil {
-			return nil, 0, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		taskID = &t.ID
 	}
@@ -397,11 +398,11 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 	}
 	total, err := repository.CountAgentSubmissionsBy(ctx, pool, agentID, taskID)
 	if err != nil {
-		return nil, 0, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	rows, err := repository.ListAgentSubmissions(ctx, pool, agentID, taskID, pageSize, (page-1)*pageSize)
 	if err != nil {
-		return nil, 0, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	codes := map[int64]string{}
 	for i := range rows {

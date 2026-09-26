@@ -104,9 +104,12 @@ func TestHTTPStatusTable(t *testing.T) {
 			t.Fatalf("HTTPStatusFor(%s) = %d, want %d", tc.code, got, tc.want)
 		}
 	}
-	// the only 429
-	for code := range httpStatusByCode {
-		if httpStatusByCode[code] == http.StatusTooManyRequests && code != "RATE_LIMIT" {
+	// the only 429: the single source table must not map anything
+	// else to 429 — verify by sampling every code we know of
+	for _, code := range []string{"UNAUTHORIZED", "RATE_LIMIT", "TASK_NOT_FOUND", "OWN_TASK",
+		"VALIDATION_FAILED", "INTERNAL_ERROR", "NAME_TAKEN", "PRIVATE_KUNGFU"} {
+		got := HTTPStatusFor(code)
+		if got == http.StatusTooManyRequests && code != "RATE_LIMIT" {
 			t.Fatalf("%s also maps to 429; RATE_LIMIT must be the only one", code)
 		}
 	}

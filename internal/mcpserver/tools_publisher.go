@@ -18,120 +18,120 @@ import (
 // contractArg mirrors the §3 contract JSON in tool arguments.
 type contractArg = task.Contract
 
-func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Contract contractArg `json:"contract"`
 		Budget   int64       `json:"budget"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return nil, argError("arguments must match the tool schema")
+		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, in.Contract, in.Budget)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Code     string      `json:"code"`
 		Contract contractArg `json:"contract"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
-		return nil, argError("code and contract are required")
+		return ToolResult{}, argError("code and contract are required")
 	}
 	view, err := service.UpdateTask(ctx, deps.Pool, agent.ID, in.Code, in.Contract)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskOpen(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskOpen(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	code, err := codeOnly(args)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	view, err := service.OpenTask(ctx, deps.Pool, agent.ID, code)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskPause(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskPause(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	code, err := codeOnly(args)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	view, err := service.PauseTask(ctx, deps.Pool, agent.ID, code)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskClose(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskClose(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	code, err := codeOnly(args)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	view, err := service.CloseTask(ctx, deps.Pool, agent.ID, code)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskFund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskFund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Code   string `json:"code"`
 		Amount int64  `json:"amount"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" || in.Amount == 0 {
-		return nil, argError("code and amount are required")
+		return ToolResult{}, argError("code and amount are required")
 	}
 	view, err := service.FundTask(ctx, deps.Pool, agent.ID, in.Code, in.Amount)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskRefund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskRefund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	code, err := codeOnly(args)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	view, err := service.RefundTask(ctx, deps.Pool, agent.ID, code)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	code, err := codeOnly(args)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	view, err := service.GetTask(ctx, deps.Pool, agent.ID, code)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return view, nil
+	return dataView(view)
 }
 
-func handleTaskList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	rows, err := service.ListTasks(ctx, deps.Pool, agent.ID)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	return map[string]any{"tasks": rows, "total": len(rows)}, nil
+	return data(map[string]any{"tasks": rows, "total": len(rows)})
 }
 
-func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Code     string `json:"code"`
 		State    string `json:"state"`
@@ -139,7 +139,7 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 		PageSize int    `json:"page_size"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
-		return nil, argError("code is required")
+		return ToolResult{}, argError("code is required")
 	}
 	if in.Page < 1 {
 		in.Page = 1
@@ -149,37 +149,36 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 	}
 	rows, total, err := service.ListSubmissionsForPublisher(ctx, deps.Pool, agent.ID, in.Code, in.State, in.Page, in.PageSize, deps.AgentRefKey)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for i := range rows {
 		m, err := asMap(rows[i])
 		if err != nil {
-			return nil, err
+			return ToolResult{}, err
 		}
 		items = append(items, m)
 	}
-	return map[string]any{"submissions": items, "total": total}, nil
+	return data(map[string]any{"submissions": items, "total": total})
 }
 
-func handleTaskVerdict(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+func handleTaskVerdict(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		SubmissionID int64           `json:"submission_id"`
 		Verdict      json.RawMessage `json:"verdict"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil || in.SubmissionID == 0 || len(in.Verdict) == 0 {
-		return nil, argError("submission_id and verdict are required")
+		return ToolResult{}, argError("submission_id and verdict are required")
 	}
 	view, err := service.SubmitVerdict(ctx, deps.Pool, agent.ID, in.SubmissionID, in.Verdict, time.Now())
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
 	m, err := asMap(view)
 	if err != nil {
-		return nil, err
+		return ToolResult{}, err
 	}
-	m["_no_action"] = true // publisher tools: next_action is always null
-	return m, nil
+	return data(m) // publisher tools: next_action is always null
 }
 
 func codeOnly(args json.RawMessage) (string, error) {
@@ -190,4 +189,14 @@ func codeOnly(args json.RawMessage) (string, error) {
 		return "", argError("code is required")
 	}
 	return in.Code, nil
+}
+
+// dataView projects any service view into a NoAction ToolResult
+// (publisher tools never carry a next_action).
+func dataView(v any) (ToolResult, error) {
+	m, err := asMap(v)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	return data(m)
 }

@@ -31,19 +31,32 @@ import (
 	"kungfu.md/internal/task"
 )
 
-// ToolHandler runs one tool for a verified agent over its raw JSON
-// arguments. The result map is merged into the §8.2 envelope; errors
-// carry a stable application code (see normalizeToolError). Handlers
-// may set the reserved "_"-prefixed keys (_action, _retry_after,
-// _verdict, _rate_retry_after) to steer the envelope; they never
-// cross the wire.
-type ToolHandler func(ctx context.Context, agent *model.Bot, args json.RawMessage) (map[string]any, error)
+// ToolResult is the typed result every registry handler returns; the
+// §8.2 envelope is built from these fields, never from magic map
+// keys. Action/RetryAfter/Verdict steer the computed next_action;
+// NoAction forces next_action and retry_after to null (publisher and
+// account/memory tools).
+type ToolResult struct {
+	Data       map[string]any
+	Action     *string
+	RetryAfter *int
+	Verdict    *task.Verdict
+	NoAction   bool
+}
+
+// ToolHandler runs one tool for a verified agent (nil agent = the
+// public tools' anonymous caller) over its raw JSON arguments.
+// Errors carry a stable application code (see normalizeToolError).
+type ToolHandler func(ctx context.Context, agent *model.Bot, args json.RawMessage) (ToolResult, error)
 
 // ToolDef is one registry entry; Handler binds the server's Deps.
+// Public marks the tools callable without a Bearer Agent key (the
+// single allowlist both the MCP gate and /api/v1 read).
 type ToolDef struct {
 	Name        string
 	Description string
 	InputSchema string // JSON Schema (draft 2020-12), root object
+	Public      bool
 	Handler     func(deps *Deps) ToolHandler
 }
 
@@ -51,9 +64,9 @@ type ToolDef struct {
 func (t ToolDef) bind(deps *Deps) ToolHandler { return t.Handler(deps) }
 
 // factory adapts a (deps, agent, args) handler into the factory form.
-func factory(fn func(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error)) func(*Deps) ToolHandler {
+func factory(fn func(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error)) func(*Deps) ToolHandler {
 	return func(deps *Deps) ToolHandler {
-		return func(ctx context.Context, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+		return func(ctx context.Context, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 			return fn(ctx, deps, agent, args)
 		}
 	}
@@ -68,46 +81,19 @@ type ToolError struct {
 
 func (e *ToolError) Error() string { return e.Code + ": " + e.Message }
 
-// httpStatusByCode is the ONE protocol-layer code→HTTP status table
-// (§8.4); service-internal AppError HTTP codes map ONLY through it.
-var httpStatusByCode = map[string]int{
-	"UNAUTHORIZED":          http.StatusUnauthorized,
-	"RATE_LIMIT":            http.StatusTooManyRequests, // the only 429
-	"TASK_NOT_FOUND":        http.StatusNotFound,
-	"SUBMISSION_NOT_FOUND":  http.StatusNotFound,
-	"HARNESS_REF_NOT_FOUND": http.StatusNotFound,
-	"UNKNOWN_TOOL":          http.StatusNotFound,
-	"OWN_TASK":              http.StatusForbidden,
-	"NOT_OWNER":             http.StatusForbidden,
-	"INSUFFICIENT_CREDITS":  http.StatusPaymentRequired,
-	"PAYLOAD_TOO_LARGE":     http.StatusRequestEntityTooLarge,
-	"TASK_NOT_OPEN":         http.StatusConflict,
-	"SLOTS_EXHAUSTED":       http.StatusConflict,
-	"SUBMISSION_LIMIT":      http.StatusConflict,
-	"CLAIM_REQUIRED":        http.StatusConflict,
-	"CLAIM_INVALID":         http.StatusConflict,
-	"IDEMPOTENCY_CONFLICT":  http.StatusConflict,
-	"INVALID_STATE":         http.StatusConflict,
-	"HAS_RESERVATIONS":      http.StatusConflict,
-	"NOT_UNDER_REVIEW":      http.StatusConflict,
-	"NOTHING_TO_REFUND":     http.StatusConflict,
-	"SCHEMA_MISMATCH":       http.StatusUnprocessableEntity,
-	"CREDENTIAL_IN_PAYLOAD": http.StatusUnprocessableEntity,
-	"INVALID_REVISES":       http.StatusUnprocessableEntity,
-	"INVALID_REQUEST_KEY":   http.StatusUnprocessableEntity,
-	"VALIDATION_FAILED":     http.StatusUnprocessableEntity,
-	"VERDICT_INVALID":       http.StatusUnprocessableEntity,
-	"TEST_DELIVERY_FAILED":  http.StatusUnprocessableEntity,
-}
-
-// HTTPStatusFor is the protocol-layer mapping; codes outside the table
-// are INTERNAL_ERROR → 500 with a fixed message (no internal detail
-// ever crosses the boundary).
+// HTTPStatusFor delegates to the ONE protocol-layer table in
+// internal/errors; codes outside it are INTERNAL_ERROR → 500.
 func HTTPStatusFor(code string) int {
-	if status, ok := httpStatusByCode[code]; ok {
+	if status, ok := apperr.StatusFor(code); ok {
 		return status
 	}
 	return http.StatusInternalServerError
+}
+
+// listed reports whether the code is in the protocol table.
+func listed(code string) bool {
+	_, ok := apperr.StatusFor(code)
+	return ok
 }
 
 const internalErrorMessage = "An internal error occurred"
@@ -123,7 +109,7 @@ func normalizeToolError(err error) *ToolError {
 			te = &ToolError{Code: "INTERNAL_ERROR", Message: internalErrorMessage}
 		}
 	}
-	if _, listed := httpStatusByCode[te.Code]; !listed {
+	if !listed(te.Code) {
 		te = &ToolError{Code: "INTERNAL_ERROR", Message: internalErrorMessage}
 	}
 	return te
@@ -344,6 +330,80 @@ Possible errors: SUBMISSION_NOT_FOUND, NOT_OWNER, NOT_UNDER_REVIEW (details.stat
 		},"required":["submission_id","verdict"],"additionalProperties":false}`,
 		Handler: factory(handleTaskVerdict),
 	},
+	{
+		Name: "account_register",
+		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once — store it now; it cannot be recovered later.
+Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-128 chars; IP registration rate limit applies.
+Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
+		InputSchema: `{"type":"object","properties":{
+			"name":{"type":"string"},
+			"password":{"type":"string"}
+		},"required":["name","password"],"additionalProperties":false}`,
+		Public:  true,
+		Handler: factory(handleAccountRegister),
+	},
+	{
+		Name: "account_status",
+		Description: `Return the authenticated agent's account identity and current authoritative credit balance.
+Preconditions: valid Agent key.
+Possible errors: UNAUTHORIZED, INTERNAL_ERROR.`,
+		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+		Handler:     factory(handleAccountStatus),
+	},
+	{
+		Name: "memory_list",
+		Description: `List your stored Kungfu memories.
+Preconditions: valid Agent key; agent rate limit (list) applies.
+Result: {memories[], total, returned}.`,
+		InputSchema: `{"type":"object","properties":{
+			"limit":{"type":"integer"},
+			"offset":{"type":"integer"}
+		},"additionalProperties":false}`,
+		Handler: factory(handleMemoryList),
+	},
+	{
+		Name: "memory_get",
+		Description: `Get one memory by code. Owners read their own; other agents may read shared public memories.
+Preconditions: valid Agent key; the code exists and is readable by you.
+Possible errors: NOT_FOUND, PRIVATE_KUNGFU.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryGet),
+	},
+	{
+		Name: "memory_put",
+		Description: `Create (no code) or update (with code) an owned memory.
+Preconditions: valid Agent key; title 1-128 chars, content >= 50 bytes and <= 100 KB, no credential-shaped strings; push rate limit applies.
+Possible errors: INVALID_CODE, TITLE_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.`,
+		InputSchema: `{"type":"object","properties":{
+			"code":{"type":"string"},
+			"title":{"type":"string"},
+			"tags":{"type":"array","items":{"type":"string"}},
+			"description":{"type":"string"},
+			"content":{"type":"string"}
+		},"required":["title","tags","content"],"additionalProperties":false}`,
+		Handler: factory(handleMemoryPut),
+	},
+	{
+		Name: "memory_share",
+		Description: `Make one of your memories publicly readable. Idempotent.
+Possible errors: NOT_FOUND, NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryShare),
+	},
+	{
+		Name: "memory_unshare",
+		Description: `Revoke public access to one of your memories. Idempotent.
+Possible errors: NOT_FOUND, NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryUnshare),
+	},
+	{
+		Name: "memory_delete",
+		Description: `Soft-delete one of your memories.
+Possible errors: NOT_FOUND, NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryDelete),
+	},
 }
 
 // Tool returns the registry definition by name.
@@ -379,8 +439,8 @@ func CallTool(ctx context.Context, deps *Deps, name string, agent *model.Bot, ra
 	return buildEnvelope(result, err), envelopeStatus(err)
 }
 
-// buildEnvelope assembles the flat §8.2 object.
-func buildEnvelope(result map[string]any, err error) map[string]any {
+// buildEnvelope assembles the flat §8.2 object from the typed result.
+func buildEnvelope(result ToolResult, err error) map[string]any {
 	env := map[string]any{
 		"ok":          err == nil,
 		"error":       nil,
@@ -389,34 +449,10 @@ func buildEnvelope(result map[string]any, err error) map[string]any {
 	}
 
 	var state string
-	var verdict *task.Verdict
-	var errCode string
-	var retryOverride *int
-	var actionOverride string
-	var rateRetry any
-	noAction := false // publisher tools: next_action is always null
-
-	if result != nil {
-		if v, ok := result["_no_action"].(bool); ok {
-			noAction = v
-		}
-		if s, ok := result["state"].(string); ok {
-			state = s
-		}
-		if v, ok := result["_verdict"].(*task.Verdict); ok {
-			verdict = v
-		}
-		if a, ok := result["_action"].(string); ok {
-			actionOverride = a
-		}
-		if r, ok := result["_retry_after"].(*int); ok {
-			retryOverride = r
-		}
-		if r, ok := result["_rate_retry_after"]; ok {
-			rateRetry = r
-		}
+	if s, ok := result.Data["state"].(string); ok {
+		state = s
 	}
-
+	var errCode string
 	if err != nil {
 		te := normalizeToolError(err)
 		errCode = te.Code
@@ -427,18 +463,25 @@ func buildEnvelope(result map[string]any, err error) map[string]any {
 		}
 	}
 
-	action, retryAfter := NextAction(state, verdict, errCode)
-	if actionOverride != "" {
-		action = actionOverride
+	action, retryAfter := NextAction(state, result.Verdict, errCode)
+	if errCode == "RATE_LIMIT" {
+		// retry_after is the limiter remainder carried in details
+		if te, ok := err.(*ToolError); ok {
+			if v, ok := te.Details["retry_after"]; ok {
+				if i := intPtrOf(v); i != nil {
+					retryAfter = i
+				}
+			}
+		}
 	}
-	if noAction {
+	if result.Action != nil && *result.Action != "" {
+		action = *result.Action
+	}
+	if result.RetryAfter != nil {
+		retryAfter = result.RetryAfter
+	}
+	if result.NoAction {
 		action, retryAfter = "", nil
-	}
-	if retryOverride != nil {
-		retryAfter = retryOverride
-	}
-	if errCode == "RATE_LIMIT" && rateRetry != nil {
-		retryAfter = intPtrOf(rateRetry)
 	}
 	if action != "" {
 		env["next_action"] = action
@@ -446,28 +489,10 @@ func buildEnvelope(result map[string]any, err error) map[string]any {
 	if retryAfter != nil {
 		env["retry_after"] = *retryAfter
 	}
-
-	for k, v := range result {
-		if len(k) > 0 && k[0] == '_' {
-			continue // reserved plumbing keys never cross the wire
-		}
+	for k, v := range result.Data {
 		env[k] = v
 	}
 	return env
-}
-
-func intPtrOf(v any) *int {
-	switch t := v.(type) {
-	case int:
-		return &t
-	case int64:
-		i := int(t)
-		return &i
-	case float64:
-		i := int(t)
-		return &i
-	}
-	return nil
 }
 
 func envelopeStatus(err error) int {
@@ -484,11 +509,37 @@ func notAcceptedEnvelope(code, message string, details map[string]any) map[strin
 		"next_action": nil,
 		"retry_after": nil,
 	}
-	if action, retry := NextAction("", nil, code); action != "" {
+	action, retry := NextAction("", nil, code)
+	if action != "" {
 		env["next_action"] = action
-		if retry != nil {
-			env["retry_after"] = *retry
+	}
+	if code == "RATE_LIMIT" && details != nil {
+		if v, ok := details["retry_after"]; ok {
+			if i := intPtrOf(v); i != nil {
+				retry = i
+			}
 		}
 	}
+	if retry != nil {
+		env["retry_after"] = *retry
+	}
 	return env
+}
+
+// intPtrOf normalizes numeric detail values to *int.
+func intPtrOf(v any) *int {
+	switch t := v.(type) {
+	case int:
+		return &t
+	case int32:
+		i := int(t)
+		return &i
+	case int64:
+		i := int(t)
+		return &i
+	case float64:
+		i := int(t)
+		return &i
+	}
+	return nil
 }

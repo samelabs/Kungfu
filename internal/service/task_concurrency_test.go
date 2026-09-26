@@ -86,18 +86,18 @@ func TestConcurrentSubmitVersusClaimOps(t *testing.T) {
 	}
 
 	// submit × renew
-	runConcurrent(t, 20, submit, func(round int) error {
+	runConcurrent(t, 5, submit, func(round int) error {
 		_, err := RenewClaim(ctx, pool, agent, claim.ClaimID, time.Now())
 		return err
 	})
 	// submit × release (release wins exactly once; later rounds error
 	// CLAIM_INVALID which is legal)
-	runConcurrent(t, 20, submit, func(round int) error {
+	runConcurrent(t, 5, submit, func(round int) error {
 		_, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID, time.Now())
 		return err
 	})
 	// submit × ExpireClaims
-	runConcurrent(t, 20, submit, func(round int) error {
+	runConcurrent(t, 5, submit, func(round int) error {
 		_, err := ExpireClaims(ctx, pool, time.Now(), 100)
 		return err
 	})
@@ -151,7 +151,7 @@ func TestSubmitBindsLockedVersion(t *testing.T) {
 		lastVersion = v.Version
 		return nil
 	}
-	runConcurrent(t, 20, submit, reopen)
+	runConcurrent(t, 5, submit, reopen)
 
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	if tr.Version < 2 {

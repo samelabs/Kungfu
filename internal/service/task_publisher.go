@@ -53,7 +53,7 @@ func validationFailed(fieldErrors []task.FieldError) *errors.AppError {
 
 // invalidTaskState is §8.4 INVALID_STATE with the current status.
 func invalidTaskState(status string) *errors.AppError {
-	return errors.NewWithDetails(409, "INVALID_STATE",
+	return errors.NewWithDetails(0, "INVALID_STATE",
 		fmt.Sprintf("Operation not allowed in status %q", status),
 		map[string]interface{}{"status": status})
 }
@@ -63,16 +63,16 @@ func invalidTaskState(status string) *errors.AppError {
 func lockOwnedTask(ctx context.Context, q pg.Querier, publisherID int64, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCodeForUpdate(ctx, q, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if t == nil {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.PublisherID != publisherID {
-		return nil, errors.New(403, "NOT_OWNER", "Not your task")
+		return nil, errors.New(0, "NOT_OWNER", "Not your task")
 	}
 	return t, nil
 }
@@ -95,7 +95,7 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 		if v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version); err == nil && v != nil {
 			contractJSON = v.Contract
 		} else if err != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 	}
 	var contract task.Contract
@@ -169,46 +169,46 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		}})
 	}
 	if balance, err := credits.Balance(ctx, pool, publisherID); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if balance < budget {
-		return nil, errors.New(402, "INSUFFICIENT_CREDITS",
+		return nil, errors.New(0, "INSUFFICIENT_CREDITS",
 			fmt.Sprintf("Insufficient credits. Need %d, have %d", budget, balance))
 	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	code, err := publiccode.GenerateUnique(func(code string) (bool, error) {
 		return repository.TaskCodeExists(ctx, pool, code)
 	})
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Code generation failed")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Code generation failed")
 	}
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	taskID, err := repository.InsertTask(ctx, tx, repository.NewTaskRow{
 		Code: code, PublisherID: publisherID, Contract: contractJSON,
 	})
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := repository.LockTaskBudget(ctx, pool, tx, taskID, publisherID, budget); err != nil {
 		if isInsufficientCreditsErr(err) {
-			return nil, errors.New(402, "INSUFFICIENT_CREDITS", "Insufficient credits")
+			return nil, errors.New(0, "INSUFFICIENT_CREDITS", "Insufficient credits")
 		}
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	t, err := repository.FindTaskByID(ctx, pool, taskID)
 	if err != nil || t == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, t)
 }
@@ -236,12 +236,12 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
@@ -252,15 +252,15 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 		return nil, invalidTaskState(t.Status)
 	}
 	if err := repository.UpdateDraftContract(ctx, tx, t.ID, contractJSON); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	after, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || after == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
 }
@@ -275,7 +275,7 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
 	if err != nil {
@@ -294,7 +294,7 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 
 	var contract task.Contract
 	if err := json.Unmarshal(draftJSON, &contract); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Stored contract is not valid JSON")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
@@ -308,7 +308,7 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	for i, ref := range defaults.HarnessRefs {
 		k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, publisherID, ref)
 		if err != nil {
-			return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		if k == nil {
 			harnessErrs = append(harnessErrs, task.FieldError{
@@ -329,11 +329,11 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	}
 	harnessJSON, err := json.Marshal(harness)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 
 	newVersion := currentVersion + 1
@@ -347,7 +347,7 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	// semantics, details.reason=DRAFT_CHANGED).
 	tx, err = pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	t, err = lockOwnedTask(ctx, tx, publisherID, code)
@@ -358,26 +358,26 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 		return nil, invalidTaskState(t.Status)
 	}
 	if !jsonEqual(t.DraftContract, draftJSON) {
-		return nil, errors.NewWithDetails(409, "INVALID_STATE",
+		return nil, errors.NewWithDetails(0, "INVALID_STATE",
 			"The draft changed while the task was opening",
 			map[string]interface{}{"status": t.Status, "reason": "DRAFT_CHANGED"})
 	}
 	if err := repository.InsertTaskVersion(ctx, tx, taskID, newVersion, contractJSON, harnessJSON); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := repository.ApplyTaskStatus(ctx, tx, taskID, status, task.EventOpen, nil); err != nil {
 		return nil, invalidTaskState(status)
 	}
 	if err := repository.SetTaskVersion(ctx, tx, taskID, newVersion); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
 	after, err := repository.FindTaskByID(ctx, pool, taskID)
 	if err != nil || after == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
 }
@@ -417,7 +417,7 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 		"payload":       payload,
 	})
 	if err != nil {
-		return errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 
 	res := delivery.PostJSON(ctx, contract.Receiver.URL, body, map[string]string{
@@ -465,7 +465,7 @@ func CloseTask(ctx context.Context, pool *pg.Pool, publisherID int64, code strin
 func applyPublisherStatus(ctx context.Context, pool *pg.Pool, publisherID int64, code, event string) (map[string]interface{}, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
@@ -476,14 +476,14 @@ func applyPublisherStatus(ctx context.Context, pool *pg.Pool, publisherID int64,
 		return nil, invalidTaskState(t.Status)
 	}
 	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, event, nil); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	after, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || after == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
 }
@@ -498,7 +498,7 @@ func FundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	}
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
@@ -510,16 +510,16 @@ func FundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	}
 	if err := repository.FundTaskBudget(ctx, pool, tx, t.ID, publisherID, amount); err != nil {
 		if isInsufficientCreditsErr(err) {
-			return nil, errors.New(402, "INSUFFICIENT_CREDITS", "Insufficient credits")
+			return nil, errors.New(0, "INSUFFICIENT_CREDITS", "Insufficient credits")
 		}
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	after, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || after == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
 }
@@ -530,7 +530,7 @@ func FundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
@@ -541,22 +541,22 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 		return nil, invalidTaskState(t.Status)
 	}
 	if t.Reserved > 0 {
-		return nil, errors.NewWithDetails(409, "HAS_RESERVATIONS",
+		return nil, errors.NewWithDetails(0, "HAS_RESERVATIONS",
 			fmt.Sprintf("Task still holds %d reserved credits", t.Reserved),
 			map[string]interface{}{"reserved": t.Reserved})
 	}
 	if t.BudgetLocked-t.Settled-t.Reserved-t.Refunded <= 0 {
-		return nil, errors.New(409, "NOTHING_TO_REFUND", "No available budget to refund")
+		return nil, errors.New(0, "NOTHING_TO_REFUND", "No available budget to refund")
 	}
 	if _, err := repository.RefundTaskAvailable(ctx, pool, tx, t.ID, publisherID); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	after, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || after == nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
 }
@@ -566,16 +566,16 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if t == nil {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.PublisherID != publisherID {
-		return nil, errors.New(403, "NOT_OWNER", "Not your task")
+		return nil, errors.New(0, "NOT_OWNER", "Not your task")
 	}
 	return taskView(ctx, pool, t)
 }
@@ -584,7 +584,7 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 func ListTasks(ctx context.Context, pool *pg.Pool, publisherID int64) ([]map[string]interface{}, error) {
 	rows, err := repository.ListTasksByPublisher(ctx, pool, publisherID)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	out := make([]map[string]interface{}, 0, len(rows))
 	for i := range rows {
