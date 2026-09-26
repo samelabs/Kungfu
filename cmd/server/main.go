@@ -48,7 +48,7 @@ func main() {
 	// on backgroundErrors, and routed through ServeLifecycle's single
 	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
-	backgroundErrors := make(chan error, 4) // one slot per background worker
+	backgroundErrors := make(chan error, 5) // one slot per background worker
 	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
 
 	// Claim expiry (spec §5.2): expired active claims are marked
@@ -86,6 +86,17 @@ func main() {
 		}
 	})
 
+	// Data retention (§9): 30 days after a submission's terminal entry
+	// its payload goes; 30 days after a task closes its snapshot
+	// material goes (hashes, verdicts, events, schema, criteria stay).
+	retentionStop := make(chan struct{})
+	go runPeriodic("retention", retentionStop, backgroundErrors, 6*time.Hour, func() {
+		payloads, snapshots, err := service.PurgeExpired(context.Background(), pool, time.Now(), 500)
+		if err != nil {
+			log.Printf("[kungfu.md] retention pass failed (payloads=%d snapshots=%d): %v", payloads, snapshots, err)
+		}
+	})
+
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      srv,
@@ -111,7 +122,7 @@ func main() {
 		httpServer:       httpServer,
 		shutdownBudget:   10 * time.Second,
 		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, reviewStop},
+		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, reviewStop, retentionStop},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

@@ -176,5 +176,9 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-2a：可选数值字段用指针区分缺省与显式值；“字符”按 rune 计；schema 根必须显式声明 `type: object`；harness_refs 归属与 receiver 可达性在 WO-2b 校验。
 - WO-2b：任务不存在统一为 `TASK_NOT_FOUND`；可用为 0 的退款为 `NOTHING_TO_REFUND`；budget 下限不足为 `VALIDATION_FAILED`（field=budget）；Harness 快照形状 `[{ref_id, title, description, content}]`；`draft_contract` 缺省 `'{}'`。
 - WO-3：已有 active Claim 时领取幂等返回；后台周期任务统一为 `runPeriodic`，claim_expiry 每 30 秒一轮、每轮 100 条。
+- WO-4：payload 规范化哈希（键排序，数字按原文）；schema 编译按 (task_id, version) 进程内缓存；非 object 的 payload 归为 SCHEMA_MISMATCH（pointer ""）；CREDENTIAL_IN_PAYLOAD 取首个命中位置。
+- WO-5a：状态机补边 uncertain --delivery_failed--> failed；投递结果写入使用不随请求取消的上下文；202 与其他 2xx 以响应码区分。
+- WO-5b：恢复租约为 UPDATE…SKIP LOCKED 并刷新 updated_at；delivering 超 15 秒、uncertain 每 30 秒重投、满 24 小时 failed(DELIVERY_UNRESOLVED)；agent_ref 密钥取 SESSION_SECRET（轮换会改变 agent_ref，部署说明需写明）；判定已过期时先超时结算再返回 NOT_UNDER_REVIEW。
+- WO-6a：work_list 至多 100 条、候选窗口 500；my.remaining 为两类上限剩余的较小值，全不限为 null；统计窗口按进入终态时间；harness bytes 为快照内容字节数。已知优化项：ListWork 逐任务查询统计，规模增长后改为批量查询。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。
