@@ -24,52 +24,52 @@ import (
 // then returns NOT_UNDER_REVIEW with the settled state. Verdict
 // bodies are validated with the contract's own criteria (§6.1);
 // invalid bodies leave the submission untouched.
-func SubmitVerdict(ctx context.Context, pool *pg.Pool, publisherID int64, submissionID int64, body json.RawMessage, now time.Time) (submissionView, error) {
+func SubmitVerdict(ctx context.Context, pool *pg.Pool, publisherID int64, submissionID int64, body json.RawMessage, now time.Time) (SubmissionView, error) {
 	sub, err := repository.FindSubmissionByID(ctx, pool, submissionID)
 	if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
-		return submissionView{}, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
+		return SubmissionView{}, errors.New(404, "SUBMISSION_NOT_FOUND", "Submission not found")
 	}
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	t, err := repository.FindTaskByID(ctx, pool, sub.TaskID)
 	if err != nil || t == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if t.PublisherID != publisherID {
-		return submissionView{}, errors.New(403, "NOT_OWNER", "Not your task")
+		return SubmissionView{}, errors.New(403, "NOT_OWNER", "Not your task")
 	}
 
 	// §6.2 amendment: past the deadline (and still under review) the
 	// platform settles by timeout FIRST, then reports NOT_UNDER_REVIEW.
 	if sub.State == task.SubUnderReview && sub.ReviewDeadline != nil && !now.Before(*sub.ReviewDeadline) {
 		if err := settleReviewTimeout(context.WithoutCancel(ctx), pool, sub); err != nil {
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
-		return submissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
+		return SubmissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
 			"The review window closed; the submission was accepted by timeout",
 			map[string]interface{}{"state": task.SubSettled})
 	}
 	if sub.State != task.SubUnderReview {
-		return submissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
+		return SubmissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
 			fmt.Sprintf("Submission is %s, not under review", sub.State),
 			map[string]interface{}{"state": sub.State})
 	}
 
 	contract, err := versionContract(ctx, pool, t.ID, sub.Version)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	verdict, err := task.ParseVerdict(body, contract.Acceptance.Criteria)
 	if err != nil {
-		return submissionView{}, errors.NewWithDetails(400, "VERDICT_INVALID",
+		return SubmissionView{}, errors.NewWithDetails(400, "VERDICT_INVALID",
 			"The verdict does not satisfy §6.1",
 			map[string]interface{}{"message": err.Error()})
 	}
 	verdict.Source = "publisher"
 	raw, err := json.Marshal(verdict)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Internal error")
 	}
 
 	event := task.EventReject
@@ -80,38 +80,38 @@ func SubmitVerdict(ctx context.Context, pool *pg.Pool, publisherID int64, submis
 	writeCtx := context.WithoutCancel(ctx)
 	tx, err := pool.TxBegin(writeCtx)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	current, err := repository.FindSubmissionByIDForUpdate(writeCtx, tx, submissionID)
 	if err != nil || current == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if current.State != task.SubUnderReview {
-		return submissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
+		return SubmissionView{}, errors.NewWithDetails(409, "NOT_UNDER_REVIEW",
 			fmt.Sprintf("Submission is %s, not under review", current.State),
 			map[string]interface{}{"state": current.State})
 	}
 	if err := repository.SetSubmissionState(writeCtx, tx, submissionID, task.SubUnderReview,
 		event, &repository.SetSubmissionStateOpts{Verdict: raw}); err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	switch event {
 	case task.EventAccept:
 		if err := repository.SettleTaskSubmission(writeCtx, pool, tx, current.TaskID,
 			submissionID, current.AgentID, current.Amount); err != nil {
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 	case task.EventReject:
 		if err := repository.ReleaseTaskReservation(writeCtx, tx, current.TaskID, current.Amount); err != nil {
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 	}
 	if err := tx.Commit(writeCtx); err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 
-	return submissionViewByID(writeCtx, pool, submissionID)
+	return SubmissionViewByID(writeCtx, pool, submissionID)
 }
 
 // publisherSubmissionRow is one listed submission (§6.2 async-no-

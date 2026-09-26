@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"kungfu.md/internal/auth"
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/mcpserver"
 	"kungfu.md/internal/middleware"
@@ -33,6 +34,8 @@ type Server struct {
 	Config         *config.Config
 	Pool           *pg.Pool
 	RateLimiter    *ratelimit.Limiter
+	mcpDepsValue   mcpserver.Deps
+	mcpAgentLookup auth.BotLookupFunc
 	Router         http.Handler
 	TrustedProxies []*net.IPNet
 
@@ -135,12 +138,13 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// security-header / panic / deadline middleware — no second
 	// timeout or lifecycle owner. Trusted client IP flows from the
 	// existing proxy mechanism into MCP rate limiting.
+	s.mcpAgentLookup = func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
+		return repository.FindActiveBotByAPIKeyHash(ctx, s.Pool, keyHash)
+	}
 	mcpDeps := mcpserver.Deps{
-		Pool:        s.Pool,
-		RateLimiter: s.RateLimiter,
-		AgentLookup: func(ctx context.Context, keyHash []byte) (*model.Bot, error) {
-			return repository.FindActiveBotByAPIKeyHash(ctx, s.Pool, keyHash)
-		},
+		Pool:          s.Pool,
+		RateLimiter:   s.RateLimiter,
+		AgentLookup:   s.mcpAgentLookup,
 		AccountStatus: service.ComposeAgentAccountStatus,
 		ClientIP: func(r *http.Request) string {
 			return middleware.GetClientIP(r, s.TrustedProxies)
@@ -152,8 +156,15 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 			MaxDescriptionLength: s.Config.MaxDescriptionLength,
 			MaxContentSize:       s.Config.MaxContentSize,
 		},
+		// Same agent_ref key source as the recovery worker (§7.1).
+		AgentRefKey: []byte(s.Config.SessionSecret),
 	}
+	s.mcpDepsValue = mcpDeps
 	r.Handle("/mcp", mcpserver.Handler(mcpDeps))
+
+	// -- Task 1.0 tools over plain HTTP JSON (§8): POST /api/v1/<tool>,
+	// Bearer Agent key, the same registry and §8.2 envelope as /mcp.
+	r.Post("/api/v1/{tool}", s.handleAPIV1Tool)
 
 	// -- API routes: Owner (session auth) --
 	r.Get("/api/owner/session", s.handleOwnerSessionGet)

@@ -34,15 +34,15 @@ var requestKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 
 // SubmitInput is the §5.3 submission request.
 type SubmitInput struct {
-	Code       string
-	RequestKey string
-	Payload    json.RawMessage
-	ClaimID    *int64
-	Revises    *int64
+	Code       string          `json:"code"`
+	RequestKey string          `json:"request_key"`
+	Payload    json.RawMessage `json:"payload"`
+	ClaimID    *int64          `json:"claim_id,omitempty"`
+	Revises    *int64          `json:"revises,omitempty"`
 }
 
-// submissionView is the intake + delivery return structure.
-type submissionView struct {
+// SubmissionView is the intake + delivery return structure.
+type SubmissionView struct {
 	SubmissionID   int64      `json:"submission_id"`
 	TaskCode       string     `json:"task_code"`
 	Version        int32      `json:"version"`
@@ -55,8 +55,8 @@ type submissionView struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
-func newSubmissionView(s *repository.SubmissionRow, code string) submissionView {
-	v := submissionView{
+func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView {
+	v := SubmissionView{
 		SubmissionID:   s.SubmissionID,
 		TaskCode:       code,
 		Version:        s.Version,
@@ -78,14 +78,14 @@ func newSubmissionView(s *repository.SubmissionRow, code string) submissionView 
 // accepted submission is then delivered SYNCHRONOUSLY (§5.4) and the
 // post-delivery view returned; agentRefKey keys the per-task anonymous
 // agent_ref (§7.1).
-func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInput, agentRefKey []byte, now time.Time) (submissionView, error) {
+func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInput, agentRefKey []byte, now time.Time) (SubmissionView, error) {
 	// (a) request_key format and payload size — before any query.
 	if !requestKeyPattern.MatchString(in.RequestKey) {
-		return submissionView{}, errors.New(400, "INVALID_REQUEST_KEY",
+		return SubmissionView{}, errors.New(400, "INVALID_REQUEST_KEY",
 			"request_key must be 1-128 chars of [A-Za-z0-9._~-]")
 	}
 	if len(in.Payload) > maxPayloadBytes {
-		return submissionView{}, errors.New(400, "PAYLOAD_TOO_LARGE",
+		return SubmissionView{}, errors.New(400, "PAYLOAD_TOO_LARGE",
 			fmt.Sprintf("payload must be at most %d bytes, got %d", maxPayloadBytes, len(in.Payload)))
 	}
 	payloadHash := task.PayloadHash(in.Payload)
@@ -95,17 +95,17 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if goerrors.Is(err, pgx.ErrNoRows) {
 		// fall through to (c) which reports TASK_NOT_FOUND
 	} else if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if t != nil {
 		if existing, err := repository.FindSubmissionByIdentity(ctx, pool, t.ID, agentID, in.RequestKey); err == nil && existing != nil {
 			if existing.PayloadHash == payloadHash {
 				return newSubmissionView(existing, t.Code), nil
 			}
-			return submissionView{}, errors.New(409, "IDEMPOTENCY_CONFLICT",
+			return SubmissionView{}, errors.New(409, "IDEMPOTENCY_CONFLICT",
 				"request_key was already used with a different payload")
 		} else if err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 	}
 
@@ -113,47 +113,47 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// the claim's version when a claim is carried (spec §5.3), else the
 	// task's current version.
 	if t == nil {
-		return submissionView{}, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return SubmissionView{}, errors.New(404, "TASK_NOT_FOUND", "Task not found")
 	}
 	var version int32
 	var contract task.Contract
 	if in.ClaimID == nil {
 		if t.Status != task.TaskOpen {
-			return submissionView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
+			return SubmissionView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
 				fmt.Sprintf("Task is %s, not open", t.Status),
 				map[string]interface{}{"status": t.Status})
 		}
 		version, contract, err = resolveSubmissionVersion(ctx, pool, t, nil)
 		if err != nil {
-			return submissionView{}, err
+			return SubmissionView{}, err
 		}
 		if slotsFor(t, contract) < 1 {
-			return submissionView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
+			return SubmissionView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
 		}
 	} else {
 		version, contract, err = resolveSubmissionVersion(ctx, pool, t, in.ClaimID)
 		if err != nil {
-			return submissionView{}, err
+			return SubmissionView{}, err
 		}
 	}
 
 	// (d) own task.
 	if t.PublisherID == agentID {
-		return submissionView{}, errors.New(403, "OWN_TASK", "You cannot submit to your own task")
+		return SubmissionView{}, errors.New(403, "OWN_TASK", "You cannot submit to your own task")
 	}
 
 	// (e) limits — same tallies as WO-3.
 	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && counts.Settled+counts.Inflight >= *cap {
-		return submissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
 			map[string]interface{}{"limit": "accepted"})
 	}
 	if counts.Rejected >= rejectedCapFor(contract) {
-		return submissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
 			map[string]interface{}{"limit": "rejected"})
 	}
@@ -163,35 +163,35 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// this task, unexpired (spec §5.2).
 	if in.ClaimID == nil {
 		if contract.Claim.Required {
-			return submissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
+			return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
 		}
 	} else if err := checkClaim(ctx, pool, *in.ClaimID, agentID, t.ID, now); err != nil {
-		return submissionView{}, err
+		return SubmissionView{}, err
 	}
 
 	// (g) revises.
 	if in.Revises != nil {
 		if err := checkRevises(ctx, pool, *in.Revises, agentID, t.ID); err != nil {
-			return submissionView{}, err
+			return SubmissionView{}, err
 		}
 	}
 
 	// (h) payload: a JSON object, schema-valid, credential-free.
 	var decoded map[string]any
 	if err := json.Unmarshal(in.Payload, &decoded); err != nil {
-		return submissionView{}, schemaMismatch([]task.PointerError{{
+		return SubmissionView{}, schemaMismatch([]task.PointerError{{
 			Pointer: "", Message: "payload must be a JSON object",
 		}})
 	}
 	schema, err := versionSchema(ctx, pool, t.ID, version)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if errs := task.ValidatePayloadForTask(t.ID, version, schema, in.Payload); len(errs) > 0 {
-		return submissionView{}, schemaMismatch(errs)
+		return SubmissionView{}, schemaMismatch(errs)
 	}
 	if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
-		return submissionView{}, errors.NewWithDetails(400, "CREDENTIAL_IN_PAYLOAD",
+		return SubmissionView{}, errors.NewWithDetails(400, "CREDENTIAL_IN_PAYLOAD",
 			"payload contains credential-shaped strings",
 			map[string]interface{}{"pointer": ptrs[0]})
 	}
@@ -199,55 +199,55 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// -- write phase: one transaction, re-verify c–f under the lock --
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
 	locked, err := repository.FindTaskByCodeForUpdate(ctx, tx, in.Code)
 	if err != nil || locked == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	// (d)+(e) under the lock: ownership is immutable, the tallies are
 	// not (a concurrent intake may have committed in between).
 	if locked.PublisherID == agentID {
-		return submissionView{}, errors.New(403, "OWN_TASK", "You cannot submit to your own task")
+		return SubmissionView{}, errors.New(403, "OWN_TASK", "You cannot submit to your own task")
 	}
 	lockedCounts, err := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && lockedCounts.Settled+lockedCounts.Inflight >= *cap {
-		return submissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
 			map[string]interface{}{"limit": "accepted"})
 	}
 	if lockedCounts.Rejected >= rejectedCapFor(contract) {
-		return submissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+		return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
 			map[string]interface{}{"limit": "rejected"})
 	}
 	amount := contract.Price
 	if in.ClaimID == nil {
 		if locked.Status != task.TaskOpen {
-			return submissionView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
+			return SubmissionView{}, errors.NewWithDetails(409, "TASK_NOT_OPEN",
 				fmt.Sprintf("Task is %s, not open", locked.Status),
 				map[string]interface{}{"status": locked.Status})
 		}
 		if err := repository.ReserveTaskAmount(ctx, tx, locked.ID, amount); err != nil {
 			if goerrors.Is(err, repository.ErrNoAvailableBudget) {
-				return submissionView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
+				return SubmissionView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
 			}
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 	} else {
 		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *in.ClaimID)
 		if err != nil || claim == nil ||
 			claim.AgentID != agentID || claim.TaskID != locked.ID ||
 			claim.Status != task.ClaimActive || !claim.ExpiresAt.After(now) {
-			return submissionView{}, errors.New(404, "CLAIM_INVALID", "Claim is not active for you on this task")
+			return SubmissionView{}, errors.New(404, "CLAIM_INVALID", "Claim is not active for you on this task")
 		}
 		if err := repository.ApplyClaimStatus(ctx, tx, claim.ClaimID, task.ClaimActive, task.EventClaimUse); err != nil {
-			return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 		}
 		amount = claim.Amount
 	}
@@ -271,14 +271,14 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 				if existing.PayloadHash == payloadHash {
 					return newSubmissionView(existing, locked.Code), nil
 				}
-				return submissionView{}, errors.New(409, "IDEMPOTENCY_CONFLICT",
+				return SubmissionView{}, errors.New(409, "IDEMPOTENCY_CONFLICT",
 					"request_key was already used with a different payload")
 			}
 		}
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 
 	// Synchronous delivery (§5.4): async-without-receiver goes straight

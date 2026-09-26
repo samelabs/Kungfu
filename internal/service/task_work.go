@@ -377,7 +377,7 @@ func GetSubmissionStatus(ctx context.Context, pool *pg.Pool, agentID int64, subm
 
 // ListHistory is §8.1 work_history: the agent's submissions, newest
 // first, optionally filtered by task.
-func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string, page, pageSize int) ([]submissionView, int64, error) {
+func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string, page, pageSize int) ([]SubmissionView, int64, error) {
 	var taskID *int64
 	if code != "" {
 		t, err := repository.FindTaskByCode(ctx, pool, code)
@@ -411,7 +411,7 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 			}
 		}
 	}
-	out := make([]submissionView, 0, len(rows))
+	out := make([]SubmissionView, 0, len(rows))
 	for i := range rows {
 		out = append(out, newSubmissionView(&rows[i], codes[rows[i].TaskID]))
 	}

@@ -103,7 +103,7 @@ func deliverSyncTask(t *testing.T, pool *pg.Pool, publisher int64, rcv *progRece
 	return code
 }
 
-func deliverSubmit(t *testing.T, pool *pg.Pool, agent int64, code string) (submissionView, int64) {
+func deliverSubmit(t *testing.T, pool *pg.Pool, agent int64, code string) (SubmissionView, int64) {
 	t.Helper()
 	view, err := SubmitWork(context.Background(), pool, agent, SubmitInput{
 		Code:       code,

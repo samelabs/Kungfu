@@ -11,6 +11,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -56,6 +57,11 @@ type Deps struct {
 	// Limits is the narrow typed projection of the existing Config
 	// values (no MCP defaults, no MCP env vars).
 	Limits ContentLimits
+
+	// AgentRefKey derives the per-task anonymous agent_ref (§7.1).
+	// Injected from the same source as the recovery worker's key
+	// (cfg.SessionSecret in production wiring).
+	AgentRefKey []byte
 }
 
 // limiter returns the business rate-limit authority (the single
@@ -281,7 +287,46 @@ func newServer(deps Deps) *mcp.Server {
 	})
 	addAccountTools(s, deps)
 	addMemoryTools(s, deps)
+	addRegistryTools(s, deps)
 	return s
+}
+
+// addRegistryTools mounts the Task 1.0 registry (WO-7a) on the MCP
+// server: one low-level AddTool per ToolDef with the explicit JSON
+// schema; the handler builds the §8.2 envelope as structuredContent
+// and mirrors not-accepted calls with isError = true.
+func addRegistryTools(s *mcp.Server, deps Deps) {
+	for _, def := range executorTools {
+		s.AddTool(&mcp.Tool{
+			Name:        def.Name,
+			Description: def.Description,
+			InputSchema: json.RawMessage(def.InputSchema),
+		}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			agent, err := deps.resolveVerified(ctx)
+			if err != nil {
+				// unreachable behind the bearer middleware; fail closed
+				env := notAcceptedEnvelope("UNAUTHORIZED", "Agent key is invalid", nil)
+				return envelopeResult(env), nil
+			}
+			env, _ := CallExecutorTool(ctx, &deps, def.Name, agent, json.RawMessage(req.Params.Arguments))
+			return envelopeResult(env), nil
+		})
+	}
+}
+
+// envelopeResult renders the §8.2 envelope as both the structured
+// content and the JSON text content; not-accepted calls carry
+// isError = true (§8.2: the SAME structure on both channels).
+func envelopeResult(env map[string]any) *mcp.CallToolResult {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		raw = []byte(`{"ok":false,"error":{"code":"INTERNAL_ERROR","message":"An internal error occurred"}}`)
+	}
+	return &mcp.CallToolResult{
+		Content:           []mcp.Content{&mcp.TextContent{Text: string(raw)}},
+		StructuredContent: env,
+		IsError:           env["ok"] == false,
+	}
 }
 
 // mcpBootstrapInstructions is the server instructions payload of the
