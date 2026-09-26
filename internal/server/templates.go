@@ -330,6 +330,8 @@ window.OWNER_I18N = ` + ownerI18N + `;
 <script src="/assets/owner/api.js"></script>
 <script src="/assets/owner/render-overview.js"></script>
 <script src="/assets/owner/render-logs.js"></script>
+<script src="/assets/owner/render-tasks-console.js"></script>
+<script src="/assets/owner/tasks-console.js"></script>
 <script src="/assets/owner/auth.js"></script>
 <script src="/assets/owner/logs.js"></script>
 <script src="/assets/owner/render-store.js"></script>
@@ -384,10 +386,19 @@ func ownerNavHTML(data *tmplData) string {
 		}
 		return ""
 	}
+	isActiveMulti := func(ss ...string) string {
+		for _, s := range ss {
+			if data.Section == s {
+				return " active"
+			}
+		}
+		return ""
+	}
 	return `<nav class="nav" aria-label="Owner Workspace">
     <a class="btn` + isActive("overview") + `" href="` + i18n.LocaleURL(data.Locale, "/owner") + `">` + data.T("owner.nav.overview") + `</a>
     <a class="btn` + isActive("account") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/account") + `">` + data.T("owner.nav.account") + `</a>
     <a class="btn` + isActive("key") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/key") + `">` + data.T("owner.nav.key") + `</a>
+    <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
     <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("store") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("owner.nav.store") + `</a>
@@ -403,6 +414,10 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerAccountHTML(data)
 	case "key":
 		return ownerKeyHTML(data)
+	case "tasks":
+		return ownerTasksConsoleHTML(data)
+	case "task_new", "task_detail":
+		return ownerTaskEditorHTML(data)
 	case "logs":
 		return ownerLogsHTML(data)
 	case "store":
@@ -588,4 +603,40 @@ func formatCredits(c int64) string {
 
 func intToStr(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+// ownerTasksConsoleHTML is the /owner/tasks list shell: the JS layer
+// calls task_list through /api/owner/tool and renders the rows.
+func ownerTasksConsoleHTML(d *tmplData) string {
+	return `<section class="panel">
+    <div class="section-head">
+        <div class="section-head-copy">
+            <h2>` + d.T("owner.tasks.heading") + `</h2>
+            <p>` + d.T("owner.tasks.summary") + `</p>
+        </div>
+        <div class="section-head-actions">
+            <a class="btn primary" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks/new") + `" id="newTaskBtn">` + d.T("owner.tasks.new_task") + `</a>
+        </div>
+    </div>
+</section>
+<section class="panel">
+    <h2>` + d.T("owner.tasks.my_tasks") + `</h2>
+    <div id="taskConsoleList"><p class="muted">` + d.T("owner.tasks.loading") + `</p></div>
+</section>`
+}
+
+// ownerTaskEditorHTML is the /owner/tasks/new and /owner/tasks/{code}
+// shell: Contract JSON editor, lifecycle buttons, stats, and the
+// submissions review queue — all driven by /api/owner/tool calls.
+func ownerTaskEditorHTML(d *tmplData) string {
+	return `<section class="panel">
+    <div class="section-head">
+        <div class="section-head-copy">
+            <h2 id="taskEditorHeading">` + d.T("owner.tasks.heading") + `</h2>
+            <p>` + d.T("owner.tasks.summary") + `</p>
+        </div>
+    </div>
+    <div id="taskEditorStatus" class="keybox" hidden></div>
+    <div id="taskEditorRoot"><p class="muted">` + d.T("owner.tasks.loading") + `</p></div>
+</section>`
 }
