@@ -34,6 +34,8 @@ func NextAction(state string, verdict *task.Verdict, errCode string) (string, *i
 			return "wait", nil // retry_after = limiter remainder (caller)
 		case "CLAIM_INVALID":
 			return "retry", iptr(retryAfterClaimInvalid)
+		case "CLAIM_REQUIRED":
+			return "retry", nil // §8.4: retry (claim first)
 		case "SCHEMA_MISMATCH", "CREDENTIAL_IN_PAYLOAD", "PAYLOAD_TOO_LARGE",
 			"IDEMPOTENCY_CONFLICT", "INVALID_REVISES", "INVALID_REQUEST_KEY":
 			return "revise", nil

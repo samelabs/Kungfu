@@ -63,7 +63,7 @@ func httpDispatch(t *testing.T, pool *pg.Pool, deps *Deps, botID int64, tool str
 	t.Helper()
 	var bot = wo7Bot(t, pool, botID)
 	raw, _ := json.Marshal(args)
-	env, status := CallExecutorTool(context.Background(), deps, tool, bot, raw)
+	env, status := CallTool(context.Background(), deps, tool, bot, raw)
 	return env, status
 }
 
@@ -108,6 +108,8 @@ func mcpCallRelease(t *testing.T, srv *httptest.Server, key string, claimID int6
 func numOff(v any) float64 {
 	switch t := v.(type) {
 	case int:
+		return float64(t)
+	case int32:
 		return float64(t)
 	case int64:
 		return float64(t)

@@ -9,7 +9,7 @@ package mcpserver
 //              (low-level Server.AddTool with the explicit schema);
 //   (b) HTTP — POST /api/v1/<tool> (internal/server) authenticates the
 //              Bearer Agent key through the same auth.VerifyAgentKey +
-//              AgentLookup seam and dispatches into CallExecutorTool.
+//              AgentLookup seam and dispatches into CallTool.
 //
 // Both channels return the identical §8.2 envelope: a flat JSON object
 // with ok, error (null or {code, message, details}), next_action and
@@ -129,8 +129,8 @@ func normalizeToolError(err error) *ToolError {
 	return te
 }
 
-// executorTools is the registry.
-var executorTools = []ToolDef{
+// tools is the registry.
+var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open, claimable work.
@@ -234,11 +234,121 @@ next_action: the platform triages; continue other work.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string"}},"required":["code","reason"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkReport),
 	},
+	{
+		Name: "task_create",
+		Description: `Create a draft task and lock its budget (lock_task ledger row).
+Preconditions: the contract satisfies the spec's section-3 table (validated field-by-field); budget >= max(1000, price); your balance covers the budget.
+Result: the task view - status "draft", budget_locked, available, slots.
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS. After: task_open makes it visible to executors.`,
+		InputSchema: `{"type":"object","properties":{
+			"contract":{"type":"object"},
+			"budget":{"type":"integer"}
+		},"required":["contract","budget"],"additionalProperties":false}`,
+		Handler: factory(handleTaskCreate),
+	},
+	{
+		Name: "task_update",
+		Description: `Edit the draft contract of a draft or paused task.
+Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
+Result: the task view with the updated draft contract (applied as a NEW version on the next open).
+Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+		InputSchema: `{"type":"object","properties":{
+			"code":{"type":"string"},
+			"contract":{"type":"object"}
+		},"required":["code","contract"],"additionalProperties":false}`,
+		Handler: factory(handleTaskUpdate),
+	},
+	{
+		Name: "task_open",
+		Description: `Validate the draft contract, run the test delivery (section 5.4) and open the task on a new version.
+Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds (sync 2xx; async 2xx or 202; async without receiver skips it).
+Result: status "open", version incremented.
+Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, TEST_DELIVERY_FAILED (details.status_code, details.response).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskOpen),
+	},
+	{
+		Name: "task_pause",
+		Description: `Pause an open task: new claims and claim-less submissions stop; existing active claims may still submit (no renewal); in-flight submissions complete.
+Preconditions: the task is yours and open.
+Result: status "paused".
+Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskPause),
+	},
+	{
+		Name: "task_close",
+		Description: `Close a task permanently. Same claim semantics as pause; refund becomes possible once reservations drain.
+Preconditions: the task is yours and not already closed.
+Result: status "closed".
+Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskClose),
+	},
+	{
+		Name: "task_fund",
+		Description: `Add budget to a non-closed task (fund_task ledger row).
+Preconditions: the task is yours, not closed; amount is a positive integer; your balance covers it.
+Result: the task view with the increased budget_locked/available/slots.
+Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, INSUFFICIENT_CREDITS.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"amount":{"type":"integer"}},"required":["code","amount"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskFund),
+	},
+	{
+		Name: "task_refund",
+		Description: `Refund the available budget of a closed task (refund_task ledger row).
+Preconditions: the task is yours, closed, holds no reservations and has available budget.
+Result: the task view with refunded set and available 0.
+Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskRefund),
+	},
+	{
+		Name: "task_get",
+		Description: `Read one of your tasks: status, version, counters, derived amounts (available, slots).
+Preconditions: the task is yours.
+Possible errors: NOT_FOUND (missing task), NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskGet),
+	},
+	{
+		Name: "task_list",
+		Description: `List your tasks, newest first.
+Preconditions: valid Agent key.
+Result: tasks[] with the task views and total.`,
+		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+		Handler:     factory(handleTaskList),
+	},
+	{
+		Name: "task_submissions",
+		Description: `Read the submissions of one of your tasks (newest first; state filter and paging optional) - payloads, verdicts, failures, review deadlines and the stable agent_ref of each executor.
+Preconditions: the task is yours.
+Possible errors: NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
+		InputSchema: `{"type":"object","properties":{
+			"code":{"type":"string"},
+			"state":{"type":"string"},
+			"page":{"type":"integer"},
+			"page_size":{"type":"integer"}
+		},"required":["code"],"additionalProperties":false}`,
+		Handler: factory(handleTaskSubmissions),
+	},
+	{
+		Name: "task_verdict",
+		Description: `Judge an under_review submission (async acceptance).
+Preconditions: the submission belongs to your task and is under review; the verdict satisfies section 6.1 (rejections cite declared criteria, reason 1-500 chars, retryable defaults true; annotations <= 50 with declared criterion and pointer).
+Result: accepted -> settled and paid (source "publisher"); rejected -> the reservation returns to the task.
+Possible errors: SUBMISSION_NOT_FOUND, NOT_OWNER, NOT_UNDER_REVIEW (details.state; a verdict arriving past the review deadline first settles by timeout, then returns this), VERDICT_INVALID (details.message).`,
+		InputSchema: `{"type":"object","properties":{
+			"submission_id":{"type":"integer"},
+			"verdict":{"type":"object"}
+		},"required":["submission_id","verdict"],"additionalProperties":false}`,
+		Handler: factory(handleTaskVerdict),
+	},
 }
 
-// ExecutorTool returns the registry definition by name.
-func ExecutorTool(name string) (ToolDef, bool) {
-	for _, t := range executorTools {
+// Tool returns the registry definition by name.
+func Tool(name string) (ToolDef, bool) {
+	for _, t := range tools {
 		if t.Name == name {
 			return t, true
 		}
@@ -246,22 +356,22 @@ func ExecutorTool(name string) (ToolDef, bool) {
 	return ToolDef{}, false
 }
 
-// ExecutorToolNames lists the registry (tests, parity checks).
-func ExecutorToolNames() []string {
-	out := make([]string, 0, len(executorTools))
-	for _, t := range executorTools {
+// ToolNames lists the registry (tests, parity checks).
+func ToolNames() []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
 		out = append(out, t.Name)
 	}
 	return out
 }
 
-// CallExecutorTool runs one registry tool and builds the §8.2
+// CallTool runs one registry tool and builds the §8.2
 // envelope. It returns the envelope and the HTTP status (200 on ok;
 // the protocol table otherwise). The MCP channel uses the same
 // envelope as structuredContent and mirrors not-accepted calls with
 // isError = true.
-func CallExecutorTool(ctx context.Context, deps *Deps, name string, agent *model.Bot, rawArgs json.RawMessage) (map[string]any, int) {
-	def, ok := ExecutorTool(name)
+func CallTool(ctx context.Context, deps *Deps, name string, agent *model.Bot, rawArgs json.RawMessage) (map[string]any, int) {
+	def, ok := Tool(name)
 	if !ok {
 		return notAcceptedEnvelope("UNKNOWN_TOOL", "Unknown tool "+name, nil), HTTPStatusFor("UNKNOWN_TOOL")
 	}
@@ -284,8 +394,12 @@ func buildEnvelope(result map[string]any, err error) map[string]any {
 	var retryOverride *int
 	var actionOverride string
 	var rateRetry any
+	noAction := false // publisher tools: next_action is always null
 
 	if result != nil {
+		if v, ok := result["_no_action"].(bool); ok {
+			noAction = v
+		}
 		if s, ok := result["state"].(string); ok {
 			state = s
 		}
@@ -316,6 +430,9 @@ func buildEnvelope(result map[string]any, err error) map[string]any {
 	action, retryAfter := NextAction(state, verdict, errCode)
 	if actionOverride != "" {
 		action = actionOverride
+	}
+	if noAction {
+		action, retryAfter = "", nil
 	}
 	if retryOverride != nil {
 		retryAfter = retryOverride

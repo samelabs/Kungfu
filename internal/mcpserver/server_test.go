@@ -246,7 +246,7 @@ func TestMCPToolsListDeterministicOrder(t *testing.T) {
 	want := append([]string{
 		"account_register", "account_status",
 		"memory_delete", "memory_get", "memory_list", "memory_put", "memory_share", "memory_unshare",
-	}, ExecutorToolNames()...)
+	}, ToolNames()...)
 	sort.Strings(want)
 
 	listNames := func() []string {
