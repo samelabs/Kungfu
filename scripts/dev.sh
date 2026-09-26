@@ -30,7 +30,7 @@ tools() {
 net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null; }
 
 run_tools() { # run a command in the toolchain container with the repo mounted
-  docker run --rm --network "$NET" -v "$PWD":/src -v "$CACHE":/go -w /src "$@"
+  docker run --rm --network "$NET" -v "$PWD":/src -v "$CACHE":/go -e GOCACHE=/go/cache -w /src "$@"
 }
 
 wait_pg() { # $1 = container
@@ -74,7 +74,7 @@ cmd_up() {
     if [ "$fresh" = 1 ]; then echo "fresh dev database: applying migrations"; migrate "$DB"; fi
   fi
   docker rm -f "$APP" >/dev/null 2>&1 || true
-  docker run -d --name "$APP" --network "$NET" -p 127.0.0.1:8090:8090 -v "$PWD":/src -v "$CACHE":/go -w /src \
+  docker run -d --name "$APP" --network "$NET" -p 127.0.0.1:8090:8090 -v "$PWD":/src -v "$CACHE":/go -e GOCACHE=/go/cache -w /src \
     -e DB_HOST="$DB" -e DB_PORT=5432 -e DB_NAME=kungfu_md -e DB_USER=kungfu -e DB_PASS=kungfu -e DB_SSLMODE=disable \
     -e SESSION_SECRET=local-dev-session-secret-00000000000 \
     -e SETTINGS_ENC_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
