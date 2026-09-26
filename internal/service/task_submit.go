@@ -233,6 +233,39 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 				fmt.Sprintf("Task is %s, not open", locked.Status),
 				map[string]interface{}{"status": locked.Status})
 		}
+		// The version may have moved under us (a concurrent pause→
+		// update→open). Bind the submission to the LOCKED row's current
+		// version and redo the payload checks against it (§10.7).
+		if locked.Version != version {
+			nv, nc, rerr := resolveSubmissionVersion(ctx, tx, locked, nil)
+			if rerr != nil {
+				return SubmissionView{}, rerr
+			}
+			version, contract = nv, nc
+			if errs := task.ValidatePayloadForTask(locked.ID, version, contract.Output.Schema, in.Payload); len(errs) > 0 {
+				return SubmissionView{}, schemaMismatch(errs)
+			}
+			if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
+				return SubmissionView{}, errors.NewWithDetails(400, "CREDENTIAL_IN_PAYLOAD",
+					"payload contains credential-shaped strings",
+					map[string]interface{}{"pointer": ptrs[0]})
+			}
+			recount, cerr := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
+			if cerr != nil {
+				return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+			}
+			if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && recount.Settled+recount.Inflight >= *cap {
+				return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+					fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
+					map[string]interface{}{"limit": "accepted"})
+			}
+			if recount.Rejected >= rejectedCapFor(contract) {
+				return SubmissionView{}, errors.NewWithDetails(429, "SUBMISSION_LIMIT",
+					fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
+					map[string]interface{}{"limit": "rejected"})
+			}
+			amount = contract.Price
+		}
 		if err := repository.ReserveTaskAmount(ctx, tx, locked.ID, amount); err != nil {
 			if goerrors.Is(err, repository.ErrNoAvailableBudget) {
 				return SubmissionView{}, errors.New(409, "SLOTS_EXHAUSTED", "No claimable budget left")
@@ -290,10 +323,10 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 // its contract: the claim's version when a claim is carried, otherwise
 // the task's current version (spec §5.3 — a carried claim pins the
 // version the payload is validated against).
-func resolveSubmissionVersion(ctx context.Context, pool *pg.Pool, t *repository.TaskRow, claimID *int64) (int32, task.Contract, error) {
+func resolveSubmissionVersion(ctx context.Context, q pg.Querier, t *repository.TaskRow, claimID *int64) (int32, task.Contract, error) {
 	version := t.Version
 	if claimID != nil {
-		claim, err := repository.FindClaimByID(ctx, pool, *claimID)
+		claim, err := repository.FindClaimByID(ctx, q, *claimID)
 		if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
 			return 0, task.Contract{}, errors.New(404, "CLAIM_INVALID", "Claim not found")
 		}
@@ -305,7 +338,7 @@ func resolveSubmissionVersion(ctx context.Context, pool *pg.Pool, t *repository.
 	if version < 1 {
 		return 0, task.Contract{}, errors.New(500, "INTERNAL_ERROR", "Task without an effective version")
 	}
-	v, err := repository.FindTaskVersion(ctx, pool, t.ID, version)
+	v, err := repository.FindTaskVersion(ctx, q, t.ID, version)
 	if goerrors.Is(err, pgx.ErrNoRows) || v == nil {
 		return 0, task.Contract{}, errors.New(500, "INTERNAL_ERROR", "Version snapshot missing")
 	}

@@ -709,26 +709,33 @@ func PurgeTaskVersionSnapshots(ctx context.Context, q pg.Querier, taskID int64) 
 	return nil
 }
 
-// RecentTerminalStates returns the states of the most recent
-// terminal submissions of a task (settled / rejected / failed), newest
-// first — the §7.3 receiver-fault window.
-func RecentTerminalStates(ctx context.Context, q pg.Querier, taskID int64, limit int) ([]string, error) {
+// TerminalOutcome is one recent terminal submission: its state and,
+// for failed, the failure reason.
+type TerminalOutcome struct {
+	State   string
+	Failure *string
+}
+
+// RecentTerminalOutcomes returns the most recent terminal submissions
+// of a task (settled / rejected / failed), newest first — the §7.3
+// receiver-fault window with the failure reasons attached.
+func RecentTerminalOutcomes(ctx context.Context, q pg.Querier, taskID int64, limit int) ([]TerminalOutcome, error) {
 	rows, err := q.Query(ctx, `
-		SELECT state FROM tb_task_submission
+		SELECT state, failure FROM tb_task_submission
 		WHERE task_id = $1 AND state IN ('settled', 'rejected', 'failed')
 		ORDER BY updated_at DESC, submission_id DESC
 		LIMIT $2`, taskID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("recent terminal states: %w", err)
+		return nil, fmt.Errorf("recent terminal outcomes: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	var out []TerminalOutcome
 	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
+		var o TerminalOutcome
+		if err := rows.Scan(&o.State, &o.Failure); err != nil {
 			return nil, err
 		}
-		out = append(out, s)
+		out = append(out, o)
 	}
 	return out, rows.Err()
 }

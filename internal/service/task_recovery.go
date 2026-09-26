@@ -47,15 +47,13 @@ func RecoverSubmissions(ctx context.Context, pool *pg.Pool, agentRefKey []byte, 
 			continue
 		}
 		if sub.State == task.SubDelivering {
-			// §5.4: delivering ≤ 15s, then uncertain.
-			if err := writeDeliveryOutcome(ctx, pool, sub, task.EventTimeout, nil, nil, nil); err != nil {
-				continue
-			}
-			sub, err = repository.FindSubmissionByID(ctx, pool, id)
-			if err != nil || sub == nil || sub.State != task.SubUncertain {
+			// §5.4: delivering ≤ 15s, then uncertain. The conversion
+			// ENDS this round for the row — redelivery follows the 30s
+			// uncertain cadence on a later pass (§7c).
+			if err := writeDeliveryOutcome(ctx, pool, sub, task.EventTimeout, nil, nil, nil); err == nil {
 				handled++
-				continue
 			}
+			continue
 		}
 		if sub.State == task.SubUncertain {
 			if since, err := repository.UncertainSince(ctx, pool, id); err == nil &&
@@ -71,6 +69,9 @@ func RecoverSubmissions(ctx context.Context, pool *pg.Pool, agentRefKey []byte, 
 				handled++
 				continue
 			}
+			// redelivery cadence (§5.4: every 30s) — the lease already
+			// guarantees updated_at <= now-30s, i.e. at least 30s since
+			// entering uncertain or the last attempt
 			if _, err := DeliverSubmission(ctx, pool, id, agentRefKey, now); err != nil {
 				continue
 			}

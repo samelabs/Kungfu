@@ -253,23 +253,18 @@ func writeDeliveryOutcome(ctx context.Context, pool *pg.Pool, pre *repository.Su
 	return nil
 }
 
-// maybePauseForReceiverFault is §7.3: when the task's five most recent
-// terminal submissions are ALL failed, the platform pauses the task
-// with paused_reason = RECEIVER_FAULT (only from open).
+// countingFailures are the §7.3 receiver-fault causes; DELIVERY_UNRESOLVED
+// breaks the consecutive count instead of joining it.
+var countingFailures = map[string]bool{
+	"RECEIVER_PROTOCOL": true, "RECEIVER_FAULT": true, "RECEIVER_UNREACHABLE": true,
+}
+
+// maybePauseForReceiverFault is §7.3: with the Task row locked, the
+// five most recent terminal submissions are re-read; only when ALL are
+// failed with a counting receiver-fault reason does the platform pause
+// the task with paused_reason = RECEIVER_FAULT (only from open).
 func maybePauseForReceiverFault(ctx context.Context, pool *pg.Pool, taskID int64) error {
 	govCtx := context.WithoutCancel(ctx)
-	states, err := repository.RecentTerminalStates(govCtx, pool, taskID, receiverFaultThreshold)
-	if err != nil {
-		return errors.New(500, "INTERNAL_ERROR", "Database error")
-	}
-	if len(states) < receiverFaultThreshold {
-		return nil
-	}
-	for _, s := range states {
-		if s != task.SubFailed {
-			return nil
-		}
-	}
 	tx, err := pool.TxBegin(govCtx)
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -282,6 +277,18 @@ func maybePauseForReceiverFault(ctx context.Context, pool *pg.Pool, taskID int64
 	if t.Status != task.TaskOpen {
 		return nil // already paused/closed — nothing to do
 	}
+	outcomes, err := repository.RecentTerminalOutcomes(govCtx, tx, taskID, receiverFaultThreshold)
+	if err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	if len(outcomes) < receiverFaultThreshold {
+		return nil
+	}
+	for _, o := range outcomes {
+		if o.State != task.SubFailed || o.Failure == nil || !countingFailures[*o.Failure] {
+			return nil
+		}
+	}
 	reason := receiverFaultReason
 	if err := repository.ApplyTaskStatus(govCtx, tx, taskID, task.TaskOpen, task.EventPlatformPause, &reason); err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -292,9 +299,9 @@ func maybePauseForReceiverFault(ctx context.Context, pool *pg.Pool, taskID int64
 	return nil
 }
 
-// versionContract loads a task version's contract.
-func versionContract(ctx context.Context, pool *pg.Pool, taskID int64, version int32) (task.Contract, error) {
-	v, err := repository.FindTaskVersion(ctx, pool, taskID, version)
+// versionContract loads a task version's contract (pool or tx).
+func versionContract(ctx context.Context, q pg.Querier, taskID int64, version int32) (task.Contract, error) {
+	v, err := repository.FindTaskVersion(ctx, q, taskID, version)
 	if err != nil || v == nil {
 		return task.Contract{}, err
 	}

@@ -132,6 +132,18 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	return view, nil
 }
 
+// jsonEqual compares two JSON documents by semantics (key order and
+// whitespace irrelevant).
+func jsonEqual(a, b []byte) bool {
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return string(a) == string(b)
+	}
+	na, _ := json.Marshal(va)
+	nb, _ := json.Marshal(vb)
+	return string(na) == string(nb)
+}
+
 func derefInt64(p *int64) int64 {
 	if p == nil {
 		return 0
@@ -329,8 +341,10 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 		return nil, err
 	}
 
-	// Phase 3: write under a fresh lock; a concurrent status change
-	// aborts with INVALID_STATE instead of double-opening.
+	// Phase 3: write under a fresh lock; a concurrent status change —
+	// or a draft edited between the phases — aborts with INVALID_STATE
+	// instead of double-opening (§7c: the draft is compared by JSON
+	// semantics, details.reason=DRAFT_CHANGED).
 	tx, err = pool.TxBegin(ctx)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -342,6 +356,11 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	}
 	if t.Status != status || t.Version != currentVersion {
 		return nil, invalidTaskState(t.Status)
+	}
+	if !jsonEqual(t.DraftContract, draftJSON) {
+		return nil, errors.NewWithDetails(409, "INVALID_STATE",
+			"The draft changed while the task was opening",
+			map[string]interface{}{"status": t.Status, "reason": "DRAFT_CHANGED"})
 	}
 	if err := repository.InsertTaskVersion(ctx, tx, taskID, newVersion, contractJSON, harnessJSON); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")

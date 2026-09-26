@@ -252,7 +252,7 @@ Kungfu-Task-Version: <version>
 
 ### 7.3 故障治理
 
-同一任务连续 5 个 Submission 以 `failed`（协议错误或接收端故障）终止，平台暂停任务，`paused_reason = RECEIVER_FAULT`。
+同一任务连续 5 个 Submission 以 `failed`（协议错误或接收端故障）终止，平台暂停任务，`paused_reason = RECEIVER_FAULT`。计入原因为 RECEIVER_PROTOCOL、RECEIVER_FAULT、RECEIVER_UNREACHABLE；DELIVERY_UNRESOLVED 不计入并中断连续计数。
 
 ---
 
