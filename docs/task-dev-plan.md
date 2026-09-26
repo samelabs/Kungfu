@@ -181,5 +181,6 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-5b：恢复租约为 UPDATE…SKIP LOCKED 并刷新 updated_at；delivering 超 15 秒、uncertain 每 30 秒重投、满 24 小时 failed(DELIVERY_UNRESOLVED)；agent_ref 密钥取 SESSION_SECRET（轮换会改变 agent_ref，部署说明需写明）；判定已过期时先超时结算再返回 NOT_UNDER_REVIEW。
 - WO-6a：work_list 至多 100 条、候选窗口 500；my.remaining 为两类上限剩余的较小值，全不限为 null；统计窗口按进入终态时间；harness bytes 为快照内容字节数。已知优化项：ListWork 逐任务查询统计，规模增长后改为批量查询。
 - WO-7a：协议层统一 code→HTTP 状态表（429 仅 RATE_LIMIT）；retry_after：delivering 5、uncertain 30、under_review 60、failed 60 秒；未知工具 UNKNOWN_TOOL(404)。
+- WO-7b：执行者与发布者共用一个注册表；发布者工具 next_action 恒为 null；/api/v1 请求体超限为 PAYLOAD_TOO_LARGE(413)。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。

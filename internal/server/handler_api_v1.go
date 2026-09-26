@@ -8,6 +8,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -23,7 +24,7 @@ const apiV1BodyLimit = 512*1024 + 4096
 
 func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "tool")
-	if _, ok := mcpserver.ExecutorTool(name); !ok {
+	if _, ok := mcpserver.Tool(name); !ok {
 		writeAPIV1JSON(w, http.StatusNotFound,
 			map[string]any{"ok": false,
 				"error": map[string]any{"code": "UNKNOWN_TOOL", "message": "Unknown tool " + name},
@@ -42,12 +43,22 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, apiV1BodyLimit))
+	body, err := io.ReadAll(io.LimitReader(r.Body, apiV1BodyLimit+1))
 	if err != nil {
 		writeAPIV1JSON(w, http.StatusUnprocessableEntity,
 			map[string]any{"ok": false,
 				"error": map[string]any{"code": "VALIDATION_FAILED", "message": "Unreadable request body"},
 			})
+		return
+	}
+	if len(body) > apiV1BodyLimit {
+		// over the cap BEFORE any decoding: the same §8.2 structure,
+		// the protocol status table's 413
+		env := map[string]any{"ok": false, "error": map[string]any{
+			"code":    "PAYLOAD_TOO_LARGE",
+			"message": fmt.Sprintf("Request body exceeds %d bytes", apiV1BodyLimit),
+		}, "next_action": "revise", "retry_after": nil}
+		writeAPIV1JSON(w, http.StatusRequestEntityTooLarge, env)
 		return
 	}
 	if len(body) == 0 {
@@ -63,7 +74,7 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deps := s.mcpDeps()
-	env, status := mcpserver.CallExecutorTool(r.Context(), deps, name, bot, args)
+	env, status := mcpserver.CallTool(r.Context(), deps, name, bot, args)
 	writeAPIV1JSON(w, status, env)
 }
 

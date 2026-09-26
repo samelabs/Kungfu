@@ -1,0 +1,193 @@
+package mcpserver
+
+// Publisher registry tools (WO-7b) — §8.1 publisher column over the
+// Task 1.0 service layer. The caller IS the publisher. Publisher tools
+// return the same §8.2 envelope; next_action is always null (there is
+// no executor next action for a publisher operation).
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"kungfu.md/internal/model"
+	"kungfu.md/internal/service"
+	"kungfu.md/internal/task"
+)
+
+// contractArg mirrors the §3 contract JSON in tool arguments.
+type contractArg = task.Contract
+
+func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	var in struct {
+		Contract contractArg `json:"contract"`
+		Budget   int64       `json:"budget"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return nil, argError("arguments must match the tool schema")
+	}
+	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, in.Contract, in.Budget)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	var in struct {
+		Code     string      `json:"code"`
+		Contract contractArg `json:"contract"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+		return nil, argError("code and contract are required")
+	}
+	view, err := service.UpdateTask(ctx, deps.Pool, agent.ID, in.Code, in.Contract)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskOpen(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	code, err := codeOnly(args)
+	if err != nil {
+		return nil, err
+	}
+	view, err := service.OpenTask(ctx, deps.Pool, agent.ID, code)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskPause(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	code, err := codeOnly(args)
+	if err != nil {
+		return nil, err
+	}
+	view, err := service.PauseTask(ctx, deps.Pool, agent.ID, code)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskClose(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	code, err := codeOnly(args)
+	if err != nil {
+		return nil, err
+	}
+	view, err := service.CloseTask(ctx, deps.Pool, agent.ID, code)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskFund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	var in struct {
+		Code   string `json:"code"`
+		Amount int64  `json:"amount"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" || in.Amount == 0 {
+		return nil, argError("code and amount are required")
+	}
+	view, err := service.FundTask(ctx, deps.Pool, agent.ID, in.Code, in.Amount)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskRefund(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	code, err := codeOnly(args)
+	if err != nil {
+		return nil, err
+	}
+	view, err := service.RefundTask(ctx, deps.Pool, agent.ID, code)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	code, err := codeOnly(args)
+	if err != nil {
+		return nil, err
+	}
+	view, err := service.GetTask(ctx, deps.Pool, agent.ID, code)
+	if err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func handleTaskList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	rows, err := service.ListTasks(ctx, deps.Pool, agent.ID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"tasks": rows, "total": len(rows)}, nil
+}
+
+func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	var in struct {
+		Code     string `json:"code"`
+		State    string `json:"state"`
+		Page     int    `json:"page"`
+		PageSize int    `json:"page_size"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+		return nil, argError("code is required")
+	}
+	if in.Page < 1 {
+		in.Page = 1
+	}
+	if in.PageSize < 1 || in.PageSize > 100 {
+		in.PageSize = 20
+	}
+	rows, total, err := service.ListSubmissionsForPublisher(ctx, deps.Pool, agent.ID, in.Code, in.State, in.Page, in.PageSize, deps.AgentRefKey)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for i := range rows {
+		m, err := asMap(rows[i])
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, m)
+	}
+	return map[string]any{"submissions": items, "total": total}, nil
+}
+
+func handleTaskVerdict(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (map[string]any, error) {
+	var in struct {
+		SubmissionID int64           `json:"submission_id"`
+		Verdict      json.RawMessage `json:"verdict"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || in.SubmissionID == 0 || len(in.Verdict) == 0 {
+		return nil, argError("submission_id and verdict are required")
+	}
+	view, err := service.SubmitVerdict(ctx, deps.Pool, agent.ID, in.SubmissionID, in.Verdict, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	m, err := asMap(view)
+	if err != nil {
+		return nil, err
+	}
+	m["_no_action"] = true // publisher tools: next_action is always null
+	return m, nil
+}
+
+func codeOnly(args json.RawMessage) (string, error) {
+	var in struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+		return "", argError("code is required")
+	}
+	return in.Code, nil
+}

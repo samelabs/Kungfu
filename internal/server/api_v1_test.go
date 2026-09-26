@@ -187,3 +187,50 @@ func TestAPIV1WorkListAndSubmit(t *testing.T) {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
+
+func TestAPIV1BodyTooLarge(t *testing.T) {
+	s, key, _, code := apiV1Env(t)
+
+	// a body one byte over the cap: 413 PAYLOAD_TOO_LARGE, revise
+	huge := map[string]any{
+		"code": code, "request_key": "toolarge",
+		"payload": map[string]any{"url": "https://example.com/a",
+			"bullets": []string{strings.Repeat("x", apiV1BodyLimit)}},
+	}
+	body, _ := json.Marshal(huge)
+	if len(body) <= apiV1BodyLimit {
+		t.Fatalf("setup: body %d must exceed %d", len(body), apiV1BodyLimit)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/work_submit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	s.buildRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (%s)", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("non-JSON: %s", rec.Body.String())
+	}
+	if env["ok"] != false || env["error"].(map[string]any)["code"] != "PAYLOAD_TOO_LARGE" ||
+		env["next_action"] != "revise" {
+		t.Fatalf("envelope: %v", env)
+	}
+
+	// one byte under the cap reaches the tool (fails later as
+	// SCHEMA_MISMATCH, not 413)
+	ok := map[string]any{
+		"code": code, "request_key": "under",
+		"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"one"}},
+	}
+	b2, _ := json.Marshal(ok)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/work_submit", bytes.NewReader(b2))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", "Bearer "+key)
+	rec2 := httptest.NewRecorder()
+	s.buildRouter().ServeHTTP(rec2, req2)
+	if rec2.Code == http.StatusRequestEntityTooLarge {
+		t.Fatal("in-cap body rejected as 413")
+	}
+}

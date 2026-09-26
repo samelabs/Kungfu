@@ -296,7 +296,7 @@ func newServer(deps Deps) *mcp.Server {
 // schema; the handler builds the §8.2 envelope as structuredContent
 // and mirrors not-accepted calls with isError = true.
 func addRegistryTools(s *mcp.Server, deps Deps) {
-	for _, def := range executorTools {
+	for _, def := range tools {
 		s.AddTool(&mcp.Tool{
 			Name:        def.Name,
 			Description: def.Description,
@@ -308,7 +308,7 @@ func addRegistryTools(s *mcp.Server, deps Deps) {
 				env := notAcceptedEnvelope("UNAUTHORIZED", "Agent key is invalid", nil)
 				return envelopeResult(env), nil
 			}
-			env, _ := CallExecutorTool(ctx, &deps, def.Name, agent, json.RawMessage(req.Params.Arguments))
+			env, _ := CallTool(ctx, &deps, def.Name, agent, json.RawMessage(req.Params.Arguments))
 			return envelopeResult(env), nil
 		})
 	}
