@@ -71,20 +71,22 @@ func (d *Deps) limiter() *ratelimit.Limiter { return d.RateLimiter }
 
 // rateLimited is the shared 429 tool error.
 func rateLimited() error {
-	return &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Rate limit exceeded"}
+	return &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded"}
 }
 
-// publicMethods is the anonymous-call allowlist: MCP protocol
-// discovery plus the two explicitly public surfaces. Everything else
-// requires a valid Agent key.
+// isPublicCall is the anonymous-call allowlist: MCP protocol
+// discovery, plus any registry tool whose ToolDef.Public is set (the
+// single source — no duplicated name list). Everything else requires
+// a valid Agent key.
 func isPublicCall(method, toolName string) bool {
 	switch {
 	case method == "server/discover":
 		return true
 	case method == "tools/list":
 		return true
-	case method == "tools/call" && toolName == "account_register":
-		return true
+	case method == "tools/call":
+		def, ok := Tool(toolName)
+		return ok && def.Public
 	}
 	return false
 }
@@ -285,8 +287,6 @@ func newServer(deps Deps) *mcp.Server {
 			Tools: &mcp.ToolCapabilities{},
 		},
 	})
-	addAccountTools(s, deps)
-	addMemoryTools(s, deps)
 	addRegistryTools(s, deps)
 	return s
 }
@@ -303,9 +303,9 @@ func addRegistryTools(s *mcp.Server, deps Deps) {
 			InputSchema: json.RawMessage(def.InputSchema),
 		}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			agent, err := deps.resolveVerified(ctx)
-			if err != nil {
+			if err != nil && !def.Public {
 				// unreachable behind the bearer middleware; fail closed
-				env := notAcceptedEnvelope("UNAUTHORIZED", "Agent key is invalid", nil)
+				env := notAcceptedEnvelope("UNAUTHORIZED", "Agent key is invalid or missing", nil)
 				return envelopeResult(env), nil
 			}
 			env, _ := CallTool(ctx, &deps, def.Name, agent, json.RawMessage(req.Params.Arguments))
@@ -342,96 +342,6 @@ Plain HTTP works: POST one JSON-RPC object to /mcp with Content-Type: applicatio
 
 Full docs: https://kungfu.md/llms.txt · Skill: https://kungfu.md/kungfu_skill.md`
 
-// ---- account_register ----
-
-type registerInput struct {
-	Name     string `json:"name" jsonschema:"the bot account name (6-32 chars, letters/digits/_/./-)"`
-	Password string `json:"password" jsonschema:"the human owner password (6-128 chars)"`
-}
-
-type registerOutput struct {
-	BotName string `json:"bot_name"`
-	APIKey  string `json:"api_key"`
-	Message string `json:"message"`
-}
-
-// addAccountTools registers the two account tools. account_register is
-// public (bootstrap); account_status resolves identity from the
-// credential the official SDK Bearer middleware already verified
-// (RequireBearerToken → auth.VerifyAgentKey → verified bot stored in
-// TokenInfo). The tool does NOT re-verify the key; it resolves that
-// verified identity and reads through the shared account-status
-// service.
-func addAccountTools(s *mcp.Server, deps Deps) {
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "account_register",
-		Description: "Register a new Kungfu agent account. Returns the raw API key exactly once — store it now; it cannot be recovered later.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    false,
-			DestructiveHint: boolPtr(false),
-			IdempotentHint:  false,
-			OpenWorldHint:   boolPtr(false),
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in registerInput) (*mcp.CallToolResult, registerOutput, error) {
-		// Rate limiting stays with the existing authority: the server
-		// layer supplies the trusted client IP; MCP creates no bypass.
-		if err := deps.limitRegister(ctx); err != nil {
-			return nil, registerOutput{}, err
-		}
-		reg := deps.Register
-		if reg == nil {
-			reg = service.Register
-		}
-		ip := deps.requestIP(ctx)
-		res, err := reg(ctx, deps.Pool, in.Name, in.Password, ip)
-		if err != nil {
-			return nil, registerOutput{}, mapAppError(err)
-		}
-		// Bootstrap facts only: bot_name, api_key (one-time disclosure
-		// — never logged), message. Balance is NOT an MCP registration
-		// fact; account_status owns the authoritative balance.
-		return nil, registerOutput{
-			BotName: res.BotName,
-			APIKey:  res.Key,
-			Message: res.Message,
-		}, nil
-	})
-
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "account_status",
-		Description: "Return the authenticated agent's account identity and current authoritative credit balance.",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  true,
-			OpenWorldHint: boolPtr(false),
-		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, statusOutput, error) {
-		bot, err := deps.resolveVerified(ctx)
-		if err != nil {
-			return nil, statusOutput{}, err
-		}
-		if deps.AccountStatus == nil {
-			return nil, statusOutput{}, &toolError{httpStatus: 500, code: "INTERNAL_ERROR", message: "An internal error occurred"}
-		}
-		st, err := deps.AccountStatus(ctx, deps.Pool, bot.ID)
-		if err != nil {
-			return nil, statusOutput{}, mapAppError(err)
-		}
-		return nil, statusOutput{
-			BotID:   st.BotID,
-			BotName: st.BotName,
-			Balance: st.Balance,
-			Status:  st.Status,
-		}, nil
-	})
-}
-
-type statusOutput struct {
-	BotID   int64  `json:"bot_id"`
-	BotName string `json:"bot_name"`
-	Balance int64  `json:"balance"`
-	Status  string `json:"status"`
-}
-
 func boolPtr(b bool) *bool { return &b }
 
 // limitRegister enforces the existing registration rate limit from
@@ -446,14 +356,14 @@ func (d *Deps) limitRegister(ctx context.Context) error {
 	if !ok || r == nil {
 		// No request context (unit wiring): fail OPEN for the limiter
 		// is unacceptable — fail closed instead.
-		return &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Too many registrations from this IP; retry later"}
+		return &ToolError{Code: "RATE_LIMIT", Message: "Too many registrations from this IP; retry later"}
 	}
 	ip := d.ClientIP(r)
 	if ip == "" {
 		return nil
 	}
 	if rl := d.RateLimiter.CheckRegister(ip); !rl.Allowed {
-		return &toolError{httpStatus: 429, code: "RATE_LIMIT", message: "Too many registrations from this IP; retry later"}
+		return &ToolError{Code: "RATE_LIMIT", Message: "Too many registrations from this IP; retry later"}
 	}
 	return nil
 }
@@ -478,4 +388,9 @@ type httpRequestCtxKey struct{}
 // WithHTTPRequest stamps the originating request into a context.
 func WithHTTPRequest(ctx context.Context, r *http.Request) context.Context {
 	return context.WithValue(ctx, httpRequestCtxKey{}, r)
+}
+
+// WithHTTPRequest is the Deps-flavored alias for transport wrappers.
+func (d *Deps) WithHTTPRequest(ctx context.Context, r *http.Request) context.Context {
+	return WithHTTPRequest(ctx, r)
 }

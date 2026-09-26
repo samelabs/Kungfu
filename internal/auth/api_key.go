@@ -95,7 +95,7 @@ func ExtractAPIKeyFromHeader(r *http.Request) string {
 // Transport wrappers (HTTP header, MCP Bearer) own any transport-
 // specific presentation hints; the shared authority stays neutral.
 func invalidKeyErr() error {
-	return apperr.New(401, "INVALID_KEY", "Agent key is invalid or expired")
+	return apperr.New(0, "UNAUTHORIZED", "Agent key is invalid or missing")
 }
 
 // VerifyAgentKey is the ONE raw Agent-key verification authority shared

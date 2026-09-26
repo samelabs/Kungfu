@@ -164,7 +164,7 @@ func ComposeAgentAccountStatus(ctx context.Context, q pg.Querier, botID int64) (
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving account")
 	}
 	if bot == nil {
-		return nil, errors.New(401, "INVALID_KEY", "Agent key is invalid or expired")
+		return nil, errors.New(0, "UNAUTHORIZED", "Agent key is invalid or missing")
 	}
 	balance, balErr := credits.Balance(ctx, q, bot.ID)
 	if balErr != nil {
@@ -291,18 +291,21 @@ func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, bo
 
 	currentKey = strings.TrimSpace(currentKey)
 	if currentKey == "" {
-		return nil, errors.New(400, "MISSING_FIELD", "Missing required field: current_key")
+		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Missing required field: current_key",
+			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "is required"}}})
 	}
 
 	// Validate key format (canonical auth helper; case-insensitive hex)
 	if !auth.ValidateKeyFormat(currentKey) {
-		return nil, errors.New(400, "INVALID_KEY", "Current key format is invalid")
+		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Current key format is invalid",
+			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "must be a valid Agent key"}}})
 	}
 
 	// Verify the supplied raw key against the stored digest
 	// (constant-time). The plaintext key no longer exists at rest.
 	if subtle.ConstantTimeCompare(bot.APIKeyHash, auth.HashAgentKey(currentKey)) != 1 {
-		return nil, errors.New(401, "INVALID_KEY", "Current key is incorrect")
+		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Current key is incorrect",
+			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "does not match the stored key"}}})
 	}
 
 	// Rate limit check

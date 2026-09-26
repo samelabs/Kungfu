@@ -40,23 +40,23 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	}
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if t.Status == task.TaskDraft {
-		return nil, errors.New(404, "TASK_NOT_FOUND", "Task not found")
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 
 	if id, ok, err := repository.FindOpenReportByReporterTask(ctx, pool, t.ID, agentID); err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if ok {
 		return map[string]any{"report_id": id, "status": "open"}, nil
 	}
 	id, err := repository.InsertTaskReport(ctx, pool, t.ID, agentID, reason)
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return map[string]any{"report_id": id, "status": "open"}, nil
 }

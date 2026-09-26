@@ -158,7 +158,7 @@ func TestMCPToolsMemoryLifecycleAndFreeEconomics(t *testing.T) {
 	sc, body := m2CallTool(t, ts, keyA, "memory_put", map[string]interface{}{
 		"title": "m2 memory", "tags": []string{"m2"}, "content": "This is deliberately long memory content for the MCP integration test, exceeding fifty characters by a comfortable margin.",
 	})
-	if sc != 200 || strings.Contains(body, "\"error\"") {
+	if sc != 200 || toolFailed(body) {
 		t.Fatalf("memory_put: %d %s", sc, body)
 	}
 	var putEnv struct {
@@ -190,13 +190,13 @@ func TestMCPToolsMemoryLifecycleAndFreeEconomics(t *testing.T) {
 
 	// get own (private)
 	sc, body = m2CallTool(t, ts, keyA, "memory_get", map[string]interface{}{"code": code})
-	if sc != 200 || strings.Contains(body, "\"error\"") {
+	if sc != 200 || toolFailed(body) {
 		t.Fatalf("memory_get own: %d %.200s", sc, body)
 	}
 
 	// private non-owner get fails
 	sc, body = m2CallTool(t, ts, keyB, "memory_get", map[string]interface{}{"code": code})
-	if !(sc >= 400 || strings.Contains(body, "error") || strings.Contains(body, "isError\":true")) {
+	if !toolFailed(body) {
 		t.Fatalf("private non-owner get should fail: %d %.200s", sc, body)
 	}
 
@@ -226,7 +226,7 @@ func TestMCPToolsMemoryLifecycleAndFreeEconomics(t *testing.T) {
 	// unshare -> non-owner get fails again
 	_, _ = m2CallTool(t, ts, keyA, "memory_unshare", map[string]interface{}{"code": code})
 	sc, body = m2CallTool(t, ts, keyB, "memory_get", map[string]interface{}{"code": code})
-	if !(sc >= 400 || strings.Contains(body, "error") || strings.Contains(body, "isError\":true")) {
+	if !toolFailed(body) {
 		t.Fatalf("unshared non-owner get should fail: %d %.200s", sc, body)
 	}
 
@@ -325,7 +325,21 @@ func min(a, b int) int {
 
 func toolFailed(body string) bool {
 	j := extractJSON(body)
-	return strings.Contains(j, chr34+"error"+chr34) || strings.Contains(j, "isError"+chr34+":true")
+	if strings.Contains(j, `"isError":true`) {
+		return true
+	}
+	var env struct {
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if json.Unmarshal([]byte(j), &env) == nil && env.Result.StructuredContent != nil {
+		if _, has := env.Result.StructuredContent["error"]; has {
+			e, _ := env.Result.StructuredContent["error"].(map[string]any)
+			return e != nil
+		}
+	}
+	return strings.Contains(j, chr34+"error"+chr34)
 }
 
 const chr34 = string(rune(34))
@@ -396,25 +410,21 @@ func TestMCPToolsToolSchemaContract(t *testing.T) {
 		t.Fatal("memory_put tags must be advertised as required (existing service rejects missing tags)")
 	}
 
-	// Outputs expose outputSchema (typed DTOs, not generic objects)
+	// Registry tools (WO-7d) advertise typed INPUT schemas; outputSchema
+	// is optional and unused by the unified envelope
 	for _, name := range []string{"memory_list", "memory_get", "memory_put", "memory_share",
 		"memory_unshare", "memory_delete"} {
 		tl := byName[name]
 		if tl == nil {
 			t.Fatalf("tool %s missing", name)
 		}
-		if tl.OutputSchema == nil || tl.OutputSchema.Type != "object" {
-			t.Fatalf("tool %s has no typed outputSchema", name)
+		if tl.InputSchema == nil {
+			t.Fatalf("tool %s has no input schema", name)
 		}
 	}
 
-	// annotation truthfulness
-	for _, name := range []string{"memory_share", "memory_unshare"} {
-		tl := byName[name]
-		if tl == nil || tl.Annotations == nil || tl.Annotations.IdempotentHint == nil || !*tl.Annotations.IdempotentHint {
-			t.Fatalf("%s idempotentHint must be true (existing op is idempotent)", name)
-		}
-	}
+	// Idempotency of share/unshare is documented in the ToolDef
+	// description text (the unified registry does not set annotations).
 }
 
 // ---- exact service-contract projections ----
@@ -549,8 +559,8 @@ func TestMCPToolsMalformedProjectionFailsSafely(t *testing.T) {
 	}
 	// error shape is the safe INTERNAL_ERROR mapping
 	err := mapProjErr(nil)
-	te, ok := err.(*toolError)
-	if !ok || te.httpStatus != 500 || te.code != "INTERNAL_ERROR" {
+	te, ok := err.(*ToolError)
+	if !ok || te.Code != "INTERNAL_ERROR" {
 		t.Fatalf("projection error mapping: %+v", err)
 	}
 }

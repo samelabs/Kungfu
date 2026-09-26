@@ -165,8 +165,15 @@ func TestKeyAtRestResetRequiresCurrentRawKey(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: expected AppError, got %v", tc.label, err)
 		}
-		if ae.HTTPCode != 400 && ae.HTTPCode != 401 {
-			t.Fatalf("%s: status = %d", tc.label, ae.HTTPCode)
+		// WO-7d: the status code is decided by the protocol table; the
+		// service emits code 0 + VALIDATION_FAILED(field=current_key)
+		if status, listed := apperr.StatusFor(ae.Code); !listed {
+			t.Fatalf("%s: code %s missing from the protocol table", tc.label, ae.Code)
+		} else if status != 422 {
+			t.Fatalf("%s: status = %d, want 422", tc.label, status)
+		}
+		if ae.Code != "VALIDATION_FAILED" {
+			t.Fatalf("%s: code = %s, want VALIDATION_FAILED", tc.label, ae.Code)
 		}
 		// zero mutation: original key still authenticates
 		bot, err2 := repository.FindActiveBotByAPIKeyHash(context.Background(), pool, auth.HashAgentKey(res.Key))

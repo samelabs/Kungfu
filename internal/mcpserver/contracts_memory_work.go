@@ -318,5 +318,5 @@ func projectDelete(result map[string]interface{}) (MemoryDeleteOutput, error) {
 }
 
 func mapProjErr(err error) error {
-	return &toolError{httpStatus: 500, code: "INTERNAL_ERROR", message: "An internal error occurred"}
+	return &ToolError{Code: "INTERNAL_ERROR", Message: "An internal error occurred"}
 }
