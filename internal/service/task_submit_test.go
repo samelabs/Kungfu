@@ -41,7 +41,7 @@ func submitOpenedTask(t *testing.T, pool *pg.Pool, publisher int64, budget int64
 	return code
 }
 
-func submitOnce(t *testing.T, pool *pg.Pool, agent int64, code string, mutate func(*SubmitInput)) (submissionView, error) {
+func submitOnce(t *testing.T, pool *pg.Pool, agent int64, code string, mutate func(*SubmitInput)) (SubmissionView, error) {
 	t.Helper()
 	in := SubmitInput{Code: code, RequestKey: fmt.Sprintf("k-%d", time.Now().UnixNano()), Payload: []byte(submitPayloadOK)}
 	if mutate != nil {
@@ -623,7 +623,7 @@ func TestSubmitConcurrentSameKey(t *testing.T) {
 	in := SubmitInput{Code: code, RequestKey: key, Payload: []byte(submitPayloadOK)}
 
 	var wg sync.WaitGroup
-	views := make([]submissionView, 2)
+	views := make([]SubmissionView, 2)
 	errs := make([]error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)

@@ -49,25 +49,25 @@ func AgentRef(agentRefKey []byte, taskCode string, agentID int64) string {
 // DeliverSubmission delivers one submission synchronously and settles
 // its outcome. Non-delivering/uncertain states return the current view
 // unchanged (idempotent; no re-settlement).
-func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, agentRefKey []byte, now time.Time) (submissionView, error) {
+func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, agentRefKey []byte, now time.Time) (SubmissionView, error) {
 	sub, err := repository.FindSubmissionByID(ctx, pool, submissionID)
 	if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
-		return submissionView{}, errors.New(404, "NOT_FOUND", "Submission not found")
+		return SubmissionView{}, errors.New(404, "NOT_FOUND", "Submission not found")
 	}
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	if sub.State != task.SubDelivering && sub.State != task.SubUncertain {
-		return submissionViewByID(ctx, pool, submissionID)
+		return SubmissionViewByID(ctx, pool, submissionID)
 	}
 
 	t, err := repository.FindTaskByID(ctx, pool, sub.TaskID)
 	if err != nil || t == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	contract, err := versionContract(ctx, pool, t.ID, sub.Version)
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 
 	// async without a receiver goes straight to review (§5.4).
@@ -75,9 +75,9 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		if err := writeDeliveryOutcome(ctx, pool, sub, task.EventNoReceiver, &repository.SetSubmissionStateOpts{
 			ReviewDeadline: reviewDeadline(now, contract),
 		}, nil, nil); err != nil {
-			return submissionView{}, err
+			return SubmissionView{}, err
 		}
-		return submissionViewByID(ctx, pool, submissionID)
+		return SubmissionViewByID(ctx, pool, submissionID)
 	}
 
 	// §7.1 request, delivered outside any transaction.
@@ -89,7 +89,7 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		"payload":       sub.Payload,
 	})
 	if err != nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Internal error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Internal error")
 	}
 	res := delivery.PostJSON(ctx, contract.Receiver.URL, body, map[string]string{
 		"Idempotency-Key":     fmt.Sprintf("%d", sub.SubmissionID),
@@ -103,7 +103,7 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 	}
 	if outcome.event == task.EventTimeout && sub.State == task.SubUncertain {
 		// another unresolved retry: stays uncertain without a state write
-		return submissionViewByID(context.WithoutCancel(ctx), pool, submissionID)
+		return SubmissionViewByID(context.WithoutCancel(ctx), pool, submissionID)
 	}
 
 	var settle func(ctx context.Context, tx pgx.Tx) error
@@ -119,24 +119,24 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		}
 	}
 	if err := writeDeliveryOutcome(ctx, pool, sub, outcome.event, outcome.opts, settle, release); err != nil {
-		return submissionView{}, err
+		return SubmissionView{}, err
 	}
 
 	// §7.3 receiver-fault governance.
 	if outcome.event == task.EventDeliveryFailed {
 		if err := maybePauseForReceiverFault(ctx, pool, sub.TaskID); err != nil {
-			return submissionView{}, err
+			return SubmissionView{}, err
 		}
 	}
-	return submissionViewByID(context.WithoutCancel(ctx), pool, submissionID)
+	return SubmissionViewByID(context.WithoutCancel(ctx), pool, submissionID)
 }
 
-// submissionViewByID loads a submission (and its task code) and
+// SubmissionViewByID loads a submission (and its task code) and
 // projects the view.
-func submissionViewByID(ctx context.Context, pool *pg.Pool, submissionID int64) (submissionView, error) {
+func SubmissionViewByID(ctx context.Context, pool *pg.Pool, submissionID int64) (SubmissionView, error) {
 	sub, err := repository.FindSubmissionByID(ctx, pool, submissionID)
 	if err != nil || sub == nil {
-		return submissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
+		return SubmissionView{}, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
 	code := ""
 	if t, err := repository.FindTaskByID(ctx, pool, sub.TaskID); err == nil && t != nil {
