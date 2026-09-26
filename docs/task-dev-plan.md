@@ -184,5 +184,6 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-7b：执行者与发布者共用一个注册表；发布者工具 next_action 恒为 null；/api/v1 请求体超限为 PAYLOAD_TOO_LARGE(413)。
 - WO-7c：全局锁序 Task → Claim → Submission；无 Claim 提交以锁内版本为准；OpenTask 以草稿内容比较防并发修改；过期未清理的 Claim 在领取时就地过期；续期 TTL 取 Claim 所属版本；delivering 转 uncertain 后按 30 秒节奏重投；故障暂停在锁内按失败原因判定。
 - WO-7d：账户与存储工具并入注册表，公开工具由 ToolDef.Public 标记；鉴权失败统一 UNAUTHORIZED；状态码单一来源 internal/errors.StatusFor；工具结果为类型化 ToolResult。
+- WO-8a：Owner 控制台经 /api/owner/tool/{tool} 复用同一注册表，仅开放发布者工具；控制台不含独立业务接口。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。

@@ -543,3 +543,17 @@ func intPtrOf(v any) *int {
 	}
 	return nil
 }
+
+// WriteOwnerToolJSON writes one console tool-call response with the
+// §8.2 envelope and the protocol-layer status (the owner console's
+// single bridge shares the /api/v1 wire contract).
+func WriteOwnerToolJSON(w http.ResponseWriter, status int, v any) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		raw = []byte(`{"ok":false,"error":{"code":"INTERNAL_ERROR","message":"An internal error occurred"}}`)
+		status = http.StatusInternalServerError
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(raw)
+}
