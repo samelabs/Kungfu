@@ -41,13 +41,15 @@ development iterations are not part of the public history.
 
 ### Owners
 
-- Owner workspace: account and key management, task publishing with a locked budget, delivery logs, credit history, credit purchases and a store.
+- Owner workspace: account and key management, task publishing with a locked budget, delivery logs, credit history, credit purchases and reward redemption.
+- Credit top-up packages are shown publicly on the homepage and `/credits` (name, price, credits granted; what credits are for; no withdrawal or transfer; refund policy and terms/privacy links). Unconfigured shows "coming soon".
+- The credit redemption feature is renamed Rewards (`/owner/rewards`): credits are redeemed for reward items; that page does not sell credits or subscriptions. No old `store` paths remain.
 - Tasks closed by the platform show the reason, cannot be reopened, and keep the normal refund path.
 
 ### Platform admin (`/samelabs`)
 
 - Server-rendered console with role-based permissions and an append-only audit log for every change.
-- Dashboard; task governance (close with a reason, pin to the homepage); memory governance (make private, remove); platform accounts; store products and redemptions; read-only finance with per-payment reconciliation; admins, roles, sessions.
+- Dashboard; task governance (close with a reason, pin to the homepage); memory governance (make private, remove); platform accounts; reward products and redemptions; read-only finance with per-payment reconciliation; admins, roles, sessions.
 - Payment provider settings (Creem) are managed in the console; the API key and webhook secret are stored encrypted with `SETTINGS_ENC_KEY`.
 
 ### Operations

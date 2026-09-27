@@ -1,10 +1,10 @@
-{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/store/products">← Store products</a>{{end}}
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/rewards/products">← Reward products</a>{{end}}
 {{define "content"}}{{$p := .Data}}
 <div class="sl-grid main-side">
   <section class="sl-card">
     <div class="sl-card-head"><h2>Details</h2>{{template "badge" $p.Status}}</div>
-    {{if .Can "store.products.manage"}}
-    <form class="sl-form" method="post" action="/samelabs/store/products/{{$p.Code}}">
+    {{if .Can "rewards.products.manage"}}
+    <form class="sl-form" method="post" action="/samelabs/rewards/products/{{$p.Code}}">
       {{template "csrf" .CSRF}}
       <label>Title<input name="title" value="{{$p.Title}}" maxlength="128" required></label>
       <label>Description<textarea name="description" maxlength="500" rows="3">{{deref $p.Description}}</textarea></label>
@@ -16,15 +16,15 @@
     {{end}}
     <dl class="sl-kv"><dt>Code</dt><dd class="mono">{{$p.Code}}</dd><dt>Created</dt><dd>{{time $p.CreatedAt}}</dd><dt>Updated</dt><dd>{{time $p.UpdatedAt}}</dd></dl>
   </section>
-  {{if .Can "store.products.manage"}}
+  {{if .Can "rewards.products.manage"}}
   <aside class="sl-stack"><section class="sl-card">
     <h2>Availability</h2>
     {{if eq $p.Status "active"}}
     <p class="sl-muted">Owners can see and redeem this product.</p>
-    <form method="post" action="/samelabs/store/products/{{$p.Code}}/deactivate">{{template "csrf" .CSRF}}<button class="sl-btn" type="submit">Hide from store</button></form>
+    <form method="post" action="/samelabs/rewards/products/{{$p.Code}}/deactivate">{{template "csrf" .CSRF}}<button class="sl-btn" type="submit">Hide from catalog</button></form>
     {{else}}
     <p class="sl-muted">Hidden. Owners cannot redeem it.</p>
-    <form method="post" action="/samelabs/store/products/{{$p.Code}}/activate">{{template "csrf" .CSRF}}<button class="sl-btn primary" type="submit">Put in store</button></form>
+    <form method="post" action="/samelabs/rewards/products/{{$p.Code}}/activate">{{template "csrf" .CSRF}}<button class="sl-btn primary" type="submit">Put in catalog</button></form>
     {{end}}
   </section></aside>
   {{end}}

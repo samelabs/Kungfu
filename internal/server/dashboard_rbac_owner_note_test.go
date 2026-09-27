@@ -54,15 +54,15 @@ func TestSamelabsDashboardRBACGating(t *testing.T) {
 
 	// Hidden: every domain without permission — neither link nor stats.
 	for _, banned := range []string{
-		`>Accounts<`,                        // accounts.read card
-		"AccountsNew7d",                     // (rendered form checked below)
-		`href="/samelabs/accounts"`,         // accounts link
-		`href="/samelabs/memories`,          // memories link
-		`>Memories<`,                        // memories card
-		"Credits held by accounts",          // finance.read card
-		"Credits earned",                    // finance.read subtext (loose match)
-		`href="/samelabs/store/redemptions`, // store.redemptions.read link
-		"Redemptions to review",             // store.redemptions.read card
+		`>Accounts<`,                          // accounts.read card
+		"AccountsNew7d",                       // (rendered form checked below)
+		`href="/samelabs/accounts"`,           // accounts link
+		`href="/samelabs/memories`,            // memories link
+		`>Memories<`,                          // memories card
+		"Credits held by accounts",            // finance.read card
+		"Credits earned",                      // finance.read subtext (loose match)
+		`href="/samelabs/rewards/redemptions`, // rewards.redemptions.read link
+		"Redemptions to review",               // rewards.redemptions.read card
 	} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("restricted dashboard leaks %q", banned)

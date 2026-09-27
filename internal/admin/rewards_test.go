@@ -1,6 +1,6 @@
 package admin
 
-// Store Administration domain integration tests (real PG, private
+// Rewards Administration domain integration tests (real PG, private
 // DBs from the full migration chain — proving 001→007 order).
 
 import (
@@ -18,7 +18,7 @@ import (
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
-	"kungfu.md/internal/store"
+	"kungfu.md/internal/rewards"
 )
 
 // b2SeedBot creates a bot with a balance for redemption flows.
@@ -45,14 +45,14 @@ func b2SeedBot(t *testing.T, dbPool *pg.Pool, balance int64) int64 {
 // b2SeedRedemption creates a pending_review redemption with its spend.
 func b2SeedRedemption(t *testing.T, dbPool *pg.Pool, botID int64, price int64) string {
 	t.Helper()
-	p, err := store.CreateProduct(context.Background(), dbPool, store.ProductInput{
+	p, err := rewards.CreateProduct(context.Background(), dbPool, rewards.ProductInput{
 		Title: "B2 Prod " + time.Now().Format("150405.000000000"), CreditsPrice: price,
 	})
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
 	rk := "rk" + time.Now().Format("150405000000000")
-	res, err := store.Redeem(context.Background(), dbPool, botID, p.Code, rk)
+	res, err := rewards.Redeem(context.Background(), dbPool, botID, p.Code, rk)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -83,8 +83,8 @@ func b2RefundCount(t *testing.T, dbPool *pg.Pool, code string) int {
 func TestStoreAdminStorePermissionsSeeded(t *testing.T) {
 	dbPool := createPrivateDB(t) // runs the full 001→007 chain
 	ctx := context.Background()
-	for _, code := range []string{"store.products.read", "store.products.manage",
-		"store.redemptions.read", "store.redemptions.manage"} {
+	for _, code := range []string{"rewards.products.read", "rewards.products.manage",
+		"rewards.redemptions.read", "rewards.redemptions.manage"} {
 		var exists bool
 		if err := dbPool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM tb_admin_permissions WHERE code=$1)`, code).Scan(&exists); err != nil || !exists {
@@ -99,7 +99,7 @@ func TestStoreAdminStorePermissionsSeeded(t *testing.T) {
 	}
 }
 
-// -- superadmin wildcard uses all Store APIs --
+// -- superadmin wildcard uses all Rewards APIs --
 
 func TestStoreAdminSuperadminFullStoreFlow(t *testing.T) {
 	dbPool := createPrivateDB(t)
@@ -107,13 +107,13 @@ func TestStoreAdminSuperadminFullStoreFlow(t *testing.T) {
 	root := b12PrincipalOf(t, dbPool, "root", "password-123")
 	ctx := context.Background()
 
-	// wildcard sees the store permissions
-	if !root.HasPermission("store.products.manage") || !root.HasPermission("store.redemptions.manage") {
-		t.Fatal("superadmin wildcard must cover store permissions")
+	// wildcard sees the rewards permissions
+	if !root.HasPermission("rewards.products.manage") || !root.HasPermission("rewards.redemptions.manage") {
+		t.Fatal("superadmin wildcard must cover rewards permissions")
 	}
 
 	// create → edit → deactivate → activate
-	created, err := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{
+	created, err := CreateRewardsProduct(ctx, dbPool, root, rewards.ProductInput{
 		Title: "Flow Item", Description: "first", CreditsPrice: 12,
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func TestStoreAdminSuperadminFullStoreFlow(t *testing.T) {
 	}
 	newTitle := "Flow Item v2"
 	newPrice := int64(15)
-	updated, err := UpdateStoreProduct(ctx, dbPool, root, created.Code, store.ProductPatch{
+	updated, err := UpdateRewardsProduct(ctx, dbPool, root, created.Code, rewards.ProductPatch{
 		Title: &newTitle, CreditsPrice: &newPrice,
 	})
 	if err != nil {
@@ -133,16 +133,16 @@ func TestStoreAdminSuperadminFullStoreFlow(t *testing.T) {
 	if updated.Title != "Flow Item v2" || updated.CreditsPrice != 15 || updated.Description == nil || *updated.Description != "first" {
 		t.Fatalf("partial patch broken: %+v", updated)
 	}
-	off, err := SetStoreProductStatus(ctx, dbPool, root, created.Code, "inactive")
+	off, err := SetRewardsProductStatus(ctx, dbPool, root, created.Code, "inactive")
 	if err != nil || off.Status != "inactive" {
 		t.Fatalf("deactivate: %v %+v", err, off)
 	}
-	on, err := SetStoreProductStatus(ctx, dbPool, root, created.Code, "active")
+	on, err := SetRewardsProductStatus(ctx, dbPool, root, created.Code, "active")
 	if err != nil || on.Status != "active" {
 		t.Fatalf("activate: %v %+v", err, on)
 	}
 	// idempotent repeats
-	on2, err := SetStoreProductStatus(ctx, dbPool, root, created.Code, "active")
+	on2, err := SetRewardsProductStatus(ctx, dbPool, root, created.Code, "active")
 	if err != nil || on2.Status != "active" {
 		t.Fatalf("idempotent activate: %v", err)
 	}
@@ -150,21 +150,21 @@ func TestStoreAdminSuperadminFullStoreFlow(t *testing.T) {
 	// redemption full cycle: approve → fulfill
 	botID := b2SeedBot(t, dbPool, 100)
 	code := b2SeedRedemption(t, dbPool, botID, 12)
-	oc, err := ApproveStoreRedemption(ctx, dbPool, root, code, "ok")
+	oc, err := ApproveRewardsRedemption(ctx, dbPool, root, code, "ok")
 	if err != nil || !oc.Transitioned || oc.After.Status != "approved" {
 		t.Fatalf("approve: %v %+v", err, oc)
 	}
 	// idempotent re-approve
-	oc2, err := ApproveStoreRedemption(ctx, dbPool, root, code, "ok")
+	oc2, err := ApproveRewardsRedemption(ctx, dbPool, root, code, "ok")
 	if err != nil || oc2.Transitioned {
 		t.Fatalf("re-approve must be idempotent: %v", err)
 	}
-	oc3, err := FulfillStoreRedemption(ctx, dbPool, root, code, "done")
+	oc3, err := FulfillRewardsRedemption(ctx, dbPool, root, code, "done")
 	if err != nil || !oc3.Transitioned || oc3.After.Status != "fulfilled" {
 		t.Fatalf("fulfill: %v", err)
 	}
 	// fulfilled → cancel 409
-	_, err = CancelStoreRedemption(ctx, dbPool, root, code)
+	_, err = CancelRewardsRedemption(ctx, dbPool, root, code)
 	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 409 {
 		t.Fatalf("cancel from fulfilled must 409, got %v", err)
 	}
@@ -179,46 +179,46 @@ func TestStoreAdminScopedCustomRoles(t *testing.T) {
 	ctx := context.Background()
 
 	// products.read only
-	role, err := CreateRole(ctx, dbPool, root, CreateRoleInput{Code: "storeview", Name: "Store Viewer"})
+	role, err := CreateRole(ctx, dbPool, root, CreateRoleInput{Code: "storeview", Name: "Rewards Viewer"})
 	if err != nil {
 		t.Fatalf("role: %v", err)
 	}
-	if err := SetRolePermissions(ctx, dbPool, root, role.ID, []string{"store.products.read"}); err != nil {
+	if err := SetRolePermissions(ctx, dbPool, root, role.ID, []string{"rewards.products.read"}); err != nil {
 		t.Fatalf("perms: %v", err)
 	}
 	viewer := b12CreateUserDirect(t, dbPool, "storeview.user", "viewer-pass-1", []string{"storeview"})
 	vp := b12PrincipalOf(t, dbPool, viewer.Username, "viewer-pass-1")
 
 	// read allowed
-	if _, _, err := ListStoreProducts(ctx, dbPool, vp, store.ProductListFilter{}); err != nil {
+	if _, _, err := ListRewardsProducts(ctx, dbPool, vp, rewards.ProductListFilter{}); err != nil {
 		t.Fatalf("products read should be allowed: %v", err)
 	}
 	// mutation 403
-	if _, err := CreateStoreProduct(ctx, dbPool, vp, store.ProductInput{Title: "X", CreditsPrice: 1}); err == nil {
+	if _, err := CreateRewardsProduct(ctx, dbPool, vp, rewards.ProductInput{Title: "X", CreditsPrice: 1}); err == nil {
 		t.Fatal("products manage must be denied")
 	} else if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 403 {
 		t.Fatalf("expected 403, got %v", err)
 	}
 	// redemptions read denied too
-	if _, _, err := ListStoreRedemptions(ctx, dbPool, vp, store.RedemptionListFilter{}); err == nil {
+	if _, _, err := ListRewardsRedemptions(ctx, dbPool, vp, rewards.RedemptionListFilter{}); err == nil {
 		t.Fatal("redemptions read must be denied without permission")
 	}
 
 	// redemptions.read/manage role
 	role2, _ := CreateRole(ctx, dbPool, root, CreateRoleInput{Code: "redops", Name: "Redemption Ops"})
-	_ = SetRolePermissions(ctx, dbPool, root, role2.ID, []string{"store.redemptions.read", "store.redemptions.manage"})
+	_ = SetRolePermissions(ctx, dbPool, root, role2.ID, []string{"rewards.redemptions.read", "rewards.redemptions.manage"})
 	ops := b12CreateUserDirect(t, dbPool, "redops.user", "ops-pass-123", []string{"redops"})
 	op := b12PrincipalOf(t, dbPool, ops.Username, "ops-pass-123")
-	if _, _, err := ListStoreRedemptions(ctx, dbPool, op, store.RedemptionListFilter{}); err != nil {
+	if _, _, err := ListRewardsRedemptions(ctx, dbPool, op, rewards.RedemptionListFilter{}); err != nil {
 		t.Fatalf("redemptions read denied: %v", err)
 	}
 	// products mutation still denied
-	if _, err := CreateStoreProduct(ctx, dbPool, op, store.ProductInput{Title: "X", CreditsPrice: 1}); err == nil {
+	if _, err := CreateRewardsProduct(ctx, dbPool, op, rewards.ProductInput{Title: "X", CreditsPrice: 1}); err == nil {
 		t.Fatal("products manage must be denied for redops")
 	}
 }
 
-// live RBAC: grant store permission to an existing session's role →
+// live RBAC: grant rewards permission to an existing session's role →
 // immediately effective.
 func TestStoreAdminLivePermissionGrant(t *testing.T) {
 	dbPool := createPrivateDB(t)
@@ -229,14 +229,14 @@ func TestStoreAdminLivePermissionGrant(t *testing.T) {
 	role, _ := CreateRole(ctx, dbPool, root, CreateRoleInput{Code: "livegrant", Name: "Live"})
 	user := b12CreateUserDirect(t, dbPool, "live.user", "live-pass-123", []string{"livegrant"})
 	p := b12PrincipalOf(t, dbPool, user.Username, "live-pass-123")
-	if p.HasPermission("store.products.read") {
-		t.Fatal("precondition: must not hold store.products.read")
+	if p.HasPermission("rewards.products.read") {
+		t.Fatal("precondition: must not hold rewards.products.read")
 	}
-	if err := SetRolePermissions(ctx, dbPool, root, role.ID, []string{"store.products.read"}); err != nil {
+	if err := SetRolePermissions(ctx, dbPool, root, role.ID, []string{"rewards.products.read"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	p2 := b12PrincipalOf(t, dbPool, user.Username, "live-pass-123")
-	if !p2.HasPermission("store.products.read") {
+	if !p2.HasPermission("rewards.products.read") {
 		t.Fatal("grant must be immediately effective on the existing session")
 	}
 }
@@ -255,14 +255,14 @@ func TestStoreAdminRejectAndCancelExactlyOneRefund(t *testing.T) {
 	if b2Balance(t, dbPool, bot1) != 40 {
 		t.Fatalf("post-redeem balance = %v", b2Balance(t, dbPool, bot1))
 	}
-	if _, err := RejectStoreRedemption(ctx, dbPool, root, code1, "no"); err != nil {
+	if _, err := RejectRewardsRedemption(ctx, dbPool, root, code1, "no"); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	if b2Balance(t, dbPool, bot1) != 50 {
 		t.Fatalf("post-reject balance = %v", b2Balance(t, dbPool, bot1))
 	}
 	// idempotent re-reject: no second refund
-	if _, err := RejectStoreRedemption(ctx, dbPool, root, code1, "no"); err != nil {
+	if _, err := RejectRewardsRedemption(ctx, dbPool, root, code1, "no"); err != nil {
 		t.Fatalf("re-reject: %v", err)
 	}
 	if n := b2RefundCount(t, dbPool, code1); n != 1 {
@@ -275,7 +275,7 @@ func TestStoreAdminRejectAndCancelExactlyOneRefund(t *testing.T) {
 	// cancel-from-pending
 	bot2 := b2SeedBot(t, dbPool, 50)
 	code2 := b2SeedRedemption(t, dbPool, bot2, 10)
-	if _, err := CancelStoreRedemption(ctx, dbPool, root, code2); err != nil {
+	if _, err := CancelRewardsRedemption(ctx, dbPool, root, code2); err != nil {
 		t.Fatalf("cancel pending: %v", err)
 	}
 	if b2Balance(t, dbPool, bot2) != 50 || b2RefundCount(t, dbPool, code2) != 1 {
@@ -285,10 +285,10 @@ func TestStoreAdminRejectAndCancelExactlyOneRefund(t *testing.T) {
 	// cancel-from-approved
 	bot3 := b2SeedBot(t, dbPool, 50)
 	code3 := b2SeedRedemption(t, dbPool, bot3, 10)
-	if _, err := ApproveStoreRedemption(ctx, dbPool, root, code3, ""); err != nil {
+	if _, err := ApproveRewardsRedemption(ctx, dbPool, root, code3, ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if _, err := CancelStoreRedemption(ctx, dbPool, root, code3); err != nil {
+	if _, err := CancelRewardsRedemption(ctx, dbPool, root, code3); err != nil {
 		t.Fatalf("cancel approved: %v", err)
 	}
 	if b2Balance(t, dbPool, bot3) != 50 || b2RefundCount(t, dbPool, code3) != 1 {
@@ -306,10 +306,10 @@ func TestStoreAdminRejectAndCancelExactlyOneRefund(t *testing.T) {
 	// and with a NON-empty approve note, the note survives cancel
 	bot4 := b2SeedBot(t, dbPool, 50)
 	code4 := b2SeedRedemption(t, dbPool, bot4, 10)
-	if _, err := ApproveStoreRedemption(ctx, dbPool, root, code4, "keep me"); err != nil {
+	if _, err := ApproveRewardsRedemption(ctx, dbPool, root, code4, "keep me"); err != nil {
 		t.Fatalf("approve4: %v", err)
 	}
-	if _, err := CancelStoreRedemption(ctx, dbPool, root, code4); err != nil {
+	if _, err := CancelRewardsRedemption(ctx, dbPool, root, code4); err != nil {
 		t.Fatalf("cancel4: %v", err)
 	}
 	var kept *string
@@ -328,7 +328,7 @@ func TestStoreAdminConcurrentEditVsRedeemSnapshotIntegrity(t *testing.T) {
 	root := b12PrincipalOf(t, dbPool, "root", "password-123")
 	ctx := context.Background()
 
-	p, err := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{
+	p, err := CreateRewardsProduct(ctx, dbPool, root, rewards.ProductInput{
 		Title: "Old Title", CreditsPrice: 10,
 	})
 	if err != nil {
@@ -349,12 +349,12 @@ func TestStoreAdminConcurrentEditVsRedeemSnapshotIntegrity(t *testing.T) {
 			<-start
 			if i%2 == 0 {
 				// editor (idempotent-ish: same target state each time)
-				_, err := UpdateStoreProduct(ctx, dbPool, root, p.Code, store.ProductPatch{
+				_, err := UpdateRewardsProduct(ctx, dbPool, root, p.Code, rewards.ProductPatch{
 					Title: &newTitle, CreditsPrice: &newPrice,
 				})
 				errs <- err
 			} else {
-				_, err := store.Redeem(ctx, dbPool, botID, p.Code, fmt.Sprintf("rk%d-%d", i, time.Now().UnixNano()))
+				_, err := rewards.Redeem(ctx, dbPool, botID, p.Code, fmt.Sprintf("rk%d-%d", i, time.Now().UnixNano()))
 				errs <- err
 			}
 		}(i)
@@ -396,21 +396,21 @@ func TestStoreAdminStoreAuditFacts(t *testing.T) {
 	root := b12PrincipalOf(t, dbPool, "root", "password-123")
 	ctx := context.Background()
 
-	created, _ := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{
+	created, _ := CreateRewardsProduct(ctx, dbPool, root, rewards.ProductInput{
 		Title: "Audit Item", Description: "d1", CreditsPrice: 5,
 	})
 	var after map[string]interface{}
 	var targetID string
 	err := dbPool.QueryRow(ctx, `
 		SELECT target_id, after_json FROM tb_admin_audit_logs
-		WHERE action='store.product.create' AND success ORDER BY id DESC LIMIT 1`).
+		WHERE action='rewards.product.create' AND success ORDER BY id DESC LIMIT 1`).
 		Scan(&targetID, json.RawMessage(nil))
 	_ = err
 	// re-query properly with []byte
 	var afterBytes []byte
 	err = dbPool.QueryRow(ctx, `
 		SELECT target_id, after_json FROM tb_admin_audit_logs
-		WHERE action='store.product.create' AND success ORDER BY id DESC LIMIT 1`).
+		WHERE action='rewards.product.create' AND success ORDER BY id DESC LIMIT 1`).
 		Scan(&targetID, &afterBytes)
 	if err != nil {
 		t.Fatalf("create audit: %v", err)
@@ -425,13 +425,13 @@ func TestStoreAdminStoreAuditFacts(t *testing.T) {
 
 	// update: real before/after
 	newTitle := "Audit Item v2"
-	if _, err := UpdateStoreProduct(ctx, dbPool, root, created.Code, store.ProductPatch{Title: &newTitle}); err != nil {
+	if _, err := UpdateRewardsProduct(ctx, dbPool, root, created.Code, rewards.ProductPatch{Title: &newTitle}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	var beforeBytes, after2 []byte
 	err = dbPool.QueryRow(ctx, `
 		SELECT before_json, after_json FROM tb_admin_audit_logs
-		WHERE action='store.product.update' AND success ORDER BY id DESC LIMIT 1`).
+		WHERE action='rewards.product.update' AND success ORDER BY id DESC LIMIT 1`).
 		Scan(&beforeBytes, &after2)
 	if err != nil {
 		t.Fatalf("update audit: %v", err)
@@ -449,13 +449,13 @@ func TestStoreAdminStoreAuditFacts(t *testing.T) {
 	// redemption transition audit: real before/after + transitioned
 	botID := b2SeedBot(t, dbPool, 20)
 	code := b2SeedRedemption(t, dbPool, botID, 5)
-	if _, err := RejectStoreRedemption(ctx, dbPool, root, code, "bad"); err != nil {
+	if _, err := RejectRewardsRedemption(ctx, dbPool, root, code, "bad"); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	var rb, ra, rm []byte
 	err = dbPool.QueryRow(ctx, `
 		SELECT before_json, after_json, metadata_json FROM tb_admin_audit_logs
-		WHERE action='store.redemption.reject' AND success ORDER BY id DESC LIMIT 1`).
+		WHERE action='rewards.redemption.reject' AND success ORDER BY id DESC LIMIT 1`).
 		Scan(&rb, &ra, &rm)
 	if err != nil {
 		t.Fatalf("reject audit: %v", err)
@@ -475,12 +475,12 @@ func TestStoreAdminStoreAuditFacts(t *testing.T) {
 	}
 
 	// idempotent replay audit: transitioned=false, before==after
-	if _, err := RejectStoreRedemption(ctx, dbPool, root, code, "bad"); err != nil {
+	if _, err := RejectRewardsRedemption(ctx, dbPool, root, code, "bad"); err != nil {
 		t.Fatalf("re-reject: %v", err)
 	}
 	_ = dbPool.QueryRow(ctx, `
 		SELECT metadata_json FROM tb_admin_audit_logs
-		WHERE action='store.redemption.reject' AND success ORDER BY id DESC LIMIT 1`).Scan(&rm)
+		WHERE action='rewards.redemption.reject' AND success ORDER BY id DESC LIMIT 1`).Scan(&rm)
 	_ = json.Unmarshal(rm, &meta)
 	if meta["transitioned"] != false {
 		t.Fatalf("idempotent replay must record transitioned=false: %v", meta)
@@ -498,7 +498,7 @@ func TestStoreAdminAuditInsertFailureRollsBackEverything(t *testing.T) {
 	// inject a constraint that makes audit INSERTs fail for probe actions
 	if _, err := dbPool.Exec(ctx,
 		`ALTER TABLE tb_admin_audit_logs ADD CONSTRAINT chk_b2_probe
-		 CHECK (action NOT LIKE 'store.%')`); err != nil {
+		 CHECK (action NOT LIKE 'rewards.%')`); err != nil {
 		t.Fatalf("inject: %v", err)
 	}
 	t.Cleanup(func() {
@@ -510,7 +510,7 @@ func TestStoreAdminAuditInsertFailureRollsBackEverything(t *testing.T) {
 	beforeBalance := b2Balance(t, dbPool, botID) // 40
 
 	// reject with failing audit → everything rolls back
-	_, err := RejectStoreRedemption(ctx, dbPool, root, code, "no")
+	_, err := RejectRewardsRedemption(ctx, dbPool, root, code, "no")
 	if err == nil {
 		t.Fatal("reject must fail when the audit insert fails")
 	}
@@ -530,25 +530,25 @@ func TestStoreAdminAuditInsertFailureRollsBackEverything(t *testing.T) {
 	}
 
 	// product mutation with failing audit → rollback
-	created, err := store.CreateProduct(ctx, dbPool, store.ProductInput{Title: "Probe", CreditsPrice: 1})
+	created, err := rewards.CreateProduct(ctx, dbPool, rewards.ProductInput{Title: "Probe", CreditsPrice: 1})
 	if err != nil {
 		t.Fatalf("setup product: %v", err)
 	}
 	newTitle := "Probe v2"
-	if _, err := UpdateStoreProduct(ctx, dbPool, root, created.Code, store.ProductPatch{Title: &newTitle}); err == nil {
+	if _, err := UpdateRewardsProduct(ctx, dbPool, root, created.Code, rewards.ProductPatch{Title: &newTitle}); err == nil {
 		t.Fatal("product update must fail when the audit insert fails")
 	}
 	var title string
-	_ = dbPool.QueryRow(ctx, `SELECT title FROM tb_store_products WHERE code=$1`, created.Code).Scan(&title)
+	_ = dbPool.QueryRow(ctx, `SELECT title FROM tb_rewards_products WHERE code=$1`, created.Code).Scan(&title)
 	if title != "Probe" {
 		t.Fatalf("product title rolled forward without audit: %s", title)
 	}
 	// no audit rows landed
 	var n int
 	_ = dbPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action LIKE 'store.%'`).Scan(&n)
+		`SELECT COUNT(*) FROM tb_admin_audit_logs WHERE action LIKE 'rewards.%'`).Scan(&n)
 	if n != 0 {
-		t.Fatalf("store audit rows = %d, want 0", n)
+		t.Fatalf("rewards audit rows = %d, want 0", n)
 	}
 }
 
@@ -560,39 +560,39 @@ func TestStoreAdminAdminReads(t *testing.T) {
 	root := b12PrincipalOf(t, dbPool, "root", "password-123")
 	ctx := context.Background()
 
-	p1, _ := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{Title: "Visible One", CreditsPrice: 3})
-	p2, _ := CreateStoreProduct(ctx, dbPool, root, store.ProductInput{Title: "Hidden Two", CreditsPrice: 4})
-	if _, err := SetStoreProductStatus(ctx, dbPool, root, p2.Code, "inactive"); err != nil {
+	p1, _ := CreateRewardsProduct(ctx, dbPool, root, rewards.ProductInput{Title: "Visible One", CreditsPrice: 3})
+	p2, _ := CreateRewardsProduct(ctx, dbPool, root, rewards.ProductInput{Title: "Hidden Two", CreditsPrice: 4})
+	if _, err := SetRewardsProductStatus(ctx, dbPool, root, p2.Code, "inactive"); err != nil {
 		t.Fatalf("deactivate: %v", err)
 	}
 
 	// admin list includes inactive
-	items, total, err := ListStoreProducts(ctx, dbPool, root, store.ProductListFilter{Status: "all"})
+	items, total, err := ListRewardsProducts(ctx, dbPool, root, rewards.ProductListFilter{Status: "all"})
 	if err != nil || total != 2 || len(items) != 2 {
 		t.Fatalf("all-products list: total=%d items=%d err=%v", total, len(items), err)
 	}
 	// status filter
-	items, _, _ = ListStoreProducts(ctx, dbPool, root, store.ProductListFilter{Status: "inactive"})
+	items, _, _ = ListRewardsProducts(ctx, dbPool, root, rewards.ProductListFilter{Status: "inactive"})
 	if len(items) != 1 || items[0].Code != p2.Code {
 		t.Fatalf("inactive filter: %+v", items)
 	}
 	// search by code and title
-	items, _, _ = ListStoreProducts(ctx, dbPool, root, store.ProductListFilter{Q: p1.Code})
+	items, _, _ = ListRewardsProducts(ctx, dbPool, root, rewards.ProductListFilter{Q: p1.Code})
 	if len(items) != 1 || items[0].Code != p1.Code {
 		t.Fatalf("code search: %+v", items)
 	}
-	items, _, _ = ListStoreProducts(ctx, dbPool, root, store.ProductListFilter{Q: "Hidden"})
+	items, _, _ = ListRewardsProducts(ctx, dbPool, root, rewards.ProductListFilter{Q: "Hidden"})
 	if len(items) != 1 || items[0].Code != p2.Code {
 		t.Fatalf("title search: %+v", items)
 	}
 	// invalid status filter → 400
-	if _, _, err := ListStoreProducts(ctx, dbPool, root, store.ProductListFilter{Status: "bogus"}); err == nil {
+	if _, _, err := ListRewardsProducts(ctx, dbPool, root, rewards.ProductListFilter{Status: "bogus"}); err == nil {
 		t.Fatal("invalid status filter must 400")
 	}
 
 	// inactive product still NOT redeemable by owner
 	botID := b2SeedBot(t, dbPool, 100)
-	if _, err := store.Redeem(ctx, dbPool, botID, p2.Code, "rk-inactive-1"); err == nil {
+	if _, err := rewards.Redeem(ctx, dbPool, botID, p2.Code, "rk-inactive-1"); err == nil {
 		t.Fatal("inactive product must not be redeemable")
 	} else if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 409 {
 		t.Fatalf("expected 409 PRODUCT_INACTIVE, got %v", err)
@@ -603,9 +603,9 @@ func TestStoreAdminAdminReads(t *testing.T) {
 	codeA := b2RedeemDirect(t, dbPool, botID, p1.Code)
 	bot2 := b2SeedBot(t, dbPool, 100)
 	codeB := b2RedeemDirect(t, dbPool, bot2, p1.Code)
-	_, _ = ApproveStoreRedemption(ctx, dbPool, root, codeB, "")
+	_, _ = ApproveRewardsRedemption(ctx, dbPool, root, codeB, "")
 
-	reds, total, err := ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Status: "all"})
+	reds, total, err := ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Status: "all"})
 	if err != nil || total != 2 {
 		t.Fatalf("redemptions all: total=%d err=%v", total, err)
 	}
@@ -614,36 +614,36 @@ func TestStoreAdminAdminReads(t *testing.T) {
 		t.Fatalf("order: %s then %s", reds[0].Code, reds[1].Code)
 	}
 	// status filter
-	reds, _, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Status: "pending_review"})
+	reds, _, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Status: "pending_review"})
 	if len(reds) != 1 || reds[0].Code != codeA {
 		t.Fatalf("pending filter: %+v", reds)
 	}
 	// bot filter
-	reds, _, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{BotID: bot2})
+	reds, _, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{BotID: bot2})
 	if len(reds) != 1 || reds[0].Code != codeB {
 		t.Fatalf("bot filter: %+v", reds)
 	}
 	// q search by code / title / request_key
-	reds, _, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Q: codeA})
+	reds, _, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Q: codeA})
 	if len(reds) != 1 || reds[0].Code != codeA {
 		t.Fatalf("code search: %+v", reds)
 	}
-	reds, _, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Q: "Visible One"})
+	reds, _, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Q: "Visible One"})
 	if len(reds) != 2 {
 		t.Fatalf("title search: %+v", reds)
 	}
 	// pagination
-	reds, total, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Page: 1, PageSize: 1})
+	reds, total, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Page: 1, PageSize: 1})
 	if len(reds) != 1 || total != 2 {
 		t.Fatalf("page 1: len=%d total=%d", len(reds), total)
 	}
-	reds, _, _ = ListStoreRedemptions(ctx, dbPool, root, store.RedemptionListFilter{Page: 2, PageSize: 1})
+	reds, _, _ = ListRewardsRedemptions(ctx, dbPool, root, rewards.RedemptionListFilter{Page: 2, PageSize: 1})
 	if len(reds) != 1 || reds[0].Code != codeA {
 		t.Fatalf("page 2: %+v", reds)
 	}
 }
 
-// -- legacy Store Core wrappers still work (single state machine) --
+// -- legacy Rewards Core wrappers still work (single state machine) --
 
 func TestStoreAdminLegacyStoreWrappersUnchanged(t *testing.T) {
 	dbPool := createPrivateDB(t)
@@ -652,16 +652,16 @@ func TestStoreAdminLegacyStoreWrappersUnchanged(t *testing.T) {
 	botID := b2SeedBot(t, dbPool, 30)
 	code := b2SeedRedemption(t, dbPool, botID, 10)
 
-	// legacy approve path (store.ApproveRedemption)
-	if _, err := store.ApproveRedemption(ctx, dbPool, code, ""); err != nil {
+	// legacy approve path (rewards.ApproveRedemption)
+	if _, err := rewards.ApproveRedemption(ctx, dbPool, code, ""); err != nil {
 		t.Fatalf("legacy approve: %v", err)
 	}
 	// legacy reject on approved → 409
-	if _, err := store.RejectRedemption(ctx, dbPool, code, ""); err == nil {
+	if _, err := rewards.RejectRedemption(ctx, dbPool, code, ""); err == nil {
 		t.Fatal("legacy reject from approved must 409")
 	}
 	// legacy cancel from approved works + refunds once
-	if _, err := store.CancelRedemption(ctx, dbPool, code); err != nil {
+	if _, err := rewards.CancelRedemption(ctx, dbPool, code); err != nil {
 		t.Fatalf("legacy cancel: %v", err)
 	}
 	if b2Balance(t, dbPool, botID) != 30 {
@@ -670,14 +670,14 @@ func TestStoreAdminLegacyStoreWrappersUnchanged(t *testing.T) {
 	if n := b2RefundCount(t, dbPool, code); n != 1 {
 		t.Fatalf("legacy refund count = %d", n)
 	}
-	_ = repository.StoreProductCodeExists // keep import parity
+	_ = repository.RewardsProductCodeExists // keep import parity
 }
 
 // b2RedeemDirect redeems an EXISTING product (helper creates a new one).
 func b2RedeemDirect(t *testing.T, dbPool *pg.Pool, botID int64, productCode string) string {
 	t.Helper()
 	rk := "rk" + fmt.Sprintf("%d", time.Now().UnixNano())
-	res, err := store.Redeem(context.Background(), dbPool, botID, productCode, rk)
+	res, err := rewards.Redeem(context.Background(), dbPool, botID, productCode, rk)
 	if err != nil {
 		t.Fatalf("redeem direct: %v", err)
 	}
@@ -693,13 +693,13 @@ func TestStoreAdminRegressionLegacyProductStatusWrappers(t *testing.T) {
 	dbPool := createPrivateDB(t)
 	ctx := context.Background()
 
-	p, err := store.CreateProduct(ctx, dbPool, store.ProductInput{Title: "Legacy Status", CreditsPrice: 2})
+	p, err := rewards.CreateProduct(ctx, dbPool, rewards.ProductInput{Title: "Legacy Status", CreditsPrice: 2})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// deactivate → status correct
-	ok, err := store.SetProductInactive(ctx, dbPool, p.Code)
+	ok, err := rewards.SetProductInactive(ctx, dbPool, p.Code)
 	if err != nil || !ok {
 		t.Fatalf("deactivate: %v %v", ok, err)
 	}
@@ -708,7 +708,7 @@ func TestStoreAdminRegressionLegacyProductStatusWrappers(t *testing.T) {
 		t.Fatalf("status = %s", got)
 	}
 	// repeat deactivate → idempotent, still inactive
-	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("idempotent deactivate: %v %v", ok, err)
 	}
 	if got = productStatus(t, dbPool, p.Code); got != "inactive" {
@@ -716,13 +716,13 @@ func TestStoreAdminRegressionLegacyProductStatusWrappers(t *testing.T) {
 	}
 
 	// activate → correct; repeat → idempotent
-	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("activate: %v %v", ok, err)
 	}
 	if got = productStatus(t, dbPool, p.Code); got != "active" {
 		t.Fatalf("status = %s", got)
 	}
-	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("idempotent activate: %v %v", ok, err)
 	}
 	if got = productStatus(t, dbPool, p.Code); got != "active" {
@@ -734,7 +734,7 @@ func productStatus(t *testing.T, dbPool *pg.Pool, code string) string {
 	t.Helper()
 	var s string
 	if err := dbPool.QueryRow(context.Background(),
-		`SELECT status FROM tb_store_products WHERE code=$1`, code).Scan(&s); err != nil {
+		`SELECT status FROM tb_rewards_products WHERE code=$1`, code).Scan(&s); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -748,18 +748,18 @@ func productStatus(t *testing.T, dbPool *pg.Pool, code string) string {
 func TestStoreAdminRegressionSingleStatusMutationImplementation(t *testing.T) {
 	root := repoRoot(t)
 
-	storeSrc := readSourceForGuard(t, filepath.Join(root, "internal", "store", "store.go"))
+	storeSrc := readSourceForGuard(t, filepath.Join(root, "internal", "rewards", "rewards.go"))
 	// both public wrappers delegate to the shared legacy helper, which
 	// is the ONLY tx-owner over SetProductStatusTx for the legacy path
 	for _, fn := range []string{"SetProductActive", "SetProductInactive"} {
 		body := extractFuncBody(storeSrc, fn)
 		if body == "" {
-			t.Fatalf("%s not found in store.go", fn)
+			t.Fatalf("%s not found in rewards.go", fn)
 		}
 		if !strings.Contains(body, "legacySetProductStatus") {
 			t.Fatalf("%s must delegate to legacySetProductStatus", fn)
 		}
-		if strings.Contains(body, "repository.SetStoreProductStatus") {
+		if strings.Contains(body, "repository.SetRewardsProductStatus") {
 			t.Fatalf("%s still calls the removed direct repository path", fn)
 		}
 	}
@@ -772,17 +772,17 @@ func TestStoreAdminRegressionSingleStatusMutationImplementation(t *testing.T) {
 	}
 
 	// repository: the only status writer is the row-locked Returning variant
-	repoSrc := readSourceForGuard(t, filepath.Join(root, "internal", "repository", "store.go"))
-	if strings.Contains(repoSrc, "func SetStoreProductStatus(") {
-		t.Fatal("repository.SetStoreProductStatus (second status entrypoint) must not exist")
+	repoSrc := readSourceForGuard(t, filepath.Join(root, "internal", "repository", "rewards.go"))
+	if strings.Contains(repoSrc, "func SetRewardsProductStatus(") {
+		t.Fatal("repository.SetRewardsProductStatus (second status entrypoint) must not exist")
 	}
-	if !strings.Contains(repoSrc, "func SetStoreProductStatusReturning(") {
-		t.Fatal("SetStoreProductStatusReturning missing")
+	if !strings.Contains(repoSrc, "func SetRewardsProductStatusReturning(") {
+		t.Fatal("SetRewardsProductStatusReturning missing")
 	}
 	// no other production package calls a status mutation on products
 	// besides the Tx primitive
-	txSrc := readSourceForGuard(t, filepath.Join(root, "internal", "store", "store_tx.go"))
-	if !strings.Contains(txSrc, "SetStoreProductStatusReturning") {
+	txSrc := readSourceForGuard(t, filepath.Join(root, "internal", "rewards", "store_tx.go"))
+	if !strings.Contains(txSrc, "SetRewardsProductStatusReturning") {
 		t.Fatal("SetProductStatusTx must be the sole caller of the status write")
 	}
 }
@@ -832,36 +832,36 @@ func TestStoreAdminRegressionBLegacyStatusNotFoundContract(t *testing.T) {
 	ctx := context.Background()
 
 	// nonexistent codes → (false, nil), NOT an error
-	ok, err := store.SetProductInactive(ctx, dbPool, "nonexistent1")
+	ok, err := rewards.SetProductInactive(ctx, dbPool, "nonexistent1")
 	if err != nil || ok {
 		t.Fatalf("inactive(nonexistent) = (%v, %v), want (false, nil)", ok, err)
 	}
-	ok, err = store.SetProductActive(ctx, dbPool, "nonexistent2")
+	ok, err = rewards.SetProductActive(ctx, dbPool, "nonexistent2")
 	if err != nil || ok {
 		t.Fatalf("active(nonexistent) = (%v, %v), want (false, nil)", ok, err)
 	}
 
 	// existing product: correct status, repeated idempotent
-	p, err := store.CreateProduct(ctx, dbPool, store.ProductInput{Title: "R2 Status", CreditsPrice: 1})
+	p, err := rewards.CreateProduct(ctx, dbPool, rewards.ProductInput{Title: "R2 Status", CreditsPrice: 1})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("inactive = (%v, %v)", ok, err)
 	}
 	if s := productStatus(t, dbPool, p.Code); s != "inactive" {
 		t.Fatalf("status = %s", s)
 	}
-	if ok, err := store.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductInactive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("repeat inactive = (%v, %v)", ok, err)
 	}
-	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("active = (%v, %v)", ok, err)
 	}
 	if s := productStatus(t, dbPool, p.Code); s != "active" {
 		t.Fatalf("status = %s", s)
 	}
-	if ok, err := store.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
+	if ok, err := rewards.SetProductActive(ctx, dbPool, p.Code); err != nil || !ok {
 		t.Fatalf("repeat active = (%v, %v)", ok, err)
 	}
 }

@@ -21,9 +21,9 @@
       {{if .Can "reports.manage"}}<a class="{{if eq .Nav "reports"}}on{{end}}" href="/samelabs/reports">Reports</a>{{end}}
       {{if .Can "memories.read"}}<a class="{{if eq .Nav "memories"}}on{{end}}" href="/samelabs/memories">Memories</a>{{end}}
       {{if .Can "accounts.read"}}<a class="{{if eq .Nav "accounts"}}on{{end}}" href="/samelabs/accounts">Accounts</a>{{end}}
-      {{if or (.Can "store.redemptions.read") (.Can "store.products.read") (.Can "finance.read")}}<div class="sl-group">Commerce</div>{{end}}
-      {{if .Can "store.redemptions.read"}}<a class="{{if eq .Nav "redemptions"}}on{{end}}" href="/samelabs/store/redemptions">Redemptions</a>{{end}}
-      {{if .Can "store.products.read"}}<a class="{{if eq .Nav "products"}}on{{end}}" href="/samelabs/store/products">Store products</a>{{end}}
+      {{if or (.Can "rewards.redemptions.read") (.Can "rewards.products.read") (.Can "finance.read")}}<div class="sl-group">Commerce</div>{{end}}
+      {{if .Can "rewards.redemptions.read"}}<a class="{{if eq .Nav "redemptions"}}on{{end}}" href="/samelabs/rewards/redemptions">Redemptions</a>{{end}}
+      {{if .Can "rewards.products.read"}}<a class="{{if eq .Nav "products"}}on{{end}}" href="/samelabs/rewards/products">Reward products</a>{{end}}
       {{if .Can "finance.read"}}<a class="{{if eq .Nav "finance"}}on{{end}}" href="/samelabs/finance">Finance</a>{{end}}
       {{if or (.Can "settings.payment.manage") (.Can "admin.users.read") (.Can "admin.roles.read") (.Can "admin.sessions.manage") (.Can "admin.audit.read")}}<div class="sl-group">Platform</div>{{end}}
       {{if .Can "settings.payment.manage"}}<a class="{{if eq .Nav "payment"}}on{{end}}" href="/samelabs/settings/payment">Payment settings</a>{{end}}

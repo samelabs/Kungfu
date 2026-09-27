@@ -2,7 +2,7 @@
 // Displays live fixed packages; the server remains the sole authority
 // for prices and credits — the client never computes either.
 // Every dynamic value reaching innerHTML goes through escapeHtml,
-// matching the Store renderer style.
+// matching the Rewards renderer style.
 
 // Format an authoritative fiat minor-unit integer (canonical decimal
 // STRING on the wire — never routed through JS Number) with EXACTLY
@@ -36,13 +36,13 @@ function renderCredits() {
         return;
     }
     wrap.innerHTML = pkgs.map((p) => `
-        <div class="store-product" data-package-code="${escapeHtml(p.code)}">
-            <div class="store-product-main">
+        <div class="rewards-product" data-package-code="${escapeHtml(p.code)}">
+            <div class="rewards-product-main">
                 <strong>${escapeHtml(p.name)}</strong>
                 <div class="muted">${escapeHtml(t('credits.price'))}: ${escapeHtml(creditsFormatAmount(p.amount_minor, p.currency))}</div>
                 <div>${escapeHtml(t('credits.credits'))}: ${escapeHtml(String(p.credits))}</div>
             </div>
-            <div class="store-product-actions">
+            <div class="rewards-product-actions">
                 <button class="btn primary" type="button" data-buy-package="${escapeHtml(p.code)}" ${state.credits.buying ? 'disabled' : ''}>
                     ${escapeHtml(state.credits.buying === p.code ? t('credits.buying') : t('credits.buy'))}
                 </button>

@@ -7,7 +7,7 @@ const state = {
     keyMasked: '',
     newKeyOnce: '',
     account: null,
-    store: {
+    rewards: {
         products: [],
         lastRedemption: null
     },

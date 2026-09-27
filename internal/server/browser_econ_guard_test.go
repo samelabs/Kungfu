@@ -33,7 +33,7 @@ var econBannedPatterns = []*regexp.Regexp{
 var economicAssetFiles = []string{
 	"web/assets/owner/api.js",
 	"web/assets/owner/render-credits.js",
-	"web/assets/owner/render-store.js",
+	"web/assets/owner/render-rewards.js",
 	"web/assets/owner/render-overview.js",
 	"web/assets/owner/render-logs.js",
 }

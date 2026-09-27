@@ -1,6 +1,6 @@
-package store
+package rewards
 
-// Admin-facing Store reads. The Admin is a PLATFORM subject (not a
+// Admin-facing Rewards reads. The Admin is a PLATFORM subject (not a
 // bot), so these global reads do no owner bot ownership filtering and
 // never attach a bot identity to the Admin — they merely return rows
 // whose bot_id column is an operational fact of the redemption.
@@ -24,7 +24,7 @@ type ProductListFilter struct {
 
 // ListProductsForAdmin returns the FULL catalog (active + inactive)
 // with pagination and search, stably ordered created_at DESC, id DESC.
-func ListProductsForAdmin(ctx context.Context, pool *pg.Pool, f ProductListFilter) ([]model.StoreProduct, int64, error) {
+func ListProductsForAdmin(ctx context.Context, pool *pg.Pool, f ProductListFilter) ([]model.RewardsProduct, int64, error) {
 	if f.Page < 1 {
 		f.Page = 1
 	}
@@ -39,7 +39,7 @@ func ListProductsForAdmin(ctx context.Context, pool *pg.Pool, f ProductListFilte
 	default:
 		return nil, 0, errors.New(400, "INVALID_STATUS_FILTER", "status must be all, active or inactive")
 	}
-	items, total, err := repository.AdminListStoreProducts(ctx, pool, repository.AdminProductFilter{
+	items, total, err := repository.AdminListRewardsProducts(ctx, pool, repository.AdminProductFilter{
 		Status: f.Status, Q: f.Q, Page: f.Page, PageSize: f.PageSize,
 	})
 	if err != nil {

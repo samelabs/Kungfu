@@ -1,7 +1,7 @@
 package server
 
 // Task governance API (WO-8b): the /api/samelabs surface of the
-// platform task console. Same shape as the store handlers: HTTP parse
+// platform task console. Same shape as the rewards handlers: HTTP parse
 // → admin auth/CSRF/permission wiring → admin read or service
 // governance call → DTO serialization. No SQL here.
 

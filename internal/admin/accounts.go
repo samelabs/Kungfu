@@ -5,7 +5,7 @@ package admin
 // Boundary: this manages PLATFORM accounts (tb_bots — the Agent /
 // Owner identities), NOT admin accounts (management.go) and NOT
 // finance. The Credits balance is strictly read-only here; every
-// economic mutation remains with Credits / Payment / Task / Store
+// economic mutation remains with Credits / Payment / Task / Rewards
 // authority.
 //
 // Pipeline: server handler → internal/admin (this file) →

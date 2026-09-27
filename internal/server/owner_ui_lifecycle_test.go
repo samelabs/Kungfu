@@ -162,7 +162,7 @@ func TestLifecycleHelperPresent(t *testing.T) {
 // loading/empty/error markup anymore — the shared sectionBox owns it.
 func TestSectionsUseSharedLifecycle(t *testing.T) {
 	for name, forbidden := range map[string][]string{
-		"render-store.js":   {`t('store.loading')`, `t('store.empty')`},
+		"render-rewards.js": {`t('rewards.loading')`, `t('rewards.empty')`},
 		"render-credits.js": {`t('credits.loading')`, `t('credits.unavailable')`},
 		"render-logs.js":    {`t('logs.empty')`},
 	} {
@@ -179,7 +179,7 @@ func TestSectionsUseSharedLifecycle(t *testing.T) {
 			t.Fatalf("init.js missing lifecycle wiring %q", token)
 		}
 	}
-	// Store empty and load error must not share a state: the empty
+	// Rewards empty and load error must not share a state: the empty
 	// key and the error path are distinct branches in runSection.
 	if !strings.Contains(initSrc, "isEmpty") || !strings.Contains(initSrc, "emptyKey") {
 		t.Fatal("runSection must decide empty vs ready explicitly")
@@ -218,7 +218,7 @@ func TestBalanceServerFactContract(t *testing.T) {
 	if acctIdx < 0 || shellIdx < 0 || acctIdx > shellIdx {
 		t.Fatal("restoreSession must load /api/account before revealing the authed shell")
 	}
-	rs := ownerAsset(t, "render-store.js")
+	rs := ownerAsset(t, "render-rewards.js")
 	rc := ownerAsset(t, "render-credits.js")
 	for _, src := range []string{rs, rc} {
 		if !strings.Contains(src, "state.account.balance") {
@@ -294,7 +294,7 @@ func TestCreditsEmptyMapsToUnavailable(t *testing.T) {
 	if strings.Contains(credBlock, "emptyKey: 'credits.unavailable'") {
 		t.Fatal("unavailable must not be faked through an empty-state text key")
 	}
-	// Store/Logs keep plain empty.
+	// Rewards/Logs keep plain empty.
 	block := func(section string) string {
 		i := strings.Index(initSrc, "runSection('"+section+"'")
 		if i < 0 {
@@ -302,7 +302,7 @@ func TestCreditsEmptyMapsToUnavailable(t *testing.T) {
 		}
 		return initSrc[i : i+400]
 	}
-	for name, section := range map[string]string{"store": "store", "logs": "logs"} {
+	for name, section := range map[string]string{"rewards": "rewards", "logs": "logs"} {
 		b := block(section)
 		if b == "" {
 			t.Fatalf("%s runSection call not found", name)
@@ -405,7 +405,7 @@ const qsa = () => [];
 // stub binders / helpers from sources not under test (core.js etc.)
 function bindAuthHandlers() {}
 function bindTaskHandlers() {}
-function bindStoreHandlers() {}
+function bindRewardsHandlers() {}
 function bindCreditsEvents() {}
 function isOwnerLoginRequired(error) {
     const code = (error && error.code) || '';

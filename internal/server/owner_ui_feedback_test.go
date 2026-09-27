@@ -33,7 +33,7 @@ func TestOwnerUINoticeCSSAuthorityRemoved(t *testing.T) {
 func TestOwnerUINoticeContainersRemovedFromTemplates(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
-	for _, path := range []string{"/owner", "/owner/logs", "/owner/credits", "/owner/store", "/owner/key", "/owner/account", "/owner/login"} {
+	for _, path := range []string{"/owner", "/owner/logs", "/owner/credits", "/owner/rewards", "/owner/key", "/owner/account", "/owner/login"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		router.ServeHTTP(rec, req)
@@ -88,14 +88,14 @@ func TestOwnerUIOwnerJSI18nScope(t *testing.T) {
 	}
 }
 
-// C1-5: Store and Credits balance use the existing stat DOM contract
+// C1-5: Rewards and Credits balance use the existing stat DOM contract
 // (numeric value in <b id=...Balance>, label in <span>); no parallel
 // stat-value system.
 func TestOwnerUIBalanceStatDOMContract(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	cases := map[string]string{
-		"/owner/store":   "storeBalance",
+		"/owner/rewards": "rewardsBalance",
 		"/owner/credits": "creditsBalance",
 	}
 	for path, id := range cases {
@@ -128,7 +128,7 @@ func TestOwnerUINoBalanceFormatPolicy(t *testing.T) {
 	if strings.Contains(string(core), "formatCredits") {
 		t.Fatal("formatCredits authority must not exist")
 	}
-	for _, f := range []string{"render-overview.js", "render-credits.js", "render-store.js"} {
+	for _, f := range []string{"render-overview.js", "render-credits.js", "render-rewards.js"} {
 		src, err := os.ReadFile(filepath.Join(jsDir, f))
 		if err != nil {
 			t.Fatal(err)

@@ -37,7 +37,17 @@
       "task_completed": "Completed",
       "task_credit_singular": "credit",
       "task_credit_plural": "credits",
-      "task_unavailable": "Task stream unavailable right now."
+      "task_unavailable": "Task stream unavailable right now.",
+      "credits_title": "Credits",
+      "credits_sub": "Top up credits to fund task bounties and redeem rewards.",
+      "credits_use": "Credits fund task bounties and reward redemptions.",
+      "credits_nontransfer": "Credits cannot be withdrawn or transferred.",
+      "credits_refund": "See the terms and privacy policy for refunds.",
+      "credits_buy": "Buy credits",
+      "credits_soon": "Coming soon",
+      "credits_unit": "credit",
+      "credits_terms": "Terms",
+      "credits_privacy": "Privacy"
     },
     "owner": {
       "nav": {
@@ -48,7 +58,7 @@
         "logs": "Logs",
         "task_guide": "Task Guide",
         "logout": "Logout",
-        "store": "Store",
+        "rewards": "Rewards",
         "credits": "Credits"
       },
       "overview": {
@@ -221,7 +231,7 @@
         "tx_earn_task": "Task reward",
         "tx_lock_task": "Task budget locked",
         "tx_refund_task": "Task budget refunded",
-        "tx_spend_redemption": "Store redemption",
+        "tx_spend_redemption": "Rewards redemption",
         "tx_refund_redemption": "Redemption refunded",
         "tx_spend_push": "Memory storage (legacy)",
         "tx_spend_get": "Memory read (legacy)"
@@ -296,9 +306,9 @@
         "open": "Open",
         "closed": "Closed"
       },
-      "store": {
-        "title": "Store",
-        "summary": "Redeem credits for platform products.",
+      "rewards": {
+        "title": "Reward redemption",
+        "summary": "Exchange credits for reward items. This page does not sell credits or subscriptions.",
         "credits": "Credits",
         "products": "Available products",
         "redeem": "Redeem",
@@ -318,7 +328,8 @@
         "load_failed": "Could not load products.",
         "redeem_failed": "Redeem failed.",
         "price_one": "{{price}} credit",
-        "short_by": "{{gap}} more credits needed"
+        "short_by": "{{gap}} more credits needed",
+        "disclaimer": "Rewards are redeemed with credits earned on the platform. This page does not sell credits or subscriptions."
       },
       "credits": {
         "title": "Buy Credits",
@@ -444,12 +455,12 @@
     },
     "credits": {
       "title": "Credits",
-      "summary": "Credits are Kungfu.md’s internal platform credits. One balance per account, earned through delivered work and redeemed in the store.",
+      "summary": "Credits are Kungfu.md’s internal platform credits. One balance per account, earned through delivered work and redeemed for rewards.",
       "balance_explainer": "Your Kungfu account has one shared credit balance. Owner and agent access use the same account balance.",
       "earn_title": "Earn credits",
       "earn_body": "When a task owner accepts your delivered work, credits are booked to your account and your balance increases.",
       "redeem_title": "Use credits",
-      "redeem_body": "Redeem an active store product and the credits are deducted from your balance.",
+      "redeem_body": "Redeem an active reward product and the credits are deducted from your balance.",
       "task_cta": "Find tasks",
       "tasks_manage_cta": "Manage your tasks",
       "store_cta": "Redeem credits",
@@ -469,7 +480,7 @@
       "s3_h": "Owner testing",
       "s3_b": "Owner tests via POST /api/testtask/{code} consume task budget, produce no agent earnings, and do not open the task.",
       "s4_h": "Credits and payments",
-      "s4_b": "Credits are the platform balance. Paid top-ups are processed through the Creem payment provider; refunds and disputes are reversed through the payment core. Store redemptions spend credits and can be refunded per the store policy.",
+      "s4_b": "Credits are the platform balance. Paid top-ups are processed through the Creem payment provider; refunds and disputes are reversed through the payment core. Rewards redemptions spend credits and can be refunded per the rewards policy.",
       "s5_h": "Acceptable use",
       "s5_b": "Do not use the platform to submit unlawful content, to attack Post API endpoints, or to circumvent delivery validation.",
       "s6_h": "Changes",
@@ -537,7 +548,17 @@
       "task_completed": "已完成",
       "task_credit_singular": "积分",
       "task_credit_plural": "积分",
-      "task_unavailable": "任务流当前不可用。"
+      "task_unavailable": "任务流当前不可用。",
+      "credits_title": "积分",
+      "credits_sub": "充值积分，用于发布任务悬赏与兑换奖励。",
+      "credits_use": "积分用于发布任务悬赏与兑换奖励。",
+      "credits_nontransfer": "积分不可提现、不可转让。",
+      "credits_refund": "退款政策见条款与隐私政策。",
+      "credits_buy": "购买积分",
+      "credits_soon": "即将开放",
+      "credits_unit": "积分",
+      "credits_terms": "条款",
+      "credits_privacy": "隐私"
     },
     "owner": {
       "nav": {
@@ -548,7 +569,7 @@
         "logs": "日志",
         "task_guide": "任务指南",
         "logout": "退出登录",
-        "store": "商店",
+        "rewards": "奖励",
         "credits": "积分"
       },
       "overview": {
@@ -796,9 +817,9 @@
         "open": "开放中",
         "closed": "已关闭"
       },
-      "store": {
-        "title": "商店",
-        "summary": "使用积分兑换平台商品。",
+      "rewards": {
+        "title": "奖励兑换",
+        "summary": "用积分兑换奖品。本页不出售积分或订阅。",
         "credits": "积分",
         "products": "可兑换商品",
         "redeem": "兑换",
@@ -818,7 +839,8 @@
         "load_failed": "商品加载失败。",
         "redeem_failed": "兑换失败。",
         "price_one": "{{price}} 积分",
-        "short_by": "还差 {{gap}} 积分"
+        "short_by": "还差 {{gap}} 积分",
+        "disclaimer": "奖励使用平台上获得的积分兑换。本页不出售积分或订阅。"
       },
       "credits": {
         "title": "购买积分",
@@ -1037,7 +1059,17 @@
       "task_completed": "完了数",
       "task_credit_singular": "クレジット",
       "task_credit_plural": "クレジット",
-      "task_unavailable": "現在タスクストリームを利用できません。"
+      "task_unavailable": "現在タスクストリームを利用できません。",
+      "credits_title": "クレジット",
+      "credits_sub": "クレジットをチャージしてタスク報酬とリワード交換に使います。",
+      "credits_use": "クレジットはタスク報酬とリワード交換に使います。",
+      "credits_nontransfer": "クレジットは出金も譲渡もできません。",
+      "credits_refund": "返金は利用規約とプライバシーポリシーをご覧ください。",
+      "credits_buy": "クレジットを購入",
+      "credits_soon": "近日公開",
+      "credits_unit": "クレジット",
+      "credits_terms": "利用規約",
+      "credits_privacy": "プライバシー"
     },
     "owner": {
       "nav": {
@@ -1048,7 +1080,7 @@
         "logs": "ログ",
         "task_guide": "タスクガイド",
         "logout": "ログアウト",
-        "store": "ストア",
+        "rewards": "リワード",
         "credits": "クレジット"
       },
       "overview": {
@@ -1280,9 +1312,9 @@
         "open": "公開中",
         "closed": "クローズ済み"
       },
-      "store": {
-        "title": "ストア",
-        "summary": "クレジットをプラットフォーム商品と交換します。",
+      "rewards": {
+        "title": "リワード交換",
+        "summary": "クレジットでリワードを交換します。このページではクレジットやサブスクリプションを販売しません。",
         "credits": "クレジット",
         "products": "交換可能な商品",
         "redeem": "交換",
@@ -1302,7 +1334,8 @@
         "load_failed": "商品の読み込みに失敗しました。",
         "redeem_failed": "交換に失敗しました。",
         "price_one": "{{price}} クレジット",
-        "short_by": "あと {{gap}} クレジット必要"
+        "short_by": "あと {{gap}} クレジット必要",
+        "disclaimer": "リワードはプラットフォームで獲得したクレジットで交換します。このページではクレジットやサブスクリプションを販売しません。"
       },
       "credits": {
         "title": "クレジット購入",
@@ -1521,7 +1554,17 @@
       "task_completed": "완료",
       "task_credit_singular": "크레딧",
       "task_credit_plural": "크레딧",
-      "task_unavailable": "현재 작업 스트림을 사용할 수 없습니다."
+      "task_unavailable": "현재 작업 스트림을 사용할 수 없습니다.",
+      "credits_title": "크레딧",
+      "credits_sub": "크레딧을 충전해 작업 현상금과 리워드 교환에 사용하세요.",
+      "credits_use": "크레딧은 작업 현상금과 리워드 교환에 사용됩니다.",
+      "credits_nontransfer": "크레딧은 출금하거나 양도할 수 없습니다.",
+      "credits_refund": "환불은 약관과 개인정보처리방침을 참고하세요.",
+      "credits_buy": "크레딧 구매",
+      "credits_soon": "곧 공개",
+      "credits_unit": "크레딧",
+      "credits_terms": "약관",
+      "credits_privacy": "개인정보"
     },
     "owner": {
       "nav": {
@@ -1532,7 +1575,7 @@
         "logs": "로그",
         "task_guide": "작업 가이드",
         "logout": "로그아웃",
-        "store": "스토어",
+        "rewards": "리워드",
         "credits": "크레딧"
       },
       "overview": {
@@ -1764,9 +1807,9 @@
         "open": "열림",
         "closed": "닫힘"
       },
-      "store": {
-        "title": "스토어",
-        "summary": "크레딧을 플랫폼 상품으로 교환합니다.",
+      "rewards": {
+        "title": "리워드 교환",
+        "summary": "크레딧으로 리워드를 교환합니다. 이 페이지는 크레딧이나 구독을 판매하지 않습니다.",
         "credits": "크레딧",
         "products": "교환 가능한 상품",
         "redeem": "교환",
@@ -1786,7 +1829,8 @@
         "load_failed": "상품을 불러오지 못했습니다.",
         "redeem_failed": "교환에 실패했습니다.",
         "price_one": "{{price}} 크레딧",
-        "short_by": "{{gap}} 크레딧 부족"
+        "short_by": "{{gap}} 크레딧 부족",
+        "disclaimer": "리워드는 플랫폼에서 획득한 크레딧으로 교환합니다. 이 페이지는 크레딧이나 구독을 판매하지 않습니다."
       },
       "credits": {
         "title": "크레딧 구매",
@@ -2005,7 +2049,17 @@
       "task_completed": "Completadas",
       "task_credit_singular": "crédito",
       "task_credit_plural": "créditos",
-      "task_unavailable": "El flujo de tareas no está disponible en este momento."
+      "task_unavailable": "El flujo de tareas no está disponible en este momento.",
+      "credits_title": "Créditos",
+      "credits_sub": "Recarga créditos para financiar recompensas de tareas y canjear recompensas.",
+      "credits_use": "Los créditos financian recompensas de tareas y canjes de recompensas.",
+      "credits_nontransfer": "Los créditos no se pueden retirar ni transferir.",
+      "credits_refund": "Consulta los términos y la política de privacidad para los reembolsos.",
+      "credits_buy": "Comprar créditos",
+      "credits_soon": "Próximamente",
+      "credits_unit": "créditos",
+      "credits_terms": "Términos",
+      "credits_privacy": "Privacidad"
     },
     "owner": {
       "nav": {
@@ -2016,7 +2070,7 @@
         "logs": "Registros",
         "task_guide": "Guía de tareas",
         "logout": "Cerrar sesión",
-        "store": "Tienda",
+        "rewards": "Recompensas",
         "credits": "Créditos"
       },
       "overview": {
@@ -2248,9 +2302,9 @@
         "open": "Abierta",
         "closed": "Cerrada"
       },
-      "store": {
-        "title": "Tienda",
-        "summary": "Canjea créditos por productos de la plataforma.",
+      "rewards": {
+        "title": "Canje de recompensas",
+        "summary": "Cambia créditos por recompensas. Esta página no vende créditos ni suscripciones.",
         "credits": "Créditos",
         "products": "Productos disponibles",
         "redeem": "Canjear",
@@ -2270,7 +2324,8 @@
         "load_failed": "No se pudieron cargar los productos.",
         "redeem_failed": "El canje falló.",
         "price_one": "{{price}} crédito",
-        "short_by": "Faltan {{gap}} créditos"
+        "short_by": "Faltan {{gap}} créditos",
+        "disclaimer": "Las recompensas se canjean con créditos ganados en la plataforma. Esta página no vende créditos ni suscripciones."
       },
       "credits": {
         "title": "Comprar créditos",

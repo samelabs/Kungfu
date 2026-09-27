@@ -148,7 +148,7 @@ func TestSamelabsPagesRender(t *testing.T) {
 		"/samelabs", "/samelabs/account",
 		"/samelabs/memories", "/samelabs/memories/" + sd.memCode, "/samelabs/accounts",
 		fmt.Sprintf("/samelabs/accounts/%d", sd.botID), "/samelabs/finance", "/samelabs/finance?tab=adjustments",
-		"/samelabs/finance?tab=ledger", "/samelabs/store/products", "/samelabs/store/redemptions",
+		"/samelabs/finance?tab=ledger", "/samelabs/rewards/products", "/samelabs/rewards/redemptions",
 		"/samelabs/settings/payment", "/samelabs/admins", "/samelabs/roles", "/samelabs/sessions", "/samelabs/audit",
 	} {
 		rec := e.page(t, path)

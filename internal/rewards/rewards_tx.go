@@ -1,12 +1,12 @@
-package store
+package rewards
 
-// Store Administration: caller-transaction (Tx) variants of every
-// Admin-triggered Store mutation, plus the Admin-facing read queries.
+// Rewards Administration: caller-transaction (Tx) variants of every
+// Admin-triggered Rewards mutation, plus the Admin-facing read queries.
 //
 // Invariants:
 //   - Tx primitives accept a caller-owned pgx.Tx; they NEVER begin,
 //     commit, or roll back the transaction and NEVER write Admin
-//     audit — the Admin control plane (internal/admin/store.go) owns
+//     audit — the Admin control plane (internal/admin/rewards.go) owns
 //     the transaction via admin.WithAuditTx and the audit row.
 //   - There is exactly ONE state-machine implementation per operation:
 //     the legacy public wrappers (owner/internal surfaces) now begin
@@ -44,8 +44,8 @@ type TransitionOutcome struct {
 
 // ProductOutcome is the product analogue of TransitionOutcome.
 type ProductOutcome struct {
-	Before *model.StoreProduct // nil on create
-	After  *model.StoreProduct
+	Before *model.RewardsProduct // nil on create
+	After  *model.RewardsProduct
 }
 
 // ProductPatch carries OPTIONAL editable fields (partial update).
@@ -80,13 +80,13 @@ func CreateProductTx(ctx context.Context, pool *pg.Pool, tx pgx.Tx, in ProductIn
 	}
 
 	code, err := publiccode.GenerateUnique(func(c string) (bool, error) {
-		return repository.StoreProductCodeExists(ctx, pool, c)
+		return repository.RewardsProductCodeExists(ctx, pool, c)
 	})
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not allocate product code")
 	}
 
-	p, err := repository.CreateStoreProduct(ctx, tx, code, repository.StoreProductInput{
+	p, err := repository.CreateRewardsProduct(ctx, tx, code, repository.RewardsProductInput{
 		Title: title, Description: desc, CreditsPrice: in.CreditsPrice,
 	})
 	if err != nil {
@@ -122,7 +122,7 @@ func UpdateProductTx(ctx context.Context, tx pgx.Tx, code string, patch ProductP
 		}
 	}
 
-	before, err := repository.LockStoreProductByCode(ctx, tx, code)
+	before, err := repository.LockRewardsProductByCode(ctx, tx, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load product")
 	}
@@ -146,7 +146,7 @@ func UpdateProductTx(ctx context.Context, tx pgx.Tx, code string, patch ProductP
 		next.CreditsPrice = *patch.CreditsPrice
 	}
 
-	after, err := repository.UpdateStoreProduct(ctx, tx, before.ID, next.Title, next.Description, next.CreditsPrice)
+	after, err := repository.UpdateRewardsProduct(ctx, tx, before.ID, next.Title, next.Description, next.CreditsPrice)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not update product")
 	}
@@ -161,7 +161,7 @@ func SetProductStatusTx(ctx context.Context, tx pgx.Tx, code, status string) (*P
 	if status != model.ProductStatusActive && status != model.ProductStatusInactive {
 		return nil, errors.New(400, "INVALID_PRODUCT_STATUS", "Product status must be active or inactive")
 	}
-	before, err := repository.LockStoreProductByCode(ctx, tx, code)
+	before, err := repository.LockRewardsProductByCode(ctx, tx, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load product")
 	}
@@ -171,7 +171,7 @@ func SetProductStatusTx(ctx context.Context, tx pgx.Tx, code, status string) (*P
 	if before.Status == status {
 		return &ProductOutcome{Before: before, After: before}, nil // idempotent
 	}
-	after, err := repository.SetStoreProductStatusReturning(ctx, tx, before.ID, status)
+	after, err := repository.SetRewardsProductStatusReturning(ctx, tx, before.ID, status)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not update product status")
 	}

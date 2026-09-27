@@ -33,7 +33,7 @@ func TestCreditsPageRendersRealMechanisms(t *testing.T) {
 	}
 
 	// Live entry points.
-	for _, want := range []string{"/owner/store", "/owner/logs"} {
+	for _, want := range []string{"/owner/rewards", "/owner/logs"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("entry point %s missing", want)
 		}
@@ -43,7 +43,7 @@ func TestCreditsPageRendersRealMechanisms(t *testing.T) {
 	// identifiers were removed from user-facing copy in the frontend
 	// closure round (they read as engineering artifacts on a public
 	// page); the test now locks the mechanism SEMANTICS instead:
-	// earning via tasks, redeeming in the store, budget lock at task
+	// earning via tasks, redeeming for rewards, budget lock at task
 	// creation (including pending), and refund of the remaining budget
 	// at close.
 	for _, want := range []string{"booked to your account", "deducted from your balance", "is locked from your account balance", "can return to you"} {

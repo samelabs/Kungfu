@@ -207,12 +207,12 @@ func detectAdminSQLInDirs(t *testing.T, dirs ...string) []sqlViolation {
 	return violations
 }
 
-// storeTables are the Store tables owned by internal/repository/store.go.
-var storeTables = []string{"tb_store_products", "tb_redemptions"}
+// rewardsTables are the Rewards tables owned by internal/repository/rewards.go.
+var rewardsTables = []string{"tb_rewards_products", "tb_redemptions"}
 
 // detectTableSQLInSource is the GENERALIZED AST detector: violations
 // for string literals referencing any of the given tables in SQL
-// context. Reused for both the admin-plane and store-table guards.
+// context. Reused for both the admin-plane and rewards-table guards.
 func detectTableSQLInSource(path, src string, tables []string) []sqlViolation {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, src, 0)
@@ -253,9 +253,9 @@ func detectTableSQLInSource(path, src string, tables []string) []sqlViolation {
 	return out
 }
 
-// detectStoreSQLInSource runs the detector for Store tables.
-func detectStoreSQLInSource(path, src string) []sqlViolation {
-	return detectTableSQLInSource(path, src, storeTables)
+// detectRewardsSQLInSource runs the detector for Rewards tables.
+func detectRewardsSQLInSource(path, src string) []sqlViolation {
+	return detectTableSQLInSource(path, src, rewardsTables)
 }
 
 // Guard: SQL against tb_admin* tables lives ONLY in

@@ -7,7 +7,7 @@
 </form>
 <section class="sl-card flush">
 {{if .Data.Items}}<table class="sl-table"><thead><tr><th>Redemption</th><th>Product</th><th>Account</th><th class="r">Cost</th><th>Status</th><th>Created</th></tr></thead><tbody>
-{{range .Data.Items}}<tr><td><a class="mono" href="/samelabs/store/redemptions/{{.Code}}">{{.Code}}</a></td><td>{{.ProductTitle}}</td><td><a href="/samelabs/accounts/{{.BotID}}">#{{.BotID}}</a></td><td class="r">{{num .CreditsCost}} cr</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
+{{range .Data.Items}}<tr><td><a class="mono" href="/samelabs/rewards/redemptions/{{.Code}}">{{.Code}}</a></td><td>{{.ProductTitle}}</td><td><a href="/samelabs/accounts/{{.BotID}}">#{{.BotID}}</a></td><td class="r">{{num .CreditsCost}} cr</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
 </tbody></table>{{else}}{{template "empty" "No redemption matches these filters."}}{{end}}
 </section>
 {{template "pager" (pager .Query .Data.Total .Data.Page .Data.Size)}}

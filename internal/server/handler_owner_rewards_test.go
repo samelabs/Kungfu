@@ -1,6 +1,6 @@
 package server
 
-// Owner Store API integration tests (real PostgreSQL + real router).
+// Owner Rewards API integration tests (real PostgreSQL + real router).
 // Covers: auth gate, active-only catalog, redeem + atomic spend, snapshot,
 // request_key idempotency (serial + concurrent), conflicts, ownership
 // scoping, and DTO field hygiene (no internal ids).
@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"kungfu.md/internal/store"
+	"kungfu.md/internal/rewards"
 )
 
 // -- helpers --
@@ -37,7 +37,7 @@ func storeOwnerCookie(t *testing.T, s *Server, botID int64) *http.Cookie {
 
 func storeSeedProduct(t *testing.T, s *Server, price int64) string {
 	t.Helper()
-	p, err := store.CreateProduct(context.Background(), s.Pool, store.ProductInput{
+	p, err := rewards.CreateProduct(context.Background(), s.Pool, rewards.ProductInput{
 		Title:        fmt.Sprintf("SE Product %d", time.Now().UnixNano()),
 		CreditsPrice: price,
 	})
@@ -46,8 +46,8 @@ func storeSeedProduct(t *testing.T, s *Server, price int64) string {
 	}
 	t.Cleanup(func() {
 		_, _ = s.Pool.Exec(context.Background(),
-			`DELETE FROM tb_redemptions WHERE product_id = (SELECT id FROM tb_store_products WHERE code = $1)`, p.Code)
-		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_store_products WHERE code = $1`, p.Code)
+			`DELETE FROM tb_redemptions WHERE product_id = (SELECT id FROM tb_rewards_products WHERE code = $1)`, p.Code)
+		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_rewards_products WHERE code = $1`, p.Code)
 	})
 	return p.Code
 }
@@ -99,11 +99,11 @@ func storeSpendCount(t *testing.T, s *Server, botID int64, refID string) (int, i
 
 // -- 1. unauthenticated -> owner auth error --
 
-func TestStoreProductsRequiresOwnerAuth(t *testing.T) {
+func TestRewardsProductsRequiresOwnerAuth(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 
-	rec, body := storeDo(t, router, nil, http.MethodGet, "/api/owner/store/products", nil)
+	rec, body := storeDo(t, router, nil, http.MethodGet, "/api/owner/rewards/products", nil)
 	if rec.Code == http.StatusOK {
 		t.Fatalf("unauthenticated request returned 200: %v", body)
 	}
@@ -114,18 +114,18 @@ func TestStoreProductsRequiresOwnerAuth(t *testing.T) {
 
 // -- 2. products list active only --
 
-func TestStoreProductsActiveOnly(t *testing.T) {
+func TestRewardsProductsActiveOnly(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	_, cookie := seedStoreBot(t, s, 10)
 
 	active := storeSeedProduct(t, s, 40)
 	inactive := storeSeedProduct(t, s, 50)
-	if ok, err := store.SetProductInactive(context.Background(), s.Pool, inactive); err != nil || !ok {
+	if ok, err := rewards.SetProductInactive(context.Background(), s.Pool, inactive); err != nil || !ok {
 		t.Fatalf("deactivate: %v %v", ok, err)
 	}
 
-	rec, body := storeDo(t, router, cookie, http.MethodGet, "/api/owner/store/products", nil)
+	rec, body := storeDo(t, router, cookie, http.MethodGet, "/api/owner/rewards/products", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %v", rec.Code, body)
 	}
@@ -183,7 +183,7 @@ func TestStoreRedeemCreatesPendingAndSpends(t *testing.T) {
 	botID, cookie := seedStoreBot(t, s, 100)
 	product := storeSeedProduct(t, s, 40)
 
-	rec, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_redeem_1"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %v", rec.Code, body)
@@ -222,11 +222,11 @@ func TestStoreRedeemIdempotentReplay(t *testing.T) {
 	botID, cookie := seedStoreBot(t, s, 100)
 	product := storeSeedProduct(t, s, 40)
 
-	_, b1 := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	_, b1 := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_replay_1"})
 	code := b1["data"].(map[string]interface{})["redemption"].(map[string]interface{})["code"].(string)
 
-	rec, b2 := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, b2 := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_replay_1"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replay status = %d", rec.Code)
@@ -263,7 +263,7 @@ func TestStoreRedeemConcurrentSameKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+			_, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 				map[string]string{"product_code": product, "request_key": "se_conc_1"})
 			if c, ok := body["data"].(map[string]interface{})["redemption"].(map[string]interface{})["code"].(string); ok {
 				codesMu.Lock()
@@ -305,9 +305,9 @@ func TestStoreRedeemSameKeyDifferentProduct(t *testing.T) {
 	p1 := storeSeedProduct(t, s, 40)
 	p2 := storeSeedProduct(t, s, 50)
 
-	storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": p1, "request_key": "se_conflict_1"})
-	rec, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, body := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": p2, "request_key": "se_conflict_1"})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d body = %v", rec.Code, body)
@@ -325,7 +325,7 @@ func TestStoreRedeemInsufficient(t *testing.T) {
 	botID, cookie := seedStoreBot(t, s, 5)
 	product := storeSeedProduct(t, s, 40)
 
-	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_insuf_1"})
 	if rec.Code != http.StatusPaymentRequired {
 		t.Fatalf("status = %d, want 402", rec.Code)
@@ -348,11 +348,11 @@ func TestStoreRedeemInactive(t *testing.T) {
 	router := s.buildRouter()
 	botID, cookie := seedStoreBot(t, s, 100)
 	product := storeSeedProduct(t, s, 40)
-	if ok, _ := store.SetProductInactive(context.Background(), s.Pool, product); !ok {
+	if ok, _ := rewards.SetProductInactive(context.Background(), s.Pool, product); !ok {
 		t.Fatal("deactivate failed")
 	}
 
-	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_inactive_1"})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
@@ -370,20 +370,20 @@ func TestStoreRedeemInactive(t *testing.T) {
 
 // -- 12/13/14. ownership-scoped get --
 
-func TestStoreRedemptionGetOwnership(t *testing.T) {
+func TestRewardsRedemptionGetOwnership(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 	botA, cookieA := seedStoreBot(t, s, 100)
 	_, cookieB := seedStoreBot(t, s, 100)
 	product := storeSeedProduct(t, s, 40)
 
-	_, b1 := storeDo(t, router, cookieA, http.MethodPost, "/api/owner/store/redemptions",
+	_, b1 := storeDo(t, router, cookieA, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": product, "request_key": "se_get_1"})
 	r := b1["data"].(map[string]interface{})["redemption"].(map[string]interface{})
 	code := r["code"].(string)
 
 	// own -> 200
-	rec, body := storeDo(t, router, cookieA, http.MethodGet, "/api/owner/store/redemptions/"+code, nil)
+	rec, body := storeDo(t, router, cookieA, http.MethodGet, "/api/owner/rewards/redemptions/"+code, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("own get status = %d", rec.Code)
 	}
@@ -399,13 +399,13 @@ func TestStoreRedemptionGetOwnership(t *testing.T) {
 	}
 
 	// other bot -> 404
-	rec, _ = storeDo(t, router, cookieB, http.MethodGet, "/api/owner/store/redemptions/"+code, nil)
+	rec, _ = storeDo(t, router, cookieB, http.MethodGet, "/api/owner/rewards/redemptions/"+code, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("cross-bot get status = %d, want 404", rec.Code)
 	}
 
 	// nonexistent -> 404
-	rec, _ = storeDo(t, router, cookieA, http.MethodGet, "/api/owner/store/redemptions/nonexistent0", nil)
+	rec, _ = storeDo(t, router, cookieA, http.MethodGet, "/api/owner/rewards/redemptions/nonexistent0", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("missing get status = %d, want 404", rec.Code)
 	}
@@ -419,12 +419,12 @@ func TestStoreRedeemMissingFields(t *testing.T) {
 	router := s.buildRouter()
 	_, cookie := seedStoreBot(t, s, 100)
 
-	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, _ := storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"request_key": "se_missing_1"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing product_code: %d, want 400", rec.Code)
 	}
-	rec, _ = storeDo(t, router, cookie, http.MethodPost, "/api/owner/store/redemptions",
+	rec, _ = storeDo(t, router, cookie, http.MethodPost, "/api/owner/rewards/redemptions",
 		map[string]string{"product_code": "x"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing request_key: %d, want 400", rec.Code)

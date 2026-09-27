@@ -2,7 +2,7 @@ package server
 
 // J-contract boundary tests: fractional Credits are rejected fail-closed
 // at the public HTTP boundaries (owner task create/edit/add-budget,
-// admin store create/edit). MCP work_publish rejection is covered in
+// admin rewards create/edit). MCP work_publish rejection is covered in
 // internal/mcpserver; CREEM_PACKAGES_JSON in internal/config. Integers
 // stay valid, and no silent rounding ever happens. Real PostgreSQL.
 
@@ -101,18 +101,18 @@ func (e *econEnv) assertNoLeak(t *testing.T) {
 	}
 }
 
-// Fractional admin store product price → 400 (create and PATCH); integer OK.
+// Fractional admin rewards product price → 400 (create and PATCH); integer OK.
 func TestAdminStoreRejectsFractionalPrice(t *testing.T) {
 	env := newB2HTTPEnv(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
-	rec := env.mutateJSON(t, "POST", "/api/samelabs/store/products",
+	rec := env.mutateJSON(t, "POST", "/api/samelabs/rewards/products",
 		`{"title":"FRAC `+suffix+`","credits_price":12.5}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "INVALID_PRICE") {
 		t.Fatalf("fractional create = %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = env.mutateJSON(t, "POST", "/api/samelabs/store/products",
+	rec = env.mutateJSON(t, "POST", "/api/samelabs/rewards/products",
 		`{"title":"FRAC2 `+suffix+`","credits_price":12}`)
 	if rec.Code != 200 {
 		t.Fatalf("integer create = %d %s", rec.Code, rec.Body.String())
@@ -124,10 +124,10 @@ func TestAdminStoreRejectsFractionalPrice(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
 	t.Cleanup(func() {
-		_, _ = env.s.Pool.Exec(ctxBg(), `DELETE FROM tb_store_products WHERE code=$1`, created.Data.Code)
+		_, _ = env.s.Pool.Exec(ctxBg(), `DELETE FROM tb_rewards_products WHERE code=$1`, created.Data.Code)
 	})
 
-	rec = env.mutateJSON(t, "PATCH", "/api/samelabs/store/products/"+created.Data.Code,
+	rec = env.mutateJSON(t, "PATCH", "/api/samelabs/rewards/products/"+created.Data.Code,
 		`{"credits_price":13.75}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "INVALID_PRICE") {
 		t.Fatalf("fractional patch = %d %s", rec.Code, rec.Body.String())
@@ -135,7 +135,7 @@ func TestAdminStoreRejectsFractionalPrice(t *testing.T) {
 
 	var n int
 	_ = env.s.Pool.QueryRow(ctxBg(),
-		`SELECT COUNT(*) FROM tb_store_products WHERE title LIKE $1`, "FRAC%"+suffix).Scan(&n)
+		`SELECT COUNT(*) FROM tb_rewards_products WHERE title LIKE $1`, "FRAC%"+suffix).Scan(&n)
 	if n != 1 {
 		t.Fatalf("product rows leaked: %d", n)
 	}

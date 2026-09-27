@@ -658,7 +658,7 @@ func parseAdminJSONBody(r *http.Request) (map[string]interface{}, error) {
 
 // parseAdminJSONBodyNumbers is parseAdminJSONBody with lossless number
 // decoding (json.Number, never float64) — for Credit-bearing admin
-// boundaries (store credits_price) where 2^53 corruption is unacceptable.
+// boundaries (rewards credits_price) where 2^53 corruption is unacceptable.
 func parseAdminJSONBodyNumbers(r *http.Request) (map[string]interface{}, error) {
 	return parseJSONBodyRequiredNumbers(r, true, "Request body must be valid JSON")
 }

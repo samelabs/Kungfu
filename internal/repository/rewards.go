@@ -13,10 +13,10 @@ import (
 	"kungfu.md/internal/pg"
 )
 
-// Store persistence for tb_store_products and tb_redemptions.
+// Rewards persistence for tb_rewards_products and tb_redemptions.
 // Every method accepts a pg.Querier so it works with both *pgxpool.Pool and
 // pgx.Tx; review/fulfillment/cancel transitions always run inside the
-// store service's transaction.
+// rewards service's transaction.
 
 // ErrProductCodeExists / ErrRequestKeyExists are uniqueness outcomes the
 // service translates into business errors.
@@ -27,57 +27,57 @@ var (
 
 // -- catalog --
 
-// StoreProductInput is the validated payload for creating a product.
-type StoreProductInput struct {
+// RewardsProductInput is the validated payload for creating a product.
+type RewardsProductInput struct {
 	Title        string
 	Description  *string
 	CreditsPrice int64
 }
 
-// CreateStoreProduct inserts an active product row.
-func CreateStoreProduct(ctx context.Context, q pg.Querier, code string, in StoreProductInput) (*model.StoreProduct, error) {
+// CreateRewardsProduct inserts an active product row.
+func CreateRewardsProduct(ctx context.Context, q pg.Querier, code string, in RewardsProductInput) (*model.RewardsProduct, error) {
 	row := q.QueryRow(ctx, `
-		INSERT INTO tb_store_products (code, title, description, credits_price, status, created_at, updated_at)
+		INSERT INTO tb_rewards_products (code, title, description, credits_price, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
 		RETURNING id, code, title, description, credits_price, status, created_at, updated_at`,
 		code, in.Title, in.Description, in.CreditsPrice)
-	return scanStoreProduct(row)
+	return scanRewardsProduct(row)
 }
 
-// FindStoreProductByCode returns a product by code, or nil when absent.
-func FindStoreProductByCode(ctx context.Context, q pg.Querier, code string) (*model.StoreProduct, error) {
+// FindRewardsProductByCode returns a product by code, or nil when absent.
+func FindRewardsProductByCode(ctx context.Context, q pg.Querier, code string) (*model.RewardsProduct, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
-		FROM tb_store_products WHERE code = $1`, code)
-	p, err := scanStoreProduct(row)
+		FROM tb_rewards_products WHERE code = $1`, code)
+	p, err := scanRewardsProduct(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	return p, err
 }
 
-// LockActiveStoreProductByCode locks the product row (FOR UPDATE) inside
+// LockActiveRewardsProductByCode locks the product row (FOR UPDATE) inside
 // the redemption transaction: the snapshot (title + price) is taken from
 // the locked row, so a concurrent price change cannot interleave.
 // Returns nil (no error) when the code does not exist.
-func LockActiveStoreProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model.StoreProduct, error) {
+func LockActiveRewardsProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model.RewardsProduct, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
-		FROM tb_store_products
+		FROM tb_rewards_products
 		WHERE code = $1 AND status = 'active'
 		FOR UPDATE`, code)
-	p, err := scanStoreProduct(row)
+	p, err := scanRewardsProduct(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	return p, err
 }
 
-// ListActiveStoreProducts returns the active catalog, newest first.
-func ListActiveStoreProducts(ctx context.Context, q pg.Querier) ([]model.StoreProduct, error) {
+// ListActiveRewardsProducts returns the active catalog, newest first.
+func ListActiveRewardsProducts(ctx context.Context, q pg.Querier) ([]model.RewardsProduct, error) {
 	rows, err := q.Query(ctx, `
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
-		FROM tb_store_products
+		FROM tb_rewards_products
 		WHERE status = 'active'
 		ORDER BY created_at DESC, id DESC`)
 	if err != nil {
@@ -85,9 +85,9 @@ func ListActiveStoreProducts(ctx context.Context, q pg.Querier) ([]model.StorePr
 	}
 	defer rows.Close()
 
-	var items []model.StoreProduct
+	var items []model.RewardsProduct
 	for rows.Next() {
-		var it model.StoreProduct
+		var it model.RewardsProduct
 		if err := rows.Scan(&it.ID, &it.Code, &it.Title, &it.Description,
 			&it.CreditsPrice, &it.Status, &it.CreatedAt, &it.UpdatedAt); err != nil {
 			return nil, err
@@ -97,11 +97,11 @@ func ListActiveStoreProducts(ctx context.Context, q pg.Querier) ([]model.StorePr
 	return items, rows.Err()
 }
 
-// StoreProductCodeExists reports whether a code is already used.
-func StoreProductCodeExists(ctx context.Context, q pg.Querier, code string) (bool, error) {
+// RewardsProductCodeExists reports whether a code is already used.
+func RewardsProductCodeExists(ctx context.Context, q pg.Querier, code string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM tb_store_products WHERE code = $1)`, code).Scan(&exists)
+		`SELECT EXISTS (SELECT 1 FROM tb_rewards_products WHERE code = $1)`, code).Scan(&exists)
 	return exists, err
 }
 
@@ -252,8 +252,8 @@ func RedemptionCodeExists(ctx context.Context, q pg.Querier, code string) (bool,
 
 // -- scan helpers --
 
-func scanStoreProduct(row pgx.Row) (*model.StoreProduct, error) {
-	var p model.StoreProduct
+func scanRewardsProduct(row pgx.Row) (*model.RewardsProduct, error) {
+	var p model.RewardsProduct
 	err := row.Scan(&p.ID, &p.Code, &p.Title, &p.Description,
 		&p.CreditsPrice, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
@@ -281,7 +281,7 @@ func classifyInsertError(err error) error {
 		if strings.Contains(pgErr.ConstraintName, "uk_redemption_bot_request") {
 			return ErrRequestKeyConflict
 		}
-		if pgErr.ConstraintName == "uk_store_product_code" {
+		if pgErr.ConstraintName == "uk_rewards_product_code" {
 			return ErrProductCodeExists
 		}
 	}
@@ -289,51 +289,51 @@ func classifyInsertError(err error) error {
 }
 
 // ============================================================
-// Store Administration repository additions. Same SQL-ownership
+// Rewards Administration repository additions. Same SQL-ownership
 // file; Admin reads are platform-global (no bot ownership filter).
 // ============================================================
 
-// LockStoreProductByCode locks ANY product row (regardless of
+// LockRewardsProductByCode locks ANY product row (regardless of
 // status) FOR UPDATE inside the caller's transaction — the Admin
 // edit/status path shares this lock with Redeem's snapshot read, so
 // concurrent edit vs redeem serializes on the row. Returns nil when
 // the code does not exist.
-func LockStoreProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model.StoreProduct, error) {
+func LockRewardsProductByCode(ctx context.Context, tx pgx.Tx, code string) (*model.RewardsProduct, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
-		FROM tb_store_products
+		FROM tb_rewards_products
 		WHERE code = $1
 		FOR UPDATE`, code)
-	p, err := scanStoreProduct(row)
+	p, err := scanRewardsProduct(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	return p, err
 }
 
-// UpdateStoreProduct writes the editable columns (title, description,
+// UpdateRewardsProduct writes the editable columns (title, description,
 // credits_price) of a locked product row and returns the fresh row.
 // code/id/created_at/status are never touched here.
-func UpdateStoreProduct(ctx context.Context, tx pgx.Tx, id int64, title string, description *string, creditsPrice int64) (*model.StoreProduct, error) {
+func UpdateRewardsProduct(ctx context.Context, tx pgx.Tx, id int64, title string, description *string, creditsPrice int64) (*model.RewardsProduct, error) {
 	row := tx.QueryRow(ctx, `
-		UPDATE tb_store_products
+		UPDATE tb_rewards_products
 		SET title = $2, description = $3, credits_price = $4, updated_at = NOW()
 		WHERE id = $1
 		RETURNING id, code, title, description, credits_price, status, created_at, updated_at`,
 		id, title, description, creditsPrice)
-	return scanStoreProduct(row)
+	return scanRewardsProduct(row)
 }
 
-// SetStoreProductStatusReturning flips the status of a locked product
+// SetRewardsProductStatusReturning flips the status of a locked product
 // row and returns the fresh row.
-func SetStoreProductStatusReturning(ctx context.Context, tx pgx.Tx, id int64, status string) (*model.StoreProduct, error) {
+func SetRewardsProductStatusReturning(ctx context.Context, tx pgx.Tx, id int64, status string) (*model.RewardsProduct, error) {
 	row := tx.QueryRow(ctx, `
-		UPDATE tb_store_products
+		UPDATE tb_rewards_products
 		SET status = $2, updated_at = NOW()
 		WHERE id = $1
 		RETURNING id, code, title, description, credits_price, status, created_at, updated_at`,
 		id, status)
-	return scanStoreProduct(row)
+	return scanRewardsProduct(row)
 }
 
 // FindRedemptionByID re-reads a redemption row by numeric id inside
@@ -363,10 +363,10 @@ type AdminProductFilter struct {
 	PageSize int
 }
 
-// AdminListStoreProducts returns the full catalog (or a status
+// AdminListRewardsProducts returns the full catalog (or a status
 // slice) matching a search, paginated, ordered created_at DESC,
 // id DESC, plus the total match count.
-func AdminListStoreProducts(ctx context.Context, q pg.Querier, f AdminProductFilter) ([]model.StoreProduct, int64, error) {
+func AdminListRewardsProducts(ctx context.Context, q pg.Querier, f AdminProductFilter) ([]model.RewardsProduct, int64, error) {
 	where, args := "WHERE 1=1", []interface{}{}
 	n := 0
 	addArg := func(v interface{}) string {
@@ -384,7 +384,7 @@ func AdminListStoreProducts(ctx context.Context, q pg.Querier, f AdminProductFil
 
 	var total int64
 	if err := q.QueryRow(ctx,
-		"SELECT COUNT(*) FROM tb_store_products "+where, args...).Scan(&total); err != nil {
+		"SELECT COUNT(*) FROM tb_rewards_products "+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -393,16 +393,16 @@ func AdminListStoreProducts(ctx context.Context, q pg.Querier, f AdminProductFil
 	off := addArg(offset)
 	rows, err := q.Query(ctx, `
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
-		FROM tb_store_products `+where+`
+		FROM tb_rewards_products `+where+`
 		ORDER BY created_at DESC, id DESC
 		LIMIT `+limit+` OFFSET `+off, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var items []model.StoreProduct
+	var items []model.RewardsProduct
 	for rows.Next() {
-		var it model.StoreProduct
+		var it model.RewardsProduct
 		if err := rows.Scan(&it.ID, &it.Code, &it.Title, &it.Description,
 			&it.CreditsPrice, &it.Status, &it.CreatedAt, &it.UpdatedAt); err != nil {
 			return nil, 0, err

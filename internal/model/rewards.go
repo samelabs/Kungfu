@@ -2,13 +2,13 @@ package model
 
 import "time"
 
-// Store product status values.
+// Rewards product status values.
 const (
 	ProductStatusActive   = "active"
 	ProductStatusInactive = "inactive"
 )
 
-// Redemption status values (state machine, see internal/store).
+// Redemption status values (state machine, see internal/rewards).
 const (
 	RedemptionStatusPendingReview = "pending_review"
 	RedemptionStatusApproved      = "approved"
@@ -17,8 +17,8 @@ const (
 	RedemptionStatusCancelled     = "cancelled"
 )
 
-// StoreProduct is a single row of tb_store_products (virtual goods only).
-type StoreProduct struct {
+// RewardsProduct is a single row of tb_rewards_products (virtual goods only).
+type RewardsProduct struct {
 	ID           int64     `db:"id" json:"id"`
 	Code         string    `db:"code" json:"code"`
 	Title        string    `db:"title" json:"title"`
