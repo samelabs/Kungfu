@@ -126,9 +126,11 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 	if s, err := PurgeExpired(ctx, pool, time.Now().Add(29*24*time.Hour), 500); err != nil || s != 0 {
 		t.Fatalf("29d snapshots=%d err=%v", s, err)
 	}
-	// 31 days: the closed task's snapshot empties; the open one stays
+	// 31 days: the closed task's snapshot empties; the open one stays.
+	// Closed tasks left by earlier tests in THIS package share the
+	// cutoff, so assert >= 1 plus this task's exact outcome below.
 	snapshots, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500)
-	if err != nil || snapshots != 1 {
+	if err != nil || snapshots < 1 {
 		t.Fatalf("31d purge (snapshots=%d err=%v)", snapshots, err)
 	}
 	harness, sample, requirements, schemaPresent := snapshot(closed.ID)

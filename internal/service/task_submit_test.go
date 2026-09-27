@@ -221,8 +221,10 @@ func TestSubmitSlotsExhausted(t *testing.T) {
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	var n int64
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_task_submission WHERE task_id = $1`, tr.ID).Scan(&n)
-	if n != 1 || tr.Reserved != 1000 {
-		t.Fatalf("n = %d reserved = %d, want 1/1000", n, tr.Reserved)
+	// the first submission settled on the receiver's 200: its unit is
+	// spent, so no slot is left
+	if n != 1 || tr.Settled != 1000 || tr.Reserved != 0 {
+		t.Fatalf("n = %d settled = %d reserved = %d, want 1/1000/0", n, tr.Settled, tr.Reserved)
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)

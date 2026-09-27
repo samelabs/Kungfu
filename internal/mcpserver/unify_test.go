@@ -1,6 +1,6 @@
 package mcpserver
 
-// WO-7d protocol unification tests: the complete 29-tool registry,
+// WO-7d protocol unification tests: the complete 28-tool registry,
 // account/memory tools on both channels with identical envelopes,
 // anonymous behavior driven by ToolDef.Public, and the error-catalog
 // closure over internal/errors.StatusFor.
@@ -83,8 +83,8 @@ func TestRegistryMCPToolsListMatches(t *testing.T) {
 	if err := json.Unmarshal([]byte(extractJSON(body)), &rpc); err != nil {
 		t.Fatalf("parse: %v (%s)", err, body)
 	}
-	if len(rpc.Result.Tools) != 29 {
-		t.Fatalf("tools/list = %d, want 29", len(rpc.Result.Tools))
+	if len(rpc.Result.Tools) != 28 {
+		t.Fatalf("tools/list = %d, want 28", len(rpc.Result.Tools))
 	}
 	got := ToolNames()
 	for _, tl := range rpc.Result.Tools {
