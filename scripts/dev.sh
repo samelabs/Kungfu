@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Local development for Kungfu. Needs only Docker.
+# Local development for Kungfu. Tests need Go and Node on the host plus
+# Docker (PostgreSQL only); `up` needs only Docker.
 #
 #   scripts/dev.sh test [pkgs...]   run the CI gate (gofmt, vet, tests on a
 #                                   fresh PostgreSQL built from migrations/)
@@ -34,7 +35,7 @@ run_tools() { # run a command in the toolchain container with the repo mounted
 }
 
 wait_pg() { # $1 = container
-  for _ in $(seq 60); do docker exec "$1" pg_isready -U kungfu -d kungfu_md >/dev/null 2>&1 && return; sleep 1; done
+  for _ in $(seq 60); do docker exec "$1" pg_isready -h 127.0.0.1 -U kungfu -d kungfu_md >/dev/null 2>&1 && return; sleep 1; done
   echo "PostgreSQL did not become ready" >&2; exit 1
 }
 
@@ -44,30 +45,37 @@ migrate() { # $1 = db host (container name)
 }
 
 cmd_test() {
-  tools; net
+  # Go runs natively (fast, incremental build cache, no VM load); only the
+  # throwaway PostgreSQL runs in Docker, on tmpfs, removed with its volumes.
+  command -v go >/dev/null || { echo "Go is required for tests: brew install go" >&2; exit 1; }
+  command -v node >/dev/null || { echo "Node is required for the owner-UI tests: brew install node" >&2; exit 1; }
   TEST_PG="kungfu-test-pg-$$"
   local pg="$TEST_PG"
-  trap 'docker rm -f "$TEST_PG" >/dev/null 2>&1 || true' EXIT
-  docker run -d --name "$pg" --network "$NET" "${PG_ENV[@]}" postgres:16-alpine >/dev/null
+  trap 'docker rm -fv "$TEST_PG" >/dev/null 2>&1 || true' EXIT
+  docker run -d --name "$pg" --tmpfs /var/lib/postgresql/data -p 127.0.0.1::5432 "${PG_ENV[@]}" postgres:16-alpine >/dev/null
   wait_pg "$pg"
-  migrate "$pg"
-  local pkgs="${*:-./...}"
+  local f
+  for f in migrations/*.sql; do
+    docker exec -i "$pg" psql -q -h 127.0.0.1 -U kungfu -d kungfu_md -v ON_ERROR_STOP=1 <"$f" >/dev/null || { echo "migration failed: $f" >&2; exit 1; }
+  done
+  local port; port=$(docker port "$pg" 5432/tcp | head -1 | awk -F: '{print $NF}')
+  local pkgs=("$@"); [ ${#pkgs[@]} -gt 0 ] || pkgs=(./...)
   # with package arguments, vet covers only those packages (flags like
   # -run pass through to go test alone)
-  local vet_pkgs="" a
-  for a in "$@"; do case "$a" in ./*) vet_pkgs="$vet_pkgs $a" ;; esac; done
-  [ -n "$vet_pkgs" ] || vet_pkgs=" ./..."
-  run_tools -e KF_TEST_DATABASE_URL="postgres://kungfu:kungfu@$pg:5432/kungfu_md?sslmode=disable" \
-    -e DB_PASS=kungfu -e SESSION_SECRET=local-test-session-secret-000000000 "$IMG" sh -c '
-      set -e
-      u=$(gofmt -l ./cmd ./internal ./web); [ -z "$u" ] || { echo "gofmt needed:"; echo "$u"; exit 1; }
-      go vet'"$vet_pkgs"'
-      # -p 1: test packages run SERIALLY — they share the one test
-      # PostgreSQL, so parallel packages would mutate the fixtures of
-      # one another (WO-7e).
-      go test -p 1 -count=1 '"$pkgs"' 2>&1 | tee /tmp/test.log
-      if grep -q "KF_TEST_DATABASE_URL not set" /tmp/test.log; then echo "integration tests skipped"; exit 1; fi
-      grep -q "^FAIL" /tmp/test.log && exit 1 || true'
+  local vet_pkgs=() a
+  for a in "$@"; do case "$a" in ./*) vet_pkgs+=("$a") ;; esac; done
+  [ ${#vet_pkgs[@]} -gt 0 ] || vet_pkgs=(./...)
+  local u; u=$(gofmt -l ./cmd ./internal ./web ./examples); [ -z "$u" ] || { echo "gofmt needed:"; echo "$u"; exit 1; }
+  go vet "${vet_pkgs[@]}"
+  local log; log=$(mktemp)
+  # -p 1: test packages run SERIALLY — they share the one test
+  # PostgreSQL, so parallel packages would mutate the fixtures of
+  # one another (WO-7e).
+  KF_TEST_DATABASE_URL="postgres://kungfu:kungfu@127.0.0.1:$port/kungfu_md?sslmode=disable" \
+    DB_PASS=kungfu SESSION_SECRET=local-test-session-secret-000000000 TZ=UTC \
+    go test -p 1 -count=1 "${pkgs[@]}" 2>&1 | tee "$log"
+  if grep -q "KF_TEST_DATABASE_URL not set" "$log"; then echo "integration tests skipped"; exit 1; fi
+  if grep -q "^FAIL" "$log"; then exit 1; fi
   echo "gate: PASS"
 }
 

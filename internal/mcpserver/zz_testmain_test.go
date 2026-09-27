@@ -6,14 +6,12 @@ package mcpserver
 // both passes contract validation and verifies against the hardened
 // client (same technique as internal/service).
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"math/big"
 	"net"
 	"os"
@@ -52,18 +50,14 @@ func mustGenCert() tls.Certificate {
 	if err != nil {
 		panic(err)
 	}
-	var pemBuf bytes.Buffer
-	if err := pem.Encode(&pemBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		panic(err)
+	leaf, perr := x509.ParseCertificate(der)
+	if perr != nil {
+		panic(perr)
 	}
-	f, err := os.CreateTemp("", "wo7b-cert-*.pem")
-	if err != nil {
-		panic(err)
-	}
-	if _, err := f.Write(pemBuf.Bytes()); err != nil {
-		panic(err)
-	}
-	_ = f.Close()
-	os.Setenv("SSL_CERT_FILE", f.Name()) // Go loads roots lazily on first use
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	// Trust the test cert in the delivery client explicitly: macOS Go
+	// verifies with the system keychain and ignores SSL_CERT_FILE.
+	delivery.TrustRootsForTest(pool)
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }

@@ -890,8 +890,10 @@ func TestSSRFLoopbackBypassNeverInProduction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(b), "AllowLoopbackForTest") {
-			t.Errorf("%s references AllowLoopbackForTest — production must never relax the SSRF policy", f)
+		for _, hook := range []string{"AllowLoopbackForTest", "TrustRootsForTest"} {
+			if strings.Contains(string(b), hook) {
+				t.Errorf("%s references %s — production must never relax the delivery policy", f, hook)
+			}
 		}
 	}
 }
