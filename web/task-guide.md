@@ -73,6 +73,8 @@ Reply mapping:
 
 Fault governance: five consecutive submissions ending `failed` with cause protocol error or receiver fault pause the task with `paused_reason` `RECEIVER_FAULT`; fix the receiver and open again (a paused edit opens as a new version).
 
+A copy-deployable reference receiver (sync and async, rule and model judging): `https://github.com/samelabs/Kungfu/tree/main/examples/receiver`.
+
 ## Verdicts
 
 Judge with `task_verdict` (or the console). Format:
