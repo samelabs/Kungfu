@@ -478,10 +478,10 @@ func TestFinanceAdminFinanceReadsNeverMutate(t *testing.T) {
 	f := newFinanceFixture(t, e)
 
 	snapshot := func() string {
-		// Isolated to this fixture's own finance facts: go test runs
-		// real-PG packages in parallel and sibling packages' t.Cleanup
-		// legitimately deletes THEIR fixture rows, which must not be
-		// misread as a Finance GET mutation here.
+		// Isolated to this fixture's own finance facts. Test packages
+		// now run serially (-p 1, WO-7e), but the isolation stays: it
+		// keeps the comparison independent of any other fixture rows
+		// sharing the tables.
 		var payID int64
 		if err := e.s.Pool.QueryRow(context.Background(),
 			`SELECT id FROM tb_payments WHERE code=$1`, f.payCode).Scan(&payID); err != nil {

@@ -60,7 +60,10 @@ jobs:
       - name: go test (with real PostgreSQL integration)
         run: |
           set -o pipefail
-          go test ./... -v 2>&1 | tee /tmp/test-output.log
+          # -p 1: test packages run serially — they share the one test
+          # PostgreSQL, so parallel packages would mutate each other's
+          # fixtures (WO-7e).
+          go test -p 1 ./... -v 2>&1 | tee /tmp/test-output.log
 
       - name: Guard integration tests must not skip
         run: |

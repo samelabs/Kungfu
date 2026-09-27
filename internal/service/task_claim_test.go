@@ -489,8 +489,9 @@ func TestExpireClaims(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	// pass at t0+301s: only cExp is expired (t0+300). Other packages'
-	// tests share the gate database and may also leave expired claims —
+	// pass at t0+301s: only cExp is expired (t0+300). Earlier tests in
+	// THIS package leave their own short-TTL active claims (ttl 300
+	// claimed seconds ago), which the same cutoff also expires —
 	// assert n >= 1 plus THIS claim's exact outcome below.
 	n, err := ExpireClaims(ctx, pool, t0.Add(301*time.Second), 100)
 	if err != nil {

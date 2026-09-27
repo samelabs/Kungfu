@@ -12,7 +12,7 @@ Requires Docker only (no local Go or PostgreSQL).
 
 | Command | What it does |
 |---|---|
-| `scripts/dev.sh test` | The CI gate: gofmt, vet and every test against a fresh PostgreSQL built from `migrations/`. `scripts/dev.sh test ./internal/mcpserver/` runs one package. |
+| `scripts/dev.sh test` | The CI gate: gofmt, vet and every test against a fresh PostgreSQL built from `migrations/`. `scripts/dev.sh test ./internal/mcpserver/` runs one package. Test packages run serially (`go test -p 1`) because they share the one test database. |
 | `scripts/dev.sh up` | Local server on http://127.0.0.1:8090 with a persistent dev database (all migrations applied on first start). |
 | `scripts/dev.sh seed-admin NAME` | Create a superadmin for `/samelabs` in the dev database (password read from the terminal). |
 | `scripts/dev.sh down` / `reset` | Stop the dev server and database / also delete the dev data. |

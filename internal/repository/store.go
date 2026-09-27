@@ -79,7 +79,7 @@ func ListActiveStoreProducts(ctx context.Context, q pg.Querier) ([]model.StorePr
 		SELECT id, code, title, description, credits_price, status, created_at, updated_at
 		FROM tb_store_products
 		WHERE status = 'active'
-		ORDER BY created_at DESC`)
+		ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}

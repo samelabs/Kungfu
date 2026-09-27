@@ -57,7 +57,10 @@ cmd_test() {
       set -e
       u=$(gofmt -l ./cmd ./internal ./web); [ -z "$u" ] || { echo "gofmt needed:"; echo "$u"; exit 1; }
       go vet ./...
-      go test -count=1 '"$pkgs"' 2>&1 | tee /tmp/test.log
+      # -p 1: test packages run SERIALLY — they share the one test
+      # PostgreSQL, so parallel packages would mutate the fixtures of
+      # one another (WO-7e).
+      go test -p 1 -count=1 '"$pkgs"' 2>&1 | tee /tmp/test.log
       if grep -q "KF_TEST_DATABASE_URL not set" /tmp/test.log; then echo "integration tests skipped"; exit 1; fi
       grep -q "^FAIL" /tmp/test.log && exit 1 || true'
   echo "gate: PASS"
