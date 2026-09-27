@@ -14,6 +14,8 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -23,10 +25,22 @@ import (
 
 var wo7TLSCert tls.Certificate
 
+// okReceiverURL is a package-wide receiver that accepts everything
+// (HTTP 200 with a message body): the default receiver of test tasks.
+var okReceiverURL string
+
 func TestMain(m *testing.M) {
 	wo7TLSCert = mustGenCert()
 	restore := delivery.AllowLoopbackForTest()
+	ok := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"accepted"}`))
+	}))
+	ok.TLS = &tls.Config{Certificates: []tls.Certificate{wo7TLSCert}}
+	ok.StartTLS()
+	okReceiverURL = ok.URL
 	code := m.Run()
+	ok.Close()
 	restore()
 	os.Exit(code)
 }

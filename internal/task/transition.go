@@ -44,26 +44,16 @@ const (
 	// Outcomes of a delivery attempt, from delivering or from a
 	// uncertain re-delivery (§5.4 "重投得到结果 → 同上").
 	EventDeliver2XX = "deliver_2xx" // 2xx → settled
-	EventDeliver4XX = "deliver_4xx" // 4xx valid Verdict → rejected
-	EventDeliver202 = "deliver_202" // 202 on async → under_review
-
-	// Async task without a receiver: straight to under_review.
-	EventNoReceiver = "no_receiver"
+	EventDeliver4XX = "deliver_4xx" // 4xx → rejected
 
 	// Timeout / connection broken mid-request → uncertain.
 	EventTimeout = "timeout"
 
-	// Unreachable / receiver fault / protocol error → failed.
+	// 1xx / 3xx / 5xx / unreachable → failed.
 	EventDeliveryFailed = "delivery_failed"
 
 	// uncertain unresolved for 24h → failed (DELIVERY_UNRESOLVED).
 	EventUnresolved = "unresolved"
-
-	// under_review outcomes (§5.4, §6.2): publisher verdict or
-	// review-window expiry (source = timeout → accepted).
-	EventAccept        = "accept"
-	EventReject        = "reject"
-	EventReviewTimeout = "review_timeout"
 )
 
 // taskTransitions is the §4 edge set:
@@ -98,26 +88,19 @@ var claimTransitions = map[[2]string]string{
 
 // submissionTransitions is the §5.4 edge set. settled / rejected /
 // failed are terminal. From uncertain, only a re-delivery RESULT
-// (2xx / 4xx / 202 / definitive failure) or the 24h unresolved limit
+// (2xx / 4xx / definitive failure) or the 24h unresolved limit
 // leaves the state; another timeout keeps it uncertain without a
 // state write, so (uncertain, timeout) is not an edge.
 var submissionTransitions = map[[2]string]string{
 	{SubDelivering, EventDeliver2XX}:     SubSettled,
 	{SubDelivering, EventDeliver4XX}:     SubRejected,
-	{SubDelivering, EventDeliver202}:     SubUnderReview,
-	{SubDelivering, EventNoReceiver}:     SubUnderReview,
 	{SubDelivering, EventTimeout}:        SubUncertain,
 	{SubDelivering, EventDeliveryFailed}: SubFailed,
 
 	{SubUncertain, EventDeliver2XX}:     SubSettled,
 	{SubUncertain, EventDeliver4XX}:     SubRejected,
-	{SubUncertain, EventDeliver202}:     SubUnderReview,
 	{SubUncertain, EventDeliveryFailed}: SubFailed, // re-delivery with a definitive failure (§7.2)
 	{SubUncertain, EventUnresolved}:     SubFailed,
-
-	{SubUnderReview, EventAccept}:        SubSettled,
-	{SubUnderReview, EventReject}:        SubRejected,
-	{SubUnderReview, EventReviewTimeout}: SubSettled,
 }
 
 // TaskTransition returns the §4 status after `event` fires on `from`.

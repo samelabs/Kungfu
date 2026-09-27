@@ -1,6 +1,6 @@
 package service
 
-// Recovery and review-timeout tests (WO-5b) — real PostgreSQL, TLS
+// Recovery tests (WO-5b) — real PostgreSQL, TLS
 // receivers, injectable clocks. Every test ends with
 // task.CheckInvariants.
 
@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -262,77 +261,5 @@ func TestRecoverLeaseSingleDelivery(t *testing.T) {
 		t.Fatalf("earn_task rows = %d, want 1 (single settlement)", earned)
 	}
 	assertEvents(t, pool, subID, task.SubUncertain, task.SubSettled)
-	deliverInvariants(t, pool, code)
-}
-
-// -- review timeout --
-
-func makeUnderReview(t *testing.T, pool *pg.Pool, publisher, agent int64, rcv *progReceiver) (string, int64) {
-	t.Helper()
-	rcv.mu.Lock()
-	rcv.status = http.StatusAccepted
-	rcv.mu.Unlock()
-	c := deliverContract(rcv.url)
-	c.Acceptance.Mode = task.ModeAsync
-	w := int64(3600)
-	c.Acceptance.ReviewWindow = &w
-	code := pubCreateForTest(t, pool, publisher, c, 1000)
-	if _, err := OpenTask(context.Background(), pool, publisher, code); err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	view, err := SubmitWork(context.Background(), pool, agent, SubmitInput{
-		Code:       code,
-		RequestKey: fmt.Sprintf("rev-%d", time.Now().UnixNano()),
-		Payload:    []byte(submitPayloadOK),
-	}, testAgentRefKey, time.Now())
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if view.State != task.SubUnderReview {
-		t.Fatalf("state = %s, want under_review", view.State)
-	}
-	return code, view.SubmissionID.Int64()
-}
-
-func TestExpireReviewsOverdue(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	rcv := startProgReceiver(t)
-	ctx := context.Background()
-
-	code, subID := makeUnderReview(t, pool, publisher, pubSeedBot(t, pool, 0), rcv)
-
-	// not yet overdue: nothing happens (deadline is submit-time + 3600s)
-	if n, err := ExpireReviews(ctx, pool, time.Now(), 100); err != nil || n != 0 {
-		t.Fatalf("early expire (n=%d, err=%v)", n, err)
-	}
-	sub, _ := repository.FindSubmissionByID(ctx, pool, subID)
-	if sub.State != task.SubUnderReview {
-		t.Fatalf("premature settlement: %s", sub.State)
-	}
-
-	// past the window: timeout acceptance with source=timeout. Earlier
-	// tests in THIS package leave their own overdue reviews in the same
-	// database, which this pass also expires — assert on this
-	// submission, not on the pass count.
-	if n, err := ExpireReviews(ctx, pool, time.Now().Add(2*time.Hour), 100); err != nil || n < 1 {
-		t.Fatalf("expire (n=%d, err=%v)", n, err)
-	}
-	sub, _ = repository.FindSubmissionByID(ctx, pool, subID)
-	if sub.State != task.SubSettled {
-		t.Fatalf("state = %s, want settled", sub.State)
-	}
-	if !strings.Contains(string(sub.Verdict), `"timeout"`) || !strings.Contains(string(sub.Verdict), `"accepted"`) {
-		t.Fatalf("verdict = %s, want accepted/source=timeout", sub.Verdict)
-	}
-	var earned int64
-	_ = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tb_transactions
-		WHERE type='earn_task' AND ref_type='task_submission' AND ref_id=$1`,
-		fmt.Sprint(subID)).Scan(&earned)
-	if earned != 1 {
-		t.Fatalf("earn_task rows = %d, want 1", earned)
-	}
-	assertEvents(t, pool, subID, task.SubUnderReview, task.SubSettled)
 	deliverInvariants(t, pool, code)
 }

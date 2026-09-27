@@ -1,14 +1,13 @@
 package service
 
-// Synchronous delivery, reply mapping and settlement — spec §5.4, §6.1,
+// Synchronous delivery, reply mapping and settlement — spec §5.4,
 // §7.1, §7.2, §7.3. DeliverSubmission takes a delivering (or uncertain)
 // submission, performs ONE outbound POST outside any transaction, maps
-// the reply per the §7.2 table, and writes the outcome — with its
-// SubmissionEvent, and the money move for settled / the reservation
-// release for rejected / failed — in a single transaction that
-// re-checks the pre-delivery state under the row lock. The uncertain
-// recovery loop, review-window timeouts and publisher verdicts are
-// WO-5b.
+// the reply per the §7.2 table, and writes the outcome — the reply
+// record (status code + body), its SubmissionEvent, and the money move
+// for settled / the reservation release for rejected / failed — in a
+// single transaction that re-checks the pre-delivery state under the
+// row lock. The uncertain recovery loop is task_recovery.go.
 
 import (
 	"context"
@@ -18,7 +17,9 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -35,6 +36,10 @@ const receiverFaultThreshold = 5
 
 // receiverFaultReason is the §7.3 paused_reason.
 const receiverFaultReason = "RECEIVER_FAULT"
+
+// maxReplyBodyBytes bounds the recorded reply body (§7.2: the first
+// 4 000 bytes of the receiver's response, cut on a rune boundary).
+const maxReplyBodyBytes = 4000
 
 // AgentRef is the executor's stable anonymous identity inside one task
 // (§7.1): hex(HMAC-SHA256(agentRefKey, "agent-ref:"+taskCode+":"+agentID))
@@ -70,16 +75,6 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
-	// async without a receiver goes straight to review (§5.4).
-	if contract.Acceptance.Mode == task.ModeAsync && contract.Receiver.URL == "" {
-		if err := writeDeliveryOutcome(ctx, pool, sub, task.EventNoReceiver, &repository.SetSubmissionStateOpts{
-			ReviewDeadline: reviewDeadline(now, contract),
-		}, nil, nil); err != nil {
-			return SubmissionView{}, err
-		}
-		return SubmissionViewByID(ctx, pool, submissionID)
-	}
-
 	// §7.1 request, delivered outside any transaction. submission_id
 	// travels as the STRING the spec's request example shows ("…"), so
 	// receivers typed against §7.1 parse it; the Idempotency-Key header
@@ -100,10 +95,7 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		"Kungfu-Task-Version": fmt.Sprintf("%d", sub.Version),
 	}, delivery.AgentSubmitErrorConfig())
 
-	outcome := mapReply(res, contract)
-	if outcome.event == task.EventDeliver202 {
-		outcome.opts.ReviewDeadline = reviewDeadline(now, contract)
-	}
+	outcome := mapReply(res)
 	if outcome.event == task.EventTimeout && sub.State == task.SubUncertain {
 		// another unresolved retry: stays uncertain without a state write
 		return SubmissionViewByID(context.WithoutCancel(ctx), pool, submissionID)
@@ -154,61 +146,52 @@ type replyOutcome struct {
 	opts  *repository.SetSubmissionStateOpts
 }
 
-// mapReply implements the §7.2 table.
-func mapReply(res delivery.PostResult, contract task.Contract) replyOutcome {
-	failed := func(reason string) replyOutcome {
-		return replyOutcome{event: task.EventDeliveryFailed,
-			opts: &repository.SetSubmissionStateOpts{Failure: &reason}}
-	}
-
+// mapReply implements the §7.2 table. The status code alone decides
+// the outcome; the body is recorded verbatim (bounded) and handed to
+// the executor — the platform never parses or rewrites it.
+func mapReply(res delivery.PostResult) replyOutcome {
 	if res.ResponseCode != nil {
 		code := *res.ResponseCode
+		opts := &repository.SetSubmissionStateOpts{ResponseCode: &code, ResponseBody: replyBody(res.ResponseBody)}
+		fail := func(reason string) replyOutcome {
+			opts.Failure = &reason
+			return replyOutcome{event: task.EventDeliveryFailed, opts: opts}
+		}
 		switch {
-		case code == 202:
-			if contract.Acceptance.Mode == task.ModeAsync {
-				return replyOutcome{event: task.EventDeliver202, opts: &repository.SetSubmissionStateOpts{
-					ReviewDeadline: nil, // filled by the caller with now+window
-				}}
-			}
-			return failed("RECEIVER_PROTOCOL") // 202 于 sync 任务
 		case code >= 200 && code < 300:
-			verdict, _ := json.Marshal(task.Verdict{Accepted: true, Retryable: true, Source: "receiver"})
-			return replyOutcome{event: task.EventDeliver2XX,
-				opts: &repository.SetSubmissionStateOpts{Verdict: verdict}}
+			return replyOutcome{event: task.EventDeliver2XX, opts: opts}
 		case code >= 400 && code < 500:
-			body := []byte{}
-			if res.ResponseBody != nil {
-				body = []byte(*res.ResponseBody)
-			}
-			if verdict, err := task.ParseVerdict(body, contract.Acceptance.Criteria); err == nil && !verdict.Accepted {
-				verdict.Source = "receiver"
-				raw, _ := json.Marshal(verdict)
-				return replyOutcome{event: task.EventDeliver4XX,
-					opts: &repository.SetSubmissionStateOpts{Verdict: raw}}
-			}
-			return failed("RECEIVER_PROTOCOL") // 4xx 且响应体不是有效驳回 Verdict
+			return replyOutcome{event: task.EventDeliver4XX, opts: opts}
 		case code >= 500:
-			return failed("RECEIVER_FAULT")
+			return fail("RECEIVER_FAULT")
 		default: // 1xx / 3xx
-			return failed("RECEIVER_PROTOCOL")
+			return fail("RECEIVER_PROTOCOL")
 		}
 	}
 	if delivery.IsDefinitiveNotDelivered(res) {
-		return failed("RECEIVER_UNREACHABLE") // 连接被拒 / DNS / SSRF 拦截
+		reason := "RECEIVER_UNREACHABLE" // 连接被拒 / DNS / SSRF 拦截
+		return replyOutcome{event: task.EventDeliveryFailed,
+			opts: &repository.SetSubmissionStateOpts{Failure: &reason}}
 	}
 	// 超时 / 连接中途断开 → uncertain（预留保持）
 	return replyOutcome{event: task.EventTimeout}
 }
 
-// reviewDeadline is now + acceptance.review_window (present on valid
-// async contracts).
-func reviewDeadline(now time.Time, contract task.Contract) *time.Time {
-	window := int64(0)
-	if contract.Acceptance.ReviewWindow != nil {
-		window = *contract.Acceptance.ReviewWindow
+// replyBody bounds a reply body to maxReplyBodyBytes, cut on a rune
+// boundary with invalid UTF-8 replaced; nil stays nil.
+func replyBody(body *string) *string {
+	if body == nil {
+		return nil
 	}
-	d := now.Add(time.Duration(window) * time.Second)
-	return &d
+	b := strings.ToValidUTF8(*body, "\uFFFD")
+	if len(b) > maxReplyBodyBytes {
+		cut := maxReplyBodyBytes
+		for cut > 0 && !utf8.RuneStart(b[cut]) {
+			cut--
+		}
+		b = b[:cut]
+	}
+	return &b
 }
 
 // writeDeliveryOutcome applies one delivery outcome atomically: state +

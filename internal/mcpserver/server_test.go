@@ -243,7 +243,7 @@ func TestMCPToolsListDeterministicOrder(t *testing.T) {
 	// tool name — that sorted order is the SDK's own deterministic
 	// contract (single registry, no second registry added): the 8
 	// account/memory tools plus the 10 registry (Task 1.0) tools.
-	want := ToolNames() // the single registry (29 tools)
+	want := ToolNames() // the single registry (28 tools)
 	sort.Strings(want)
 
 	listNames := func() []string {

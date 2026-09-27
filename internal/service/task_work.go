@@ -22,10 +22,10 @@ import (
 
 // §5.1/§6.3 presentation bounds.
 const (
-	workListMax          = 100
-	workObjectiveExcerpt = 280 // runes
-	statsWindow          = 30 * 24 * time.Hour
-	listOpenWorkingSet   = 500 // candidate rows before slot/limit filtering
+	workListMax             = 100
+	workRequirementsExcerpt = 280 // runes
+	statsWindow             = 30 * 24 * time.Hour
+	listOpenWorkingSet      = 500 // candidate rows before slot/limit filtering
 )
 
 // workStats is the §6.3 statistic block (rates are nil when the
@@ -33,16 +33,15 @@ const (
 type workStats struct {
 	AcceptRate           *float64 `json:"accept_rate"`
 	MedianVerdictSeconds *float64 `json:"median_verdict_seconds"`
-	TimeoutRate          *float64 `json:"timeout_rate"`
 	FailureRate          *float64 `json:"failure_rate"`
 }
 
-// myStats is the executor's own tally on one task (§5.1); remaining is
-// nil when unlimited.
+// myStats is the executor's own tally on one task (§5.1);
+// rejections_left is what remains of max_rejected_per_agent.
 type myStats struct {
-	Accepted  int64  `json:"accepted"`
-	Rejected  int64  `json:"rejected"`
-	Remaining *int64 `json:"remaining"`
+	Accepted       int64 `json:"accepted"`
+	Rejected       int64 `json:"rejected"`
+	RejectionsLeft int64 `json:"rejections_left"`
 }
 
 func statsView(s repository.TaskStats) workStats {
@@ -56,47 +55,18 @@ func statsView(s repository.TaskStats) workStats {
 	return workStats{
 		AcceptRate:           rate(s.Settled, s.Settled+s.Rejected),
 		MedianVerdictSeconds: s.MedianVerdictSeconds,
-		TimeoutRate:          rate(s.TimeoutAccepted, s.TerminalTotal),
 		FailureRate:          rate(s.Failed, s.TerminalTotal),
 	}
 }
 
-// myTally computes the executor's counts and remaining allowance from
-// the contract's caps (§5.1, §5.3 step 5, §6.3 缺省 5).
+// myTally computes the executor's counts and the rejections left
+// under the contract's cap (§5.3 step 5, §3 缺省 5).
 func myTally(counts repository.AgentSubmissionCounts, contract task.Contract) myStats {
-	m := myStats{Accepted: counts.Settled, Rejected: counts.Rejected}
-
-	acceptedRemaining := int64(-1) // -1 = unlimited
-	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil {
-		acceptedRemaining = *cap - counts.Settled - counts.Inflight
+	left := rejectedCapFor(contract) - counts.Rejected
+	if left < 0 {
+		left = 0
 	}
-	rejectedCap := int64(task.DefaultMaxRejectedPerAgent)
-	if contract.Limits.MaxRejectedPerAgent != nil {
-		rejectedCap = *contract.Limits.MaxRejectedPerAgent
-	}
-	rejectedRemaining := rejectedCap - counts.Rejected
-
-	switch {
-	case acceptedRemaining < 0 && rejectedRemaining < 0:
-		m.Remaining = nil // unlimited
-	case acceptedRemaining < 0:
-		v := rejectedRemaining
-		m.Remaining = &v
-	case rejectedRemaining < 0:
-		v := acceptedRemaining
-		m.Remaining = &v
-	default:
-		v := acceptedRemaining
-		if rejectedRemaining < v {
-			v = rejectedRemaining
-		}
-		m.Remaining = &v
-	}
-	if m.Remaining != nil && *m.Remaining < 0 {
-		v := int64(0)
-		m.Remaining = &v
-	}
-	return m
+	return myStats{Accepted: counts.Settled, Rejected: counts.Rejected, RejectionsLeft: left}
 }
 
 // myTallyFor reads the agent's tallies for the task's CURRENT version
@@ -141,30 +111,26 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) 
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		my := myTally(counts, contract)
-		if my.Remaining != nil && *my.Remaining <= 0 {
-			continue // executor exhausted this task's caps
+		if my.RejectionsLeft <= 0 {
+			continue // executor exhausted this task's rejection cap
 		}
 		stats, err := repository.GetTaskStats(ctx, pool, t.ID, since)
 		if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
-		objective := []rune(contract.Objective)
-		if len(objective) > workObjectiveExcerpt {
-			objective = objective[:workObjectiveExcerpt]
+		requirements := []rune(contract.Requirements)
+		if len(requirements) > workRequirementsExcerpt {
+			requirements = requirements[:workRequirementsExcerpt]
 		}
 		out = append(out, map[string]any{
-			"code":      t.Code,
-			"title":     contract.Title,
-			"objective": string(objective),
-			"price":     contract.Price,
-			"slots":     slotsFor(t, contract),
-			"acceptance": map[string]any{
-				"mode":          contract.Acceptance.Mode,
-				"review_window": derefInt64(contract.Acceptance.ReviewWindow),
-			},
-			"claim": map[string]any{"required": contract.Claim.Required},
-			"stats": statsView(stats),
-			"my":    my,
+			"code":         t.Code,
+			"title":        contract.Title,
+			"requirements": string(requirements),
+			"price":        contract.Price,
+			"slots":        slotsFor(t, contract),
+			"claim":        map[string]any{"required": contract.Claim.Required},
+			"stats":        statsView(stats),
+			"my":           my,
 		})
 	}
 	return out, nil
@@ -417,4 +383,23 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 		out = append(out, newSubmissionView(&rows[i], codes[rows[i].TaskID]))
 	}
 	return out, total, nil
+}
+
+// RejectionsLeft is how many more rejections the agent may collect on
+// the task (§5.3 step 5) under its current version's cap — 0 means a
+// rejected submission ends the agent's work on this task (§8.3 stop).
+func RejectionsLeft(ctx context.Context, pool *pg.Pool, agentID int64, code string) (int64, error) {
+	t, err := repository.FindTaskByCode(ctx, pool, code)
+	if err != nil || t == nil {
+		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	contract, err := effectiveContract(ctx, pool, t)
+	if err != nil {
+		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	my, err := myTallyFor(ctx, pool, agentID, t, contract)
+	if err != nil {
+		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	return my.RejectionsLeft, nil
 }

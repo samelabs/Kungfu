@@ -1,16 +1,9 @@
-// Command receiver is the Kungfu reference acceptance receiver
-// (WO-9b): a publisher-copyable judging service implementing the
-// receiver protocol of docs/task-spec-1.0.md §7 and producing §6.1
-// verdicts. It depends on nothing from internal/ — the platform is
-// reached only over HTTP.
-//
-// Modes:
-//
-//	sync  — judge inside the delivery call: pass → HTTP 200, fail →
-//	        HTTP 422 + the rejecting verdict body (§7.2).
-//	async — answer HTTP 202 immediately, judge in the background and
-//	        write the verdict back through
-//	        POST {KUNGFU_BASE_URL}/api/v1/task_verdict.
+// Command receiver is the Kungfu reference receiver (WO-9b): a
+// publisher-copyable judging service implementing the receiver
+// protocol of docs/task-spec-1.0.md §7. It judges inside the delivery
+// call — pass → HTTP 200, fail → HTTP 422 — and its response body is
+// what the executor reads (the platform hands it over verbatim). It
+// depends on nothing from internal/.
 //
 // Rules per criterion (receiver.json): required (JSON pointers that
 // must exist and be non-empty), pattern (pointer + regex), schema (a
@@ -67,35 +60,29 @@ type Criterion struct {
 
 // Config is receiver.json.
 type Config struct {
-	Mode     string      `json:"mode"`   // "sync" | "async"
 	Listen   string      `json:"listen"` // e.g. ":8080"
 	Criteria []Criterion `json:"criteria"`
 }
 
-// Environment for the model API and the platform write-back.
+// Environment for the model API.
 type envConfig struct {
-	kungfuBaseURL string // KUNGFU_BASE_URL
-	agentKey      string // KUNGFU_AGENT_KEY
-	modelBaseURL  string // MODEL_BASE_URL
-	modelAPIKey   string // MODEL_API_KEY
-	modelName     string // MODEL_NAME
+	modelBaseURL string // MODEL_BASE_URL
+	modelAPIKey  string // MODEL_API_KEY
+	modelName    string // MODEL_NAME
 }
 
 func envFromOS() envConfig {
 	return envConfig{
-		kungfuBaseURL: os.Getenv("KUNGFU_BASE_URL"),
-		agentKey:      os.Getenv("KUNGFU_AGENT_KEY"),
-		modelBaseURL:  os.Getenv("MODEL_BASE_URL"),
-		modelAPIKey:   os.Getenv("MODEL_API_KEY"),
-		modelName:     os.Getenv("MODEL_NAME"),
+		modelBaseURL: os.Getenv("MODEL_BASE_URL"),
+		modelAPIKey:  os.Getenv("MODEL_API_KEY"),
+		modelName:    os.Getenv("MODEL_NAME"),
 	}
 }
 
 // loadConfig reads, validates and compiles receiver.json. A criterion
-// using a rubric without MODEL_* configured, an async receiver without
-// the platform write-back credentials, or any malformed rule is a
-// startup error; a sync receiver using a rubric only gets a warning
-// (model latency risks the §11 10-second response budget).
+// using a rubric without MODEL_* configured or any malformed rule is a
+// startup error; a rubric gets a warning (model latency risks the §11
+// 10-second response budget).
 func loadConfig(path string, env envConfig) (*receiver, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -104,9 +91,6 @@ func loadConfig(path string, env envConfig) (*receiver, error) {
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	if cfg.Mode != "sync" && cfg.Mode != "async" {
-		return nil, fmt.Errorf("mode must be \"sync\" or \"async\", got %q", cfg.Mode)
 	}
 	if cfg.Listen == "" {
 		return nil, errors.New("listen is required")
@@ -162,16 +146,8 @@ func loadConfig(path string, env envConfig) (*receiver, error) {
 	if hasRubric && (env.modelBaseURL == "" || env.modelAPIKey == "" || env.modelName == "") {
 		return nil, errors.New("a rubric criterion requires MODEL_BASE_URL, MODEL_API_KEY and MODEL_NAME")
 	}
-	if hasRubric && cfg.Mode == "sync" {
-		fmt.Fprintln(os.Stderr, "warning: mode sync with a rubric — model latency may exceed the 10-second response budget; consider async")
-	}
-	if cfg.Mode == "async" {
-		if env.kungfuBaseURL == "" {
-			return nil, errors.New("mode async requires KUNGFU_BASE_URL")
-		}
-		if env.agentKey == "" {
-			return nil, errors.New("mode async requires KUNGFU_AGENT_KEY")
-		}
+	if hasRubric {
+		fmt.Fprintln(os.Stderr, "warning: a rubric criterion calls a model inside the delivery; keep it within the 10-second response budget")
 	}
 	return newReceiver(cfg, env), nil
 }
@@ -190,31 +166,29 @@ func compileSchema(raw []byte) (*jsonschema.Schema, error) {
 	return compiler.Compile("criterion:schema")
 }
 
-// -- verdict (§6.1 shape; the platform sets source, never the body) ----
+// -- reply (the response body the executor reads verbatim) -------------
 
-type annotation struct {
+type problem struct {
 	Pointer   string `json:"pointer"`
 	Criterion string `json:"criterion"`
 	Message   string `json:"message"`
 }
 
-type verdict struct {
-	Accepted    bool         `json:"accepted"`
-	Criteria    []string     `json:"criteria,omitempty"`
-	Reason      string       `json:"reason,omitempty"`
-	Retryable   bool         `json:"retryable"`
-	Annotations []annotation `json:"annotations,omitempty"`
+type reply struct {
+	Accepted bool      `json:"accepted"`
+	Message  string    `json:"message,omitempty"`
+	Problems []problem `json:"problems,omitempty"`
 }
 
-// §6.1 bounds enforced while building the verdict.
+// Reply bounds: the platform hands over the first 4 000 bytes of the
+// body, so the summary and the problem list stay well inside it.
 const (
-	maxReasonRunes      = 500
-	maxAnnotations      = 50
-	maxAnnotationRunes  = 300
-	syncFailStatus      = http.StatusUnprocessableEntity
-	requestBodyLimit    = 2 << 20 // 512 KB payload cap + envelope headroom
-	modelCallTimeout    = 8 * time.Second
-	platformCallTimeout = 10 * time.Second
+	maxMessageRunes  = 500
+	maxProblems      = 20
+	maxProblemRunes  = 200
+	failStatus       = http.StatusUnprocessableEntity
+	requestBodyLimit = 2 << 20 // 512 KB payload cap + envelope headroom
+	modelCallTimeout = 8 * time.Second
 )
 
 // -- receiver -----------------------------------------------------------
@@ -230,20 +204,10 @@ type receiver struct {
 
 	mu      sync.Mutex
 	results map[string]cachedResult // Idempotency-Key -> first outcome
-
-	client *http.Client // shared, non-judging calls
 }
 
-// verdictRetryBackoff spaces the task_verdict write-back retries after
-// a failed attempt (package var so tests can shorten it).
-var verdictRetryBackoff = []time.Duration{5 * time.Second, 30 * time.Second, 120 * time.Second}
-
 func newReceiver(cfg Config, env envConfig) *receiver {
-	return &receiver{
-		cfg:    cfg,
-		env:    env,
-		client: &http.Client{Timeout: platformCallTimeout},
-	}
+	return &receiver{cfg: cfg, env: env}
 }
 
 // deliveryRequest is the §7.1 body.
@@ -298,38 +262,24 @@ func (r *receiver) handler() http.Handler {
 		r.mu.Unlock()
 
 		if req.Header.Get("Kungfu-Test") == "1" {
-			// open-time test delivery (§5.4): acknowledge, never judge
+			// open-time test delivery (§4): the sample must pass
+			// judging exactly like a real submission would.
+			v := r.judge(d.Payload)
+			out, _ := json.Marshal(v)
 			status := http.StatusOK
-			if r.cfg.Mode == "async" {
-				status = http.StatusAccepted
+			if !v.Accepted {
+				status = failStatus
 			}
-			out, _ := json.Marshal(map[string]string{"status": "test"})
-			res := cachedResult{status: status, body: out}
-			r.remember(key, res)
-			writeResult(w, res)
+			writeResult(w, cachedResult{status: status, body: out})
 			return
 		}
 
-		if r.cfg.Mode == "async" {
-			out, _ := json.Marshal(map[string]string{"status": "reviewing"})
-			res := cachedResult{status: http.StatusAccepted, body: out}
-			r.remember(key, res)
-			writeResult(w, res)
-			go func() {
-				v := r.judge(d.Payload)
-				if err := r.writeBack(d.SubmissionID, v); err != nil {
-					log.Printf("verdict write-back for %s gave up: %v (the platform accepts by timeout past the review window)", d.SubmissionID, err)
-				}
-			}()
-			return
-		}
-
-		// sync: judge inside the call, within the §11 response budget
+		// judge inside the call, within the §11 response budget
 		v := r.judge(d.Payload)
 		out, _ := json.Marshal(v)
 		status := http.StatusOK
 		if !v.Accepted {
-			status = syncFailStatus
+			status = failStatus
 		}
 		res := cachedResult{status: status, body: out}
 		r.remember(key, res)
@@ -354,23 +304,17 @@ func writeResult(w http.ResponseWriter, res cachedResult) {
 	_, _ = w.Write(res.body)
 }
 
-// judge evaluates every criterion against the payload and builds a
-// §6.1 verdict: all pass → accepted; otherwise the failing criteria,
-// a ≤500-rune summed reason and ≤50 annotations (message ≤300 runes).
-func (r *receiver) judge(payload []byte) verdict {
-	v := verdict{Accepted: true, Retryable: true}
+// judge evaluates every criterion against the payload: all pass →
+// accepted; otherwise a ≤500-rune summary message naming each failing
+// criterion and up to 20 problems (pointer, criterion, message).
+func (r *receiver) judge(payload []byte) reply {
+	v := reply{Accepted: true}
 	if len(payload) == 0 {
-		v.Accepted = false
-		v.Criteria = r.criterionIDs()
-		v.Reason = truncateRunes("payload is empty", maxReasonRunes)
-		return v
+		return reply{Message: "payload is empty"}
 	}
 	var doc any
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		v.Accepted = false
-		v.Criteria = r.criterionIDs()
-		v.Reason = truncateRunes("payload is not valid JSON: "+err.Error(), maxReasonRunes)
-		return v
+		return reply{Message: truncateRunes("payload is not valid JSON: "+err.Error(), maxMessageRunes)}
 	}
 
 	var reasons []string
@@ -381,28 +325,19 @@ func (r *receiver) judge(payload []byte) verdict {
 			continue
 		}
 		v.Accepted = false
-		v.Criteria = append(v.Criteria, c.ID)
 		reasons = append(reasons, c.ID+": "+msg)
-		if len(v.Annotations) < maxAnnotations {
-			v.Annotations = append(v.Annotations, annotation{
+		if len(v.Problems) < maxProblems {
+			v.Problems = append(v.Problems, problem{
 				Pointer:   ptr,
 				Criterion: c.ID,
-				Message:   truncateRunes(msg, maxAnnotationRunes),
+				Message:   truncateRunes(msg, maxProblemRunes),
 			})
 		}
 	}
 	if !v.Accepted {
-		v.Reason = truncateRunes(strings.Join(reasons, "; "), maxReasonRunes)
+		v.Message = truncateRunes(strings.Join(reasons, "; "), maxMessageRunes)
 	}
 	return v
-}
-
-func (r *receiver) criterionIDs() []string {
-	ids := make([]string, 0, len(r.cfg.Criteria))
-	for i := range r.cfg.Criteria {
-		ids = append(ids, r.cfg.Criteria[i].ID)
-	}
-	return ids
 }
 
 // checkCriterion runs one criterion. It returns the annotation pointer
@@ -513,38 +448,6 @@ func parseScore(content string) (float64, string, error) {
 	return out.Score, out.Reason, nil
 }
 
-// writeBack posts the verdict to the platform: retry three times with
-// the backoff schedule, then give up (the platform accepts by timeout
-// past the review window, §6.2).
-func (r *receiver) writeBack(submissionID string, v verdict) error {
-	body, _ := json.Marshal(map[string]any{"submission_id": submissionID, "verdict": v})
-	url := strings.TrimRight(r.env.kungfuBaseURL, "/") + "/api/v1/task_verdict"
-	var lastErr error
-	for attempt := 0; attempt <= len(verdictRetryBackoff); attempt++ {
-		if attempt > 0 {
-			time.Sleep(verdictRetryBackoff[attempt-1])
-		}
-		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+r.env.agentKey)
-		resp, err := r.client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return lastErr
-}
-
 // -- JSON Pointer (RFC 6901) ---------------------------------------------
 
 // atPointer resolves an RFC 6901 pointer ("/a/b", "" = the root
@@ -610,7 +513,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "receiver:", err)
 		os.Exit(1)
 	}
-	log.Printf("kungfu reference receiver listening on %s (mode %s, %d criteria)",
-		r.cfg.Listen, r.cfg.Mode, len(r.cfg.Criteria))
+	log.Printf("kungfu reference receiver listening on %s (%d criteria)",
+		r.cfg.Listen, len(r.cfg.Criteria))
 	log.Fatal(http.ListenAndServe(r.cfg.Listen, r.handler()))
 }

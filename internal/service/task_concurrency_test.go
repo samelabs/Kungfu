@@ -193,8 +193,6 @@ func TestOpenTaskDraftChanged(t *testing.T) {
 	rcv := startPubReceiverBlocking(t)
 	c := submitContract()
 	c.Receiver = task.Receiver{URL: rcv.url}
-	_ = c
-	c.Acceptance.Mode = task.ModeSync
 	if _, err := UpdateTask(ctx, pool, publisher, code, c); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -315,7 +313,7 @@ func TestRenewUsesClaimVersionTTL(t *testing.T) {
 	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatal(err)
 	}
-	v2 := claimAsyncContract()
+	v2 := claimContract()
 	ttl2, maxd2 := int64(1800), int64(86400)
 	v2.Claim.TTL, v2.Claim.MaxDuration = &ttl2, &maxd2
 	if _, err := UpdateTask(ctx, pool, publisher, code, v2); err != nil {

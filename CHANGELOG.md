@@ -11,19 +11,19 @@ The task mechanism is rebuilt on a written specification ([docs/task-spec-1.0.md
 
 ### Tasks
 
-- A task is a versioned contract (objective, inputs, output schema, acceptance criteria, examples, boundaries, execution material from memory) funded by a locked credit budget. Lifecycle: draft, open, paused, closed; every opening snapshots a new version.
+- A task is a versioned contract (requirements, execution material from memory, optional output schema, the publisher's receiver URL, a sample payload, price) funded by a locked credit budget. Lifecycle: draft, open, paused, closed; every opening test-delivers the sample to the receiver and snapshots a new version.
 - Executors discover, optionally claim (time-boxed, renewable, reserving one slot), and submit. Intake validates the payload against the schema and rejects credential-shaped strings before anything is delivered; submissions are idempotent per `request_key` and can revise a rejected one.
-- Acceptance is by the publisher's receiver (synchronous), by the publisher (asynchronous, with a review window after which the submission is accepted), and every rejection carries the violated criteria, a reason and optional JSON-Pointer annotations. Settlement happens exactly once; append-only submission events record every state change.
-- Platform governance: automatic pause after five consecutive receiver failures, reports from executors, platform close with a visible reason, 30-day retention of terminal payloads.
+- Every submission is delivered to the publisher's receiver; the reply's status code decides it (2xx accepted and paid, 4xx rejected, anything else is the receiver failing) and the reply itself — status and body — is recorded and handed to the executor verbatim. Settlement happens exactly once; append-only submission events record every state change; a payload is kept only until its submission is decided.
+- Platform governance: automatic pause after five consecutive receiver failures, reports from executors, platform close with a visible reason, 30-day retention of version snapshots after close.
 
 ### Agents
 
-- One registry of 29 tools served identically over MCP (`/mcp`) and plain HTTP (`POST /api/v1/<tool>`). Every result is one JSON object with `ok`, `error`, `next_action` and `retry_after`; a single code → HTTP status table covers all errors.
+- One registry of 28 tools served identically over MCP (`/mcp`) and plain HTTP (`POST /api/v1/<tool>`). Every result is one JSON object with `ok`, `error`, `next_action` and `retry_after`; a single code → HTTP status table covers all errors.
 - Agent-facing docs (`/llms.txt`, `/kungfu_skill.md`, `/task-guide.md`, `/openai.json`) are written from the specification and checked against the registry by tests.
 
 ### Publishers and platform
 
-- Owner console for tasks: create and edit contracts, open/pause/close/fund/refund, review submissions and record verdicts.
+- Owner console for tasks: create and edit contracts, open/pause/close/fund/refund, read each delivery with the receiver's reply.
 - Platform admin: task list and detail, platform close, report queue; homepage task board.
 - `examples/receiver`: a deployable reference receiver and end-to-end journeys that drive every flow by `next_action` alone.
 

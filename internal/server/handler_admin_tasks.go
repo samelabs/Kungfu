@@ -135,11 +135,9 @@ func taskStatsDTO(s admin.TaskStats) map[string]interface{} {
 		"settled":                s.Settled,
 		"rejected":               s.Rejected,
 		"failed":                 s.Failed,
-		"timeout_accepted":       s.TimeoutAccepted,
 		"terminal_total":         s.TerminalTotal,
 		"accept_rate":            rate(s.Settled, s.Settled+s.Rejected),
 		"median_verdict_seconds": median,
-		"timeout_rate":           rate(s.TimeoutAccepted, s.TerminalTotal),
 		"failure_rate":           rate(s.Failed, s.TerminalTotal),
 	}
 }

@@ -1,15 +1,13 @@
 package service
 
-// Recovery passes (WO-5b): the uncertain redelivery loop and the
-// review-window timeout, both spec §5.4 / §10.4 time bounds. The
-// workers lease their rows (SKIP LOCKED + updated_at refresh), recheck
+// Recovery pass (WO-5b): the uncertain redelivery loop, the spec
+// §5.4 / §10.4 time bound. The worker leases their rows (SKIP LOCKED + updated_at refresh), recheck
 // under the row lock before writing, and reuse the WO-5a delivery
 // outcome machinery (same Idempotency-Key redeliveries, §7.2 mapping,
 // §7.3 fault counting).
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -79,54 +77,4 @@ func RecoverSubmissions(ctx context.Context, pool *pg.Pool, agentRefKey []byte, 
 		handled++
 	}
 	return handled, nil
-}
-
-// ExpireReviews settles overdue reviews (§5.4: under_review past its
-// review_deadline is accepted with source = timeout). One transaction
-// per submission under the row lock, rechecked.
-func ExpireReviews(ctx context.Context, pool *pg.Pool, now time.Time, batch int) (int, error) {
-	ids, err := repository.ListOverdueReviews(ctx, pool, now, batch)
-	if err != nil {
-		return 0, err
-	}
-	expired := 0
-	for _, id := range ids {
-		writeCtx := context.WithoutCancel(ctx)
-		sub, err := repository.FindSubmissionByID(ctx, pool, id)
-		if err != nil || sub == nil || sub.State != task.SubUnderReview {
-			continue
-		}
-		if err := settleReviewTimeout(writeCtx, pool, sub); err != nil {
-			continue
-		}
-		expired++
-	}
-	return expired, nil
-}
-
-// settleReviewTimeout applies one review-window timeout acceptance
-// atomically: state + event + verdict(source=timeout) + settlement.
-func settleReviewTimeout(ctx context.Context, pool *pg.Pool, pre *repository.SubmissionRow) error {
-	verdict, _ := json.Marshal(task.Verdict{Accepted: true, Retryable: true, Source: "timeout"})
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = pg.Rollback(tx) }()
-	current, err := repository.FindSubmissionByIDForUpdate(ctx, tx, pre.SubmissionID)
-	if err != nil || current == nil {
-		return err
-	}
-	if current.State != task.SubUnderReview {
-		return nil // someone else decided first — their outcome stands
-	}
-	if err := repository.SetSubmissionState(ctx, tx, current.SubmissionID, task.SubUnderReview,
-		task.EventReviewTimeout, &repository.SetSubmissionStateOpts{Verdict: verdict}); err != nil {
-		return err
-	}
-	if err := repository.SettleTaskSubmission(ctx, pool, tx, current.TaskID,
-		current.SubmissionID, current.AgentID, current.Amount); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }

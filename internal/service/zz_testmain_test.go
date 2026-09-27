@@ -20,6 +20,8 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -29,10 +31,23 @@ import (
 
 var pubTestTLSCert tls.Certificate
 
+// okReceiverURL is a package-wide receiver that accepts everything
+// (HTTP 200): the default receiver.url of test contracts, so opening
+// passes its test delivery and submissions settle.
+var okReceiverURL string
+
 func TestMain(m *testing.M) {
 	pubTestTLSCert = mustGenerateTestCert()
 	restore := delivery.AllowLoopbackForTest()
+	ok := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"accepted"}`))
+	}))
+	ok.TLS = &tls.Config{Certificates: []tls.Certificate{pubTestTLSCert}}
+	ok.StartTLS()
+	okReceiverURL = ok.URL
 	code := m.Run()
+	ok.Close()
 	restore()
 	os.Exit(code)
 }

@@ -41,31 +41,41 @@ type SubmitInput struct {
 	Revises    *WireID         `json:"revises,omitempty"`
 }
 
+// ReplyView is the receiver's reply exactly as recorded (§7.2): the
+// status code and the body (first 4 000 bytes), never rewritten.
+type ReplyView struct {
+	Status int    `json:"status"`
+	Body   string `json:"body"`
+}
+
 // SubmissionView is the intake + delivery return structure.
 type SubmissionView struct {
-	SubmissionID   WireID          `json:"submission_id"`
-	TaskCode       string          `json:"task_code"`
-	Version        int32           `json:"version"`
-	State          string          `json:"state"`
-	Amount         int64           `json:"amount"`
-	Verdict        json.RawMessage `json:"verdict,omitempty"`
-	Paid           int64           `json:"paid"`
-	Failure        *string         `json:"failure,omitempty"`
-	ReviewDeadline *time.Time      `json:"review_deadline,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	SubmissionID WireID     `json:"submission_id"`
+	TaskCode     string     `json:"task_code"`
+	Version      int32      `json:"version"`
+	State        string     `json:"state"`
+	Amount       int64      `json:"amount"`
+	Paid         int64      `json:"paid"`
+	Reply        *ReplyView `json:"reply"`
+	Failure      *string    `json:"failure"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView {
 	v := SubmissionView{
-		SubmissionID:   WireID(s.SubmissionID),
-		TaskCode:       code,
-		Version:        s.Version,
-		State:          s.State,
-		Amount:         s.Amount,
-		Verdict:        json.RawMessage(s.Verdict),
-		Failure:        s.Failure,
-		ReviewDeadline: s.ReviewDeadline,
-		CreatedAt:      s.CreatedAt,
+		SubmissionID: WireID(s.SubmissionID),
+		TaskCode:     code,
+		Version:      s.Version,
+		State:        s.State,
+		Amount:       s.Amount,
+		Failure:      s.Failure,
+		CreatedAt:    s.CreatedAt,
+	}
+	if s.ResponseCode != nil {
+		v.Reply = &ReplyView{Status: *s.ResponseCode}
+		if s.ResponseBody != nil {
+			v.Reply.Body = *s.ResponseBody
+		}
 	}
 	if s.State == task.SubSettled {
 		v.Paid = s.Amount
@@ -148,11 +158,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && counts.Settled+counts.Inflight >= *cap {
-		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
-			map[string]interface{}{"limit": "accepted"})
-	}
 	if counts.Rejected >= rejectedCapFor(contract) {
 		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
@@ -188,7 +193,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if errs := task.ValidatePayloadForTask(t.ID, version, schema, in.Payload); len(errs) > 0 {
+	if errs := payloadSchemaErrors(t.ID, version, schema, in.Payload); len(errs) > 0 {
 		return SubmissionView{}, schemaMismatch(errs)
 	}
 	if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
@@ -217,11 +222,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && lockedCounts.Settled+lockedCounts.Inflight >= *cap {
-		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
-			map[string]interface{}{"limit": "accepted"})
-	}
 	if lockedCounts.Rejected >= rejectedCapFor(contract) {
 		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
 			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
@@ -243,7 +243,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 				return SubmissionView{}, rerr
 			}
 			version, contract = nv, nc
-			if errs := task.ValidatePayloadForTask(locked.ID, version, contract.Output.Schema, in.Payload); len(errs) > 0 {
+			if errs := payloadSchemaErrors(locked.ID, version, contract.Output.Schema, in.Payload); len(errs) > 0 {
 				return SubmissionView{}, schemaMismatch(errs)
 			}
 			if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
@@ -254,11 +254,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			recount, cerr := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
 			if cerr != nil {
 				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-			}
-			if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && recount.Settled+recount.Inflight >= *cap {
-				return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-					fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
-					map[string]interface{}{"limit": "accepted"})
 			}
 			if recount.Rejected >= rejectedCapFor(contract) {
 				return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
@@ -315,8 +310,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
-	// Synchronous delivery (§5.4): async-without-receiver goes straight
-	// to review; sync / async-with-receiver POSTs to the receiver.
+	// Synchronous delivery (§5.4): POST to the receiver, whose reply
+	// decides the outcome.
 	return DeliverSubmission(ctx, pool, subID, agentRefKey, now)
 }
 
@@ -401,8 +396,7 @@ func slotsFor(t *repository.TaskRow, contract task.Contract) int64 {
 }
 
 // checkRevises enforces the §5.3 revises rule: the target must be the
-// SAME agent's REJECTED submission on the SAME task with a retryable
-// verdict (retryable defaults to true, §6.1).
+// SAME agent's REJECTED submission on the SAME task.
 func checkRevises(ctx context.Context, pool *pg.Pool, revises, agentID, taskID int64) error {
 	target, err := repository.FindSubmissionByID(ctx, pool, revises)
 	if goerrors.Is(err, pgx.ErrNoRows) || target == nil {
@@ -415,19 +409,17 @@ func checkRevises(ctx context.Context, pool *pg.Pool, revises, agentID, taskID i
 		return errors.New(400, "INVALID_REVISES",
 			"revises must target your own rejected submission on this task")
 	}
-	retryable := true
-	if len(target.Verdict) > 0 {
-		var v struct {
-			Retryable *bool `json:"retryable"`
-		}
-		if err := json.Unmarshal(target.Verdict, &v); err == nil && v.Retryable != nil {
-			retryable = *v.Retryable
-		}
-	}
-	if !retryable {
-		return errors.New(400, "INVALID_REVISES", "the rejected submission is not retryable")
-	}
 	return nil
+}
+
+// payloadSchemaErrors checks the payload against the version's
+// output.schema; a contract without one (§3: optional) has no
+// structure check beyond "a JSON object".
+func payloadSchemaErrors(taskID int64, version int32, schema, payload []byte) []task.PointerError {
+	if len(schema) == 0 || string(schema) == "null" {
+		return nil
+	}
+	return task.ValidatePayloadForTask(taskID, version, schema, payload)
 }
 
 func schemaMismatch(errs []task.PointerError) *errors.AppError {

@@ -23,11 +23,10 @@ import (
 	"kungfu.md/internal/task"
 )
 
-func pubContractArg(reviewWindow int64) map[string]any {
+func pubContractArg() map[string]any {
 	return map[string]any{
-		"title": "Pub task", "objective": "o", "inputs": "i",
+		"title": "Pub task", "requirements": "Return three bullets for the page.",
 		"output": map[string]any{
-			"description": "d",
 			"schema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -37,15 +36,9 @@ func pubContractArg(reviewWindow int64) map[string]any {
 				"required": []string{"url", "bullets"},
 			},
 		},
-		"acceptance": map[string]any{
-			"mode":          "async",
-			"review_window": reviewWindow,
-			"criteria":      []map[string]any{{"id": "C1", "kind": "rule", "description": "r"}},
-		},
-		"examples": []map[string]any{
-			{"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}}, "accepted": true},
-		},
-		"price": 5,
+		"receiver": map[string]any{"url": okReceiverURL},
+		"sample":   map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
+		"price":    5,
 	}
 }
 
@@ -90,8 +83,8 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	}
 
 	// task_create on twins
-	e1m, i1 := mcpP("task_create", map[string]any{"contract": pubContractArg(3600), "budget": 2000})
-	e1h, s1 := httpP("task_create", map[string]any{"contract": pubContractArg(3600), "budget": 2000})
+	e1m, i1 := mcpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
+	e1h, s1 := httpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
 	if i1 || s1 != 200 || e1m["status"] != task.TaskDraft || e1m["next_action"] != nil {
 		t.Fatalf("task_create: %+v isError=%v http=%d", e1m, i1, s1)
 	}
@@ -108,7 +101,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 
 	// task_update (draft twins; the view carries status/counters — the
 	// edited contract is asserted via the stored draft in the flow test)
-	updated := pubContractArg(7200)
+	updated := pubContractArg()
 	updated["title"] = "Pub task v2"
 	e3m, i3 := mcpP("task_update", map[string]any{"code": codeA, "contract": updated})
 	e3h, s3 := httpP("task_update", map[string]any{"code": codeB, "contract": updated})
@@ -117,7 +110,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	}
 	assertCodes("task_update", e3m, e3h, codeA, codeB)
 
-	// task_open (twins: async, no receiver → no test delivery)
+	// task_open (twins: the sample test-delivers to the accept-everything receiver)
 	e4m, i4 := mcpP("task_open", map[string]any{"code": codeA})
 	e4h, s4 := httpP("task_open", map[string]any{"code": codeB})
 	if i4 || s4 != 200 || e4m["status"] != task.TaskOpen || numOff(e4m["version"]) != 1 {
@@ -133,7 +126,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	}
 	assertCodes("task_fund", e5m, e5h, codeA, codeB)
 
-	// executor submissions on both twins (for submissions/verdict)
+	// executor submissions on both twins (settle on the receiver's 200)
 	for _, code := range []string{codeA, codeB} {
 		if _, err := service.SubmitWork(ctx, pool, agentID, service.SubmitInput{
 			Code: code, RequestKey: "pub-flow",
@@ -150,16 +143,15 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 		t.Fatalf("task_submissions: %+v", e6m)
 	}
 	assertCodes("task_submissions", e6m, e6h, codeA, codeB)
-	rowA, _, _ := service.ListSubmissionsForPublisher(ctx, pool, pubID, codeA, "", 1, 10, deps.AgentRefKey)
-	rowB, _, _ := service.ListSubmissionsForPublisher(ctx, pool, pubID, codeB, "", 1, 10, deps.AgentRefKey)
-
-	// task_verdict (accept on each twin's submission)
-	e7m, i7 := mcpP("task_verdict", map[string]any{"submission_id": rowA[0].SubmissionID, "verdict": map[string]any{"accepted": true}})
-	e7h, s7 := httpP("task_verdict", map[string]any{"submission_id": rowB[0].SubmissionID, "verdict": map[string]any{"accepted": true}})
-	if i7 || s7 != 200 || e7m["state"] != task.SubSettled || e7m["next_action"] != nil {
-		t.Fatalf("task_verdict: %+v isError=%v http=%d", e7m, i7, s7)
+	rowsA, _ := e6m["submissions"].([]any)
+	if len(rowsA) != 1 {
+		t.Fatalf("task_submissions rows: %+v", e6m)
 	}
-	assertCodes("task_verdict", e7m, e7h, codeA, codeB)
+	row, _ := rowsA[0].(map[string]any)
+	reply, _ := row["reply"].(map[string]any)
+	if row["state"] != task.SubSettled || reply == nil || reply["body"] != `{"message":"accepted"}` {
+		t.Fatalf("task_submissions row: %+v", row)
+	}
 
 	// task_pause (twins, both open)
 	e8m, i8 := mcpP("task_pause", map[string]any{"code": codeA})
@@ -254,26 +246,12 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 	reviewCode := wo7OpenTask(t, pool, pubID)
 	_ = settledCode
 
-	// one under_review submission (for VERDICT_INVALID + NOT_UNDER_REVIEW)
-	subView, err := service.SubmitWork(ctx, pool, agentID, service.SubmitInput{
+	// one settled submission (for IDEMPOTENCY_CONFLICT)
+	if _, err := service.SubmitWork(ctx, pool, agentID, service.SubmitInput{
 		Code: reviewCode, RequestKey: "cat-review",
 		Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
-	}, deps.AgentRefKey, time.Now())
-	if err != nil {
+	}, deps.AgentRefKey, time.Now()); err != nil {
 		t.Fatalf("submit: %v", err)
-	}
-	// one settled submission (a verdict already applied)
-	if _, err := service.SubmitVerdict(ctx, pool, pubID, subView.SubmissionID.Int64(),
-		[]byte(`{"accepted":true}`), time.Now()); err != nil {
-		t.Fatalf("verdict: %v", err)
-	}
-	// a fresh under_review row for VERDICT_INVALID
-	freshView, err := service.SubmitWork(ctx, pool, agentID, service.SubmitInput{
-		Code: reviewCode, RequestKey: "cat-review-2",
-		Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
-	}, deps.AgentRefKey, time.Now())
-	if err != nil {
-		t.Fatalf("submit 2: %v", err)
 	}
 
 	call := func(bot *model.Bot, tool string, args map[string]any) (map[string]any, int) {
@@ -373,7 +351,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			return call(agentBot, "task_pause", map[string]any{"code": code}) // agent is not the publisher
 		}},
 		{"INSUFFICIENT_CREDITS", "", 402, func() (map[string]any, int) {
-			return call(agentBot, "task_create", map[string]any{"contract": pubContractArg(3600), "budget": 1_000_000})
+			return call(agentBot, "task_create", map[string]any{"contract": pubContractArg(), "budget": 1_000_000})
 		}},
 		{"INVALID_STATE", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
@@ -383,24 +361,12 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			return call(pubBot, "task_pause", map[string]any{"code": c})
 		}},
 		{"VALIDATION_FAILED", "", 422, func() (map[string]any, int) {
-			bad := pubContractArg(3600)
+			bad := pubContractArg()
 			bad["title"] = ""
 			return call(pubBot, "task_create", map[string]any{"contract": bad, "budget": 2000})
 		}},
 		{"TEST_DELIVERY_FAILED", "", 422, func() (map[string]any, int) {
 			return call(pubBot, "task_open", map[string]any{"code": syncBrokenTask(t, pool, pubID)})
-		}},
-		{"VERDICT_INVALID", "", 422, func() (map[string]any, int) {
-			return call(pubBot, "task_verdict", map[string]any{
-				"submission_id": freshView.SubmissionID.Int64(),
-				"verdict":       map[string]any{"accepted": false, "criteria": []string{"C9"}, "reason": "undeclared"},
-			})
-		}},
-		{"NOT_UNDER_REVIEW", "", 409, func() (map[string]any, int) {
-			return call(pubBot, "task_verdict", map[string]any{
-				"submission_id": subView.SubmissionID.Int64(), // already settled by the timeout-past verdict above
-				"verdict":       map[string]any{"accepted": true},
-			})
 		}},
 		{"HAS_RESERVATIONS", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
@@ -481,33 +447,15 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 
 func draftOf(t *testing.T, pool *pg.Pool, publisher int64) string {
 	t.Helper()
-	view, err := service.CreateTask(context.Background(), pool, publisher, wo7ContractArg(), 1000)
+	view, err := service.CreateTask(context.Background(), pool, publisher, wo7Contract(), 1000)
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	return view["code"].(string)
 }
 
-func wo7ContractArg() task.Contract {
-	w := int64(3600)
-	return task.Contract{
-		Title: "C", Objective: "o", Inputs: "i",
-		Output: task.Output{Description: "d", Schema: []byte(`{
-			"type":"object","properties":{
-				"url":{"type":"string"},
-				"bullets":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
-			},"required":["url","bullets"]}`)},
-		Acceptance: task.Acceptance{Mode: task.ModeAsync, ReviewWindow: &w,
-			Criteria: []task.Criterion{{ID: "C1", Kind: task.KindRule, Description: "r"}}},
-		Examples: []task.Example{
-			{Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), Accepted: true},
-		},
-		Price: 5,
-	}
-}
-
 func wo7OpenTaskClaimRequired(t *testing.T, pool *pg.Pool, publisher int64) string {
-	c := wo7ContractArg()
+	c := wo7Contract()
 	c.Claim = task.ClaimConfig{Required: true}
 	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000)
 	if err != nil {
@@ -560,13 +508,11 @@ func drainSlots(t *testing.T, srv *httptest.Server, pool *pg.Pool, code string, 
 
 func fakeCred() string { return "kf_live_" + strings.Repeat("ab", 32) }
 
-// syncBrokenTask creates a sync task whose receiver is unreachable:
-// open runs the test delivery and fails with TEST_DELIVERY_FAILED.
+// syncBrokenTask creates a task whose receiver is unreachable: open
+// runs the test delivery and fails with TEST_DELIVERY_FAILED.
 func syncBrokenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 	t.Helper()
-	c := wo7ContractArg()
-	c.Acceptance = task.Acceptance{Mode: task.ModeSync,
-		Criteria: []task.Criterion{{ID: "C1", Kind: task.KindRule, Description: "r"}}}
+	c := wo7Contract()
 	c.Receiver = task.Receiver{URL: "https://receiver.invalid/hook"}
 	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000)
 	if err != nil {
@@ -575,8 +521,8 @@ func syncBrokenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 	return view["code"].(string)
 }
 
-// TestPublisherLifecycle: task_create → task_open (sync test delivery
-// 2xx via the TLS receiver) → work_submit → settled → task_close →
+// TestPublisherLifecycle: task_create → task_open (test delivery 2xx
+// via the TLS receiver) → work_submit → settled → task_close →
 // task_refund, all through the registry, ending with CheckInvariants.
 func TestPublisherLifecycle(t *testing.T) {
 	pool, deps, srv := registryEnv(t)
@@ -602,10 +548,8 @@ func TestPublisherLifecycle(t *testing.T) {
 		return env, status
 	}
 
-	// create (sync contract against the receiver)
-	contract := wo7ContractArg()
-	contract.Acceptance = task.Acceptance{Mode: task.ModeSync,
-		Criteria: []task.Criterion{{ID: "C1", Kind: task.KindRule, Description: "r"}}}
+	// create (contract against the receiver)
+	contract := wo7Contract()
 	contract.Receiver = task.Receiver{URL: rcv.URL}
 	env, status := call(pubBot, "task_create", map[string]any{"contract": asContractMap(t, contract), "budget": 2000})
 	if status != 200 || env["status"] != task.TaskDraft {

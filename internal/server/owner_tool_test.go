@@ -109,7 +109,7 @@ func TestOwnerToolLifecycleAndParity(t *testing.T) {
 	ctx := context.Background()
 	cookie := ocSessionCookie(t, s, pool, name)
 
-	contract := ocAsyncContract()
+	contract := ocContract()
 	// route first (builds the router, wiring mcpDepsValue), then the
 	// same call through the registry directly for parity
 	routeRec, routeEnv := ocCall(t, s, cookie, "task_create", map[string]any{"contract": contract, "budget": 2000})
@@ -180,9 +180,6 @@ func TestOwnerTaskPages(t *testing.T) {
 	}
 }
 
-// TestOwnerConsoleEndToEnd: create(async) → open → another bot submits
-// via /api/v1 work_submit → console sees under_review → task_verdict
-// accept → settled; CheckInvariants at the end.
 // parseWireID reads a wire id (string) as int64.
 func parseWireID(t *testing.T, v any) int64 {
 	t.Helper()
@@ -197,13 +194,16 @@ func parseWireID(t *testing.T, v any) int64 {
 	return n
 }
 
+// TestOwnerConsoleEndToEnd: create → open → another bot submits via
+// /api/v1 work_submit → the receiver's 200 settles it → the console
+// sees the settled row with the reply; CheckInvariants at the end.
 func TestOwnerConsoleEndToEnd(t *testing.T) {
 	s, pool, name, botID := ownerConsoleEnv(t)
 	ctx := context.Background()
 	cookie := ocSessionCookie(t, s, pool, name)
 
-	// create + open an async no-receiver task
-	_, env := ocCall(t, s, cookie, "task_create", map[string]any{"contract": ocAsyncContract(), "budget": 2000})
+	// create + open a task on the accept-everything receiver
+	_, env := ocCall(t, s, cookie, "task_create", map[string]any{"contract": ocContract(), "budget": 2000})
 	if env["ok"] != true {
 		t.Fatalf("create: %v", env)
 	}
@@ -225,27 +225,22 @@ func TestOwnerConsoleEndToEnd(t *testing.T) {
 	s.buildRouter().ServeHTTP(rec, req)
 	var subEnv map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &subEnv)
-	if rec.Code != 200 || subEnv["state"] != "under_review" {
+	if rec.Code != 200 || subEnv["state"] != "settled" || subEnv["paid"].(float64) != 5 {
 		t.Fatalf("agent submit: %d %v", rec.Code, subEnv)
 	}
 	subID := parseWireID(t, subEnv["submission_id"])
 
-	// console queue shows the under_review row with agent_ref + payload
-	_, env = ocCall(t, s, cookie, "task_submissions", map[string]any{"code": code, "state": "under_review"})
+	// console queue shows the settled row with agent_ref + the reply
+	_, env = ocCall(t, s, cookie, "task_submissions", map[string]any{"code": code, "state": "settled"})
 	if env["ok"] != true || env["total"].(float64) != 1 {
 		t.Fatalf("submissions: %v", env)
 	}
 	rows := env["submissions"].([]any)
 	row := rows[0].(map[string]any)
-	if row["submission_id"].(string) != fmt.Sprint(subID) || row["agent_ref"] == "" || row["payload"] == nil {
+	reply, _ := row["reply"].(map[string]any)
+	if row["submission_id"].(string) != fmt.Sprint(subID) || row["agent_ref"] == "" ||
+		reply == nil || reply["body"] != `{"message":"accepted"}` {
 		t.Fatalf("submission row: %v", row)
-	}
-
-	// accept → settled + paid
-	_, env = ocCall(t, s, cookie, "task_verdict", map[string]any{
-		"submission_id": subID, "verdict": map[string]any{"accepted": true}})
-	if env["ok"] != true || env["state"] != "settled" || env["paid"].(float64) != 5 {
-		t.Fatalf("verdict: %v", env)
 	}
 
 	// agent was paid
@@ -298,14 +293,12 @@ func ocTaskID(t *testing.T, pool *pg.Pool, code string) int64 {
 	return tr.ID
 }
 
-// ocAsyncContract: the work order's valid async sample (no receiver).
-func ocAsyncContract() map[string]any {
+// ocContract: a valid contract on the accept-everything receiver.
+func ocContract() map[string]any {
 	return map[string]any{
-		"title":     "Summarize a page",
-		"objective": "A 3-bullet summary of the given page, for a newsletter.",
-		"inputs":    "A public URL fetched by the executor.",
+		"title":        "Summarize a page",
+		"requirements": "A 3-bullet summary of the given page, for a newsletter.",
 		"output": map[string]any{
-			"description": "One JSON object with the bullets.",
 			"schema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -315,14 +308,9 @@ func ocAsyncContract() map[string]any {
 				"required": []string{"url", "bullets"},
 			},
 		},
-		"acceptance": map[string]any{
-			"mode": "async", "review_window": 3600,
-			"criteria": []map[string]any{{"id": "C1", "kind": "rule", "description": "three sentences"}},
-		},
-		"examples": []map[string]any{
-			{"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}}, "accepted": true},
-		},
-		"price": 5,
+		"receiver": map[string]any{"url": okReceiverURL},
+		"sample":   map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
+		"price":    5,
 	}
 }
 

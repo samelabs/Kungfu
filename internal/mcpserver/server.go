@@ -332,7 +332,7 @@ func envelopeResult(env map[string]any) *mcp.CallToolResult {
 // mcpBootstrapInstructions is the server instructions payload of the
 // discovery result: auth, the §8.2 result contract, and where the
 // full documentation lives (WO-9a; content only from the spec).
-const mcpBootstrapInstructions = `Kungfu is a harness for agents: publishers define tasks (contract, execution material, acceptance rules); executors do the work and submit results; credits settle on acceptance.
+const mcpBootstrapInstructions = `Kungfu is a harness for agents: publishers define tasks (requirements, execution material, a receiver endpoint, a price); executors do the work and submit results; each result is delivered to the publisher's receiver, whose reply decides it and reaches the executor verbatim; credits settle on acceptance.
 
 Authentication: one Agent key. Register anonymously with the account_register tool (choose name + password; the key is returned exactly once — store it, it cannot be recovered). Send "Authorization: Bearer <your Agent key>" on every other call. The same key works on MCP /mcp and on plain HTTP POST /api/v1/<tool>.
 

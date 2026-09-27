@@ -107,21 +107,14 @@ func TestSubmissionTransitionLegal(t *testing.T) {
 		// §5.4 from delivering
 		{SubDelivering, EventDeliver2XX, SubSettled},
 		{SubDelivering, EventDeliver4XX, SubRejected},
-		{SubDelivering, EventDeliver202, SubUnderReview},
-		{SubDelivering, EventNoReceiver, SubUnderReview},
 		{SubDelivering, EventTimeout, SubUncertain},
 		{SubDelivering, EventDeliveryFailed, SubFailed},
 		// from uncertain: re-delivery result ("重投得到结果 → 同上" —
 		// including a definitive failure per §7.2) or the 24h limit
 		{SubUncertain, EventDeliver2XX, SubSettled},
 		{SubUncertain, EventDeliver4XX, SubRejected},
-		{SubUncertain, EventDeliver202, SubUnderReview},
 		{SubUncertain, EventDeliveryFailed, SubFailed},
 		{SubUncertain, EventUnresolved, SubFailed},
-		// from under_review: accept / reject / review-window timeout (= accepted)
-		{SubUnderReview, EventAccept, SubSettled},
-		{SubUnderReview, EventReject, SubRejected},
-		{SubUnderReview, EventReviewTimeout, SubSettled},
 	}
 	for _, c := range cases {
 		got, err := SubmissionTransition(c.from, c.event)
@@ -137,21 +130,15 @@ func TestSubmissionTransitionLegal(t *testing.T) {
 
 func TestSubmissionTransitionIllegal(t *testing.T) {
 	cases := []struct{ from, event string }{
-		// delivering must resolve through delivery outcomes, not verdict events
-		{SubDelivering, EventAccept},
-		{SubDelivering, EventReject},
+		// delivering resolves through delivery outcomes or the timeout edge
 		{SubDelivering, EventUnresolved},
 		// uncertain: another timeout keeps it uncertain without a state write;
 		// only a result or the 24h limit leaves the state
 		{SubUncertain, EventTimeout},
-		{SubUncertain, EventNoReceiver},
-		// under_review: wrong timeout kind; delivery events don't apply
-		{SubUnderReview, EventTimeout},
-		{SubUnderReview, EventDeliver2XX},
 		// terminal states have no outgoing edges
-		{SubSettled, EventReject},
+		{SubSettled, EventDeliver4XX},
 		{SubSettled, EventDeliver2XX},
-		{SubRejected, EventAccept},
+		{SubRejected, EventDeliver4XX},
 		{SubRejected, EventDeliver2XX},
 		{SubFailed, EventUnresolved},
 		{SubFailed, EventDeliver2XX},
@@ -182,8 +169,8 @@ func TestTransitionMapsAreExactlyTheSpecEdges(t *testing.T) {
 		{"claim", claimTransitions, ClaimStatuses,
 			[]string{EventClaimRenew, EventClaimRelease, EventClaimExpire, EventClaimUse, "claim"}},
 		{"submission", submissionTransitions, SubmissionStates,
-			[]string{EventSubmit, EventDeliver2XX, EventDeliver4XX, EventDeliver202, EventNoReceiver,
-				EventTimeout, EventDeliveryFailed, EventUnresolved, EventAccept, EventReject, EventReviewTimeout}},
+			[]string{EventSubmit, EventDeliver2XX, EventDeliver4XX,
+				EventTimeout, EventDeliveryFailed, EventUnresolved}},
 	}
 	for _, m := range machines {
 		for _, s := range m.states {
@@ -205,7 +192,7 @@ func TestSubmissionTerminal(t *testing.T) {
 			t.Errorf("SubmissionTerminal(%s) = false, want true", s)
 		}
 	}
-	for _, s := range []string{SubDelivering, SubUncertain, SubUnderReview} {
+	for _, s := range []string{SubDelivering, SubUncertain} {
 		if SubmissionTerminal(s) {
 			t.Errorf("SubmissionTerminal(%s) = true, want false", s)
 		}

@@ -16,8 +16,8 @@ import (
 	"kungfu.md/internal/task"
 )
 
-// workOpenTask opens a plain async no-receiver task (cheap, no HTTP)
-// with an optional mutation.
+// workOpenTask opens a task on the accept-everything receiver with an
+// optional mutation.
 func workOpenTask(t *testing.T, pool *pg.Pool, publisher int64, budget int64, mutate func(*task.Contract)) *repository.TaskRow {
 	t.Helper()
 	code := submitOpenedTask(t, pool, publisher, budget, mutate)
@@ -121,20 +121,12 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	// Task A: 2 settled (one by timeout), 1 rejected, 1 failed →
-	// accept_rate 2/3, timeout_rate 1/4, failure_rate 1/4, median over
-	// the three verdict durations.
-	// tally: 2 settled (one by timeout) + 1 rejected + 1 failed = 4 terminals
+	// Task A: 2 settled, 1 rejected, 1 failed → accept_rate 2/3,
+	// failure_rate 1/4, median over the three reply durations.
 	codeA := workOpenTask(t, pool, publisher, 1000, nil).Code
-	seedSubmission(t, pool, codeA, agent, task.SubSettled)  // settled (receiver source)
-	seedSubmission(t, pool, codeA, agent, task.SubRejected) // rejected
-	seedSubmission(t, pool, codeA, agent, task.SubSettled)  // settled (becomes timeout-sourced below)
-	var id int64
-	_ = pool.QueryRow(ctx, `
-		UPDATE tb_task_submission SET verdict='{"accepted":true,"source":"timeout"}'::jsonb
-		WHERE task_id=$1 AND state='settled' AND submission_id =
-		  (SELECT MIN(submission_id) FROM tb_task_submission WHERE task_id=$1 AND state='settled')
-		RETURNING submission_id`, mustTaskID(t, pool, codeA)).Scan(&id)
+	seedSubmission(t, pool, codeA, agent, task.SubSettled)
+	seedSubmission(t, pool, codeA, agent, task.SubRejected)
+	seedSubmission(t, pool, codeA, agent, task.SubSettled)
 	// one failed submission
 	tx, _ := pool.TxBegin(ctx)
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
@@ -166,9 +158,6 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	if a.AcceptRate == nil || *a.AcceptRate != 2.0/3.0 {
 		t.Fatalf("accept_rate = %v, want 2/3 (2 settled, 1 rejected)", a.AcceptRate)
 	}
-	if a.TimeoutRate == nil || *a.TimeoutRate != 0.25 {
-		t.Fatalf("timeout_rate = %v, want 1/4", a.TimeoutRate)
-	}
 	if a.FailureRate == nil || *a.FailureRate != 0.25 {
 		t.Fatalf("failure_rate = %v, want 1/4", a.FailureRate)
 	}
@@ -176,7 +165,7 @@ func TestListWorkStatsPrecision(t *testing.T) {
 		t.Fatalf("median missing: %+v", a)
 	}
 	b := byCode[codeB]["stats"].(workStats)
-	if b.AcceptRate != nil || b.TimeoutRate != nil || b.FailureRate != nil || b.MedianVerdictSeconds != nil {
+	if b.AcceptRate != nil || b.FailureRate != nil || b.MedianVerdictSeconds != nil {
 		t.Fatalf("empty stats must be all null: %+v", b)
 	}
 	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, codeA)); err != nil {
@@ -224,7 +213,7 @@ func TestGetWorkVersionPinnedByClaim(t *testing.T) {
 
 	// v1 with a harness ref owned by the publisher
 	pubSeedKungfu(t, pool, publisher, "harnessref01", "Harness One")
-	c := claimAsyncContract() // claim.required = true
+	c := claimContract() // claim.required = true
 	c.HarnessRefs = []string{"harnessref01"}
 	code := pubCreateForTest(t, pool, publisher, c, 1000)
 	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
@@ -238,7 +227,7 @@ func TestGetWorkVersionPinnedByClaim(t *testing.T) {
 	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	updated := claimAsyncContract()
+	updated := claimContract()
 	updated.Title = "Version two"
 	updated.HarnessRefs = nil
 	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
@@ -294,7 +283,7 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 
 	// a harness-backed task for GetHarness
 	pubSeedKungfu(t, pool, publisher, "harnessref02", "H")
-	hc := claimAsyncContract()
+	hc := claimContract()
 	hc.HarnessRefs = []string{"harnessref02"}
 	hcode := pubCreateForTest(t, pool, publisher, hc, 1000)
 	if _, err := OpenTask(ctx, pool, publisher, hcode); err != nil {
@@ -377,10 +366,10 @@ func TestGetSubmissionStatus(t *testing.T) {
 		t.Fatalf("id mismatch: %v", byID["submission_id"])
 	}
 	events := byID["events"].([]eventView)
-	if len(events) != 2 { // submit + no_receiver (async, no receiver)
+	if len(events) != 2 { // submit + the receiver's 200
 		t.Fatalf("events = %d, want 2", len(events))
 	}
-	if events[1].To != task.SubUnderReview || events[1].Cause != task.EventNoReceiver {
+	if events[1].To != task.SubSettled || events[1].Cause != task.EventDeliver2XX {
 		t.Fatalf("last event = %+v", events[1])
 	}
 

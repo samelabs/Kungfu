@@ -3,8 +3,8 @@ package mcpserver
 // WO-7a integration: every executor tool called through BOTH channels
 // (MCP tools/call and the registry dispatch behind POST /api/v1),
 // envelopes compared field-by-field after stripping time-class and
-// per-call identity fields; work_submit's accepted (via publisher
-// verdict) and SCHEMA_MISMATCH outcomes verified on both channels.
+// per-call identity fields; work_submit's settled (the receiver's 200
+// and body) and SCHEMA_MISMATCH outcomes verified on both channels.
 
 import (
 	"context"
@@ -140,9 +140,8 @@ func TestRegistryEveryToolBothChannels(t *testing.T) {
 	pool, deps, srv := registryEnv(t)
 	ctx := context.Background()
 
-	// publisher opens an async task WITHOUT a receiver: submissions go
-	// straight to under_review; the publisher then accepts them via
-	// SubmitVerdict (deterministic settled states, no outbound HTTP).
+	// publisher opens a task on the accept-everything receiver:
+	// submissions settle on delivery with the receiver's reply.
 	_, _, pubID := m2RegisterSeeded(t, srv, pool, 10_000)
 	code := wo7OpenTask(t, pool, pubID)
 
@@ -196,8 +195,7 @@ func TestRegistryEveryToolBothChannels(t *testing.T) {
 	}
 	assertJSONEqual(t, "work_claim_renew", e5m, e5h)
 
-	// 6. work_submit — both channels land under_review (async, no
-	// receiver); the publisher then accepts BOTH via verdicts
+	// 6. work_submit — both channels settle with the receiver's reply
 	subKey := fmt.Sprintf("par-%d", time.Now().UnixNano())
 	e6m, i6 := mcp("work_submit", map[string]any{
 		"code": code, "request_key": subKey + "-m",
@@ -207,17 +205,18 @@ func TestRegistryEveryToolBothChannels(t *testing.T) {
 		"code": code, "request_key": subKey + "-h",
 		"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
 	})
-	if i6 || s6 != 200 || e6m["state"] != task.SubUnderReview || e6m["ok"] != true {
+	if i6 || s6 != 200 || e6m["state"] != task.SubSettled || e6m["ok"] != true || e6m["next_action"] != "done" {
 		t.Fatalf("work_submit mcp: %+v isError=%v", e6m, i6)
 	}
-	if e6h["state"] != task.SubUnderReview || e6h["ok"] != true ||
-		e6h["next_action"] != "poll" || numOff(e6h["retry_after"]) != 60 {
+	if e6h["state"] != task.SubSettled || e6h["ok"] != true || e6h["next_action"] != "done" {
 		t.Fatalf("work_submit http: %+v (%d)", e6h, s6)
 	}
-	if e6m["next_action"] != "poll" || numOff(e6m["retry_after"]) != 60 {
-		t.Fatalf("work_submit mcp next: %+v", e6m)
+	for _, env := range []map[string]any{e6m, e6h} {
+		reply, _ := env["reply"].(map[string]any)
+		if reply == nil || numOff(reply["status"]) != 200 || reply["body"] != `{"message":"accepted"}` {
+			t.Fatalf("work_submit reply: %+v", env["reply"])
+		}
 	}
-	wo7AcceptAll(t, pool, pubID, code)
 
 	// 7. work_status — by code + request_key; now settled
 	e7m, i7 := mcp("work_status", map[string]any{"code": code, "request_key": subKey + "-m"})
@@ -356,26 +355,28 @@ func wo7Bot(t *testing.T, pool *pg.Pool, id int64) *model.Bot {
 	return bot
 }
 
-// wo7OpenTask creates and opens an async no-receiver task (claim not
-// required) — submissions go straight to under_review.
-func wo7OpenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
-	t.Helper()
-	c := task.Contract{
-		Title: "Parity task", Objective: "o", Inputs: "i",
-		Output: task.Output{Description: "d", Schema: []byte(`{
+// wo7Contract is a complete §3 contract on the accept-everything
+// receiver (claim not required).
+func wo7Contract() task.Contract {
+	return task.Contract{
+		Title:        "Parity task",
+		Requirements: "Return three bullets for the page.",
+		Output: task.Output{Schema: []byte(`{
 			"type":"object","properties":{
 				"url":{"type":"string"},
 				"bullets":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
 			},"required":["url","bullets"]}`)},
-		Acceptance: task.Acceptance{Mode: task.ModeAsync,
-			ReviewWindow: &[]int64{3600}[0],
-			Criteria:     []task.Criterion{{ID: "C1", Kind: task.KindRule, Description: "r"}}},
-		Examples: []task.Example{
-			{Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), Accepted: true},
-		},
-		Price: 5,
+		Receiver: task.Receiver{URL: okReceiverURL},
+		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
+		Price:    5,
 	}
-	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000)
+}
+
+// wo7OpenTask creates and opens a wo7Contract task — submissions
+// settle on delivery.
+func wo7OpenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
+	t.Helper()
+	view, err := service.CreateTask(context.Background(), pool, publisher, wo7Contract(), 1000)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -384,21 +385,4 @@ func wo7OpenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 		t.Fatalf("open: %v", err)
 	}
 	return code
-}
-
-// wo7AcceptAll settles the task's under_review submissions with a
-// publisher verdict.
-func wo7AcceptAll(t *testing.T, pool *pg.Pool, publisher int64, code string) {
-	t.Helper()
-	ctx := context.Background()
-	rows, _, err := service.ListSubmissionsForPublisher(ctx, pool, publisher, code, task.SubUnderReview, 1, 50, []byte("k"))
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	for _, r := range rows {
-		if _, err := service.SubmitVerdict(ctx, pool, publisher, r.SubmissionID.Int64(),
-			[]byte(`{"accepted":true}`), time.Now()); err != nil {
-			t.Fatalf("verdict: %v", err)
-		}
-	}
 }

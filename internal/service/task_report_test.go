@@ -6,11 +6,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
-	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
 )
@@ -95,117 +93,6 @@ func longReason(n int) string {
 
 // -- §9 retention --
 
-// seedTerminal seeds one TERMINAL submission carrying payload, hash,
-// verdict and events.
-func seedTerminal(t *testing.T, pool *pg.Pool, agent int64, code string, state string, verdict []byte) int64 {
-	t.Helper()
-	ctx := context.Background()
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent,
-		RequestKey:  fmt.Sprintf("pu-%s-%d", code, time.Now().UnixNano()),
-		Payload:     []byte(submitPayloadOK),
-		PayloadHash: task.PayloadHash([]byte(submitPayloadOK)), Amount: 5,
-	})
-	if err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-	var event string
-	var opts *repository.SetSubmissionStateOpts
-	switch state {
-	case task.SubSettled:
-		event = task.EventDeliver2XX
-		opts = &repository.SetSubmissionStateOpts{Verdict: verdict}
-	case task.SubRejected:
-		event = task.EventDeliver4XX
-		opts = &repository.SetSubmissionStateOpts{Verdict: verdict}
-	default: // failed
-		event = task.EventDeliveryFailed
-		reason := "RECEIVER_FAULT"
-		opts = &repository.SetSubmissionStateOpts{Failure: &reason}
-	}
-	if err := repository.SetSubmissionState(ctx, tx, subID, task.SubDelivering, event, opts); err != nil {
-		t.Fatalf("terminate: %v", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	return subID
-}
-
-func TestPurgeExpiredPayloads(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	ctx := context.Background()
-
-	code := workOpenTask(t, pool, publisher, 1000, nil).Code
-	old := seedTerminal(t, pool, agent, code, task.SubRejected,
-		[]byte(`{"accepted":false,"criteria":["C1"],"reason":"r","retryable":true,"source":"receiver"}`))
-
-	// a live (delivering) submission must never be purged
-	tx, _ := pool.TxBegin(ctx)
-	live, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: mustTaskID(t, pool, code), Version: 1, AgentID: agent,
-		RequestKey: fmt.Sprintf("live-%d", time.Now().UnixNano()),
-		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)), Amount: 5,
-	})
-	if err != nil {
-		t.Fatalf("live insert: %v", err)
-	}
-	if err := repository.ReserveTaskAmount(ctx, tx, mustTaskID(t, pool, code), 5); err != nil {
-		t.Fatalf("reserve: %v", err)
-	}
-	_ = tx.Commit(ctx)
-
-	subBefore, _ := repository.FindSubmissionByID(ctx, pool, old)
-	eventsBefore, _ := repository.ListSubmissionEvents(ctx, pool, old)
-
-	// 29 days: nothing purged
-	if p, s, err := PurgeExpired(ctx, pool, time.Now().Add(29*24*time.Hour), 500); err != nil || p != 0 || s != 0 {
-		t.Fatalf("29d purge (payloads=%d snapshots=%d err=%v)", p, s, err)
-	}
-
-	// 31 days: the seeded terminal payload goes. The cutoff lands one
-	// day in the FUTURE, so the terminal rows earlier tests in this
-	// package left purge in the same pass — assert >= 1; the exact
-	// outcome of THIS row (hash, verdict, events stay) follows.
-	payloads, _, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500)
-	if err != nil || payloads < 1 {
-		t.Fatalf("31d purge (payloads=%d err=%v)", payloads, err)
-	}
-	subAfter, _ := repository.FindSubmissionByID(ctx, pool, old)
-	if subAfter.Payload != nil {
-		t.Fatalf("payload not purged: %s", subAfter.Payload)
-	}
-	if subAfter.PayloadHash != subBefore.PayloadHash {
-		t.Fatal("payload_hash changed")
-	}
-	if string(subAfter.Verdict) != string(subBefore.Verdict) {
-		t.Fatalf("verdict changed: %s", subAfter.Verdict)
-	}
-	eventsAfter, _ := repository.ListSubmissionEvents(ctx, pool, old)
-	if len(eventsAfter) != len(eventsBefore) {
-		t.Fatalf("events = %d, want unchanged %d", len(eventsAfter), len(eventsBefore))
-	}
-
-	liveSub, _ := repository.FindSubmissionByID(ctx, pool, live)
-	if liveSub.Payload == nil {
-		t.Fatal("non-terminal payload purged")
-	}
-	// idempotent second pass
-	if p, _, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500); err != nil || p != 0 {
-		t.Fatalf("second pass (payloads=%d err=%v)", p, err)
-	}
-	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
 func TestPurgeExpiredSnapshots(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)
@@ -220,7 +107,7 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 	}
 	open := workOpenTask(t, pool, publisher, 1000, withHarness)
 
-	snapshot := func(taskID int64) (harness string, examples int, criteria []string, schemaPresent bool) {
+	snapshot := func(taskID int64) (harness string, sample string, requirements string, schemaPresent bool) {
 		v, err := repository.FindTaskVersion(ctx, pool, taskID, 1)
 		if err != nil || v == nil {
 			t.Fatalf("version: %v", err)
@@ -229,44 +116,40 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 		if err := json.Unmarshal(v.Contract, &contract); err != nil {
 			t.Fatalf("contract: %v", err)
 		}
-		ex, _ := contract["examples"].([]any)
-		crit := contract["acceptance"].(map[string]any)["criteria"].([]any)
-		ids := make([]string, 0, len(crit))
-		for _, cc := range crit {
-			ids = append(ids, cc.(map[string]any)["id"].(string))
-		}
+		smp, _ := json.Marshal(contract["sample"])
+		req, _ := contract["requirements"].(string)
 		_, schemaPresent = contract["output"].(map[string]any)["schema"]
-		return string(v.Harness), len(ex), ids, schemaPresent
+		return string(v.Harness), string(smp), req, schemaPresent
 	}
 
 	// 29 days: nothing
-	if _, s, err := PurgeExpired(ctx, pool, time.Now().Add(29*24*time.Hour), 500); err != nil || s != 0 {
+	if s, err := PurgeExpired(ctx, pool, time.Now().Add(29*24*time.Hour), 500); err != nil || s != 0 {
 		t.Fatalf("29d snapshots=%d err=%v", s, err)
 	}
 	// 31 days: the closed task's snapshot empties; the open one stays
-	_, snapshots, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500)
+	snapshots, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500)
 	if err != nil || snapshots != 1 {
 		t.Fatalf("31d purge (snapshots=%d err=%v)", snapshots, err)
 	}
-	harness, examples, criteria, schemaPresent := snapshot(closed.ID)
+	harness, sample, requirements, schemaPresent := snapshot(closed.ID)
 	if harness != "[]" {
 		t.Fatalf("closed harness = %s, want []", harness)
 	}
-	if examples != 0 {
-		t.Fatalf("closed examples len = %d, want 0", examples)
+	if sample != "{}" {
+		t.Fatalf("closed sample = %s, want {}", sample)
 	}
-	if len(criteria) != 2 { // C1, C2 stay for audit
-		t.Fatalf("criteria = %v, want kept", criteria)
+	if requirements == "" { // the rest of the contract stays for audit
+		t.Fatal("requirements dropped")
 	}
 	if !schemaPresent {
 		t.Fatal("schema dropped")
 	}
-	openHarness, openExamples, _, _ := snapshot(open.ID)
-	if openHarness == "[]" || openExamples == 0 {
+	openHarness, openSample, _, _ := snapshot(open.ID)
+	if openHarness == "[]" || openSample == "{}" {
 		t.Fatal("open task snapshot was purged")
 	}
 	// idempotent second pass
-	if _, s, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500); err != nil || s != 0 {
+	if s, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500); err != nil || s != 0 {
 		t.Fatalf("second pass (snapshots=%d err=%v)", s, err)
 	}
 	for _, id := range []int64{closed.ID, open.ID} {

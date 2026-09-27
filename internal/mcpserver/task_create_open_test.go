@@ -33,13 +33,15 @@ func w11Register(t *testing.T, pool *pg.Pool) (string, string, int64) {
 	return "", name, id
 }
 
-// w11Args is the minimal 3-field contract call body.
+// w11Args is a minimal contract call body (required fields only).
 func w11Args(budget int64, open bool) []byte {
 	raw, _ := json.Marshal(map[string]any{
 		"contract": map[string]any{
-			"title":     "Summarize a page",
-			"objective": "Three bullets of the page.",
-			"price":     5,
+			"title":        "Summarize a page",
+			"requirements": "Three bullets of the page.",
+			"receiver":     map[string]any{"url": okReceiverURL},
+			"sample":       map[string]any{"result": "three bullets"},
+			"price":        5,
 		},
 		"budget": budget,
 		"open":   open,
