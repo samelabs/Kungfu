@@ -43,16 +43,16 @@ type SubmitInput struct {
 
 // SubmissionView is the intake + delivery return structure.
 type SubmissionView struct {
-	SubmissionID   int64      `json:"submission_id"`
-	TaskCode       string     `json:"task_code"`
-	Version        int32      `json:"version"`
-	State          string     `json:"state"`
-	Amount         int64      `json:"amount"`
-	Verdict        []byte     `json:"verdict,omitempty"`
-	Paid           int64      `json:"paid"`
-	Failure        *string    `json:"failure,omitempty"`
-	ReviewDeadline *time.Time `json:"review_deadline,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	SubmissionID   int64           `json:"submission_id"`
+	TaskCode       string          `json:"task_code"`
+	Version        int32           `json:"version"`
+	State          string          `json:"state"`
+	Amount         int64           `json:"amount"`
+	Verdict        json.RawMessage `json:"verdict,omitempty"`
+	Paid           int64           `json:"paid"`
+	Failure        *string         `json:"failure,omitempty"`
+	ReviewDeadline *time.Time      `json:"review_deadline,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView {
@@ -62,7 +62,7 @@ func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView 
 		Version:        s.Version,
 		State:          s.State,
 		Amount:         s.Amount,
-		Verdict:        s.Verdict,
+		Verdict:        json.RawMessage(s.Verdict),
 		Failure:        s.Failure,
 		ReviewDeadline: s.ReviewDeadline,
 		CreatedAt:      s.CreatedAt,

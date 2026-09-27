@@ -305,8 +305,10 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT bot_name FROM tb_bots WHERE id=$1`, publisher).Scan(&publisherName)
 	// §10.8: no receiver, no publisher identity. The bare numeric id is
 	// not banned as a substring (any number could contain it); the
-	// dedicated key, the bot name and the receiver are.
-	banned := []string{"receiver", rcv.url, `"publisher_id"`, publisherName}
+	// dedicated key, the bot name and the receiver are. The receiver is
+	// banned as a KEY shape ("receiver":) — verdict.source = "receiver"
+	// is a §6.1 protocol value, not a leak.
+	banned := []string{`"receiver":`, rcv.url, `"publisher_id"`, publisherName}
 
 	assertClean := func(t *testing.T, name string, v any) {
 		t.Helper()

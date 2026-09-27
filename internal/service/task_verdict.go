@@ -122,7 +122,7 @@ type publisherSubmissionRow struct {
 	Version        int32           `json:"version"`
 	State          string          `json:"state"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
-	Verdict        []byte          `json:"verdict,omitempty"`
+	Verdict        json.RawMessage `json:"verdict,omitempty"`
 	Failure        *string         `json:"failure,omitempty"`
 	ReviewDeadline *time.Time      `json:"review_deadline,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
@@ -179,7 +179,7 @@ func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID
 			Version:        s.Version,
 			State:          s.State,
 			Payload:        s.Payload,
-			Verdict:        s.Verdict,
+			Verdict:        json.RawMessage(s.Verdict),
 			Failure:        s.Failure,
 			ReviewDeadline: s.ReviewDeadline,
 			CreatedAt:      s.CreatedAt,
