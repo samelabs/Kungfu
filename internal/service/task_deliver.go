@@ -196,7 +196,7 @@ func replyBody(body *string) *string {
 
 // writeDeliveryOutcome applies one delivery outcome atomically: state +
 // event via SetSubmissionState, plus the settlement or reservation
-// release, under the submission row lock, only if the state did not
+// release, under the task and submission row locks, only if the state did not
 // change since delivery started (a concurrent writer wins and its
 // outcome stands).
 func writeDeliveryOutcome(ctx context.Context, pool *pg.Pool, pre *repository.SubmissionRow,
@@ -212,6 +212,13 @@ func writeDeliveryOutcome(ctx context.Context, pool *pg.Pool, pre *repository.Su
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
+	// Global lock order Task → Claim → Submission (WO-7c): the task row
+	// first, since settlement / release move its counters. Locking the
+	// submission first deadlocks against a concurrent intake that holds
+	// the task lock and waits on this submission's unique key.
+	if _, err := repository.FindTaskByIDForUpdate(writeCtx, tx, pre.TaskID); err != nil {
+		return errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
 	current, err := repository.FindSubmissionByIDForUpdate(writeCtx, tx, pre.SubmissionID)
 	if err != nil || current == nil {
 		return errors.New(0, "INTERNAL_ERROR", "Database error")
