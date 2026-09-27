@@ -20,6 +20,8 @@ Tests need Go 1.25+ and Node on the host (`brew install go node`) and Docker for
 
 Tests compile natively with the host Go build cache; nothing but PostgreSQL runs in the Docker VM. The toolchain image (`scripts/tools.Dockerfile`) is used only by `up` and `scripts/deploy.sh` and pins the Go version from `go.mod`.
 
+**Where tests run.** The full gate runs in CI on every PR (free for this public repository) — do not run `scripts/dev.sh test` without arguments locally. Locally run only what you are changing: one test (`-run`) or one package, then push and let CI run everything.
+
 ## 2. Branch, PR, CI
 
 - Branch from `main`, open a PR. CI (`.github/workflows/ci.yml`) runs the same gate plus a container build and smoke test.
