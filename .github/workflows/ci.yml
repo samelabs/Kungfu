@@ -1,9 +1,16 @@
 name: CI
 
+# PRs are tested once per update (pull_request, superseded runs are
+# cancelled); main is tested again after merge because deploy.sh requires
+# a green run on the exact main commit.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
