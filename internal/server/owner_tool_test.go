@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,20 @@ func TestOwnerTaskPages(t *testing.T) {
 // TestOwnerConsoleEndToEnd: create(async) → open → another bot submits
 // via /api/v1 work_submit → console sees under_review → task_verdict
 // accept → settled; CheckInvariants at the end.
+// parseWireID reads a wire id (string) as int64.
+func parseWireID(t *testing.T, v any) int64 {
+	t.Helper()
+	s, ok := v.(string)
+	if !ok {
+		t.Fatalf("wire id %v is not a string", v)
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		t.Fatalf("wire id %q: %v", s, err)
+	}
+	return n
+}
+
 func TestOwnerConsoleEndToEnd(t *testing.T) {
 	s, pool, name, botID := ownerConsoleEnv(t)
 	ctx := context.Background()
@@ -213,7 +228,7 @@ func TestOwnerConsoleEndToEnd(t *testing.T) {
 	if rec.Code != 200 || subEnv["state"] != "under_review" {
 		t.Fatalf("agent submit: %d %v", rec.Code, subEnv)
 	}
-	subID := int64(subEnv["submission_id"].(float64))
+	subID := parseWireID(t, subEnv["submission_id"])
 
 	// console queue shows the under_review row with agent_ref + payload
 	_, env = ocCall(t, s, cookie, "task_submissions", map[string]any{"code": code, "state": "under_review"})
@@ -222,7 +237,7 @@ func TestOwnerConsoleEndToEnd(t *testing.T) {
 	}
 	rows := env["submissions"].([]any)
 	row := rows[0].(map[string]any)
-	if row["submission_id"].(float64) != float64(subID) || row["agent_ref"] == "" || row["payload"] == nil {
+	if row["submission_id"].(string) != fmt.Sprint(subID) || row["agent_ref"] == "" || row["payload"] == nil {
 		t.Fatalf("submission row: %v", row)
 	}
 

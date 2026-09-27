@@ -125,7 +125,7 @@ func TestVerdictNotUnderReview(t *testing.T) {
 	if view.State != task.SubSettled {
 		t.Fatalf("setup state = %s", view.State)
 	}
-	_, err := SubmitVerdict(ctx, pool, publisher, view.SubmissionID,
+	_, err := SubmitVerdict(ctx, pool, publisher, view.SubmissionID.Int64(),
 		[]byte(`{"accepted":true}`), time.Now())
 	appErr := appErrOf(t, err)
 	if appErr.Code != "NOT_UNDER_REVIEW" || appErr.Details["state"] != task.SubSettled {
@@ -207,7 +207,7 @@ func TestListSubmissionsForPublisher(t *testing.T) {
 
 	// state filter + pagination on the async task
 	rv, rtotal, err := ListSubmissionsForPublisher(ctx, pool, publisher, c2, task.SubUnderReview, 1, 10, testAgentRefKey)
-	if err != nil || rtotal != 1 || len(rv) != 1 || rv[0].SubmissionID != r1 {
+	if err != nil || rtotal != 1 || len(rv) != 1 || rv[0].SubmissionID.Int64() != r1 {
 		t.Fatalf("filtered: rows=%d total=%d err=%v", len(rv), rtotal, err)
 	}
 
@@ -221,15 +221,15 @@ func TestListSubmissionsForPublisher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second review submission: %v", err)
 	}
-	r2 := r2view.SubmissionID
+	r2 := r2view.SubmissionID.Int64()
 	page1, total2, _ := ListSubmissionsForPublisher(ctx, pool, publisher, c2, "", 1, 1, testAgentRefKey)
 	page2, _, _ := ListSubmissionsForPublisher(ctx, pool, publisher, c2, "", 2, 1, testAgentRefKey)
 	if total2 != 2 || len(page1) != 1 || len(page2) != 1 || page1[0].SubmissionID == page2[0].SubmissionID {
 		t.Fatalf("pagination: total=%d p1=%v p2=%v", total2, page1, page2)
 	}
 	// newest first
-	if page1[0].SubmissionID != r2 {
-		t.Fatalf("order: first = %d, want %d (newest)", page1[0].SubmissionID, r2)
+	if page1[0].SubmissionID.Int64() != r2 {
+		t.Fatalf("order: first = %d, want %d (newest)", page1[0].SubmissionID.Int64(), r2)
 	}
 
 	if _, _, err := ListSubmissionsForPublisher(ctx, pool, stranger, code, "", 1, 10, testAgentRefKey); appErrOf(t, err).Code != "NOT_OWNER" {

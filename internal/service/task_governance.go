@@ -164,7 +164,7 @@ func ResolveReport(ctx context.Context, pool *pg.Pool, adminID int64, reportID i
 			return nil, err
 		}
 		return map[string]any{
-			"report_id": reportID, "status": reportActioned, "task": view,
+			"report_id": WireID(reportID), "status": reportActioned, "task": view,
 		}, nil
 	}
 
@@ -203,7 +203,7 @@ func ResolveReport(ctx context.Context, pool *pg.Pool, adminID int64, reportID i
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return map[string]any{"report_id": reportID, "status": reportDismissed}, nil
+	return map[string]any{"report_id": WireID(reportID), "status": reportDismissed}, nil
 }
 
 // insertReportResolvedAudit appends the report-resolution audit row on

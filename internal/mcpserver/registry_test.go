@@ -186,9 +186,9 @@ func TestRegistryEveryToolBothChannels(t *testing.T) {
 		t.Fatalf("work_claim: %+v / %+v", e4m, e4h)
 	}
 	assertJSONEqual(t, "work_claim", e4m, e4h)
-	claimID := int64(numOff(e4m["claim_id"]))
+	claimID, _ := e4m["claim_id"].(string) // ids are strings on the wire
 
-	// 5. work_claim_renew
+	// 5. work_claim_renew (the string id exercises the dual input)
 	e5m, i5 := mcp("work_claim_renew", map[string]any{"claim_id": claimID})
 	e5h, s5 := httpCall("work_claim_renew", map[string]any{"claim_id": claimID})
 	if i5 || s5 != 200 || e5m["next_action"] != "submit" {
@@ -255,7 +255,7 @@ func TestRegistryEveryToolBothChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim c1: %v", err)
 	}
-	e10m, i10 := mcpCallRelease(t, srv, otherKey, c1.ClaimID)
+	e10m, i10 := mcpCallRelease(t, srv, otherKey, c1.ClaimID.Int64())
 	if i10 || e10m["status"] != task.ClaimReleased {
 		t.Fatalf("work_release mcp: %+v", e10m)
 	}
@@ -396,7 +396,7 @@ func wo7AcceptAll(t *testing.T, pool *pg.Pool, publisher int64, code string) {
 		t.Fatalf("list: %v", err)
 	}
 	for _, r := range rows {
-		if _, err := service.SubmitVerdict(ctx, pool, publisher, r.SubmissionID,
+		if _, err := service.SubmitVerdict(ctx, pool, publisher, r.SubmissionID.Int64(),
 			[]byte(`{"accepted":true}`), time.Now()); err != nil {
 			t.Fatalf("verdict: %v", err)
 		}

@@ -297,7 +297,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 }
 ```
 
-`verdict` 含 `annotations`；`work_status` 另返回 `events[]`（SubmissionEvent）。
+`verdict` 含 `annotations`；`work_status` 另返回 `events[]`（SubmissionEvent）。ID 字段（`submission_id`、`claim_id`、`report_id`、`revises`）在输出中为字符串，输入接受字符串或整数。
 
 ### 8.3 next_action
 

@@ -263,7 +263,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 	// one settled submission (a verdict already applied)
-	if _, err := service.SubmitVerdict(ctx, pool, pubID, subView.SubmissionID,
+	if _, err := service.SubmitVerdict(ctx, pool, pubID, subView.SubmissionID.Int64(),
 		[]byte(`{"accepted":true}`), time.Now()); err != nil {
 		t.Fatalf("verdict: %v", err)
 	}
@@ -392,13 +392,13 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 		}},
 		{"VERDICT_INVALID", "", 422, func() (map[string]any, int) {
 			return call(pubBot, "task_verdict", map[string]any{
-				"submission_id": freshView.SubmissionID,
+				"submission_id": freshView.SubmissionID.Int64(),
 				"verdict":       map[string]any{"accepted": false, "criteria": []string{"C9"}, "reason": "undeclared"},
 			})
 		}},
 		{"NOT_UNDER_REVIEW", "", 409, func() (map[string]any, int) {
 			return call(pubBot, "task_verdict", map[string]any{
-				"submission_id": subView.SubmissionID, // already settled by the timeout-past verdict above
+				"submission_id": subView.SubmissionID.Int64(), // already settled by the timeout-past verdict above
 				"verdict":       map[string]any{"accepted": true},
 			})
 		}},

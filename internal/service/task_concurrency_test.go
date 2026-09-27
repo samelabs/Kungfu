@@ -87,13 +87,13 @@ func TestConcurrentSubmitVersusClaimOps(t *testing.T) {
 
 	// submit × renew
 	runConcurrent(t, 5, submit, func(round int) error {
-		_, err := RenewClaim(ctx, pool, agent, claim.ClaimID, time.Now())
+		_, err := RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), time.Now())
 		return err
 	})
 	// submit × release (release wins exactly once; later rounds error
 	// CLAIM_INVALID which is legal)
 	runConcurrent(t, 5, submit, func(round int) error {
-		_, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID, time.Now())
+		_, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID.Int64(), time.Now())
 		return err
 	})
 	// submit × ExpireClaims
@@ -284,7 +284,7 @@ func TestClaimExpiresStaleActiveClaim(t *testing.T) {
 	if fresh.ClaimID == stale.ClaimID {
 		t.Fatal("stale active claim returned instead of a new one")
 	}
-	old, _ := repository.FindClaimByID(ctx, pool, stale.ClaimID)
+	old, _ := repository.FindClaimByID(ctx, pool, stale.ClaimID.Int64())
 	if old.Status != task.ClaimExpired {
 		t.Fatalf("stale claim status = %s, want expired", old.Status)
 	}
@@ -326,7 +326,7 @@ func TestRenewUsesClaimVersionTTL(t *testing.T) {
 	}
 
 	// renew at t0+100: expires = min(t0+100+600(v1 ttl), deadline) = t0+700
-	view, err := RenewClaim(ctx, pool, agent, claim.ClaimID, t0.Add(100*time.Second))
+	view, err := RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), t0.Add(100*time.Second))
 	if err != nil {
 		t.Fatalf("renew: %v", err)
 	}

@@ -52,13 +52,13 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	if id, ok, err := repository.FindOpenReportByReporterTask(ctx, pool, t.ID, agentID); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if ok {
-		return map[string]any{"report_id": id, "status": "open"}, nil
+		return map[string]any{"report_id": WireID(id), "status": "open"}, nil
 	}
 	id, err := repository.InsertTaskReport(ctx, pool, t.ID, agentID, reason)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return map[string]any{"report_id": id, "status": "open"}, nil
+	return map[string]any{"report_id": WireID(id), "status": "open"}, nil
 }
 
 // retentionWindow is §9: terminal material is kept 30 days.

@@ -52,6 +52,10 @@ var e2eTLSCert tls.Certificate
 func TestMain(m *testing.M) {
 	e2eTLSCert = mustE2ECert()
 	restore := delivery.AllowLoopbackForTest()
+	// the write-back retry schedule is seconds in production; the e2e
+	// journeys only need the retry SHAPE, not the spacing
+	verdictRetryBackoff = []time.Duration{
+		50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
 	code := m.Run()
 	restore()
 	os.Exit(code)
@@ -206,14 +210,15 @@ func (e *e2eEnv) seedAccount(t *testing.T, balance int64) (int64, string) {
 }
 
 // startReceiver loads a receiver config and serves it over TLS with
-// the fault injector in front.
-func (e *e2eEnv) startReceiver(t *testing.T, cfgJSON string) {
+// the fault injector in front. env carries the receiver's own
+// outbound credentials (the async verdict write-back).
+func (e *e2eEnv) startReceiver(t *testing.T, cfgJSON string, env envConfig) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "receiver.json")
 	if err := os.WriteFile(path, []byte(cfgJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := loadConfig(path, envConfig{})
+	r, err := loadConfig(path, env)
 	if err != nil {
 		t.Fatalf("receiver config: %v", err)
 	}
@@ -414,7 +419,7 @@ func wantActions(t *testing.T, steps []map[string]any, want ...string) {
 func TestE2EJourney1SyncAccepted(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url","/bullets"]}]}`)
+		{"id":"C1","required":["/url","/bullets"]}]}`, envConfig{})
 
 	// a publisher memory doubles as the harness snapshot
 	memCode := fmt.Sprintf("w1%010d", time.Now().UnixNano()%10_000_000_000)
@@ -468,7 +473,7 @@ func TestE2EJourney1SyncAccepted(t *testing.T) {
 func TestE2EJourney2SyncRevise(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://[^\\s]+$"}}]}`)
+		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://[^\\s]+$"}}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, nil))
 
 	d2 := drive{
@@ -504,7 +509,7 @@ func TestE2EJourney2SyncRevise(t *testing.T) {
 		tr.ID).Scan(&revises); err != nil {
 		t.Fatalf("no revising submission: %v", err)
 	}
-	if rejected["submission_id"].(float64) != float64(revises) {
+	if rejected["submission_id"].(string) != fmt.Sprint(revises) {
 		t.Fatalf("revises = %d, want the rejected %v", revises, rejected["submission_id"])
 	}
 	e.checkInvariants(t, code)
@@ -562,12 +567,100 @@ func TestE2EJourney3AsyncVerdictAndTimeout(t *testing.T) {
 	e.checkInvariants(t, code)
 }
 
+// 3c) the reference receiver in ASYNC mode: submissions park in
+// under_review, the receiver judges in the background and writes the
+// verdict back through POST /api/v1/task_verdict with the publisher
+// key — reject (revise), then the revision is accepted.
+func TestE2EJourney3cAsyncReceiverWriteBack(t *testing.T) {
+	e := newE2EEnv(t)
+	// pattern fails on the first payload, passes after the revision
+	e.startReceiver(t, `{"mode":"async","listen":"127.0.0.1:0","criteria":[
+		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://[^\\s]+$"}}]}`,
+		envConfig{kungfuBaseURL: e.kungfu.URL, agentKey: e.pubKey})
+	code := e.publishTask(t, e2eContract(e.rcv.URL, func(c map[string]any) {
+		c["acceptance"] = map[string]any{
+			"mode":          "async",
+			"review_window": 3600,
+			"criteria":      []any{map[string]any{"id": "C1", "kind": "rule", "description": "https url"}},
+		}
+	}))
+
+	// waitWriteBack polls until the receiver's background verdict
+	// lands: the submission leaves under_review (→ rejected or settled)
+	waitWriteBack := func(env map[string]any) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			sub, _ := repository.FindSubmissionByID(context.Background(), e.pool,
+				parseID(t, env["submission_id"]))
+			if sub != nil && sub.State != task.SubUnderReview && sub.State != "" {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("receiver write-back did not land within 5s (submission %v)",
+			env["submission_id"])
+	}
+
+	wb := drive{
+		agent: e.agent,
+		payload: map[string]any{"url": "ftp://example.com/a",
+			"bullets": []string{"s1", "s2", "s3"}},
+		key:    code + "-wb",
+		onPoll: func(env map[string]any) { waitWriteBack(env) },
+		onRevise: func(int) map[string]any {
+			return map[string]any{"url": "https://example.com/fixed", "bullets": []string{"s1", "s2", "s3"}}
+		},
+	}
+	steps := wb.run(t, code)
+	// Two legal orders: the 202 envelope may reach the executor before
+	// or after the background write-back lands.
+	got := strings.Join(nextActions(steps), ",")
+	if got != "revise,done" && !strings.HasPrefix(got, "poll,revise,poll,done") {
+		t.Fatalf("step chain = %q, want revise→done (write-back won the race) or poll→revise→poll→done", got)
+	}
+	var rejected map[string]any
+	for _, st := range steps {
+		if st["state"] == "rejected" {
+			rejected = st
+		}
+	}
+	if rejected == nil {
+		t.Fatalf("no rejected step in %v", nextActions(steps))
+	}
+	if v, _ := rejected["verdict"].(map[string]any); v == nil || v["source"] != "publisher" {
+		t.Fatalf("write-back rejection missing or wrong source: %v", rejected)
+	}
+	final := steps[len(steps)-1]
+	if final["state"] != "settled" || final["paid"].(float64) != 5 {
+		t.Fatalf("final step: %v", final)
+	}
+	e.checkInvariants(t, code)
+}
+
+// parseID reads a wire id (string or number) as int64.
+func parseID(t *testing.T, v any) int64 {
+	t.Helper()
+	switch n := v.(type) {
+	case string:
+		var id int64
+		if _, err := fmt.Sscanf(n, "%d", &id); err != nil {
+			t.Fatalf("bad id %q", n)
+		}
+		return id
+	case float64:
+		return int64(n)
+	}
+	t.Fatalf("bad id %v", v)
+	return 0
+}
+
 // 4) claims: claim → renew → submit with the claim; then a claim aged
 // past its TTL → CLAIM_INVALID/retry → re-claim → done.
 func TestE2EJourney4ClaimLifecycle(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url"]}]}`)
+		{"id":"C1","required":["/url"]}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, func(c map[string]any) {
 		c["claim"] = map[string]any{"required": true}
 	}))
@@ -600,6 +693,9 @@ func TestE2EJourney4ClaimLifecycle(t *testing.T) {
 		},
 	}
 	steps2 := d4.run(t, code)
+	for i, st := range steps2 {
+		t.Logf("J4b step %d: %v", i, st)
+	}
 	wantActions(t, steps2, "retry", "done")
 	if errObj, _ := steps2[0]["error"].(map[string]any); errObj["code"] != "CLAIM_INVALID" {
 		t.Fatalf("first step error = %v, want CLAIM_INVALID", steps2[0]["error"])
@@ -612,7 +708,7 @@ func TestE2EJourney4ClaimLifecycle(t *testing.T) {
 func TestE2EJourney5UncertainRecovery(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url"]}]}`)
+		{"id":"C1","required":["/url"]}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, nil))
 
 	e.injector.hang.Store(1) // the first delivery stalls past 10s
@@ -646,7 +742,7 @@ func TestE2EJourney5UncertainRecovery(t *testing.T) {
 func TestE2EJourney6ReceiverFaultPause(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url"]}]}`)
+		{"id":"C1","required":["/url"]}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, nil))
 
 	e.injector.fail.Store(1000) // every delivery 503s
@@ -678,7 +774,7 @@ func TestE2EJourney6ReceiverFaultPause(t *testing.T) {
 func TestE2EJourney7RejectionCap(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://never\\.matches$"}}]}`)
+		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://never\\.matches$"}}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, func(c map[string]any) {
 		c["limits"] = map[string]any{"max_rejected_per_agent": 1}
 	}))
@@ -703,7 +799,7 @@ func TestE2EJourney7RejectionCap(t *testing.T) {
 func TestE2EJourney8SchemaMismatchRevise(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url"]}]}`)
+		{"id":"C1","required":["/url"]}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, nil))
 
 	d8 := drive{

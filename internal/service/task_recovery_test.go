@@ -51,7 +51,7 @@ func makeUncertain(t *testing.T, pool *pg.Pool, publisher, agent int64, rcv *pro
 	if view.State != task.SubUncertain {
 		t.Fatalf("state = %s, want uncertain", view.State)
 	}
-	return code, view.SubmissionID
+	return code, view.SubmissionID.Int64()
 }
 
 // -- uncertain redelivery --
@@ -291,7 +291,7 @@ func makeUnderReview(t *testing.T, pool *pg.Pool, publisher, agent int64, rcv *p
 	if view.State != task.SubUnderReview {
 		t.Fatalf("state = %s, want under_review", view.State)
 	}
-	return code, view.SubmissionID
+	return code, view.SubmissionID.Int64()
 }
 
 func TestExpireReviewsOverdue(t *testing.T) {

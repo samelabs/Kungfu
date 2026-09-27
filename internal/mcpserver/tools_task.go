@@ -113,12 +113,15 @@ func handleWorkClaim(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 
 func handleWorkClaimRenew(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		ClaimID int64 `json:"claim_id"`
+		ClaimID service.WireID `json:"claim_id"` // string or integer on the wire
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.ClaimID == 0 {
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{}, argError("claim_id must be an integer or a numeric string")
+	}
+	if in.ClaimID == 0 {
 		return ToolResult{}, argError("claim_id is required")
 	}
-	view, err := service.RenewClaim(ctx, deps.Pool, agent.ID, in.ClaimID, time.Now())
+	view, err := service.RenewClaim(ctx, deps.Pool, agent.ID, in.ClaimID.Int64(), time.Now())
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -132,12 +135,15 @@ func handleWorkClaimRenew(ctx context.Context, deps *Deps, agent *model.Bot, arg
 
 func handleWorkRelease(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		ClaimID int64 `json:"claim_id"`
+		ClaimID service.WireID `json:"claim_id"` // string or integer on the wire
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.ClaimID == 0 {
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{}, argError("claim_id must be an integer or a numeric string")
+	}
+	if in.ClaimID == 0 {
 		return ToolResult{}, argError("claim_id is required")
 	}
-	view, err := service.ReleaseClaim(ctx, deps.Pool, agent.ID, in.ClaimID, time.Now())
+	view, err := service.ReleaseClaim(ctx, deps.Pool, agent.ID, in.ClaimID.Int64(), time.Now())
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -172,17 +178,17 @@ func handleWorkSubmit(ctx context.Context, deps *Deps, agent *model.Bot, args js
 
 func handleWorkStatus(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		SubmissionID *int64 `json:"submission_id"`
-		Code         string `json:"code"`
-		RequestKey   string `json:"request_key"`
+		SubmissionID *service.WireID `json:"submission_id"` // string or integer on the wire
+		Code         string          `json:"code"`
+		RequestKey   string          `json:"request_key"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return ToolResult{}, argError("arguments must match the tool schema")
+		return ToolResult{}, argError("submission_id must be an integer or a numeric string")
 	}
 	if in.SubmissionID == nil && (in.Code == "" || in.RequestKey == "") {
 		return ToolResult{}, argError("give submission_id or code + request_key")
 	}
-	m, err := service.GetSubmissionStatus(ctx, deps.Pool, agent.ID, in.SubmissionID, in.Code, in.RequestKey)
+	m, err := service.GetSubmissionStatus(ctx, deps.Pool, agent.ID, in.SubmissionID.Int64Ptr(), in.Code, in.RequestKey)
 	if err != nil {
 		return ToolResult{}, err
 	}

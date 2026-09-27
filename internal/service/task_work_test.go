@@ -290,7 +290,7 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 	// a sync task with a receiver, one settled submission by the agent
 	code := deliverSyncTask(t, pool, publisher, rcv, 1000)
 	view, _ := deliverSubmit(t, pool, agent, code)
-	subID := view.SubmissionID
+	subID := view.SubmissionID.Int64()
 
 	// a harness-backed task for GetHarness
 	pubSeedKungfu(t, pool, publisher, "harnessref02", "H")
@@ -369,11 +369,11 @@ func TestGetSubmissionStatus(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 
-	byID, err := GetSubmissionStatus(ctx, pool, agent, &view.SubmissionID, "", "")
+	byID, err := GetSubmissionStatus(ctx, pool, agent, view.SubmissionID.Int64Ptr(), "", "")
 	if err != nil {
 		t.Fatalf("by id: %v", err)
 	}
-	if int64(byID["submission_id"].(float64)) != view.SubmissionID {
+	if byID["submission_id"].(string) != fmt.Sprint(view.SubmissionID.Int64()) {
 		t.Fatalf("id mismatch: %v", byID["submission_id"])
 	}
 	events := byID["events"].([]eventView)
@@ -388,11 +388,11 @@ func TestGetSubmissionStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("by key: %v", err)
 	}
-	if int64(byKey["submission_id"].(float64)) != view.SubmissionID {
+	if byKey["submission_id"].(string) != fmt.Sprint(view.SubmissionID.Int64()) {
 		t.Fatalf("key lookup mismatch")
 	}
 
-	if _, err := GetSubmissionStatus(ctx, pool, stranger, &view.SubmissionID, "", ""); appErrOf(t, err).Code != "SUBMISSION_NOT_FOUND" {
+	if _, err := GetSubmissionStatus(ctx, pool, stranger, view.SubmissionID.Int64Ptr(), "", ""); appErrOf(t, err).Code != "SUBMISSION_NOT_FOUND" {
 		t.Fatalf("stranger: %v, want SUBMISSION_NOT_FOUND", err)
 	}
 	if _, err := GetSubmissionStatus(ctx, pool, agent, nil, code, "unknown-key"); appErrOf(t, err).Code != "SUBMISSION_NOT_FOUND" {
