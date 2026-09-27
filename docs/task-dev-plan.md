@@ -189,5 +189,6 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-8b：平台关闭与发布者关闭共用 Claim/预留处理；处置举报即关闭任务时该任务全部 open 举报置 actioned；首页任务板单查询、至多 20 条。
 - WO-7e：测试包串行（-p 1）共用一个测试库；列表查询以主键作为最终次序键。
 - WO-9a：对外文本以英文为准，内容只来自规范；发布者指南为 /task-guide.md；文本与注册表的一致性由测试保证。
+- WO-9b：参考接收端为 examples/receiver 单文件，不依赖 internal/；模型评分走 OpenAI 兼容接口，可选；async 判定经 /api/v1/task_verdict 回写。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。
