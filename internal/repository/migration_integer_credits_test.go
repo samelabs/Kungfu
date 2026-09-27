@@ -394,7 +394,7 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 		{"tb_bots", "balance"},
 		{"tb_transactions", "amount"}, {"tb_transactions", "balance_after"},
 		{"tb_payments", "credits"},
-		{"tb_rewards_products", "credits_price"},
+		{"tb_store_products", "credits_price"}, // chain ends at 009 (pre-018 name)
 		{"tb_redemptions", "credits_cost"},
 	} {
 		var dt string
