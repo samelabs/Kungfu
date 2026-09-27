@@ -43,7 +43,7 @@ func ListActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64, li
 		SELECT code, title, tags_json::text, description, visibility, created_at, updated_at
 		FROM tb_kungfus
 		WHERE bot_id = $1 AND status = 'active'
-		ORDER BY updated_at DESC
+		ORDER BY updated_at DESC, id DESC
 		LIMIT $2 OFFSET $3`, botID, limit, offset)
 	if err != nil {
 		return nil, err

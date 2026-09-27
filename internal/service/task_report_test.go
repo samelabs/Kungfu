@@ -170,7 +170,10 @@ func TestPurgeExpiredPayloads(t *testing.T) {
 		t.Fatalf("29d purge (payloads=%d snapshots=%d err=%v)", p, s, err)
 	}
 
-	// 31 days: the terminal payload goes; hash, verdict, events stay
+	// 31 days: the seeded terminal payload goes. The cutoff lands one
+	// day in the FUTURE, so the terminal rows earlier tests in this
+	// package left purge in the same pass — assert >= 1; the exact
+	// outcome of THIS row (hash, verdict, events stay) follows.
 	payloads, _, err := PurgeExpired(ctx, pool, time.Now().Add(31*24*time.Hour), 500)
 	if err != nil || payloads < 1 {
 		t.Fatalf("31d purge (payloads=%d err=%v)", payloads, err)

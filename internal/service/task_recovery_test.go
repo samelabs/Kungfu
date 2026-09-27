@@ -311,9 +311,10 @@ func TestExpireReviewsOverdue(t *testing.T) {
 		t.Fatalf("premature settlement: %s", sub.State)
 	}
 
-	// past the window: timeout acceptance with source=timeout. Other
-	// tests' overdue reviews in this database may expire too — assert
-	// on this submission, not on the pass count.
+	// past the window: timeout acceptance with source=timeout. Earlier
+	// tests in THIS package leave their own overdue reviews in the same
+	// database, which this pass also expires — assert on this
+	// submission, not on the pass count.
 	if n, err := ExpireReviews(ctx, pool, time.Now().Add(2*time.Hour), 100); err != nil || n < 1 {
 		t.Fatalf("expire (n=%d, err=%v)", n, err)
 	}
