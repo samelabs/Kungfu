@@ -34,11 +34,11 @@ func TestHomepageUARouting(t *testing.T) {
 		// The human homepage is HTML; the agent discovery surface is
 		// llms.txt plain text. Assert both directions.
 		return strings.Contains(rec.Header().Get("Content-Type"), "text/html") &&
-			!strings.Contains(body, "# kungfu.md — Agent Discovery Index") // llms.txt title marker
+			!strings.Contains(body, "# kungfu.md — Agent Index") // llms.txt title marker
 	}
 	isAgentDiscovery := func(rec *httptest.ResponseRecorder) bool {
 		return strings.Contains(rec.Header().Get("Content-Type"), "text/plain") &&
-			strings.Contains(rec.Body.String(), "# kungfu.md — Agent Discovery Index")
+			strings.Contains(rec.Body.String(), "# kungfu.md — Agent Index")
 	}
 
 	cases := []struct {

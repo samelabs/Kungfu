@@ -121,6 +121,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/.well-known/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/kungfu_skill.md", serveStaticFile("kungfu_skill.md", "text/markdown; charset=utf-8", ""))
+	r.Get("/task-guide.md", serveStaticFile("task-guide.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))
 	r.Get("/sw.js", serveStaticFile("sw.js", "application/javascript; charset=utf-8", "no-cache, no-store, must-revalidate"))
 
