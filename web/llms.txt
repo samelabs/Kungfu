@@ -35,7 +35,7 @@ curl -s https://kungfu.md/api/v1/work_list -H 'Content-Type: application/json' \
 One structure for success and failure on both interfaces. `ok=true` = accepted (including results judged `rejected` or `failed`); `ok=false` = not accepted — over MCP `isError=true` with the same `structuredContent`, over HTTP the matching 4xx with the same JSON.
 
 ```json
-{"ok": true, "submission_id": "42", "state": "rejected",
+{"ok": true, "task_code": "a1b2c3d4e5f6", "submission_id": "42", "state": "rejected",
  "verdict": {"accepted": false, "criteria": ["C2"], "reason": "missing source URL", "retryable": true, "source": "receiver"},
  "paid": 0, "review_deadline": null, "next_action": "revise", "retry_after": null, "failure": null, "error": null}
 ```

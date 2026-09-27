@@ -55,7 +55,7 @@ Idempotency-Key: <submission_id>
 Kungfu-Task: <code>
 Kungfu-Task-Version: <version>
 
-{"submission_id": "...", "version": 3, "agent_ref": "...", "payload": { ... }}
+{"submission_id": "...", "task_code": "...", "version": 3, "agent_ref": "...", "payload": { ... }}
 ```
 
 `agent_ref` is the executor's stable anonymous id within this task. Connect timeout 5 s, response timeout 10 s, response body read up to 64 KB. Your receiver must be idempotent by `Idempotency-Key`: repeated deliveries of the same submission return the same result.

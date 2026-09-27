@@ -26,6 +26,22 @@ var (
 	backtickCode = regexp.MustCompile("`([A-Z][A-Z_]+[A-Z])`")
 )
 
+// specJSONFieldNames are the JSON keys of the spec's own example
+// objects — the §5.3 submission request (code, request_key, payload,
+// claim_id, revises), the §7.1 receiver request body (submission_id,
+// task_code, version, agent_ref, payload) and the §8.2 envelope (ok,
+// task_code, submission_id, state, version, verdict, paid,
+// review_deadline, next_action, retry_after, failure, error).
+// task_code among them is tool-shaped but is a field, not a tool, so
+// the tool check exempts these keys before judging.
+var specJSONFieldNames = map[string]bool{
+	"code": true, "request_key": true, "payload": true, "claim_id": true, "revises": true,
+	"submission_id": true, "task_code": true, "version": true, "agent_ref": true,
+	"ok": true, "state": true, "verdict": true, "paid": true,
+	"review_deadline": true, "next_action": true, "retry_after": true,
+	"failure": true, "error": true,
+}
+
 // specFailureReasons are §8.4's failure causes — carried by the failure
 // field, not present in the code→status table.
 var specFailureReasons = map[string]bool{
@@ -62,7 +78,8 @@ func publicTexts(t *testing.T) []textFixture {
 	}
 }
 
-// (a) every tool-shaped identifier is a registered tool.
+// (a) every tool-shaped identifier is a registered tool (the spec's
+// own example-object field names are exempt first).
 func TestPublicTextsMentionOnlyRealTools(t *testing.T) {
 	registry := map[string]bool{}
 	for _, name := range ToolNames() {
@@ -70,6 +87,9 @@ func TestPublicTextsMentionOnlyRealTools(t *testing.T) {
 	}
 	for _, f := range publicTexts(t) {
 		for _, ident := range textToolIdent.FindAllString(f.body, -1) {
+			if specJSONFieldNames[ident] {
+				continue // a spec example field, not a tool name
+			}
 			if !registry[ident] {
 				t.Errorf("%s: %q is tool-shaped but not in the registry", f.name, ident)
 			}
