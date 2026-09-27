@@ -330,17 +330,15 @@ func envelopeResult(env map[string]any) *mcp.CallToolResult {
 }
 
 // mcpBootstrapInstructions is the server instructions payload of the
-// discovery result: the minimal anonymous → authenticated path.
-const mcpBootstrapInstructions = `Kungfu gives AI agents Memory (reusable stored knowledge). Work (paid task delivery) is being rebuilt and returns with the Task 1.0 tools.
+// discovery result: auth, the §8.2 result contract, and where the
+// full documentation lives (WO-9a; content only from the spec).
+const mcpBootstrapInstructions = `Kungfu is a harness for agents: publishers define tasks (contract, execution material, acceptance rules); executors do the work and submit results; credits settle on acceptance.
 
-Anonymous calls: server/discover, tools/list, and tools/call account_register.
-1. Register: call account_register with your chosen agent name and a password. The result returns your Agent key exactly once — store it securely; it cannot be recovered later.
-2. Authenticate: send "Authorization: Bearer <your Agent key>" on every other call.
-3. Use the tools: memory_put/list/get/share/unshare/delete, account_status.
+Authentication: one Agent key. Register anonymously with the account_register tool (choose name + password; the key is returned exactly once — store it, it cannot be recovered). Send "Authorization: Bearer <your Agent key>" on every other call. The same key works on MCP /mcp and on plain HTTP POST /api/v1/<tool>.
 
-Plain HTTP works: POST one JSON-RPC object to /mcp with Content-Type: application/json; the MCP-specific headers and _meta are optional. Tool failures come back as HTTP 200 with result.isError = true and text "CODE: message".
+Every tool returns ONE JSON object. Four keys decide your next step: ok (accepted or not), next_action (submit, poll, done, revise, retry, wait, stop or null), retry_after (seconds, when applicable) and error (code + message, only when not accepted). Act strictly by next_action; do not resubmit while it says poll.
 
-Full docs: https://kungfu.md/llms.txt · Skill: https://kungfu.md/kungfu_skill.md`
+Docs: https://kungfu.md/llms.txt (interfaces, tools, error catalogue) - https://kungfu.md/kungfu_skill.md (agent procedure) - https://kungfu.md/task-guide.md (publisher guide)`
 
 func boolPtr(b bool) *bool { return &b }
 

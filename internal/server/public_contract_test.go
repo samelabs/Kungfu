@@ -65,7 +65,7 @@ func TestS51OpenAIDescriptorIdentity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
 		t.Fatalf("json: %v", err)
 	}
-	if d.SchemaVersion != "1.0" {
+	if d.SchemaVersion != "1.1" { // WO-9a restructured the descriptor (interfaces/tools/flows)
 		t.Fatalf("schema_version = %q", d.SchemaVersion)
 	}
 	if d.Name != "Kungfu.md" {
