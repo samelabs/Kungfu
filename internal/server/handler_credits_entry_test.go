@@ -248,18 +248,18 @@ func TestOwnerCreditsPageWiring(t *testing.T) {
 	}
 }
 
-// /owner/store still intact
+// /owner/rewards still intact
 func TestOwnerStorePageStillWorks(t *testing.T) {
 	s := bcpServer(t, newBcpFake(t).URL)
 	router := s.buildRouter()
 	botID := bcpBot(t, s)
 	cookie := storeOwnerCookie(t, s, botID)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/owner/store", nil)
+	req := httptest.NewRequest(http.MethodGet, "/owner/rewards", nil)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-section="store"`) {
-		t.Fatalf("store page = %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-section="rewards"`) {
+		t.Fatalf("rewards page = %d", rec.Code)
 	}
 }
 

@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"kungfu.md/internal/i18n"
+	"kungfu.md/internal/payment"
 	"kungfu.md/internal/repository"
 	"kungfu.md/web"
 )
@@ -39,7 +42,7 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 	case "home":
 		s.renderHome(w, r, data)
 	case "credits":
-		s.renderCredits(w, data)
+		s.renderCredits(w, r, data)
 	case "owner":
 		s.renderOwner(w, data)
 	case "terms":
@@ -190,6 +193,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
             <div class="stream-panel active" data-stream-panel="tasks">` + taskBoard + `</div>
         </div>
     </div>
+    ` + s.homeCreditsBlockHTML(r.Context(), data.Locale) + `
     ` + siteFooter(data.Locale, langOpts, "home-lang-switch") + `
 </div>
 <script src="/assets/pwa-register.js"></script>
@@ -234,16 +238,85 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
 // taskBoardMax is the homepage board cap (WO-8b): one query, 20 rows.
 const taskBoardMax = 20
 
+// homeCreditsCatalog caches the public credits-package view for the
+// homepage and /credits (Creem's product API is remote; anonymous page
+// views must not hit it per request). 60s TTL; failures are not cached
+// — the block shows the "coming soon" state instead.
+var homeCreditsCatalog struct {
+	mu   sync.Mutex
+	at   time.Time
+	pkgs []payment.OwnerCreditsPackage
+}
+
+// publicCreditsPackages returns the live package list, or nil when
+// payments are unconfigured or the provider is unreachable.
+func (s *Server) publicCreditsPackages(ctx context.Context) []payment.OwnerCreditsPackage {
+	homeCreditsCatalog.mu.Lock()
+	defer homeCreditsCatalog.mu.Unlock()
+	if time.Since(homeCreditsCatalog.at) < 60*time.Second {
+		return homeCreditsCatalog.pkgs
+	}
+	rt := s.creemCheckoutRuntime(ctx)
+	if rt == nil {
+		return nil
+	}
+	pkgs, err := payment.ListCreemPackages(ctx, rt)
+	if err != nil {
+		log.Printf("public credits catalog unavailable: %v", err)
+		return nil
+	}
+	homeCreditsCatalog.pkgs, homeCreditsCatalog.at = pkgs, time.Now()
+	return pkgs
+}
+
+// homeCreditsBlockHTML renders the public credits section: what
+// credits are for, the non-transfer note, the refund/terms pointers,
+// and the configured top-up packages (or the coming-soon state).
+func (s *Server) homeCreditsBlockHTML(ctx context.Context, locale string) string {
+	pkgs := s.publicCreditsPackages(ctx)
+	var b strings.Builder
+	b.WriteString(`<div class="card credits-card" id="creditsBlock">`)
+	b.WriteString(`<h2>` + html.EscapeString(i18n.T(locale, "home.credits_title")) + `</h2>`)
+	b.WriteString(`<p>` + html.EscapeString(i18n.T(locale, "home.credits_sub")) + `</p>`)
+	if len(pkgs) == 0 {
+		b.WriteString(`<p class="muted">` + html.EscapeString(i18n.T(locale, "home.credits_soon")) + `</p>`)
+	} else {
+		b.WriteString(`<div class="credits-packages">`)
+		for _, p := range pkgs {
+			b.WriteString(`<div class="credits-package"><b>` + html.EscapeString(p.Name) + `</b>` +
+				`<span>` + html.EscapeString(fmt.Sprintf("%d %s", p.Credits, i18n.T(locale, "home.credits_unit"))) + `</span>` +
+				`<span class="credits-price">` + html.EscapeString(minorAmount(p.AmountMinor, p.Currency)) + `</span></div>`)
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<ul class="credits-notes">` +
+		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_use")) + `</li>` +
+		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_nontransfer")) + `</li>` +
+		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_refund")) +
+		` <a href="/terms">` + html.EscapeString(i18n.T(locale, "home.credits_terms")) + `</a>` +
+		` · <a href="/privacy">` + html.EscapeString(i18n.T(locale, "home.credits_privacy")) + `</a></li></ul>`)
+	b.WriteString(`<div class="actions"><a class="btn primary" href="` + i18n.LocaleURL(locale, "/owner/credits") + `">` +
+		html.EscapeString(i18n.T(locale, "home.credits_buy")) + `</a></div>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// minorAmount renders a fiat minor-unit price with its currency.
+func minorAmount(minor int64, currency string) string {
+	return fmt.Sprintf("%d.%02d %s", minor/100, minor%100, strings.ToUpper(currency))
+}
+
 // renderCredits renders the public credits explainer page: the real
 // economic mechanisms that exist today (earn_task, spend_redemption,
 // lock_task/refund_task) and the live entry points. It is a static public
 // page — no session/account fetch; balances live in the Owner Workspace.
 // The old web.StaticFile("credits_page.html") branch never resolved (the
 // file was never embedded) and its fallback promised a future "rewards
-// listing" that the shipped Store has since replaced.
-func (s *Server) renderCredits(w http.ResponseWriter, data *tmplData) {
+// listing" that the shipped Rewards page has since replaced.
+func (s *Server) renderCredits(w http.ResponseWriter, r *http.Request, data *tmplData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/credits")
+	creditsBlock := s.homeCreditsBlockHTML(r.Context(), data.Locale)
 
 	html := `<!DOCTYPE html>
 <html lang="` + html.EscapeString(data.Locale) + `">
@@ -264,13 +337,14 @@ func (s *Server) renderCredits(w http.ResponseWriter, data *tmplData) {
 </head>
 <body>
 <div class="wrap">
+    ` + creditsBlock + `
     <div class="card">
         <h1>` + data.T("credits.title") + `</h1>
         <p>` + data.T("credits.summary") + `</p>
         <p class="muted">` + data.T("credits.balance_explainer") + `</p>
         <div class="actions">
             <a class="btn primary" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("credits.task_cta") + `</a>
-            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("credits.store_cta") + `</a>
+            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/rewards") + `">` + data.T("credits.rewards_cta") + `</a>
             <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("credits.logs_cta") + `</a>
         </div>
     </div>
@@ -364,8 +438,8 @@ window.OWNER_I18N = ` + ownerI18N + `;
 <script src="/assets/owner/tasks-console.js"></script>
 <script src="/assets/owner/auth.js"></script>
 <script src="/assets/owner/logs.js"></script>
-<script src="/assets/owner/render-store.js"></script>
-<script src="/assets/owner/store.js"></script>
+<script src="/assets/owner/render-rewards.js"></script>
+<script src="/assets/owner/rewards.js"></script>
 <script src="/assets/owner/render-credits.js"></script>
 <script src="/assets/owner/credits.js"></script>
 <script src="/assets/owner/init.js"></script>
@@ -431,7 +505,7 @@ func ownerNavHTML(data *tmplData) string {
     <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
     <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
-    <a class="btn` + isActive("store") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/store") + `">` + data.T("owner.nav.store") + `</a>
+    <a class="btn` + isActive("rewards") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/rewards") + `">` + data.T("owner.nav.rewards") + `</a>
     <button class="btn danger" id="logoutBtn" type="button">` + data.T("owner.nav.logout") + `</button>
 </nav>`
 }
@@ -450,8 +524,8 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerTaskEditorHTML(data)
 	case "logs":
 		return ownerLogsHTML(data)
-	case "store":
-		return ownerStoreHTML(data)
+	case "rewards":
+		return ownerRewardsHTML(data)
 	case "owner_credits":
 		return ownerCreditsHTML(data)
 	default:
@@ -573,16 +647,17 @@ func ownerKeyHTML(d *tmplData) string {
 </section>`
 }
 
-func ownerStoreHTML(d *tmplData) string {
+func ownerRewardsHTML(d *tmplData) string {
 	return `<section class="panel">
-    <h2>` + d.T("owner.store.title") + `</h2>
-    <p>` + d.T("owner.store.summary") + `</p>
+    <h2>` + d.T("owner.rewards.title") + `</h2>
+    <p>` + d.T("owner.rewards.summary") + `</p>
+    <p class="muted">` + d.T("owner.rewards.disclaimer") + `</p>
     <div class="stats">
-        <div class="stat"><b id="storeBalance">&mdash;</b><span>` + d.T("owner.store.credits") + `</span></div>
+        <div class="stat"><b id="rewardsBalance">&mdash;</b><span>` + d.T("owner.rewards.credits") + `</span></div>
     </div>
-    <h3>` + d.T("owner.store.products") + `</h3>
-    <div id="storeProducts" class="store-products"><div class="muted">` + d.T("owner.store.loading") + `</div></div>
-    <div id="storeResult" class="detail-box" hidden></div>
+    <h3>` + d.T("owner.rewards.products") + `</h3>
+    <div id="rewardsProducts" class="rewards-products"><div class="muted">` + d.T("owner.rewards.loading") + `</div></div>
+    <div id="rewardsResult" class="detail-box" hidden></div>
 </section>`
 }
 
@@ -595,7 +670,7 @@ func ownerCreditsHTML(d *tmplData) string {
     </div>
     <div id="creditsPaymentResult" class="detail-box" hidden></div>
     <h3>` + d.T("owner.credits.packages") + `</h3>
-    <div id="creditsPackages" class="store-products"><div class="muted">` + d.T("owner.credits.loading") + `</div></div>
+    <div id="creditsPackages" class="rewards-products"><div class="muted">` + d.T("owner.credits.loading") + `</div></div>
 </section>`
 }
 

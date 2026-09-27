@@ -7,7 +7,7 @@
 const sectionState = {};
 
 function sectionLoadingKey(section) {
-    return {store: 'store.loading', owner_credits: 'credits.loading', logs: 'js.state_loading'}[section] || 'js.state_loading';
+    return {rewards: 'rewards.loading', owner_credits: 'credits.loading', logs: 'js.state_loading'}[section] || 'js.state_loading';
 }
 
 async function runSection(section, loader, boxSelector, readyRender, options = {}) {
@@ -32,7 +32,7 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
     // Success: empty vs ready is decided by the section's own
     // empty-check — an initial load failure NEVER renders as empty.
     // Success with an empty result: the section chooses its target
-    // state via emptyState ('empty' or 'unavailable') — Store/Tasks/
+    // state via emptyState ('empty' or 'unavailable') — Rewards/Tasks/
     // Logs 0 rows are empty; Credits packages=[] is unavailable.
     if (options.isEmpty && options.isEmpty()) {
         box.render(options.emptyState || 'empty', {
@@ -57,11 +57,11 @@ function renderPage() {
             emptyKey: 'js.state_logs_empty'
         });
     }
-    if (SECTION === 'store') {
-        renderStore();
-        return runSection('store', loadStoreProducts, '#storeProducts', () => renderStore(), {
-            isEmpty: () => !state.store.products.length,
-            emptyKey: 'store.empty'
+    if (SECTION === 'rewards') {
+        renderRewards();
+        return runSection('rewards', loadRewardsProducts, '#rewardsProducts', () => renderRewards(), {
+            isEmpty: () => !state.rewards.products.length,
+            emptyKey: 'rewards.empty'
         });
     }
     if (SECTION === 'owner_credits') {
@@ -130,7 +130,7 @@ async function restoreSession() {
     }
 
     // Authenticated: /api/account is the authoritative fact source.
-    // Balance on first paint comes from HERE — Store / Credits load
+    // Balance on first paint comes from HERE — Rewards / Credits load
     // independently afterwards and must never gate it.
     try {
         const accountJson = await requestJson('/api/account', {method: 'GET'});
@@ -180,7 +180,7 @@ function decorateRenderPage() {
 function bindOwnerPage() {
     bindAuthHandlers();
     bindLogsHandlers();
-    bindStoreHandlers();
+    bindRewardsHandlers();
     bindCreditsEvents();
 }
 

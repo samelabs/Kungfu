@@ -13,11 +13,11 @@ import (
 
 	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/payment"
-	"kungfu.md/internal/store"
+	"kungfu.md/internal/rewards"
 )
 
 // ValidatePrice: non-positive → existing PRICE_INVALID rule.
-// -- Payment / Store last-line input defense --
+// -- Payment / Rewards last-line input defense --
 
 func TestPaymentSpecNonPositiveCreditsRejected(t *testing.T) {
 	pool := a5TestPool(t)
@@ -38,10 +38,10 @@ func TestPaymentSpecNonPositiveCreditsRejected(t *testing.T) {
 	}
 }
 
-func TestStoreProductNonPositivePriceRejected(t *testing.T) {
+func TestRewardsProductNonPositivePriceRejected(t *testing.T) {
 	pool := a5TestPool(t)
 	for _, v := range []int64{0, -3} {
-		_, err := store.CreateProduct(context.Background(), pool, store.ProductInput{
+		_, err := rewards.CreateProduct(context.Background(), pool, rewards.ProductInput{
 			Title: "Finite Product", CreditsPrice: v,
 		})
 		if err == nil {
@@ -51,7 +51,7 @@ func TestStoreProductNonPositivePriceRejected(t *testing.T) {
 	// Only rows this test could have created (unique title prefix).
 	var n int
 	_ = pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM tb_store_products WHERE title LIKE 'Finite Product%'`).Scan(&n)
+		`SELECT COUNT(*) FROM tb_rewards_products WHERE title LIKE 'Finite Product%'`).Scan(&n)
 	if n != 0 {
 		t.Fatalf("product rows leaked: %d", n)
 	}

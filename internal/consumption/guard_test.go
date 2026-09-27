@@ -19,7 +19,7 @@ func TestConsumptionBoundary(t *testing.T) {
 		"kungfu.md/internal/server",
 		"kungfu.md/internal/repository",
 		"kungfu.md/internal/payment",
-		"kungfu.md/internal/store",
+		"kungfu.md/internal/rewards",
 		"kungfu.md/internal/delivery",
 	}
 	for _, f := range files {

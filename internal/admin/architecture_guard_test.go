@@ -53,7 +53,7 @@ func walkSources(t *testing.T, dir string, fn func(path, src string)) {
 }
 
 // Guard: the Admin domain may depend ONLY on auth (password utility),
-// pg, repository, model, errors, and security utilities. No store,
+// pg, repository, model, errors, and security utilities. No rewards,
 // payment, credits, task, storage, service, or server dependency.
 func TestAdminDomainDependencyAllowlist(t *testing.T) {
 	root := repoRoot(t)
@@ -64,10 +64,10 @@ func TestAdminDomainDependencyAllowlist(t *testing.T) {
 		"kungfu.md/internal/model":      true,
 		"kungfu.md/internal/errors":     true,
 		"kungfu.md/internal/security":   true,
-		// Evolution: the Admin control plane orchestrates the Store
-		// domain (admin → store is legal from B2 on). Store → admin
-		// remains permanently banned (TestStoreDoesNotImportAdmin).
-		"kungfu.md/internal/store": true,
+		// Evolution: the Admin control plane orchestrates the Rewards
+		// domain (admin → rewards is legal from B2 on). Rewards → admin
+		// remains permanently banned (TestRewardsDoesNotImportAdmin).
+		"kungfu.md/internal/rewards": true,
 	}
 	banned := []string{
 		"kungfu.md/internal/payment",
@@ -109,9 +109,9 @@ func codeLines(src string) []string {
 	return out
 }
 
-// Guard: Store must not import admin (Admin Foundation cannot be a
-// Store dependency in either direction).
-func TestStoreDoesNotImportAdmin(t *testing.T) {
+// Guard: Rewards must not import admin (Admin Foundation cannot be a
+// Rewards dependency in either direction).
+func TestRewardsDoesNotImportAdmin(t *testing.T) {
 	root := repoRoot(t)
 	walkSources(t, filepath.Join(root, "internal"), func(path, src string) {
 		if strings.Contains(path, "/admin/") {
@@ -247,14 +247,14 @@ func TestMigration006IsAdditiveOnly(t *testing.T) {
 }
 
 // Guard: production admin handlers must NOT import
-// the repository, credits, or store packages — the dependency pipeline
+// the repository, credits, or rewards packages — the dependency pipeline
 // is server → internal/admin → domain → repository → PostgreSQL.
 func TestAdminHandlersDoNotImportRepository(t *testing.T) {
 	root := repoRoot(t)
 	bannedImports := []string{
 		"kungfu.md/internal/repository",
 		"kungfu.md/internal/credits",
-		"kungfu.md/internal/store",
+		"kungfu.md/internal/rewards",
 	}
 	walkSources(t, filepath.Join(root, "internal", "server"), func(path, src string) {
 		base := filepath.Base(path)
@@ -272,18 +272,18 @@ func TestAdminHandlersDoNotImportRepository(t *testing.T) {
 	})
 }
 
-// Guard (B2, AST-based): tb_store_products / tb_redemptions SQL may
-// exist ONLY in internal/repository/store.go. Scanned production
-// sources: internal/admin, internal/server, internal/store (the Store
+// Guard (B2, AST-based): tb_rewards_products / tb_redemptions SQL may
+// exist ONLY in internal/repository/rewards.go. Scanned production
+// sources: internal/admin, internal/server, internal/rewards (the Rewards
 // domain itself must not write SQL either). The AST string-literal
 // detector catches inline and multiline raw SQL while ignoring
 // comments, identifiers, prose, and substring matches.
-func TestStoreSQLLivesOnlyInRepository(t *testing.T) {
+func TestRewardsSQLLivesOnlyInRepository(t *testing.T) {
 	root := repoRoot(t)
 	dirs := []string{
 		filepath.Join(root, "internal", "admin"),
 		filepath.Join(root, "internal", "server"),
-		filepath.Join(root, "internal", "store"),
+		filepath.Join(root, "internal", "rewards"),
 	}
 	for _, dir := range dirs {
 		for _, path := range collectProductionGoFiles(t, dir) {
@@ -291,17 +291,17 @@ func TestStoreSQLLivesOnlyInRepository(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", path, err)
 			}
-			for _, v := range detectStoreSQLInSource(path, string(src)) {
-				t.Errorf("%s: store-table SQL (%s) must live only in internal/repository/store.go: %q",
+			for _, v := range detectRewardsSQLInSource(path, string(src)) {
+				t.Errorf("%s: rewards-table SQL (%s) must live only in internal/repository/rewards.go: %q",
 					v.Position, v.Table, v.Literal)
 			}
 		}
 	}
 }
 
-// Synthetic fixtures for the store-table detector: multiline raw SQL
+// Synthetic fixtures for the rewards-table detector: multiline raw SQL
 // must be caught; prose/comments/substrings must not.
-func TestStoreSQLDetectorSyntheticFixtures(t *testing.T) {
+func TestRewardsSQLDetectorSyntheticFixtures(t *testing.T) {
 	mustDetect := []struct {
 		name   string
 		source string
@@ -309,13 +309,13 @@ func TestStoreSQLDetectorSyntheticFixtures(t *testing.T) {
 	}{
 		{
 			name:   "multiline raw select products",
-			source: "q := `\nSELECT id, code\nFROM tb_store_products\nWHERE code = $1\n`",
-			table:  "tb_store_products",
+			source: "q := `\nSELECT id, code\nFROM tb_rewards_products\nWHERE code = $1\n`",
+			table:  "tb_rewards_products",
 		},
 		{
 			name:   "multiline raw update products",
-			source: "q := `\nUPDATE\n    tb_store_products\nSET title = 'x'\n`",
-			table:  "tb_store_products",
+			source: "q := `\nUPDATE\n    tb_rewards_products\nSET title = 'x'\n`",
+			table:  "tb_rewards_products",
 		},
 		{
 			name:   "multiline raw select redemptions",
@@ -336,7 +336,7 @@ func TestStoreSQLDetectorSyntheticFixtures(t *testing.T) {
 	for _, tc := range mustDetect {
 		t.Run("detect/"+tc.name, func(t *testing.T) {
 			src := "package fixtures\n\nfunc f() {\n\tvar q string\n\t_ = q\n\t" + tc.source + "\n}\n"
-			vs := detectStoreSQLInSource("fixtures.go", src)
+			vs := detectRewardsSQLInSource("fixtures.go", src)
 			if len(vs) == 0 {
 				t.Fatalf("detector MISSED %s", tc.name)
 			}
@@ -350,16 +350,16 @@ func TestStoreSQLDetectorSyntheticFixtures(t *testing.T) {
 		name   string
 		source string
 	}{
-		{name: "bare table name", source: `s := "tb_store_products"`},
+		{name: "bare table name", source: `s := "tb_rewards_products"`},
 		{name: "prose mention", source: `m := "the tb_redemptions table is owned by repository"`},
-		{name: "substring", source: "q := `UPDATE xtb_store_products_y SET a=1`"},
-		{name: "comment", source: "// UPDATE tb_store_products SET x=1\nq := `SELECT 1`"},
-		{name: "identifier-ish func", source: `f := "repository.FindStoreProductByCode"`},
+		{name: "substring", source: "q := `UPDATE xtb_rewards_products_y SET a=1`"},
+		{name: "comment", source: "// UPDATE tb_rewards_products SET x=1\nq := `SELECT 1`"},
+		{name: "identifier-ish func", source: `f := "repository.FindRewardsProductByCode"`},
 	}
 	for _, tc := range mustNotDetect {
 		t.Run("ignore/"+tc.name, func(t *testing.T) {
 			src := "package fixtures\n\nfunc f() {\n\t" + tc.source + "\n\t_ = q\n}\n"
-			vs := detectStoreSQLInSource("fixtures.go", src)
+			vs := detectRewardsSQLInSource("fixtures.go", src)
 			if len(vs) != 0 {
 				t.Fatalf("FALSE POSITIVE on %s: %+v", tc.name, vs)
 			}

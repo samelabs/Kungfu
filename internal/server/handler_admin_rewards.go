@@ -1,8 +1,8 @@
 package server
 
-// Store Administration HTTP surface. Handlers do: HTTP parse →
+// Rewards Administration HTTP surface. Handlers do: HTTP parse →
 // admin auth/CSRF/permission wiring → admin control-plane call → DTO
-// serialization. No repository/store/credits imports; no SQL.
+// serialization. No repository/rewards/credits imports; no SQL.
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ import (
 
 // -- DTOs (explicit allowlists) --
 
-func adminStoreProductDTO(p *model.StoreProduct) map[string]interface{} {
+func adminRewardsProductDTO(p *model.RewardsProduct) map[string]interface{} {
 	var desc interface{}
 	if p.Description != nil {
 		desc = *p.Description
@@ -37,7 +37,7 @@ func adminStoreProductDTO(p *model.StoreProduct) map[string]interface{} {
 	}
 }
 
-func adminStoreRedemptionDTO(r *model.Redemption) map[string]interface{} {
+func adminRewardsRedemptionDTO(r *model.Redemption) map[string]interface{} {
 	return map[string]interface{}{
 		"id":               r.ID,
 		"code":             r.Code,
@@ -59,7 +59,7 @@ func adminStoreRedemptionDTO(r *model.Redemption) map[string]interface{} {
 
 // -- products --
 
-func (s *Server) handleAdminStoreProductsList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsProductsList(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.requireAdminAuth(r)
 	if err != nil {
 		handleAppError(w, err)
@@ -67,7 +67,7 @@ func (s *Server) handleAdminStoreProductsList(w http.ResponseWriter, r *http.Req
 	}
 	q := r.URL.Query()
 	page, pageSize := pageParams(q.Get("page"), q.Get("page_size"))
-	items, total, err := admin.ListStoreProducts(r.Context(), s.Pool, principal, admin.StoreProductListFilter{
+	items, total, err := admin.ListRewardsProducts(r.Context(), s.Pool, principal, admin.RewardsProductListFilter{
 		Status:   strings.TrimSpace(q.Get("status")),
 		Q:        strings.TrimSpace(q.Get("q")),
 		Page:     page,
@@ -79,20 +79,20 @@ func (s *Server) handleAdminStoreProductsList(w http.ResponseWriter, r *http.Req
 	}
 	out := make([]map[string]interface{}, 0, len(items))
 	for i := range items {
-		out = append(out, adminStoreProductDTO(&items[i]))
+		out = append(out, adminRewardsProductDTO(&items[i]))
 	}
 	SuccessResponse(w, map[string]interface{}{
 		"products": out, "page": page, "page_size": pageSize, "total": total,
 	}, "")
 }
 
-func (s *Server) handleAdminStoreProductsCreate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsProductsCreate(w http.ResponseWriter, r *http.Request) {
 	input, err := parseAdminJSONBodyNumbers(r)
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
 	}
-	principal, err := s.requireAdminMutation(r, "store.products.manage")
+	principal, err := s.requireAdminMutation(r, "rewards.products.manage")
 	if err != nil {
 		handleAppError(w, err)
 		return
@@ -132,44 +132,44 @@ func (s *Server) handleAdminStoreProductsCreate(w http.ResponseWriter, r *http.R
 		}
 		description = ds
 	}
-	created, err := admin.CreateStoreProduct(r.Context(), s.Pool, principal, admin.StoreProductInput{
+	created, err := admin.CreateRewardsProduct(r.Context(), s.Pool, principal, admin.RewardsProductInput{
 		Title: title, Description: description, CreditsPrice: price,
 	})
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreProductDTO(created), "Product created")
+	SuccessResponse(w, adminRewardsProductDTO(created), "Product created")
 }
 
-func (s *Server) handleAdminStoreProductGet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsProductGet(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.requireAdminAuth(r)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	p, err := admin.GetStoreProduct(r.Context(), s.Pool, principal, r.PathValue("code"))
+	p, err := admin.GetRewardsProduct(r.Context(), s.Pool, principal, r.PathValue("code"))
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreProductDTO(p), "")
+	SuccessResponse(w, adminRewardsProductDTO(p), "")
 }
 
-func (s *Server) handleAdminStoreProductPatch(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsProductPatch(w http.ResponseWriter, r *http.Request) {
 	input, err := parseAdminJSONBodyNumbers(r)
 	if err != nil {
 		InvalidJSON(w, err.Error())
 		return
 	}
 	code := r.PathValue("code")
-	principal, err := s.requireAdminMutation(r, "store.products.manage")
+	principal, err := s.requireAdminMutation(r, "rewards.products.manage")
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
 	// partial PATCH: omitted = preserve; provided-but-invalid-type = 400
-	patch := admin.StoreProductPatch{}
+	patch := admin.RewardsProductPatch{}
 	provided := 0
 	if v, exists := input["title"]; exists {
 		sv, ok := v.(string)
@@ -202,40 +202,40 @@ func (s *Server) handleAdminStoreProductPatch(w http.ResponseWriter, r *http.Req
 		ErrorResponse(w, 400, "EMPTY_PATCH", "PATCH must include at least one of title, description, credits_price", nil)
 		return
 	}
-	updated, err := admin.UpdateStoreProduct(r.Context(), s.Pool, principal, code, patch)
+	updated, err := admin.UpdateRewardsProduct(r.Context(), s.Pool, principal, code, patch)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreProductDTO(updated), "Product updated")
+	SuccessResponse(w, adminRewardsProductDTO(updated), "Product updated")
 }
 
-func (s *Server) handleAdminStoreProductStatus(w http.ResponseWriter, r *http.Request, status string) {
+func (s *Server) handleAdminRewardsProductStatus(w http.ResponseWriter, r *http.Request, status string) {
 	code := r.PathValue("code")
-	principal, err := s.requireAdminMutation(r, "store.products.manage")
+	principal, err := s.requireAdminMutation(r, "rewards.products.manage")
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	updated, err := admin.SetStoreProductStatus(r.Context(), s.Pool, principal, code, status)
+	updated, err := admin.SetRewardsProductStatus(r.Context(), s.Pool, principal, code, status)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreProductDTO(updated), "Product status updated")
+	SuccessResponse(w, adminRewardsProductDTO(updated), "Product status updated")
 }
 
-func (s *Server) handleAdminStoreProductActivate(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreProductStatus(w, r, "active")
+func (s *Server) handleAdminRewardsProductActivate(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsProductStatus(w, r, "active")
 }
 
-func (s *Server) handleAdminStoreProductDeactivate(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreProductStatus(w, r, "inactive")
+func (s *Server) handleAdminRewardsProductDeactivate(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsProductStatus(w, r, "inactive")
 }
 
 // -- redemptions --
 
-func (s *Server) handleAdminStoreRedemptionsList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsRedemptionsList(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.requireAdminAuth(r)
 	if err != nil {
 		handleAppError(w, err)
@@ -252,7 +252,7 @@ func (s *Server) handleAdminStoreRedemptionsList(w http.ResponseWriter, r *http.
 		}
 		botID = id
 	}
-	items, total, err := admin.ListStoreRedemptions(r.Context(), s.Pool, principal, admin.StoreRedemptionListFilter{
+	items, total, err := admin.ListRewardsRedemptions(r.Context(), s.Pool, principal, admin.RewardsRedemptionListFilter{
 		Status:   strings.TrimSpace(q.Get("status")),
 		BotID:    botID,
 		Q:        strings.TrimSpace(q.Get("q")),
@@ -265,30 +265,30 @@ func (s *Server) handleAdminStoreRedemptionsList(w http.ResponseWriter, r *http.
 	}
 	out := make([]map[string]interface{}, 0, len(items))
 	for i := range items {
-		out = append(out, adminStoreRedemptionDTO(&items[i]))
+		out = append(out, adminRewardsRedemptionDTO(&items[i]))
 	}
 	SuccessResponse(w, map[string]interface{}{
 		"redemptions": out, "page": page, "page_size": pageSize, "total": total,
 	}, "")
 }
 
-func (s *Server) handleAdminStoreRedemptionGet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAdminRewardsRedemptionGet(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.requireAdminAuth(r)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	red, err := admin.GetStoreRedemption(r.Context(), s.Pool, principal, r.PathValue("code"))
+	red, err := admin.GetRewardsRedemption(r.Context(), s.Pool, principal, r.PathValue("code"))
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	SuccessResponse(w, adminStoreRedemptionDTO(red), "")
+	SuccessResponse(w, adminRewardsRedemptionDTO(red), "")
 }
 
 // transition routes share one shape: optional note field.
-func (s *Server) handleAdminStoreRedemptionTransition(w http.ResponseWriter, r *http.Request, noteField string,
-	run func(principal *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error)) {
+func (s *Server) handleAdminRewardsRedemptionTransition(w http.ResponseWriter, r *http.Request, noteField string,
+	run func(principal *admin.Principal, code, note string) (*admin.RewardsTransitionOutcome, error)) {
 	// Optional-object body: empty / {} / {note} are all legal; a
 	// present note must be a string; malformed or non-object JSON is
 	// a 400. Fail closed — never a silent coercion.
@@ -298,7 +298,7 @@ func (s *Server) handleAdminStoreRedemptionTransition(w http.ResponseWriter, r *
 		return
 	}
 	code := r.PathValue("code")
-	principal, err := s.requireAdminMutation(r, "store.redemptions.manage")
+	principal, err := s.requireAdminMutation(r, "rewards.redemptions.manage")
 	if err != nil {
 		handleAppError(w, err)
 		return
@@ -321,32 +321,32 @@ func (s *Server) handleAdminStoreRedemptionTransition(w http.ResponseWriter, r *
 	}
 	// The response uses the transaction-local authoritative After —
 	// NO second (permission-gated) read after the commit. An actor
-	// with store.redemptions.manage but NOT store.redemptions.read
+	// with rewards.redemptions.manage but NOT rewards.redemptions.read
 	// still gets the committed state here.
-	SuccessResponse(w, adminStoreRedemptionDTO(outcome.After), "")
+	SuccessResponse(w, adminRewardsRedemptionDTO(outcome.After), "")
 }
 
-func (s *Server) handleAdminStoreRedemptionApprove(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
-		return admin.ApproveStoreRedemption(r.Context(), s.Pool, p, code, note)
+func (s *Server) handleAdminRewardsRedemptionApprove(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.RewardsTransitionOutcome, error) {
+		return admin.ApproveRewardsRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
-func (s *Server) handleAdminStoreRedemptionReject(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
-		return admin.RejectStoreRedemption(r.Context(), s.Pool, p, code, note)
+func (s *Server) handleAdminRewardsRedemptionReject(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsRedemptionTransition(w, r, "review_note", func(p *admin.Principal, code, note string) (*admin.RewardsTransitionOutcome, error) {
+		return admin.RejectRewardsRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
-func (s *Server) handleAdminStoreRedemptionFulfill(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "fulfillment_note", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
-		return admin.FulfillStoreRedemption(r.Context(), s.Pool, p, code, note)
+func (s *Server) handleAdminRewardsRedemptionFulfill(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsRedemptionTransition(w, r, "fulfillment_note", func(p *admin.Principal, code, note string) (*admin.RewardsTransitionOutcome, error) {
+		return admin.FulfillRewardsRedemption(r.Context(), s.Pool, p, code, note)
 	})
 }
 
-func (s *Server) handleAdminStoreRedemptionCancel(w http.ResponseWriter, r *http.Request) {
-	s.handleAdminStoreRedemptionTransition(w, r, "", func(p *admin.Principal, code, note string) (*admin.StoreTransitionOutcome, error) {
-		return admin.CancelStoreRedemption(r.Context(), s.Pool, p, code)
+func (s *Server) handleAdminRewardsRedemptionCancel(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminRewardsRedemptionTransition(w, r, "", func(p *admin.Principal, code, note string) (*admin.RewardsTransitionOutcome, error) {
+		return admin.CancelRewardsRedemption(r.Context(), s.Pool, p, code)
 	})
 }
 

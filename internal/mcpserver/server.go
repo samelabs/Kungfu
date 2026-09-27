@@ -4,7 +4,7 @@
 // stateless, protocol 2026-07-28), typed tool schemas, safe error
 // mapping, MCP auth context, and tool-to-existing-domain calls.
 // It holds NO SQL, no Credits mutations, no registration/Memory/Task/
-// payment/store/admin business rules — those stay in their owning
+// payment/rewards/admin business rules — those stay in their owning
 // domains. Dependency direction: server → mcpserver → auth/service/
 // credits read APIs → repository through existing domains.
 package mcpserver

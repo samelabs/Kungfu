@@ -1,6 +1,6 @@
-package store
+package rewards
 
-// Store / Redemption integration tests. They run against the local dev
+// Rewards / Redemption integration tests. They run against the local dev
 // PostgreSQL (KF_TEST_DATABASE_URL); CI provides it with the full
 // migration chain (001 -> 002 -> 003) applied.
 //
@@ -209,7 +209,7 @@ func TestSnapshotSurvivesProductChanges(t *testing.T) {
 	// Change price and title directly (no product-update service this
 	// round by design; SQL mirrors a future catalog edit).
 	_, err := pool.Exec(context.Background(),
-		`UPDATE tb_store_products SET title = 'RENAMED', credits_price = 999,
+		`UPDATE tb_rewards_products SET title = 'RENAMED', credits_price = 999,
 		 status = 'inactive', updated_at = NOW() WHERE code = $1`, product)
 	if err != nil {
 		t.Fatalf("mutate product: %v", err)
@@ -302,14 +302,14 @@ func TestRedemptionInsertFailureNoDebit(t *testing.T) {
 
 	// A product whose title trips the constraint (code is 12 hex chars).
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO tb_store_products (code, title, credits_price, status)
+		`INSERT INTO tb_rewards_products (code, title, credits_price, status)
 		 VALUES ('fai1in500001', 'SR-FAILINSERT', 30, 'active')`)
 	if err != nil {
 		t.Fatalf("seed fail product: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_redemptions WHERE product_id = (SELECT id FROM tb_store_products WHERE code = 'fai1in500001')`)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_store_products WHERE code = 'fai1in500001'`)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_redemptions WHERE product_id = (SELECT id FROM tb_rewards_products WHERE code = 'fai1in500001')`)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_rewards_products WHERE code = 'fai1in500001'`)
 	})
 
 	_, err = Redeem(context.Background(), pool, botID, "fai1in500001", "rk_insfail_1")
@@ -806,7 +806,7 @@ func TestLedgerRefShape(t *testing.T) {
 
 func TestMigrationChainIncludes003(t *testing.T) {
 	pool := testPool(t)
-	for _, table := range []string{"tb_payments", "tb_store_products", "tb_redemptions"} {
+	for _, table := range []string{"tb_payments", "tb_rewards_products", "tb_redemptions"} {
 		var ok bool
 		if err := pool.QueryRow(context.Background(), `
 			SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)`,
@@ -815,8 +815,8 @@ func TestMigrationChainIncludes003(t *testing.T) {
 		}
 	}
 	for _, chk := range []string{
-		"chk_store_price_positive",
-		"chk_store_product_status",
+		"chk_rewards_price_positive",
+		"chk_rewards_product_status",
 		"uk_redemption_bot_request",
 		"chk_redemption_cost_positive",
 		"chk_redemption_status",
@@ -833,7 +833,7 @@ func TestMigrationChainIncludes003(t *testing.T) {
 	product := seedProduct(t, pool, 1)
 	var prodID int64
 	_ = pool.QueryRow(context.Background(),
-		`SELECT id FROM tb_store_products WHERE code = $1`, product).Scan(&prodID)
+		`SELECT id FROM tb_rewards_products WHERE code = $1`, product).Scan(&prodID)
 	if _, err := pool.Exec(context.Background(),
 		`INSERT INTO tb_redemptions (code, bot_id, product_id, product_title, credits_cost, request_key, status)
 		 VALUES ('badstatus0001', $1, $2, 'x', 1, 'rk_bad_status', 'shipped')`, botID, prodID); err == nil {

@@ -190,7 +190,7 @@ func TestOwnerCSRFAllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 		`r.Post("/api/change-password", ownerMutation(`,
 		`r.Post("/api/reset-key", ownerMutation(`,
 		`r.Post("/api/owner/payments/checkout", ownerMutation(`,
-		`r.Post("/api/owner/store/redemptions", ownerMutation(`,
+		`r.Post("/api/owner/rewards/redemptions", ownerMutation(`,
 	}
 	for _, r := range routes {
 		if !strings.Contains(src, r) {

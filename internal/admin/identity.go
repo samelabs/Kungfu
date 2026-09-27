@@ -5,7 +5,7 @@
 // and authorizes per-request against live RBAC data.
 //
 // Allowed dependencies ONLY: auth password utility, pg, repository,
-// model, errors, and necessary security utilities. No store, payment,
+// model, errors, and necessary security utilities. No rewards, payment,
 // credits, task, storage, or service imports.
 package admin
 

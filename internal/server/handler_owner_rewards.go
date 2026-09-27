@@ -1,8 +1,8 @@
 package server
 
-// Owner-facing Store/Redemption entry points. The owner session resolves
+// Owner-facing Rewards/Redemption entry points. The owner session resolves
 // to bot_id — the ONLY subject. No owner_id/owner wallet/owner redemption
-// entities exist; handlers translate HTTP to store-domain calls and map
+// entities exist; handlers translate HTTP to rewards-domain calls and map
 // domain results to external DTOs that never expose internal numeric ids.
 
 import (
@@ -13,11 +13,11 @@ import (
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
-	"kungfu.md/internal/store"
+	"kungfu.md/internal/rewards"
 )
 
-// storeProductDTO is the external product contract: no internal numeric id.
-type storeProductDTO struct {
+// rewardsProductDTO is the external product contract: no internal numeric id.
+type rewardsProductDTO struct {
 	Code string `json:"code"`
 	// CreditsPrice is the authoritative whole-credit integer, on the
 	// wire as a canonical decimal STRING: JS Number cannot hold the
@@ -30,12 +30,12 @@ type storeProductDTO struct {
 	Description  *string `json:"description,omitempty"`
 }
 
-// storeRedemptionDTO is the external redemption contract: no internal
+// rewardsRedemptionDTO is the external redemption contract: no internal
 // numeric id, no product_id, no bot_id.
-type storeRedemptionDTO struct {
+type rewardsRedemptionDTO struct {
 	Code string `json:"code"`
 	// CreditsCost: canonical decimal string on the wire (see
-	// storeProductDTO.CreditsPrice).
+	// rewardsProductDTO.CreditsPrice).
 	CreditsCost     string  `json:"credits_cost"`
 	ProductTitle    string  `json:"product_title"`
 	RequestKey      string  `json:"request_key"`
@@ -50,8 +50,8 @@ type storeRedemptionDTO struct {
 	Created         *bool   `json:"created,omitempty"` // redeem response only
 }
 
-func productToDTO(p *model.StoreProduct) storeProductDTO {
-	return storeProductDTO{
+func productToDTO(p *model.RewardsProduct) rewardsProductDTO {
+	return rewardsProductDTO{
 		Code:         p.Code,
 		Title:        p.Title,
 		Description:  p.Description,
@@ -62,8 +62,8 @@ func productToDTO(p *model.StoreProduct) storeProductDTO {
 	}
 }
 
-func redemptionToDTO(r *model.Redemption) storeRedemptionDTO {
-	dto := storeRedemptionDTO{
+func redemptionToDTO(r *model.Redemption) rewardsRedemptionDTO {
+	dto := rewardsRedemptionDTO{
 		Code:         r.Code,
 		ProductTitle: r.ProductTitle,
 		CreditsCost:  econString(r.CreditsCost),
@@ -93,8 +93,8 @@ func redemptionToDTO(r *model.Redemption) storeRedemptionDTO {
 	return dto
 }
 
-// handleOwnerStoreProducts: GET /api/owner/store/products — active catalog.
-func (s *Server) handleOwnerStoreProducts(w http.ResponseWriter, r *http.Request) {
+// handleOwnerRewardsProducts: GET /api/owner/rewards/products — active catalog.
+func (s *Server) handleOwnerRewardsProducts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		MethodNotAllowed(w)
 		return
@@ -103,12 +103,12 @@ func (s *Server) handleOwnerStoreProducts(w http.ResponseWriter, r *http.Request
 		handleAppError(w, err)
 		return
 	}
-	products, err := store.ListActiveProducts(r.Context(), s.Pool)
+	products, err := rewards.ListActiveProducts(r.Context(), s.Pool)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	items := make([]storeProductDTO, 0, len(products))
+	items := make([]rewardsProductDTO, 0, len(products))
 	for i := range products {
 		items = append(items, productToDTO(&products[i]))
 	}
@@ -118,9 +118,9 @@ func (s *Server) handleOwnerStoreProducts(w http.ResponseWriter, r *http.Request
 	}, "")
 }
 
-// handleOwnerStoreRedeem: POST /api/owner/store/redemptions.
+// handleOwnerRewardsRedeem: POST /api/owner/rewards/redemptions.
 // Body: {"product_code": "...", "request_key": "..."} — nothing else.
-func (s *Server) handleOwnerStoreRedeem(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOwnerRewardsRedeem(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
 		return
@@ -155,7 +155,7 @@ func (s *Server) handleOwnerStoreRedeem(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	res, err := store.Redeem(r.Context(), s.Pool, bot.ID, input.ProductCode, input.RequestKey)
+	res, err := rewards.Redeem(r.Context(), s.Pool, bot.ID, input.ProductCode, input.RequestKey)
 	if err != nil {
 		handleAppError(w, err)
 		return
@@ -171,9 +171,9 @@ func (s *Server) handleOwnerStoreRedeem(w http.ResponseWriter, r *http.Request) 
 	SuccessResponse(w, map[string]interface{}{"redemption": dto}, msg)
 }
 
-// handleOwnerStoreRedemptionGet: GET /api/owner/store/redemptions/{code}
+// handleOwnerRewardsRedemptionGet: GET /api/owner/rewards/redemptions/{code}
 // — ownership-scoped in the SQL itself.
-func (s *Server) handleOwnerStoreRedemptionGet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOwnerRewardsRedemptionGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		MethodNotAllowed(w)
 		return
@@ -184,7 +184,7 @@ func (s *Server) handleOwnerStoreRedemptionGet(w http.ResponseWriter, r *http.Re
 		return
 	}
 	code := chi.URLParam(r, "code")
-	redemption, err := store.GetRedemptionForBot(r.Context(), s.Pool, bot.ID, code)
+	redemption, err := rewards.GetRedemptionForBot(r.Context(), s.Pool, bot.ID, code)
 	if err != nil {
 		handleAppError(w, err)
 		return

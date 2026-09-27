@@ -60,23 +60,23 @@ func TestAccountBalanceWireIsCanonicalString(t *testing.T) {
 	}
 }
 
-// TestStoreCreditsPriceWireExact: owner store product price and
+// TestRewardsCreditsPriceWireExact: owner rewards product price and
 // redemption cost reach the browser as canonical strings.
-func TestStoreCreditsPriceWireExact(t *testing.T) {
+func TestRewardsCreditsPriceWireExact(t *testing.T) {
 	e := newEconEnv(t, 9007199254740993)
 	// seed a product with a 2^53+1 price via SQL (repository authority)
 	if _, err := e.s.Pool.Exec(ctxBg(), `
-		INSERT INTO tb_store_products (code, title, credits_price, status)
+		INSERT INTO tb_rewards_products (code, title, credits_price, status)
 		VALUES ($1, 'Wire Item', $2, 'active')`,
 		"wp"+fmt.Sprintf("%010d", time.Now().UnixNano()%1e10), int64(9007199254740993)); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
-	rec := e.ownerGET(t, "/api/owner/store/products")
+	rec := e.ownerGET(t, "/api/owner/rewards/products")
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), `"credits_price": "9007199254740993"`) {
-		t.Fatalf("owner store credits_price must be canonical string: %s", rec.Body.String())
+		t.Fatalf("owner rewards credits_price must be canonical string: %s", rec.Body.String())
 	}
 }
 

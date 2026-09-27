@@ -67,7 +67,7 @@ var creditColumns = [][2]string{
 	{"tb_transactions", "amount"},
 	{"tb_transactions", "balance_after"},
 	{"tb_payments", "credits"},
-	{"tb_store_products", "credits_price"},
+	{"tb_rewards_products", "credits_price"},
 	{"tb_redemptions", "credits_cost"},
 }
 
@@ -270,7 +270,8 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 // SQL owns its transaction: a deterministic failure injected at the
 // FINAL ALTER statement (tb_redemptions.credits_cost) — after earlier
 // 009 ALTERs (tb_bots.balance, tb_transactions, tb_payments,
-// tb_store_products) have already executed successfully inside the same
+// tb_store_products — renamed tb_rewards_products by 018) have already
+// executed successfully inside the same
 // transaction — rolls back the ENTIRE migration: all Credits columns
 // stay NUMERIC(20,4), seeded data unchanged. (The v1 tb_tasks columns
 // no longer exist after 015 and are no longer part of the simulation.) This exercises explicit
@@ -344,7 +345,7 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 	// event-trigger function raises ONLY when the DDL command's target
 	// object is tb_redemptions (the last affected table in 009). The
 	// earlier ALTER TABLE commands in 009 (tb_bots,
-	// tb_transactions, tb_payments, tb_store_products) run to completion
+	// tb_transactions, tb_payments, tb_rewards_products) run to completion
 	// inside the open transaction BEFORE the failure fires.
 	if _, err := db.Exec(ctx, `
 		CREATE OR REPLACE FUNCTION kf_rb_boom() RETURNS event_trigger AS $fn$
@@ -393,7 +394,7 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 		{"tb_bots", "balance"},
 		{"tb_transactions", "amount"}, {"tb_transactions", "balance_after"},
 		{"tb_payments", "credits"},
-		{"tb_store_products", "credits_price"},
+		{"tb_store_products", "credits_price"}, // chain ends at 009 (pre-018 name)
 		{"tb_redemptions", "credits_cost"},
 	} {
 		var dt string

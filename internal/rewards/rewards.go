@@ -1,17 +1,17 @@
-// Package store owns the credit-value-exit domain: the product catalog,
+// Package rewards owns the credit-value-exit domain: the product catalog,
 // redemption orders, review state, fulfillment state, and price/title
 // snapshots. It is deliberately a single package — catalog and redemption
 // are one business domain, not two.
 //
 // Boundary rules:
 //   - the ONLY subject is bot_id (no owner/admin entity this round);
-//   - store NEVER writes tb_bots.balance or tb_transactions — every credit
+//   - rewards NEVER writes tb_bots.balance or tb_transactions — every credit
 //     movement goes through credits.Record inside the redemption
 //     transaction (spend at creation, refund on reject/cancel);
-//   - store must not import payment / task / kungfu / storage;
+//   - rewards must not import payment / task / kungfu / storage;
 //   - catalog mutation is an internal service capability only (no HTTP
 //     surface: there is no platform-admin identity model yet).
-package store
+package rewards
 
 import (
 	"context"
@@ -50,8 +50,8 @@ type ProductInput struct {
 // CreateProduct adds an active product to the catalog. Thin tx-owner
 // wrapper over the SAME CreateProductTx primitive the Admin control
 // plane uses — one implementation, no second state machine.
-func CreateProduct(ctx context.Context, pool *pg.Pool, in ProductInput) (*model.StoreProduct, error) {
-	var out *model.StoreProduct
+func CreateProduct(ctx context.Context, pool *pg.Pool, in ProductInput) (*model.RewardsProduct, error) {
+	var out *model.RewardsProduct
 	err := runInTx(ctx, pool, func(tx pgx.Tx) error {
 		oc, err := CreateProductTx(ctx, pool, tx, in)
 		if err != nil {
@@ -123,8 +123,8 @@ func legacySetProductStatus(ctx context.Context, pool *pg.Pool, code, status str
 }
 
 // GetProduct returns a product by code regardless of status.
-func GetProduct(ctx context.Context, pool *pg.Pool, code string) (*model.StoreProduct, error) {
-	p, err := repository.FindStoreProductByCode(ctx, pool, code)
+func GetProduct(ctx context.Context, pool *pg.Pool, code string) (*model.RewardsProduct, error) {
+	p, err := repository.FindRewardsProductByCode(ctx, pool, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load product")
 	}
@@ -135,8 +135,8 @@ func GetProduct(ctx context.Context, pool *pg.Pool, code string) (*model.StorePr
 }
 
 // ListActiveProducts returns the active catalog.
-func ListActiveProducts(ctx context.Context, pool *pg.Pool) ([]model.StoreProduct, error) {
-	items, err := repository.ListActiveStoreProducts(ctx, pool)
+func ListActiveProducts(ctx context.Context, pool *pg.Pool) ([]model.RewardsProduct, error) {
+	items, err := repository.ListActiveRewardsProducts(ctx, pool)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load catalog")
 	}
@@ -193,7 +193,7 @@ func Redeem(ctx context.Context, pool *pg.Pool, botID int64, productCode, reques
 	}
 
 	// Read the product for a pre-check (locked read happens in the tx).
-	product, err := repository.FindStoreProductByCode(ctx, pool, productCode)
+	product, err := repository.FindRewardsProductByCode(ctx, pool, productCode)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load product")
 	}
@@ -232,13 +232,13 @@ func redeemTx(ctx context.Context, pool *pg.Pool, botID int64, productCode, requ
 	defer func() { _ = pg.Rollback(tx) }() // no-op after commit
 
 	// Lock the product row and take the snapshot from it.
-	product, err := repository.LockActiveStoreProductByCode(ctx, tx, productCode)
+	product, err := repository.LockActiveRewardsProductByCode(ctx, tx, productCode)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not load product")
 	}
 	if product == nil {
 		// Distinguish missing vs inactive for a precise error.
-		any, lerr := repository.FindStoreProductByCode(ctx, pool, productCode)
+		any, lerr := repository.FindRewardsProductByCode(ctx, pool, productCode)
 		if lerr == nil && any != nil {
 			return nil, errors.New(409, "PRODUCT_INACTIVE", "Product is not available for redemption")
 		}
@@ -292,7 +292,7 @@ func redeemTx(ctx context.Context, pool *pg.Pool, botID int64, productCode, requ
 // idempotent outcome: same product -> replay (Created=false), different
 // product -> 409 IDEMPOTENCY_CONFLICT.
 func resolveReplay(ctx context.Context, pool *pg.Pool, existing *model.Redemption, productCode string) (*RedeemResult, error) {
-	requested, err := repository.FindStoreProductByCode(ctx, pool, productCode)
+	requested, err := repository.FindRewardsProductByCode(ctx, pool, productCode)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Could not resolve product")
 	}

@@ -87,7 +87,7 @@ func assertExactCapJSON(t *testing.T, body string, cap int) {
 	}
 }
 
-// -- A. Store Redeem oversized: balance/redemption/ledger untouched --
+// -- A. Rewards Redeem oversized: balance/redemption/ledger untouched --
 
 func TestBoundedIOStoreRedeemOversizedFailClosed(t *testing.T) {
 	pool, err := pg.NewPool(testDatabaseURL(t))
@@ -119,7 +119,7 @@ func TestBoundedIOStoreRedeemOversizedFailClosed(t *testing.T) {
 	body := buildOversizedJSON(t, 1<<20,
 		fmt.Sprintf(`{"product_code":%q,"request_key":"rk-oversize-%s"}`, prodCode, suffix))
 
-	req := httptest.NewRequest("POST", "/api/owner/store/redemptions", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/owner/rewards/redemptions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -301,14 +301,14 @@ func seedBoundedIOProduct(t *testing.T, pool *pg.Pool, title string, price float
 	t.Helper()
 	var code string
 	if err := pool.QueryRow(ctxBG2(), `
-		INSERT INTO tb_store_products (code, title, credits_price, status)
+		INSERT INTO tb_rewards_products (code, title, credits_price, status)
 		VALUES (substr(md5(random()::text),1,12), $1, $2, 'active') RETURNING code`,
 		title, price).Scan(&code); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctxBG2(), "DELETE FROM tb_redemptions WHERE product_id=(SELECT id FROM tb_store_products WHERE code=$1)", code)
-		_, _ = pool.Exec(ctxBG2(), "DELETE FROM tb_store_products WHERE code=$1", code)
+		_, _ = pool.Exec(ctxBG2(), "DELETE FROM tb_redemptions WHERE product_id=(SELECT id FROM tb_rewards_products WHERE code=$1)", code)
+		_, _ = pool.Exec(ctxBG2(), "DELETE FROM tb_rewards_products WHERE code=$1", code)
 	})
 	return code
 }

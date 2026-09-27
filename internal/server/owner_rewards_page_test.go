@@ -1,7 +1,7 @@
 package server
 
-// Owner Store page wiring tests: the /owner/store route renders the Owner
-// Workspace store section inside the existing shell (nav, scripts, auth),
+// Owner Rewards page wiring tests: the /owner/rewards route renders the Owner
+// Workspace rewards section inside the existing shell (nav, scripts, auth),
 // with active i18n keys for every supported locale.
 
 import (
@@ -16,7 +16,7 @@ func TestOwnerStorePageRendersSection(t *testing.T) {
 	router := s.buildRouter()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/owner/store", nil)
+	req := httptest.NewRequest(http.MethodGet, "/owner/rewards", nil)
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -29,30 +29,30 @@ func TestOwnerStorePageRendersSection(t *testing.T) {
 	if !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("content-type = %s", rec.Header().Get("Content-Type"))
 	}
-	if !strings.Contains(body, `data-section="store"`) {
-		t.Fatal("store section marker missing")
+	if !strings.Contains(body, `data-section="rewards"`) {
+		t.Fatal("rewards section marker missing")
 	}
-	if !strings.Contains(body, "id=\"storeProducts\"") {
-		t.Fatal("store products container missing")
+	if !strings.Contains(body, "id=\"rewardsProducts\"") {
+		t.Fatal("rewards products container missing")
 	}
-	if !strings.Contains(body, "id=\"storeResult\"") {
-		t.Fatal("store result container missing")
+	if !strings.Contains(body, "id=\"rewardsResult\"") {
+		t.Fatal("rewards result container missing")
 	}
-	if !strings.Contains(body, "id=\"storeBalance\"") {
-		t.Fatal("store balance element missing")
-	}
-
-	// Store nav link present.
-	if !strings.Contains(body, "/owner/store") {
-		t.Fatal("store nav link missing")
+	if !strings.Contains(body, "id=\"rewardsBalance\"") {
+		t.Fatal("rewards balance element missing")
 	}
 
-	// Store JS modules referenced.
-	if !strings.Contains(body, "/assets/owner/store.js") {
-		t.Fatal("store.js reference missing")
+	// Rewards nav link present.
+	if !strings.Contains(body, "/owner/rewards") {
+		t.Fatal("rewards nav link missing")
 	}
-	if !strings.Contains(body, "/assets/owner/render-store.js") {
-		t.Fatal("render-store.js reference missing")
+
+	// Rewards JS modules referenced.
+	if !strings.Contains(body, "/assets/owner/rewards.js") {
+		t.Fatal("rewards.js reference missing")
+	}
+	if !strings.Contains(body, "/assets/owner/render-rewards.js") {
+		t.Fatal("render-rewards.js reference missing")
 	}
 }
 
@@ -60,11 +60,11 @@ func TestOwnerStorePageDoesNotRegressOverviewSection(t *testing.T) {
 	s := storeTestServer(t)
 	router := s.buildRouter()
 
-	// The store section renders its own view; the overview page keeps
+	// The rewards section renders its own view; the overview page keeps
 	// rendering the overview view (section switch does not regress).
 	for path, section := range map[string]string{
-		"/owner":       "overview",
-		"/owner/store": "store",
+		"/owner":         "overview",
+		"/owner/rewards": "rewards",
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -94,10 +94,10 @@ func TestOwnerNavContainsStore(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/owner", nil)
 	router.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, "/owner/store") {
-		t.Fatal("overview page nav lacks Store link")
+	if !strings.Contains(body, "/owner/rewards") {
+		t.Fatal("overview page nav lacks Rewards link")
 	}
-	if !strings.Contains(body, ">Store</a>") {
-		t.Fatal("english locale nav lacks Store label")
+	if !strings.Contains(body, ">Rewards</a>") {
+		t.Fatal("english locale nav lacks Rewards label")
 	}
 }

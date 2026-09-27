@@ -9,7 +9,7 @@
 // Boundary rules:
 //   - this package is the ONLY place that writes tb_bots.balance or inserts
 //     into tb_transactions;
-//   - consumers (task, kungfu, registration, future payment/store/storage)
+//   - consumers (task, kungfu, registration, future payment/rewards/storage)
 //     call credits.Record / credits.Balance and never touch balance SQL;
 //   - this package must not import any business domain (task, kungfu,
 //     registration, server) — dependency direction is one-way.

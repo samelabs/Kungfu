@@ -621,7 +621,7 @@ func TestFinanceAdminFinanceAdjustmentFactsAndHygiene(t *testing.T) {
 }
 
 // (20) is covered by the existing suites still passing in the full
-// run (Admin Accounts / Store / Payment / Credits).
+// run (Admin Accounts / Rewards / Payment / Credits).
 
 // newScopedAdmin mirrors the 011 pattern: superadmin creates a custom
 // role with exactly the given permissions, a user, assigns the role,

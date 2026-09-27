@@ -36,7 +36,7 @@ func TestPaymentDoesNotMutateCreditsTables(t *testing.T) {
 }
 
 // TestPaymentDoesNotImportForbiddenDomains guards the boundary: payment may
-// not import Storage/Task/Store-style domains (nor the HTTP server), and
+// not import Storage/Task/Rewards-style domains (nor the HTTP server), and
 // only reaches credits via the credits.Record call in CompletePayment.
 func TestPaymentDoesNotImportForbiddenDomains(t *testing.T) {
 	bannedImports := []string{
@@ -45,7 +45,7 @@ func TestPaymentDoesNotImportForbiddenDomains(t *testing.T) {
 		"kungfu.md/internal/delivery",
 		"kungfu.md/internal/storage",
 		"kungfu.md/internal/task",
-		"kungfu.md/internal/store",
+		"kungfu.md/internal/rewards",
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {

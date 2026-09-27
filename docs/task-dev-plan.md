@@ -192,5 +192,6 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-9b：参考接收端为 examples/receiver 单文件，不依赖 internal/；模型评分走 OpenAI 兼容接口，可选；async 判定经 /api/v1/task_verdict 回写。
 - WO-10：端到端旅程位于 examples/receiver/e2e_test.go，全部经 /api/v1 与参考接收端，时间推进通过显式调用周期任务完成；ID 字段 wire 统一为字符串。
 - WO-11：任务最小必填为 title、objective、price，其余按 §3 缺省补全并写入版本快照；预算下限为一份单价；task_create 可带 open；发布频率 20 次/小时。
+- WO-12：积分充值包在首页公开展示（Creem 审核要求）；积分兑换功能更名为 Rewards（奖励兑换），store 命名、路由、表名与权限码全部改为 rewards，无兼容。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。

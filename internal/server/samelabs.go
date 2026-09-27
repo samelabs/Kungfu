@@ -381,7 +381,7 @@ func slItemTitle(data interface{}) string {
 		return d.Title
 	case slAccountData:
 		return "@" + d.Account.BotName
-	case *model.StoreProduct:
+	case *model.RewardsProduct:
 		return d.Title
 	case *model.Redemption:
 		return "Redemption " + d.Code

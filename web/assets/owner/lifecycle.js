@@ -93,7 +93,7 @@ function shellClearError() {
 // ── Section lifecycle ─────────────────────────────────────────
 // sectionBox is the per-section state machine. Sections do NOT
 // hand-roll loading/error HTML anymore; they call:
-//   const box = sectionBox('#storeProducts', reload);
+//   const box = sectionBox('#rewardsProducts', reload);
 //   box.render('loading' | 'ready' | 'empty' | 'unavailable' | 'error');
 // 'ready' hands rendering back to the section's own renderer via
 // box.onReady.

@@ -11,7 +11,7 @@ package server
 //  5. mutation without CSRF → fail closed
 //  6. disable → Owner authenticated request 401 / Agent key invalid
 //  7. enable → access restored under existing credentials
-//  8. disable changes no economic/task/store facts
+//  8. disable changes no economic/task/rewards facts
 //  9. list/detail never leak credential columns
 // 10. mutation + audit atomic (audit row written with real facts)
 // 11. balance wire is a canonical decimal string (no float64)

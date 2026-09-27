@@ -1,4 +1,4 @@
-package store
+package rewards
 
 import (
 	"os"
@@ -26,7 +26,7 @@ func TestStoreDoesNotMutateCreditsTables(t *testing.T) {
 		}
 		for _, b := range banned {
 			if strings.Contains(string(data), b) {
-				t.Fatalf("%s contains %s — store must not touch credits tables", f, b)
+				t.Fatalf("%s contains %s — rewards must not touch credits tables", f, b)
 			}
 		}
 	}
@@ -43,7 +43,7 @@ func TestStoreDoesNotImportForbiddenDomains(t *testing.T) {
 		"kungfu.md/internal/delivery",
 		"kungfu.md/internal/storage",
 		"kungfu.md/internal/task",
-		"kungfu.md/internal/store", // self (would mean a sub-package split)
+		"kungfu.md/internal/rewards", // self (would mean a sub-package split)
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
@@ -56,14 +56,14 @@ func TestStoreDoesNotImportForbiddenDomains(t *testing.T) {
 		}
 		for _, imp := range bannedImports {
 			if strings.Contains(string(data), "\""+imp+"\"") {
-				t.Fatalf("%s imports %s — store must stay decoupled", f, imp)
+				t.Fatalf("%s imports %s — rewards must stay decoupled", f, imp)
 			}
 		}
 	}
 }
 
 // TestCreditsDoesNotImportStore guards the reverse direction: credits
-// must never depend on the store domain.
+// must never depend on the rewards domain.
 func TestCreditsDoesNotImportStore(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("..", "credits", "*.go"))
 	for _, f := range files {
@@ -74,8 +74,8 @@ func TestCreditsDoesNotImportStore(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(data), "\"kungfu.md/internal/store\"") {
-			t.Fatalf("%s imports internal/store — credits must not depend on store", f)
+		if strings.Contains(string(data), "\"kungfu.md/internal/rewards\"") {
+			t.Fatalf("%s imports internal/rewards — credits must not depend on rewards", f)
 		}
 	}
 }

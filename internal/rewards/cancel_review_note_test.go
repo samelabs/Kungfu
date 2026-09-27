@@ -1,4 +1,4 @@
-package store
+package rewards
 
 // Regression test for the approved -> cancelled review-fact preservation:
 // cancellation must not erase review_note / reviewed_at written by an

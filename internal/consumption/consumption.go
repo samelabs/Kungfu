@@ -7,7 +7,7 @@
 //   - consumers call Apply(ctx, pool, tx, botID, action, refType, refID)
 //     and never pass an amount or a ledger type — pricing lives here;
 //   - consumption is the only credits caller on this path; it must not
-//     import consumer domains (storage/kungfu/task/store/payment) nor
+//     import consumer domains (storage/kungfu/task/rewards/payment) nor
 //     write tb_bots.balance / tb_transactions itself;
 //   - economic facts (payment grants, redemption refunds, task budget
 //     settlement, signup grants) stay with their owning domains and call

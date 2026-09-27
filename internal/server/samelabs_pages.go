@@ -50,17 +50,17 @@ func (s *Server) registerSamelabs(r chi.Router) {
 	r.Get(slBase+"/finance", s.slGet("finance", "Finance", "finance", s.slFinance))
 	r.Get(slBase+"/finance/payments/{code}", s.slGet("finance", "Payment", "payment", s.slPayment))
 
-	r.Get(slBase+"/store/products", s.slGet("products", "Store products", "products", s.slProducts))
-	r.Post(slBase+"/store/products", s.slPost(s.slProductCreate))
-	r.Get(slBase+"/store/products/{code}", s.slGet("products", "Store product", "product", s.slProduct))
-	r.Post(slBase+"/store/products/{code}", s.slPost(s.slProductUpdate))
-	r.Post(slBase+"/store/products/{code}/activate", s.slPost(s.slProductStatus("active")))
-	r.Post(slBase+"/store/products/{code}/deactivate", s.slPost(s.slProductStatus("inactive")))
+	r.Get(slBase+"/rewards/products", s.slGet("products", "Reward products", "products", s.slProducts))
+	r.Post(slBase+"/rewards/products", s.slPost(s.slProductCreate))
+	r.Get(slBase+"/rewards/products/{code}", s.slGet("products", "Reward product", "product", s.slProduct))
+	r.Post(slBase+"/rewards/products/{code}", s.slPost(s.slProductUpdate))
+	r.Post(slBase+"/rewards/products/{code}/activate", s.slPost(s.slProductStatus("active")))
+	r.Post(slBase+"/rewards/products/{code}/deactivate", s.slPost(s.slProductStatus("inactive")))
 
-	r.Get(slBase+"/store/redemptions", s.slGet("redemptions", "Redemptions", "redemptions", s.slRedemptions))
-	r.Get(slBase+"/store/redemptions/{code}", s.slGet("redemptions", "Redemption", "redemption", s.slRedemption))
+	r.Get(slBase+"/rewards/redemptions", s.slGet("redemptions", "Redemptions", "redemptions", s.slRedemptions))
+	r.Get(slBase+"/rewards/redemptions/{code}", s.slGet("redemptions", "Redemption", "redemption", s.slRedemption))
 	for _, act := range []string{"approve", "reject", "fulfill", "cancel"} {
-		r.Post(slBase+"/store/redemptions/{code}/"+act, s.slPost(s.slRedemptionAction(act)))
+		r.Post(slBase+"/rewards/redemptions/{code}/"+act, s.slPost(s.slRedemptionAction(act)))
 	}
 
 	// platform
@@ -193,7 +193,7 @@ func (s *Server) slDashboard(r *http.Request, p *admin.Principal) (interface{}, 
 	// the template decides per card.
 	if p.HasPermission("accounts.read") || p.HasPermission("tasks.read") ||
 		p.HasPermission("memories.read") || p.HasPermission("finance.read") ||
-		p.HasPermission("store.redemptions.read") {
+		p.HasPermission("rewards.redemptions.read") {
 		c, err := admin.Dashboard(ctx, s.Pool, p)
 		if err != nil {
 			return nil, err
@@ -207,8 +207,8 @@ func (s *Server) slDashboard(r *http.Request, p *admin.Principal) (interface{}, 
 			d.Finance = fs
 		}
 	}
-	if p.HasPermission("store.redemptions.read") {
-		if pd, _, err := admin.ListStoreRedemptions(ctx, s.Pool, p, admin.StoreRedemptionListFilter{Status: "pending_review", Page: 1, PageSize: 5}); err != nil {
+	if p.HasPermission("rewards.redemptions.read") {
+		if pd, _, err := admin.ListRewardsRedemptions(ctx, s.Pool, p, admin.RewardsRedemptionListFilter{Status: "pending_review", Page: 1, PageSize: 5}); err != nil {
 			return nil, err
 		} else {
 			d.Pending = pd
@@ -435,7 +435,7 @@ func (s *Server) slPayment(r *http.Request, p *admin.Principal) (interface{}, er
 	return admin.GetFinancePaymentDetail(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
 }
 
-// -- store --
+// -- rewards --
 
 func (s *Server) slProducts(r *http.Request, p *admin.Principal) (interface{}, error) {
 	q := r.URL.Query()
@@ -444,12 +444,12 @@ func (s *Server) slProducts(r *http.Request, p *admin.Principal) (interface{}, e
 	if status == "" {
 		status = "all"
 	}
-	items, total, err := admin.ListStoreProducts(r.Context(), s.Pool, p, admin.StoreProductListFilter{Status: status, Q: q.Get("q"), Page: page, PageSize: slPageSize})
-	return slList[model.StoreProduct]{Items: items, Total: total, Page: page, Size: slPageSize}, err
+	items, total, err := admin.ListRewardsProducts(r.Context(), s.Pool, p, admin.RewardsProductListFilter{Status: status, Q: q.Get("q"), Page: page, PageSize: slPageSize})
+	return slList[model.RewardsProduct]{Items: items, Total: total, Page: page, Size: slPageSize}, err
 }
 
 func (s *Server) slProduct(r *http.Request, p *admin.Principal) (interface{}, error) {
-	return admin.GetStoreProduct(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
+	return admin.GetRewardsProduct(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
 }
 
 // formCredits parses a whole positive credit amount from a form field.
@@ -463,12 +463,12 @@ func formCredits(r *http.Request, field string) (int64, error) {
 }
 
 func (s *Server) slProductCreate(r *http.Request, p *admin.Principal) (string, string, error) {
-	back := slBase + "/store/products"
+	back := slBase + "/rewards/products"
 	price, err := formCredits(r, "credits_price")
 	if err != nil {
 		return back, "", err
 	}
-	prod, err := admin.CreateStoreProduct(r.Context(), s.Pool, p, admin.StoreProductInput{
+	prod, err := admin.CreateRewardsProduct(r.Context(), s.Pool, p, admin.RewardsProductInput{
 		Title: strings.TrimSpace(r.PostFormValue("title")), Description: strings.TrimSpace(r.PostFormValue("description")), CreditsPrice: price})
 	if err != nil {
 		return back, "", err
@@ -478,26 +478,26 @@ func (s *Server) slProductCreate(r *http.Request, p *admin.Principal) (string, s
 
 func (s *Server) slProductUpdate(r *http.Request, p *admin.Principal) (string, string, error) {
 	code := chi.URLParam(r, "code")
-	back := slBase + "/store/products/" + url.PathEscape(code)
+	back := slBase + "/rewards/products/" + url.PathEscape(code)
 	price, err := formCredits(r, "credits_price")
 	if err != nil {
 		return back, "", err
 	}
 	title := strings.TrimSpace(r.PostFormValue("title"))
 	desc := strings.TrimSpace(r.PostFormValue("description"))
-	_, err = admin.UpdateStoreProduct(r.Context(), s.Pool, p, code, admin.StoreProductPatch{Title: &title, Description: &desc, CreditsPrice: &price})
+	_, err = admin.UpdateRewardsProduct(r.Context(), s.Pool, p, code, admin.RewardsProductPatch{Title: &title, Description: &desc, CreditsPrice: &price})
 	return back, "Product saved.", err
 }
 
 func (s *Server) slProductStatus(status string) slAction {
 	return func(r *http.Request, p *admin.Principal) (string, string, error) {
 		code := chi.URLParam(r, "code")
-		msg := "Product hidden from the store."
+		msg := "Product hidden from the rewards."
 		if status == "active" {
-			msg = "Product is live in the store."
+			msg = "Product is live in the rewards."
 		}
-		_, err := admin.SetStoreProductStatus(r.Context(), s.Pool, p, code, status)
-		return slBase + "/store/products/" + url.PathEscape(code), msg, err
+		_, err := admin.SetRewardsProductStatus(r.Context(), s.Pool, p, code, status)
+		return slBase + "/rewards/products/" + url.PathEscape(code), msg, err
 	}
 }
 
@@ -508,34 +508,34 @@ func (s *Server) slRedemptions(r *http.Request, p *admin.Principal) (interface{}
 	if status == "" {
 		status = "all"
 	}
-	items, total, err := admin.ListStoreRedemptions(r.Context(), s.Pool, p, admin.StoreRedemptionListFilter{
+	items, total, err := admin.ListRewardsRedemptions(r.Context(), s.Pool, p, admin.RewardsRedemptionListFilter{
 		Status: status, BotID: slInt64(q.Get("bot_id")), Q: q.Get("q"), Page: page, PageSize: slPageSize})
 	return slList[model.Redemption]{Items: items, Total: total, Page: page, Size: slPageSize}, err
 }
 
 func (s *Server) slRedemption(r *http.Request, p *admin.Principal) (interface{}, error) {
-	return admin.GetStoreRedemption(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
+	return admin.GetRewardsRedemption(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
 }
 
 func (s *Server) slRedemptionAction(action string) slAction {
 	return func(r *http.Request, p *admin.Principal) (string, string, error) {
 		ctx, code := r.Context(), chi.URLParam(r, "code")
-		back := slBase + "/store/redemptions/" + url.PathEscape(code)
+		back := slBase + "/rewards/redemptions/" + url.PathEscape(code)
 		note := strings.TrimSpace(r.PostFormValue("note"))
 		var err error
 		msg := ""
 		switch action {
 		case "approve":
-			_, err = admin.ApproveStoreRedemption(ctx, s.Pool, p, code, note)
+			_, err = admin.ApproveRewardsRedemption(ctx, s.Pool, p, code, note)
 			msg = "Redemption approved. Fulfil it once delivered."
 		case "reject":
-			_, err = admin.RejectStoreRedemption(ctx, s.Pool, p, code, note)
+			_, err = admin.RejectRewardsRedemption(ctx, s.Pool, p, code, note)
 			msg = "Redemption rejected and credits refunded."
 		case "fulfill":
-			_, err = admin.FulfillStoreRedemption(ctx, s.Pool, p, code, note)
+			_, err = admin.FulfillRewardsRedemption(ctx, s.Pool, p, code, note)
 			msg = "Redemption marked fulfilled."
 		case "cancel":
-			_, err = admin.CancelStoreRedemption(ctx, s.Pool, p, code)
+			_, err = admin.CancelRewardsRedemption(ctx, s.Pool, p, code)
 			msg = "Redemption cancelled and credits refunded."
 		}
 		return back, msg, err

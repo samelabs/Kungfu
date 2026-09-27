@@ -139,8 +139,8 @@ func TestSecurityHeadersSingleGlobalHeaderAuthority(t *testing.T) {
 		"internal/server/static.go", "internal/server/templates.go",
 		"internal/server/handlers.go", "internal/server/handler_agent.go",
 		"internal/server/handler_admin.go", "internal/server/handler_admin_management.go",
-		"internal/server/handler_creem.go", "internal/server/handler_owner_store.go",
-		"internal/server/handler_admin_store.go", "internal/server/health.go",
+		"internal/server/handler_creem.go", "internal/server/handler_owner_rewards.go",
+		"internal/server/handler_admin_rewards.go", "internal/server/health.go",
 		"internal/server/owner_mutation_guard.go",
 	}
 	for _, rel := range prod {

@@ -180,15 +180,15 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 
 	r.Get("/api/owner/logs", s.handleOwnerLogs)
 
-	// Owner store entry points (session -> bot_id; the only subject)
+	// Owner rewards entry points (session -> bot_id; the only subject)
 	r.Get("/api/owner/payments/packages", s.handleOwnerPaymentPackages)
 	r.Post("/api/owner/payments/checkout", ownerMutation(s.handleOwnerPaymentCheckout))
 	r.Post("/api/owner/tool/{tool}", ownerMutation(s.handleOwnerTool))
 	r.Get("/api/owner/payments/{code}", s.handleOwnerPaymentGet)
 	r.Post("/api/webhooks/creem", s.handleCreemWebhook)
-	r.Get("/api/owner/store/products", s.handleOwnerStoreProducts)
-	r.Post("/api/owner/store/redemptions", ownerMutation(s.handleOwnerStoreRedeem))
-	r.Get("/api/owner/store/redemptions/{code}", s.handleOwnerStoreRedemptionGet)
+	r.Get("/api/owner/rewards/products", s.handleOwnerRewardsProducts)
+	r.Post("/api/owner/rewards/redemptions", ownerMutation(s.handleOwnerRewardsRedeem))
+	r.Get("/api/owner/rewards/redemptions/{code}", s.handleOwnerRewardsRedemptionGet)
 
 	// -- API routes: Admin (kf_admin server-side session) --
 	// Identity foundation + management surface. Every
@@ -224,19 +224,19 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Delete("/api/samelabs/sessions/{id}", s.handleAdminSessionRevoke)
 	r.Get("/api/samelabs/audit", s.handleAdminAuditList)
 
-	// Store Administration (Admin control plane → store domain)
-	r.Get("/api/samelabs/store/products", s.handleAdminStoreProductsList)
-	r.Post("/api/samelabs/store/products", s.handleAdminStoreProductsCreate)
-	r.Get("/api/samelabs/store/products/{code}", s.handleAdminStoreProductGet)
-	r.Patch("/api/samelabs/store/products/{code}", s.handleAdminStoreProductPatch)
-	r.Post("/api/samelabs/store/products/{code}/activate", s.handleAdminStoreProductActivate)
-	r.Post("/api/samelabs/store/products/{code}/deactivate", s.handleAdminStoreProductDeactivate)
-	r.Get("/api/samelabs/store/redemptions", s.handleAdminStoreRedemptionsList)
-	r.Get("/api/samelabs/store/redemptions/{code}", s.handleAdminStoreRedemptionGet)
-	r.Post("/api/samelabs/store/redemptions/{code}/approve", s.handleAdminStoreRedemptionApprove)
-	r.Post("/api/samelabs/store/redemptions/{code}/reject", s.handleAdminStoreRedemptionReject)
-	r.Post("/api/samelabs/store/redemptions/{code}/fulfill", s.handleAdminStoreRedemptionFulfill)
-	r.Post("/api/samelabs/store/redemptions/{code}/cancel", s.handleAdminStoreRedemptionCancel)
+	// Rewards Administration (Admin control plane → rewards domain)
+	r.Get("/api/samelabs/rewards/products", s.handleAdminRewardsProductsList)
+	r.Post("/api/samelabs/rewards/products", s.handleAdminRewardsProductsCreate)
+	r.Get("/api/samelabs/rewards/products/{code}", s.handleAdminRewardsProductGet)
+	r.Patch("/api/samelabs/rewards/products/{code}", s.handleAdminRewardsProductPatch)
+	r.Post("/api/samelabs/rewards/products/{code}/activate", s.handleAdminRewardsProductActivate)
+	r.Post("/api/samelabs/rewards/products/{code}/deactivate", s.handleAdminRewardsProductDeactivate)
+	r.Get("/api/samelabs/rewards/redemptions", s.handleAdminRewardsRedemptionsList)
+	r.Get("/api/samelabs/rewards/redemptions/{code}", s.handleAdminRewardsRedemptionGet)
+	r.Post("/api/samelabs/rewards/redemptions/{code}/approve", s.handleAdminRewardsRedemptionApprove)
+	r.Post("/api/samelabs/rewards/redemptions/{code}/reject", s.handleAdminRewardsRedemptionReject)
+	r.Post("/api/samelabs/rewards/redemptions/{code}/fulfill", s.handleAdminRewardsRedemptionFulfill)
+	r.Post("/api/samelabs/rewards/redemptions/{code}/cancel", s.handleAdminRewardsRedemptionCancel)
 
 	// 013: payment provider settings (Creem), secrets sealed at rest
 	r.Get("/api/samelabs/settings/payment", s.handleAdminPaymentSettingsGet)
@@ -287,7 +287,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/owner/tasks/new", s.handleOwnerPage("task_new"))
 	r.Get("/owner/tasks/{code}", s.handleOwnerPage("task_detail"))
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
-	r.Get("/owner/store", s.handleOwnerPage("store"))
+	r.Get("/owner/rewards", s.handleOwnerPage("rewards"))
 	r.Get("/terms", s.handleLegalPage("terms"))
 	r.Get("/privacy", s.handleLegalPage("privacy"))
 
