@@ -1,0 +1,64 @@
+{{define "crumbs"}}<a class="sl-crumb" href="/samelabs/tasks">← Tasks</a>{{end}}
+{{define "content"}}{{$t := .Data.Detail.Task}}
+<div class="sl-grid main-side">
+  <section class="sl-card">
+    <div class="sl-card-head"><h2>{{if $t.Title}}{{$t.Title}}{{else}}Task {{$t.Code}}{{end}}</h2>{{template "badge" $t.Status}}</div>
+    <dl class="sl-kv">
+      <dt>Code</dt><dd class="mono">{{$t.Code}}</dd>
+      <dt>Publisher</dt><dd><a href="/samelabs/accounts/{{$t.PublisherID}}">{{$t.PublisherName}}</a> <span class="sl-muted">#{{$t.PublisherID}}</span></dd>
+      <dt>Status</dt><dd>{{template "badge" $t.Status}}</dd>
+      <dt>Version</dt><dd>{{$t.Version}}</dd>
+      <dt>Unit price</dt><dd>{{num $t.Price}} credits</dd>
+      <dt>Budget</dt><dd>{{num $t.BudgetLocked}} locked · {{num $t.Settled}} settled · {{num $t.Reserved}} reserved · {{num $t.Refunded}} refunded</dd>
+      <dt>Available</dt><dd>{{num $t.Available}} credits ({{$t.Slots}} slots)</dd>
+      {{with $t.PausedReason}}<dt>Paused reason</dt><dd class="mono">{{.}}</dd>{{end}}
+      {{with $t.ClosedReason}}<dt>Closed reason</dt><dd>{{.}}</dd>{{end}}
+      <dt>Created</dt><dd>{{time $t.CreatedAt}}</dd>
+      <dt>Updated</dt><dd>{{time $t.UpdatedAt}}</dd>
+    </dl>
+  </section>
+  <section class="sl-card">
+    <h2>Statistics (30 days)</h2>
+    <dl class="sl-kv">
+      <dt>Settled / rejected / failed</dt><dd>{{num .Data.Detail.Stats.Settled}} / {{num .Data.Detail.Stats.Rejected}} / {{num .Data.Detail.Stats.Failed}}</dd>
+      <dt>Accept rate</dt><dd>{{.Data.Detail.AcceptRate}}</dd>
+      <dt>Median verdict</dt><dd>{{.Data.Detail.MedianSeconds}}</dd>
+      <dt>Timeout rate</dt><dd>{{.Data.Detail.TimeoutRate}}</dd>
+      <dt>Failure rate</dt><dd>{{.Data.Detail.FailureRate}}</dd>
+    </dl>
+    <h2>Submissions by state</h2>
+    <dl class="sl-kv">
+      {{range $s := (list "delivering" "uncertain" "under_review" "settled" "rejected" "failed")}}
+      <dt>{{$s}}</dt><dd>{{num (index $.Data.Detail.Counts $s)}}</dd>
+      {{end}}
+    </dl>
+  </section>
+</div>
+<section class="sl-card">
+  <h2>Contract (read-only)</h2>
+  {{if $t.Contract}}<pre class="sl-pre tall">{{prettyjson $t.Contract}}</pre>{{else}}<p class="sl-muted">No contract yet — the task is a draft with an empty draft contract.</p>{{end}}
+</section>
+<section class="sl-card flush">
+  <div class="sl-card-head"><h2>Recent submissions</h2><span class="sl-muted">newest 10</span></div>
+  {{if .Data.Detail.Submissions}}<table class="sl-table"><thead><tr><th>#</th><th>State</th><th>Account</th><th class="r">Ver</th><th class="r">Amount</th><th>Failure</th><th>Created</th></tr></thead><tbody>
+  {{range .Data.Detail.Submissions}}<tr>
+    <td class="mono">{{.SubmissionID}}</td>
+    <td>{{template "badge" .State}}</td>
+    <td><a href="/samelabs/accounts/{{.AgentID}}">#{{.AgentID}}</a></td>
+    <td class="r">{{.Version}}</td>
+    <td class="r">{{num .Amount}}</td>
+    <td class="mono">{{with .Failure}}{{.}}{{end}}</td>
+    <td>{{time .CreatedAt}}</td>
+  </tr>{{end}}
+  </tbody></table>{{else}}{{template "empty" "No submissions yet."}}{{end}}
+</section>
+{{if and (.Can "tasks.manage") (ne $t.Status "closed")}}
+<section class="sl-card danger">
+  <h2>Platform close</h2>
+  <p class="sl-muted">Closes the task as platform governance. Active claims may still submit until they expire; in-flight submissions complete; reports still open on this task become actioned.</p>
+  <form class="sl-form" method="post" action="/samelabs/tasks/{{$t.Code}}/close" data-confirm="Close this task for the platform?">{{template "csrf" $.CSRF}}
+    <label>Closed reason (1–500 characters, visible to the publisher and executors)<input name="reason" maxlength="500" required></label>
+    <button class="sl-btn danger" type="submit">Close task</button></form>
+</section>
+{{end}}
+{{end}}

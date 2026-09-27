@@ -968,6 +968,137 @@ func InsertTaskReport(ctx context.Context, q pg.Querier, taskID, reporterID int6
 	return id, nil
 }
 
+// TaskReportRow is a row of tb_task_report.
+type TaskReportRow struct {
+	ID         int64
+	TaskID     int64
+	ReporterID int64
+	Reason     string
+	Status     string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+const reportSelect = `
+	SELECT id, task_id, reporter_id, reason, status, created_at, updated_at
+	FROM tb_task_report`
+
+func scanReport(row pgx.Row) (*TaskReportRow, error) {
+	var r TaskReportRow
+	if err := row.Scan(&r.ID, &r.TaskID, &r.ReporterID, &r.Reason, &r.Status,
+		&r.CreatedAt, &r.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// FindReportByID loads one report.
+func FindReportByID(ctx context.Context, q pg.Querier, reportID int64) (*TaskReportRow, error) {
+	return scanReport(q.QueryRow(ctx, reportSelect+` WHERE id = $1`, reportID))
+}
+
+// FindReportByIDForUpdate loads a report holding the row lock.
+func FindReportByIDForUpdate(ctx context.Context, q pg.Querier, reportID int64) (*TaskReportRow, error) {
+	return scanReport(q.QueryRow(ctx, reportSelect+` WHERE id = $1 FOR UPDATE`, reportID))
+}
+
+// SetReportStatus compare-and-swaps a report status (open → dismissed
+// by the admin resolution, open → actioned when its task is closed).
+func SetReportStatus(ctx context.Context, q pg.Querier, reportID int64, from, to string) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_task_report SET status = $2, updated_at = NOW()
+		WHERE id = $1 AND status = $3`, reportID, to, from)
+	if err != nil {
+		return fmt.Errorf("set report status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrTaskStateConflict
+	}
+	return nil
+}
+
+// ActionOpenReports marks every open report of a task actioned — the
+// report disposition of a platform close (WO-8b) — returning how many
+// rows moved.
+func ActionOpenReports(ctx context.Context, q pg.Querier, taskID int64) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_task_report SET status = 'actioned', updated_at = NOW()
+		WHERE task_id = $1 AND status = 'open'`, taskID)
+	if err != nil {
+		return 0, fmt.Errorf("action open reports: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// CountTaskSubmissionsByState tallies one task's submissions per
+// state (the admin task detail's state counts).
+func CountTaskSubmissionsByState(ctx context.Context, q pg.Querier, taskID int64) (map[string]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT state, COUNT(*) FROM tb_task_submission
+		WHERE task_id = $1 GROUP BY state ORDER BY state`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("count submissions by state: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var state string
+		var n int64
+		if err := rows.Scan(&state, &n); err != nil {
+			return nil, err
+		}
+		out[state] = n
+	}
+	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Homepage task board (WO-8)
+// ---------------------------------------------------------------------------
+
+// TaskBoardRow is one homepage board entry: an open task with at least
+// one open slot (spec §4 可接单).
+type TaskBoardRow struct {
+	Code  string
+	Title string
+	Price int64
+	Slots int64
+}
+
+// ListOpenBoardTasks returns up to `limit` board rows in ONE query,
+// newest open first (the current version's creation time is the open
+// time). Price and title come from the effective version snapshot;
+// slots = ⌊available / price⌋ restricted to ≥ 1 (spec §4).
+func ListOpenBoardTasks(ctx context.Context, q pg.Querier, limit int) ([]TaskBoardRow, error) {
+	rows, err := q.Query(ctx, `
+		SELECT t.code,
+		       COALESCE(v.contract->>'title', ''),
+		       (v.contract->>'price')::bigint AS price,
+		       (t.budget_locked - t.settled - t.reserved - t.refunded)
+		           / (v.contract->>'price')::bigint AS slots
+		FROM tb_task t
+		JOIN tb_task_version v ON v.task_id = t.id AND v.version = t.version
+		WHERE t.status = 'open'
+		  AND (v.contract->>'price')::bigint >= 1
+		  AND t.budget_locked - t.settled - t.reserved - t.refunded
+		      >= (v.contract->>'price')::bigint
+		ORDER BY v.created_at DESC, t.id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list open board tasks: %w", err)
+	}
+	defer rows.Close()
+	var out []TaskBoardRow
+	for rows.Next() {
+		var b TaskBoardRow
+		if err := rows.Scan(&b.Code, &b.Title, &b.Price, &b.Slots); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // Money primitives — task counters + credits ledger in one
 // transaction (spec §2 Ledger, §10 items 1–3).

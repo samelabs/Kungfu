@@ -107,6 +107,16 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 			"ttl":          derefInt64(contract.Claim.TTL),
 			"max_duration": derefInt64(contract.Claim.MaxDuration),
 		}
+		// The declared criteria (§3 acceptance.criteria[]), for
+		// consumers judging rejections against the contract (the
+		// owner console's reject form cites these ids).
+		criteria := make([]map[string]string, 0, len(contract.Acceptance.Criteria))
+		for _, c := range contract.Acceptance.Criteria {
+			criteria = append(criteria, map[string]string{
+				"id": c.ID, "kind": c.Kind, "description": c.Description,
+			})
+		}
+		view["criteria"] = criteria
 	}
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	slots := int64(0)
@@ -452,31 +462,59 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 // PauseTask is the §4 pause transition (open → paused). Existing
 // active claims may still submit; in-flight submissions continue.
 func PauseTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
-	return applyPublisherStatus(ctx, pool, publisherID, code, task.EventPause)
+	after, err := applyStatusChange(ctx, pool, code, &publisherID, task.EventPause, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return taskView(ctx, pool, after)
 }
 
 // CloseTask is the §4 close transition (any non-closed → closed,
 // terminal). Platform-closed tasks are already closed and cannot
-// reopen (the kernel has no closed edge).
+// reopen (the kernel has no closed edge). Active claims keep their
+// reservation and may still submit until expiry (no renewal);
+// in-flight submissions complete — the reservations drain through the
+// normal claim/submission terminal paths, after which refund applies.
 func CloseTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
-	return applyPublisherStatus(ctx, pool, publisherID, code, task.EventClose)
+	after, err := applyStatusChange(ctx, pool, code, &publisherID, task.EventClose, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return taskView(ctx, pool, after)
 }
 
-func applyPublisherStatus(ctx context.Context, pool *pg.Pool, publisherID int64, code, event string) (map[string]interface{}, error) {
+// applyStatusChange is the locked §4 status-transition core shared by
+// the publisher lifecycle (pause/close) and the platform close
+// (WO-8b): lock the task by code — ownership-checked when publisherID
+// is set — validate the event against the transition kernel, apply it
+// as a compare-and-swap with an optional reason, run extra
+// same-transaction writes against the locked row, commit and re-read.
+func applyStatusChange(ctx context.Context, pool *pg.Pool, code string, publisherID *int64, event string, reason *string,
+	extra func(ctx context.Context, tx pgx.Tx, t *repository.TaskRow) error) (*repository.TaskRow, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, err := lockOwnedTask(ctx, tx, publisherID, code)
+	var t *repository.TaskRow
+	if publisherID != nil {
+		t, err = lockOwnedTask(ctx, tx, *publisherID, code)
+	} else {
+		t, err = lockAnyTask(ctx, tx, code)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if _, err := task.TaskTransition(t.Status, event); err != nil {
 		return nil, invalidTaskState(t.Status)
 	}
-	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, event, nil); err != nil {
+	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, event, reason); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if extra != nil {
+		if err := extra(ctx, tx, t); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -485,7 +523,23 @@ func applyPublisherStatus(ctx context.Context, pool *pg.Pool, publisherID int64,
 	if err != nil || after == nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return taskView(ctx, pool, after)
+	return after, nil
+}
+
+// lockAnyTask loads a task by code under the row lock for a platform
+// governance write: no ownership requirement (WO-8b).
+func lockAnyTask(ctx context.Context, q pg.Querier, code string) (*repository.TaskRow, error) {
+	t, err := repository.FindTaskByCodeForUpdate(ctx, q, code)
+	if goerrors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
+	}
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if t == nil {
+		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
+	}
+	return t, nil
 }
 
 // FundTask is the §4 fund transition: budget_locked += amount

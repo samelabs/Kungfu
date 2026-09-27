@@ -13,6 +13,7 @@ import (
 	"kungfu.md/internal/middleware"
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/service"
 )
 
 // registerSamelabs mounts the server-rendered platform admin.
@@ -36,6 +37,14 @@ func (s *Server) registerSamelabs(r chi.Router) {
 	r.Get(slBase+"/accounts/{id}", s.slGet("accounts", "Account", "account_detail", s.slAccount))
 	r.Post(slBase+"/accounts/{id}/enable", s.slPost(s.slAccountStatus(true)))
 	r.Post(slBase+"/accounts/{id}/disable", s.slPost(s.slAccountStatus(false)))
+
+	// task governance + report queue (WO-8b)
+	r.Get(slBase+"/tasks", s.slGet("tasks", "Tasks", "tasks", s.slTasks))
+	r.Get(slBase+"/tasks/{code}", s.slGet("tasks", "Task", "task", s.slTask))
+	r.Post(slBase+"/tasks/{code}/close", s.slPost(s.slTaskClose))
+	r.Get(slBase+"/reports", s.slGet("reports", "Reports", "reports", s.slReports))
+	r.Post(slBase+"/reports/{id}/dismiss", s.slPost(s.slReportAction("dismiss")))
+	r.Post(slBase+"/reports/{id}/close", s.slPost(s.slReportAction("close")))
 
 	// commerce
 	r.Get(slBase+"/finance", s.slGet("finance", "Finance", "finance", s.slFinance))
@@ -300,6 +309,80 @@ func (s *Server) slAccountStatus(enable bool) slAction {
 			return back, "Account enabled.", admin.EnablePlatformAccount(r.Context(), s.Pool, p, id)
 		}
 		return back, "Account disabled. Its key and owner login stop working immediately.", admin.DisablePlatformAccount(r.Context(), s.Pool, p, id)
+	}
+}
+
+// -- task governance & reports (WO-8b) --
+
+func (s *Server) slTasks(r *http.Request, p *admin.Principal) (interface{}, error) {
+	q := r.URL.Query()
+	page := slPage(q)
+	items, total, err := admin.ListPlatformTasks(r.Context(), s.Pool, p, admin.TaskFilter{
+		Status: q.Get("status"), Page: page, Size: slPageSize,
+	})
+	return slList[admin.TaskRow]{Items: items, Total: total, Page: page, Size: slPageSize}, err
+}
+
+type slTaskData struct {
+	Detail *admin.TaskDetailView
+}
+
+func (s *Server) slTask(r *http.Request, p *admin.Principal) (interface{}, error) {
+	d, err := admin.GetPlatformTask(r.Context(), s.Pool, p, chi.URLParam(r, "code"))
+	if err != nil {
+		return nil, err
+	}
+	return slTaskData{Detail: d}, nil
+}
+
+// slTaskClose is the §4 平台关闭 form action; the reason is required
+// by the service (1–500 characters) and the flash carries its error.
+func (s *Server) slTaskClose(r *http.Request, p *admin.Principal) (string, string, error) {
+	code := chi.URLParam(r, "code")
+	back := slBase + "/tasks/" + url.PathEscape(code)
+	if err := admin.RequirePermission(r.Context(), s.Pool, p, "tasks.manage"); err != nil {
+		return back, "", err
+	}
+	if _, err := service.PlatformCloseTask(r.Context(), s.Pool, p.Admin.ID, code, r.PostFormValue("reason")); err != nil {
+		return back, "", err
+	}
+	return back, "Task closed. It cannot reopen; the publisher keeps the refund path.", nil
+}
+
+func (s *Server) slReports(r *http.Request, p *admin.Principal) (interface{}, error) {
+	q := r.URL.Query()
+	page := slPage(q)
+	status := q.Get("status")
+	if status == "" {
+		status = "open" // the queue's default view
+	}
+	items, total, err := admin.ListPlatformReports(r.Context(), s.Pool, p, admin.ReportFilter{
+		Status: status, Page: page, Size: slPageSize,
+	})
+	return slReportsData{List: slList[admin.ReportRow]{Items: items, Total: total, Page: page, Size: slPageSize}, Status: status}, err
+}
+
+type slReportsData struct {
+	List   slList[admin.ReportRow]
+	Status string
+}
+
+// slReportAction disposes of a report: "dismiss" marks it dismissed;
+// "close" closes the reported task through the platform close.
+func (s *Server) slReportAction(action string) slAction {
+	return func(r *http.Request, p *admin.Principal) (string, string, error) {
+		id := pathInt(r, "id")
+		back := slBase + "/reports"
+		if err := admin.RequirePermission(r.Context(), s.Pool, p, "reports.manage"); err != nil {
+			return back, "", err
+		}
+		if _, err := service.ResolveReport(r.Context(), s.Pool, p.Admin.ID, id, action); err != nil {
+			return back, "", err
+		}
+		if action == "close" {
+			return back, "Task closed; its open reports are actioned.", nil
+		}
+		return back, "Report dismissed.", nil
 	}
 }
 

@@ -256,6 +256,19 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/api/samelabs/finance/adjustments", s.handleAdminFinanceAdjustments)
 	r.Get("/api/samelabs/finance/ledger", s.handleAdminFinanceLedger)
 
+	// WO-8b: task governance + report queue (reads tasks.read;
+	// mutations tasks.manage / reports.manage via requireAdminMutation)
+	r.Get("/api/samelabs/tasks", s.handleAdminTasksList)
+	r.Get("/api/samelabs/tasks/{code}", s.handleAdminTaskGet)
+	r.Post("/api/samelabs/tasks/{code}/close", s.handleAdminTaskClose)
+	r.Get("/api/samelabs/reports", s.handleAdminReportsList)
+	r.Post("/api/samelabs/reports/{id}/dismiss", func(w http.ResponseWriter, req *http.Request) {
+		s.handleAdminReportResolve(w, req, "dismiss")
+	})
+	r.Post("/api/samelabs/reports/{id}/close", func(w http.ResponseWriter, req *http.Request) {
+		s.handleAdminReportResolve(w, req, "close")
+	})
+
 	// Admin Workspace HTML routes
 	// Platform admin pages (server-rendered)
 	s.registerSamelabs(r)

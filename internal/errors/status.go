@@ -59,6 +59,7 @@ var statusByCode = map[string]int{
 	"MISSING_FIELD":        http.StatusBadRequest,
 	"INVALID_REQUEST":      http.StatusBadRequest,
 	"OWNER_LOGIN_REQUIRED": http.StatusUnauthorized,
+	"ADMIN_LOGIN_REQUIRED": http.StatusUnauthorized,
 	"PASSWORD_UNCHANGED":   http.StatusUnprocessableEntity,
 }
 

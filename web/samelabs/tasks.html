@@ -1,0 +1,24 @@
+{{define "content"}}
+<form class="sl-filters" method="get">
+  <select name="status">{{range $s := (list "all" "draft" "open" "paused" "closed")}}<option value="{{$s}}" {{if eq ($.Q "status") $s}}selected{{end}}>{{$s}}</option>{{end}}</select>
+  <button class="sl-btn" type="submit">Filter</button>
+</form>
+<section class="sl-card flush">
+{{if .Data.Items}}<table class="sl-table"><thead><tr><th>Task</th><th>Title</th><th>Publisher</th><th>Status</th><th class="r">Ver</th><th class="r">Locked</th><th class="r">Settled</th><th class="r">Reserved</th><th class="r">Refunded</th><th>Reason</th><th>Created</th></tr></thead><tbody>
+{{range .Data.Items}}<tr>
+  <td><a class="mono" href="/samelabs/tasks/{{.Code}}">{{.Code}}</a></td>
+  <td>{{trunc .Title 48}}</td>
+  <td><a href="/samelabs/accounts/{{.PublisherID}}">{{.PublisherName}}</a></td>
+  <td>{{template "badge" .Status}}</td>
+  <td class="r">{{.Version}}</td>
+  <td class="r">{{num .BudgetLocked}}</td>
+  <td class="r">{{num .Settled}}</td>
+  <td class="r">{{num .Reserved}}</td>
+  <td class="r">{{num .Refunded}}</td>
+  <td>{{with .PausedReason}}<span class="sl-badge s-paused">paused</span> {{.}}{{end}}{{with .ClosedReason}}<span class="sl-badge s-closed">closed</span> {{trunc . 60}}{{end}}</td>
+  <td>{{time .CreatedAt}}</td>
+</tr>{{end}}
+</tbody></table>{{else}}{{template "empty" "No task matches this filter."}}{{end}}
+</section>
+{{template "pager" (pager .Query .Data.Total .Data.Page .Data.Size)}}
+{{end}}

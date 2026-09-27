@@ -185,5 +185,7 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-7c：全局锁序 Task → Claim → Submission；无 Claim 提交以锁内版本为准；OpenTask 以草稿内容比较防并发修改；过期未清理的 Claim 在领取时就地过期；续期 TTL 取 Claim 所属版本；delivering 转 uncertain 后按 30 秒节奏重投；故障暂停在锁内按失败原因判定。
 - WO-7d：账户与存储工具并入注册表，公开工具由 ToolDef.Public 标记；鉴权失败统一 UNAUTHORIZED；状态码单一来源 internal/errors.StatusFor；工具结果为类型化 ToolResult。
 - WO-8a：Owner 控制台经 /api/owner/tool/{tool} 复用同一注册表，仅开放发布者工具；控制台不含独立业务接口。
+- WO-6b：举报幂等（同执行者同任务 open 举报返回原记录）；payload 按进入终态时间满 30 天清理；快照按任务 updated_at 满 30 天清理；retention 每 6 小时一轮、每轮 500。
+- WO-8b：平台关闭与发布者关闭共用 Claim/预留处理；处置举报即关闭任务时该任务全部 open 举报置 actioned；首页任务板单查询、至多 20 条。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。
