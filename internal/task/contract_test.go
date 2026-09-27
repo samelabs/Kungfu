@@ -157,7 +157,6 @@ func TestValidateContractViolations(t *testing.T) {
 		{"title max 128 chars", func(c *Contract) { c.Title = strings.Repeat("t", maxTitleLen+1) }, "title"},
 		{"objective required", func(c *Contract) { c.Objective = "" }, "objective"},
 		{"objective max 2000 chars", func(c *Contract) { c.Objective = strings.Repeat("o", maxObjectiveLen+1) }, "objective"},
-		{"inputs required", func(c *Contract) { c.Inputs = "" }, "inputs"},
 		{"inputs max 4000 chars", func(c *Contract) { c.Inputs = strings.Repeat("i", maxInputsLen+1) }, "inputs"},
 		{"output.description required", func(c *Contract) { c.Output.Description = "" }, "output.description"},
 		{"output.description max 2000", func(c *Contract) { c.Output.Description = strings.Repeat("d", maxOutputDescLen+1) }, "output.description"},
@@ -214,7 +213,6 @@ func TestValidateContractViolations(t *testing.T) {
 		}, "boundaries[0]"},
 
 		// -- examples --
-		{"examples min 1", func(c *Contract) { c.Examples = nil }, "examples"},
 		{"examples max 5", func(c *Contract) {
 			for len(c.Examples) <= maxExamples {
 				c.Examples = append(c.Examples, Example{

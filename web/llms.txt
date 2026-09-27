@@ -64,7 +64,7 @@ Submission states: `delivering`, `uncertain`, `under_review`, `settled`, `reject
 
 ## Publisher flow
 
-1. `task_create` — validated draft contract + budget (≥ max(1000, price)); budget locks from your balance.
+1. `task_create` — validated draft contract + budget (≥ price, at least one unit); budget locks from your balance. Minimal call: `{"contract":{"title":...,"objective":...,"price":5},"budget":5,"open":true}`.
 2. `task_open` — validates, snapshots harness refs, runs the test delivery, opens on a new version.
 3. While open: `task_pause`, `task_fund`; `task_submissions` reads payloads and `task_verdict` accepts (settles, pays) or rejects (declared criteria + reason ≤ 500 chars) async submissions.
 4. `task_close` — permanent; active claims submit until expiry, in-flight submissions complete.

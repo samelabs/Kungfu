@@ -31,9 +31,6 @@ import (
 	"kungfu.md/internal/task"
 )
 
-// MinTaskBudgetFloor is the §4/§11 create floor: budget ≥ max(1000, price).
-const MinTaskBudgetFloor = 1000
-
 // testDeliveryResponsePreviewBytes caps the receiver response excerpt
 // carried in TEST_DELIVERY_FAILED details.
 const testDeliveryResponsePreviewBytes = 500
@@ -164,18 +161,18 @@ func derefInt64(p *int64) int64 {
 // -- §4 transitions --
 
 // CreateTask is the §4 create transition: a validated draft plus the
-// budget lock (lock_task) in one transaction. budget must cover
-// max(1000, price) and the publisher's balance.
+// budget lock (lock_task) in one transaction. budget must cover at
+// least one unit of the price (§4/§11, WO-11: no numeric minimum) and
+// the publisher's balance.
 func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract task.Contract, budget int64) (map[string]interface{}, error) {
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
-	if budget < int64(MinTaskBudgetFloor) || budget < defaults.Price {
+	if budget < defaults.Price {
 		return nil, validationFailed([]task.FieldError{{
-			Field: "budget",
-			Message: fmt.Sprintf("budget must be at least max(%d, price) = %d, got %d",
-				MinTaskBudgetFloor, maxInt64(MinTaskBudgetFloor, defaults.Price), budget),
+			Field:   "budget",
+			Message: fmt.Sprintf("budget must be at least the price (%d), got %d", defaults.Price, budget),
 		}})
 	}
 	if balance, err := credits.Balance(ctx, pool, publisherID); err != nil {
@@ -226,13 +223,6 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 func isInsufficientCreditsErr(err error) bool {
 	appErr, ok := err.(*errors.AppError)
 	return ok && appErr.Code == "INSUFFICIENT_CREDITS"
-}
-
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // UpdateTask is the §4 update transition: edit the Contract while the
@@ -414,10 +404,9 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 		}
 	}
 	if payload == nil {
-		return validationFailed([]task.FieldError{{
-			Field:   "examples",
-			Message: "no accepted example to deliver as the test payload",
-		}})
+		// §5.4: no examples — the test delivery is skipped (examples
+		// are optional since WO-11).
+		return nil
 	}
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(`"` + testKey + `"`),

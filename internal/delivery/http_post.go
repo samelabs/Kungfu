@@ -53,6 +53,15 @@ const (
 // forbidden; 10s total / 5s connect timeouts unchanged.
 var sharedClient *http.Client
 
+// requestTimeoutOverride, when positive, bounds each PostJSON request
+// INSTEAD of the 10-second production budget. Tests only — production
+// never sets it; the §11 value stays the authority.
+var requestTimeoutOverride time.Duration
+
+// SetRequestTimeoutForTest overrides the per-request delivery timeout
+// for the whole process (tests only; zero restores the §11 10s).
+func SetRequestTimeoutForTest(d time.Duration) { requestTimeoutOverride = d }
+
 // maxExistingResponseBytes is the largest byte budget any existing
 // consumer stores or displays (the 65535-byte TestTask DB log column).
 // Transport reads at most this + 1 byte — bounded I/O, existing
@@ -76,6 +85,11 @@ const maxExistingResponseBytes = 65535
 // http.NewRequestWithContext. The 10s client timeout remains a lower
 // safety net, NOT the primary budget.
 func PostJSON(ctx context.Context, url string, body []byte, headers map[string]string, errCfg ErrorConfig) PostResult {
+	if requestTimeoutOverride > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, requestTimeoutOverride)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return PostResult{

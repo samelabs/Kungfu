@@ -108,7 +108,7 @@ type faultInjector struct {
 
 func (f *faultInjector) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if h := f.hang.Add(-1); h >= 0 {
-		time.Sleep(12 * time.Second) // > the §11 10s response timeout
+		time.Sleep(5 * time.Second) // > the 1s test-injected request timeout
 	}
 	if n := f.fail.Add(-1); n >= 0 {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -680,10 +680,11 @@ func TestE2EJourney4ClaimLifecycle(t *testing.T) {
 
 	// (b) a fresh claim ages past its TTL before any submission
 	aged := e.mustCall(t, e.agentKey, "work_claim", map[string]any{"code": code})
-	if _, err := service.ExpireClaims(context.Background(), e.pool,
-		time.Now().Add(31*time.Minute), 100); err != nil {
-		t.Fatalf("ExpireClaims: %v", err)
-	}
+	// age THIS claim past its TTL (the shared gate database may hold
+	// hundreds of other expired active claims from earlier packages,
+	// which a global ExpireClaims pass would drain first) — the same
+	// task -> claim lock order and event as the reclaimer
+	ageClaim(t, e, code, parseID(t, aged["claim_id"]))
 	d4 := drive{
 		agent: e.agent, payload: payload, key: code + "-b",
 		extra: map[string]any{"claim_id": aged["claim_id"]},
@@ -703,6 +704,38 @@ func TestE2EJourney4ClaimLifecycle(t *testing.T) {
 	e.checkInvariants(t, code)
 }
 
+// ageClaim expires one claim of this journey's task (§5.2 expiry:
+// event expire + reservation release, task -> claim lock order).
+func ageClaim(t *testing.T, e *e2eEnv, code string, claimID int64) {
+	t.Helper()
+	ctx := context.Background()
+	tr, _ := repository.FindTaskByCode(ctx, e.pool, code)
+	tx, err := e.pool.TxBegin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := repository.FindTaskByIDForUpdate(ctx, tx, tr.ID); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("task lock: %v", err)
+	}
+	claim, err := repository.FindClaimByIDForUpdate(ctx, tx, claimID)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("claim lock: %v", err)
+	}
+	if err := repository.ApplyClaimStatus(ctx, tx, claimID, task.ClaimActive, task.EventClaimExpire); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("expire: %v", err)
+	}
+	if err := repository.ReleaseTaskReservation(ctx, tx, tr.ID, claim.Amount); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("release: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
 // 5) delivery stall → uncertain/poll → the receiver recovers, the
 // clock advances 31s and RecoverSubmissions settles the redelivery.
 func TestE2EJourney5UncertainRecovery(t *testing.T) {
@@ -711,7 +744,13 @@ func TestE2EJourney5UncertainRecovery(t *testing.T) {
 		{"id":"C1","required":["/url"]}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, nil))
 
-	e.injector.hang.Store(1) // the first delivery stalls past 10s
+	// this journey alone runs with a 1s delivery request budget
+	// (production 10s) so the stall resolves quickly; the rest of the
+	// suite keeps the §11 value
+	started := time.Now()
+	delivery.SetRequestTimeoutForTest(time.Second)
+	t.Cleanup(func() { delivery.SetRequestTimeoutForTest(0) })
+	e.injector.hang.Store(1) // the first delivery stalls past the 1s test budget
 	d5 := drive{
 		agent: e.agent,
 		payload: map[string]any{"url": "https://example.com/a",
@@ -732,6 +771,9 @@ func TestE2EJourney5UncertainRecovery(t *testing.T) {
 	}
 	if final := steps[len(steps)-1]; final["state"] != "settled" || final["paid"].(float64) != 5 {
 		t.Fatalf("final step: %v", final)
+	}
+	if d := time.Since(started); d >= 3*time.Second {
+		t.Fatalf("journey took %s with the injected 1s delivery budget, want < 3s", d)
 	}
 	e.checkInvariants(t, code)
 }

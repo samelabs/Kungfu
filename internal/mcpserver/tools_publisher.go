@@ -19,9 +19,17 @@ import (
 type contractArg = task.Contract
 
 func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	// §11: 20 creates per hour per publisher. Publisher tools carry a
+	// null next_action (WO-7b), so NoAction overrides RATE_LIMIT→wait.
+	if !deps.limiter().CheckAgent(agent.ID, "task_create") {
+		retry := deps.limiter().CheckAgentWithDetails(agent.ID, "task_create").RetryAfter
+		return ToolResult{NoAction: true}, &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded",
+			Details: map[string]any{"retry_after": retry}}
+	}
 	var in struct {
 		Contract contractArg `json:"contract"`
 		Budget   int64       `json:"budget"`
+		Open     bool        `json:"open"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
@@ -29,6 +37,16 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, in.Contract, in.Budget)
 	if err != nil {
 		return ToolResult{}, err
+	}
+	if in.Open {
+		// §8.1: open in the same call; a failed open leaves the task a
+		// draft with the budget locked (task_close + task_refund
+		// recover it) and returns that error.
+		code, _ := view["code"].(string)
+		view, err = service.OpenTask(ctx, deps.Pool, agent.ID, code)
+		if err != nil {
+			return ToolResult{}, err
+		}
 	}
 	return dataView(view)
 }

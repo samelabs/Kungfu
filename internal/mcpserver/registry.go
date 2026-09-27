@@ -223,12 +223,13 @@ next_action: the platform triages; continue other work.`,
 	{
 		Name: "task_create",
 		Description: `Create a draft task and lock its budget (lock_task ledger row).
-Preconditions: the contract satisfies the spec's section-3 table (validated field-by-field); budget >= max(1000, price); your balance covers the budget.
-Result: the task view - status "draft", budget_locked, available, slots.
-Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS. After: task_open makes it visible to executors.`,
+Preconditions: the contract needs only title, objective and price (everything else defaults per section 3); budget >= price (at least one unit); your balance covers the budget.
+Result: the task view - status "draft" (or "open" with open=true), budget_locked, available, slots. open=true opens in the same call; if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 			"contract":{"type":"object"},
-			"budget":{"type":"integer"}
+			"budget":{"type":"integer"},
+			"open":{"type":"boolean"}
 		},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},

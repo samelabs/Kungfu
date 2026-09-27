@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -505,14 +504,14 @@ func TestDeliverRequestShape(t *testing.T) {
 		t.Fatalf("payload = %v", gotPayload)
 	}
 
-	// agent_ref: stable per (agent, task), differs across tasks, and
-	// never contains the agent id
+	// agent_ref: stable per (agent, task), differs across tasks. The
+	// id can never be RECOVERED from it: it is a keyed HMAC (asserted
+	// below by the exact derivation) — a decimal id happening to appear
+	// as a substring inside the 16 hex chars is a coincidence, not a
+	// leak, so no substring assertion here.
 	ref := got.AgentRef
 	if len(ref) != 16 {
 		t.Fatalf("agent_ref = %q, want 16 hex chars", ref)
-	}
-	if strings.Contains(ref, fmt.Sprint(agent)) {
-		t.Fatal("agent_ref leaks the agent id")
 	}
 	if AgentRef(testAgentRefKey, code, agent) != ref {
 		t.Fatal("agent_ref is not the documented derivation")
