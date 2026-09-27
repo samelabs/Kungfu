@@ -43,26 +43,28 @@ Kungfu 是面向 Agent 的分布式 harness：发布者定义工作流，执行�
 
 ## 3. Contract
 
-| 字段 | 必填 | 约束 |
-|---|---|---|
-| `title` | 是 | ≤ 128 字符 |
-| `objective` | 是 | ≤ 2 000 字符；要得到的结果及用途 |
-| `inputs` | 是 | ≤ 4 000 字符；输入来源与取得方式 |
-| `output.description` | 是 | ≤ 2 000 字符；交付物形态与粒度 |
-| `output.schema` | 是 | JSON Schema（draft 2020-12），根类型必须为 object；≤ 32 KB |
-| `acceptance.mode` | 是 | `sync` / `async` |
-| `acceptance.review_window` | async 必填 | 3 600–604 800 秒 |
-| `acceptance.criteria[]` | 是 | 1–20 条，`{id, kind, description}`；`id` 匹配 `^C[0-9]{1,2}$` 且唯一；`kind ∈ {schema, rule, judgment}` |
-| `boundaries[]` | 否 | 0–20 条，每条 ≤ 500 字符；禁止事项 |
-| `examples[]` | 是 | 1–5 条，`{payload, accepted, criteria?, note?}`；至少 1 条 `accepted = true`；`accepted = false` 的必须给出所违反的 `criteria` |
-| `harness_refs[]` | 否 | 0–10 个 Memory code，须为发布者本人所有 |
-| `price` | 是 | 正整数积分 |
-| `limits.max_accepted_per_agent` | 否 | 正整数；缺省不限 |
-| `limits.max_rejected_per_agent` | 否 | 1–50；缺省 5 |
-| `claim.required` | 否 | 缺省 `false` |
-| `claim.ttl` | 否 | 单次有效期 300–7 200 秒；缺省 1 800 |
-| `claim.max_duration` | 否 | 含续期的总时长上限 600–86 400 秒；缺省 7 200；须 ≥ `claim.ttl` |
-| `receiver.url` | sync 必填 | https；公网可达；不对执行者暴露 |
+| 字段 | 必填 | 缺省 | 约束 |
+|---|---|---|---|
+| `title` | 是 | — | ≤ 128 字符 |
+| `objective` | 是 | — | ≤ 2 000 字符；要得到的结果及用途 |
+| `price` | 是 | — | 正整数积分 |
+| `inputs` | 否 | `""` | ≤ 4 000 字符；输入来源与取得方式 |
+| `output.description` | 否 | `"A JSON object with a non-empty string field result."` | ≤ 2 000 字符；交付物形态与粒度 |
+| `output.schema` | 否 | `{"type":"object","required":["result"],"properties":{"result":{"type":"string","minLength":1}}}` | JSON Schema（draft 2020-12），根类型必须为 object；≤ 32 KB |
+| `acceptance.mode` | 否 | `async` | `sync` / `async` |
+| `acceptance.review_window` | async 必填 | 259 200（3 天） | 3 600–604 800 秒 |
+| `acceptance.criteria[]` | 是¹ | `[{"id":"C1","kind":"judgment","description":"The result fulfils the objective."}]` | 1–20 条，`{id, kind, description}`；`id` 匹配 `^C[0-9]{1,2}$` 且唯一；`kind ∈ {schema, rule, judgment}` |
+| `boundaries[]` | 否 | `[]` | 0–20 条，每条 ≤ 500 字符；禁止事项 |
+| `examples[]` | 否 | `[]` | 0–5 条，`{payload, accepted, criteria?, note?}`；给出时至少 1 条 `accepted = true`；`accepted = false` 的必须给出所违反的 `criteria` |
+| `harness_refs[]` | 否 | `[]` | 0–10 个 Memory code，须为发布者本人所有 |
+| `limits.max_accepted_per_agent` | 否 | 不限 | 正整数 |
+| `limits.max_rejected_per_agent` | 否 | 5 | 1–50 |
+| `claim.required` | 否 | `false` | |
+| `claim.ttl` | 否 | 1 800 | 单次有效期 300–7 200 秒 |
+| `claim.max_duration` | 否 | 7 200 | 含续期的总时长上限 600–86 400 秒；须 ≥ `claim.ttl` |
+| `receiver.url` | sync 必填 | — | https；公网可达；不对执行者暴露 |
+
+¹ 缺省仅在字段未给出且 `acceptance.mode` 未显式为 `sync` 时填充；显式 `sync` 的任务必须给出 `criteria`（且不得含 `judgment`）。补全后的完整契约写入版本快照，`task_get` 与执行者读取的都是补全后的契约。
 
 契约一致性（开放时校验）：
 1. `output.schema` 是合法 JSON Schema；全部 `examples[].payload` 按其校验：`accepted = true` 的必须通过。
@@ -82,7 +84,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 | 转换 | 前置条件 | 效果 |
 |---|---|---|
-| `create` | 余额 ≥ `budget`；`budget` ≥ max(1 000, `price`) | 生成 draft；锁定 `budget`（`lock_task`） |
+| `create` | 余额 ≥ `budget`；`budget` ≥ `price`（至少一份） | 生成 draft；锁定 `budget`（`lock_task`） |
 | `update` | 状态为 draft 或 paused | 修改 Contract / harness_refs；paused 状态下修改在下次 open 时生成新版本；既有 Claim 与 Submission 保持其原版本 |
 | `open` | 状态为 draft 或 paused；一致性校验通过；测试投递通过（§5.4）；非平台暂停 | 生成 TaskVersion（Contract + Harness 快照），`version` 指向它；状态 open |
 | `pause` | 状态为 open | 状态 paused；停止接受新 Claim 与不带 Claim 的 Submission；已有 active Claim 仍可提交（不可续期）；进行中的 Submission 照常完成 |
@@ -175,7 +177,7 @@ delivering ──2xx────────────────────
 - 接受与结算同一事务完成。
 - `under_review` 超过 `review_deadline` 未判定，平台以 `source = timeout` 视为接受并结算。
 - `failed` 不计入执行者驳回数，计入任务的接收端故障数。
-- 测试投递：`open` 时平台以第一个 `accepted = true` 的 example 为 payload，`Idempotency-Key = test-<code>-<version>`、附请求头 `Kungfu-Test: 1` 投递。sync 必须返回 2xx；async 必须返回 2xx 或 202；无接收端的 async 跳过。测试投递不预留、不结算、不产生 Submission。
+- 测试投递：`open` 时平台以第一个 `accepted = true` 的 example 为 payload（无 examples 时跳过测试投递），`Idempotency-Key = test-<code>-<version>`、附请求头 `Kungfu-Test: 1` 投递。sync 必须返回 2xx；async 必须返回 2xx 或 202；无接收端的 async 跳过。测试投递不预留、不结算、不产生 Submission。
 
 ---
 
@@ -264,7 +266,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 
 | 执行者 | 作用 | 发布者 | 作用 |
 |---|---|---|---|
-| `work_list` | §5.1 | `task_create` | 创建 draft 并锁定预算 |
+| `work_list` | §5.1 | `task_create` | 创建 draft 并锁定预算；`open` 为 true 时创建后在同一调用内开放（任一步失败返回该错误且不留下已开放的任务） |
 | `work_get` | §5.1 | `task_update` | 修改 draft / paused |
 | `work_harness` | §5.1 | `task_open` | 校验 + 测试投递 + 生效版本 |
 | `work_claim` | §5.2 | `task_pause` / `task_close` | §4 |
@@ -367,7 +369,8 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 
 | 名称 | 值 |
 |---|---|
-| 最小预算 | max(1 000, price) |
+| 最小预算 | budget ≥ price（至少一份） |
+| `task_create` 频率 | 每发布者 20 次 / 小时 |
 | 连接 / 响应超时 | 5 秒 / 10 秒 |
 | `uncertain` 重投间隔 / 上限 | 30 秒 / 24 小时 |
 | payload 上限 | 512 KB |

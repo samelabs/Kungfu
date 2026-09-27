@@ -68,7 +68,7 @@ function tcvEditorInit() {
     const root = qs('#taskEditorRoot');
     if (!root) return;
     if (SECTION === 'task_new') {
-        tcvRenderEditor({code: null, contract: TCV_SAMPLE_CONTRACT, budget: 2000, status: 'new'});
+        tcvRenderSimpleForm();
         return;
     }
     const code = window.location.pathname.split('/').pop();
@@ -77,6 +77,79 @@ function tcvEditorInit() {
         tcvRenderEditor({code, view: env, status: env.status});
     }).catch((error) => {
         root.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
+    });
+}
+
+// ---- simple mode (task_new default): title / objective / price /
+// units (+ open now). The minimal contract {title, objective, price}
+// goes to task_create with budget = price * units and open as chosen.
+function tcvRenderSimpleForm() {
+    const root = qs('#taskEditorRoot');
+    if (!root) return;
+    root.innerHTML = `
+    <div class="panel">
+        <div class="section-head">
+            <div class="section-head-copy">
+                <h2>${escapeHtml(t('tasks.mode_title'))}</h2>
+            </div>
+            <div class="section-head-actions">
+                <button class="btn" id="tcvAdvancedBtn" type="button">${escapeHtml(t('tasks.advanced'))}</button>
+            </div>
+        </div>
+        <div id="taskEditorStatus" class="keybox" hidden></div>
+        <label>${escapeHtml(t('tasks.f_title'))}</label>
+        <input id="tcvSTitle" maxlength="128">
+        <label>${escapeHtml(t('tasks.f_objective'))}</label>
+        <textarea id="tcvSObjective" rows="3" maxlength="2000"></textarea>
+        <div class="tcv-pair">
+            <div>
+                <label>${escapeHtml(t('tasks.f_price'))}</label>
+                <input id="tcvSPrice" type="number" min="1" value="5">
+            </div>
+            <div>
+                <label>${escapeHtml(t('tasks.f_units'))}</label>
+                <input id="tcvSUnits" type="number" min="1" value="1">
+            </div>
+        </div>
+        <dl class="sl-kv">
+            <dt>${escapeHtml(t('tasks.f_total'))}</dt><dd id="tcvSTotal">5</dd>
+            <dt>${escapeHtml(t('tasks.f_balance'))}</dt><dd id="tcvSBalance">…</dd>
+        </dl>
+        <label><input type="checkbox" id="tcvSOpen" checked> ${escapeHtml(t('tasks.open_now'))}</label>
+        <div class="actions">
+            <button class="btn primary" id="tcvSPublish" type="button">${escapeHtml(t('tasks.publish'))}</button>
+        </div>
+    </div>`;
+    const total = () => {
+        const v = Math.max(1, Number(qs('#tcvSUnits').value || 0)) * Math.max(0, Number(qs('#tcvSPrice').value || 0));
+        qs('#tcvSTotal').textContent = String(v);
+    };
+    qs('#tcvSUnits').addEventListener('input', total);
+    qs('#tcvSPrice').addEventListener('input', total);
+    qs('#tcvAdvancedBtn').addEventListener('click', () => {
+        tcvRenderEditor({code: null, contract: TCV_SAMPLE_CONTRACT, budget: 2000, status: 'new'});
+    });
+    requestJson('/api/owner/logs?log_type=credits&page=1&page_size=1', {method: 'GET'})
+        .then((json) => {
+            const b = qs('#tcvSBalance');
+            if (b && json && json.success) b.textContent = String(json.data.balance ?? '0');
+        }).catch(() => {});
+    qs('#tcvSPublish').addEventListener('click', () => {
+        const title = qs('#tcvSTitle').value.trim();
+        const objective = qs('#tcvSObjective').value.trim();
+        const price = Number(qs('#tcvSPrice').value || 0);
+        const units = Math.max(1, Number(qs('#tcvSUnits').value || 1));
+        if (!title) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_title')}}); return; }
+        if (!objective) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_objective')}}); return; }
+        if (!Number.isInteger(price) || price < 1) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_price')}}); return; }
+        tcvCall('task_create', {
+            contract: {title, objective, price},
+            budget: price * units,
+            open: qs('#tcvSOpen').checked
+        }).then((env) => {
+            tcvShowStatus(env);
+            if (env.ok && env.code) window.location.href = `/owner/tasks/${env.code}`;
+        }).catch((error) => tcvShowStatus({ok: false, error: {code: 'NETWORK', message: noticeText(error)}}));
     });
 }
 

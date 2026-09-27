@@ -29,7 +29,18 @@ const (
 	DefaultMaxRejectedPerAgent = 5
 	DefaultClaimTTLSeconds     = 1800
 	DefaultClaimMaxDuration    = 7200
+	// The minimal-task defaults (WO-11): a contract with only title,
+	// objective and price becomes an async, 3-day-review judgment task
+	// over a result string.
+	DefaultReviewWindowSeconds = 259200 // 3 days
+	DefaultOutputDescription   = "A JSON object with a non-empty string field result."
+	DefaultCriterionID         = "C1"
+	DefaultCriterionDesc       = "The result fulfils the objective."
 )
+
+// DefaultOutputSchema is the §3 缺省 output.schema: one required,
+// non-empty string field `result`.
+const DefaultOutputSchema = `{"type":"object","required":["result"],"properties":{"result":{"type":"string","minLength":1}}}`
 
 // §3 bounds.
 const (
@@ -146,13 +157,39 @@ type Receiver struct {
 	URL string `json:"url,omitempty"`
 }
 
-// WithDefaults returns a copy with the §3 缺省 filled in:
-// limits.max_rejected_per_agent → 5, claim.required → false,
-// claim.ttl → 1800, claim.max_duration → 7200.
+// WithDefaults returns a copy with the §3 缺省 filled in. The minimal
+// required contract is title + objective + price; everything else
+// materializes here:
+//
+//	inputs → "", output.description/schema → the result-string pair,
+//	acceptance.mode → async, review_window → 259 200,
+//	criteria → the default judgment criterion (only when mode was not
+//	explicitly sync — a sync task must declare its own criteria),
+//	limits.max_rejected_per_agent → 5, claim.required → false,
+//	claim.ttl → 1800, claim.max_duration → 7200.
+//
 // limits.max_accepted_per_agent has no numeric default (缺省不限)
 // and stays nil.
 func (c Contract) WithDefaults() Contract {
 	out := c
+	if out.Output.Description == "" {
+		out.Output.Description = DefaultOutputDescription
+	}
+	if len(out.Output.Schema) == 0 {
+		out.Output.Schema = json.RawMessage(DefaultOutputSchema)
+	}
+	if out.Acceptance.Mode == "" {
+		out.Acceptance.Mode = ModeAsync
+	}
+	if out.Acceptance.Mode == ModeAsync && out.Acceptance.ReviewWindow == nil {
+		w := int64(DefaultReviewWindowSeconds)
+		out.Acceptance.ReviewWindow = &w
+	}
+	if len(out.Acceptance.Criteria) == 0 && c.Acceptance.Mode != ModeSync {
+		out.Acceptance.Criteria = []Criterion{{
+			ID: DefaultCriterionID, Kind: KindJudgment, Description: DefaultCriterionDesc,
+		}}
+	}
 	if out.Limits.MaxRejectedPerAgent == nil {
 		v := int64(DefaultMaxRejectedPerAgent)
 		out.Limits.MaxRejectedPerAgent = &v
@@ -191,7 +228,11 @@ func ValidateContract(c Contract) []FieldError {
 	}
 	requireBounded("title", c.Title, maxTitleLen)
 	requireBounded("objective", c.Objective, maxObjectiveLen)
-	requireBounded("inputs", c.Inputs, maxInputsLen)
+	// inputs, output.description and output.schema are optional (§3
+	// 缺省; WithDefaults has already filled them) — bounds only.
+	if n := utf8.RuneCountInString(c.Inputs); n > maxInputsLen {
+		add("inputs", "must be at most %d characters, got %d", maxInputsLen, n)
+	}
 	requireBounded("output.description", c.Output.Description, maxOutputDescLen)
 
 	// -- output.schema: required, size, valid JSON, root object,
@@ -253,10 +294,11 @@ func ValidateContract(c Contract) []FieldError {
 		}
 	}
 
-	// -- examples: 1–5, payload valid JSON, criteria declared,
-	//    accepted=false must cite violated criteria, ≥1 accepted --
-	if n := len(c.Examples); n < 1 || n > maxExamples {
-		add("examples", "must contain 1 to %d entries, got %d", maxExamples, n)
+	// -- examples: 0–5 (optional, §3 缺省 []); when present, payload
+	//    valid JSON, criteria declared, accepted=false must cite
+	//    violated criteria, ≥1 accepted --
+	if n := len(c.Examples); n > maxExamples {
+		add("examples", "must contain at most %d entries, got %d", maxExamples, n)
 	}
 	anyAccepted := false
 	for i, ex := range c.Examples {

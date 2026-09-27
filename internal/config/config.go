@@ -175,6 +175,7 @@ func defaultRateLimits() map[string]RateLimitConfig {
 		"get":         {Window: 60, Limit: 300, Enabled: &t},
 		"push":        {Window: 3600, Limit: 60, Enabled: &t},
 		"task_submit": {Window: 60, Limit: 120, Enabled: &t},
+		"task_create": {Window: 3600, Limit: 20, Enabled: &t},
 	}
 }
 

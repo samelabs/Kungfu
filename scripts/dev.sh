@@ -52,11 +52,16 @@ cmd_test() {
   wait_pg "$pg"
   migrate "$pg"
   local pkgs="${*:-./...}"
+  # with package arguments, vet covers only those packages (flags like
+  # -run pass through to go test alone)
+  local vet_pkgs="" a
+  for a in "$@"; do case "$a" in ./*) vet_pkgs="$vet_pkgs $a" ;; esac; done
+  [ -n "$vet_pkgs" ] || vet_pkgs=" ./..."
   run_tools -e KF_TEST_DATABASE_URL="postgres://kungfu:kungfu@$pg:5432/kungfu_md?sslmode=disable" \
     -e DB_PASS=kungfu -e SESSION_SECRET=local-test-session-secret-000000000 "$IMG" sh -c '
       set -e
       u=$(gofmt -l ./cmd ./internal ./web); [ -z "$u" ] || { echo "gofmt needed:"; echo "$u"; exit 1; }
-      go vet ./...
+      go vet'"$vet_pkgs"'
       # -p 1: test packages run SERIALLY — they share the one test
       # PostgreSQL, so parallel packages would mutate the fixtures of
       # one another (WO-7e).
