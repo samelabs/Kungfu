@@ -781,7 +781,7 @@ func TestStoreAdminRegressionSingleStatusMutationImplementation(t *testing.T) {
 	}
 	// no other production package calls a status mutation on products
 	// besides the Tx primitive
-	txSrc := readSourceForGuard(t, filepath.Join(root, "internal", "rewards", "store_tx.go"))
+	txSrc := readSourceForGuard(t, filepath.Join(root, "internal", "rewards", "rewards_tx.go"))
 	if !strings.Contains(txSrc, "SetRewardsProductStatusReturning") {
 		t.Fatal("SetProductStatusTx must be the sole caller of the status write")
 	}

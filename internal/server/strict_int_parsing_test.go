@@ -99,7 +99,7 @@ func jsonNum(t *testing.T, s string) interface{} {
 func TestCreditParsersContainNoFloatPath(t *testing.T) {
 	files := []string{
 		"handlers.go",            // parseCredits
-		"handler_admin_store.go", // jsonCredits
+		"handler_admin_rewards.go", // jsonCredits
 	}
 	for _, f := range files {
 		path := filepath.Join(".", f)

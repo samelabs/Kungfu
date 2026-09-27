@@ -181,7 +181,7 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 		`ALTER TABLE tb_bots ALTER COLUMN balance TYPE numeric(20,4)`,
 		`ALTER TABLE tb_transactions ALTER COLUMN amount TYPE numeric(20,4), ALTER COLUMN balance_after TYPE numeric(20,4)`,
 		`ALTER TABLE tb_payments ALTER COLUMN credits TYPE numeric(20,4)`,
-		`ALTER TABLE tb_rewards_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
+		`ALTER TABLE tb_store_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
 		`ALTER TABLE tb_redemptions ALTER COLUMN credits_cost TYPE numeric(20,4)`,
 	} {
 		if _, err := db.Exec(ctx, stmt); err != nil {
@@ -270,7 +270,8 @@ func TestMigration009UpgradeOnNumericSchema(t *testing.T) {
 // SQL owns its transaction: a deterministic failure injected at the
 // FINAL ALTER statement (tb_redemptions.credits_cost) — after earlier
 // 009 ALTERs (tb_bots.balance, tb_transactions, tb_payments,
-// tb_rewards_products) have already executed successfully inside the same
+// tb_store_products — renamed tb_rewards_products by 018) have already
+// executed successfully inside the same
 // transaction — rolls back the ENTIRE migration: all Credits columns
 // stay NUMERIC(20,4), seeded data unchanged. (The v1 tb_tasks columns
 // no longer exist after 015 and are no longer part of the simulation.) This exercises explicit
@@ -322,7 +323,7 @@ func TestMigration009ExplicitRollbackOnLaterFailure(t *testing.T) {
 		`ALTER TABLE tb_bots ALTER COLUMN balance TYPE numeric(20,4)`,
 		`ALTER TABLE tb_transactions ALTER COLUMN amount TYPE numeric(20,4), ALTER COLUMN balance_after TYPE numeric(20,4)`,
 		`ALTER TABLE tb_payments ALTER COLUMN credits TYPE numeric(20,4)`,
-		`ALTER TABLE tb_rewards_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
+		`ALTER TABLE tb_store_products ALTER COLUMN credits_price TYPE numeric(20,4)`,
 		`ALTER TABLE tb_redemptions ALTER COLUMN credits_cost TYPE numeric(20,4)`,
 	} {
 		if _, err := db.Exec(ctx, stmt); err != nil {
