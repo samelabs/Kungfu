@@ -46,6 +46,8 @@ package delivery
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -292,6 +294,18 @@ var allowLoopback bool
 func AllowLoopbackForTest() func() {
 	allowLoopback = true
 	return func() { allowLoopback = false }
+}
+
+// TrustRootsForTest makes the delivery client trust exactly pool for
+// TLS — TEST-ONLY, for in-process httptest TLS receivers with a
+// self-signed certificate (macOS Go ignores SSL_CERT_FILE). Returns the
+// restore function.
+func TrustRootsForTest(pool *x509.CertPool) func() {
+	prev := sharedClient
+	c := newHardenedClient()
+	c.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: pool}
+	sharedClient = c
+	return func() { sharedClient = prev }
 }
 
 // ---------------------------------------------------------------------------

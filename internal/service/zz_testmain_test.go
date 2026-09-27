@@ -8,18 +8,16 @@ package service
 // enforces the public-routable PostAPI policy.
 //
 // It also generates a self-signed server certificate for 127.0.0.1 and
-// points SSL_CERT_FILE at it BEFORE any TLS handshake, so httptest TLS
+// makes the delivery client trust it (delivery.TrustRootsForTest), so httptest TLS
 // receivers get https:// URLs that both pass §3 receiver validation and
 // verify against the hardened delivery client.
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"math/big"
 	"net"
 	"os"
@@ -58,20 +56,14 @@ func mustGenerateTestCert() tls.Certificate {
 	if err != nil {
 		panic(err)
 	}
-	var pemBuf bytes.Buffer
-	if err := pem.Encode(&pemBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		panic(err)
+	leaf, perr := x509.ParseCertificate(der)
+	if perr != nil {
+		panic(perr)
 	}
-	f, err := os.CreateTemp("", "wo2b-test-cert-*.pem")
-	if err != nil {
-		panic(err)
-	}
-	if _, err := f.Write(pemBuf.Bytes()); err != nil {
-		panic(err)
-	}
-	_ = f.Close()
-	// Go's x509 root pool loads lazily on first use: setting this now
-	// makes every TLS handshake in this binary trust the test cert.
-	os.Setenv("SSL_CERT_FILE", f.Name())
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	// Trust the test cert in the delivery client explicitly: macOS Go
+	// verifies with the system keychain and ignores SSL_CERT_FILE.
+	delivery.TrustRootsForTest(pool)
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }

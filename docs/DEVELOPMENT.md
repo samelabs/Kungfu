@@ -8,7 +8,7 @@ local change ──► scripts/dev.sh test ──► PR ──► CI green ─�
 
 ## 1. Work locally
 
-Requires Docker only (no local Go or PostgreSQL).
+Tests need Go 1.25+ and Node on the host (`brew install go node`) and Docker for a throwaway PostgreSQL (tmpfs, removed with its volumes after the run). `up`, `seed-admin`, `down` and `reset` need only Docker.
 
 | Command | What it does |
 |---|---|
@@ -18,7 +18,7 @@ Requires Docker only (no local Go or PostgreSQL).
 | `scripts/dev.sh seed-admin NAME` | Create a superadmin for `/samelabs` in the dev database (password read from the terminal). |
 | `scripts/dev.sh down` / `reset` | Stop the dev server and database / also delete the dev data. |
 
-The toolchain image (`scripts/tools.Dockerfile`) pins the Go version from `go.mod`.
+Tests compile natively with the host Go build cache; nothing but PostgreSQL runs in the Docker VM. The toolchain image (`scripts/tools.Dockerfile`) is used only by `up` and `scripts/deploy.sh` and pins the Go version from `go.mod`.
 
 ## 2. Branch, PR, CI
 

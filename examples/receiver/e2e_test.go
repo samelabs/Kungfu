@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +44,7 @@ import (
 
 // e2eTLSCert makes the self-signed receiver URL both pass contract
 // validation and verify against the hardened delivery client; the
-// process trust store is pointed at it via SSL_CERT_FILE (same
+// delivery client is made to trust it via delivery.TrustRootsForTest (same
 // technique as internal/mcpserver's TestMain).
 var e2eTLSCert tls.Certificate
 
@@ -80,17 +79,15 @@ func mustE2ECert() tls.Certificate {
 	if err != nil {
 		panic(err)
 	}
-	pemFile, err := os.CreateTemp("", "wo10-cert-*.pem")
-	if err != nil {
-		panic(err)
+	leaf, perr := x509.ParseCertificate(der)
+	if perr != nil {
+		panic(perr)
 	}
-	pemBody := "-----BEGIN CERTIFICATE-----\n" +
-		base64.StdEncoding.EncodeToString(der) + "\n-----END CERTIFICATE-----\n"
-	if _, err := pemFile.WriteString(pemBody); err != nil {
-		panic(err)
-	}
-	_ = pemFile.Close()
-	os.Setenv("SSL_CERT_FILE", pemFile.Name()) // Go loads roots lazily
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	// Trust the test cert in the delivery client explicitly: macOS Go
+	// verifies with the system keychain and ignores SSL_CERT_FILE.
+	delivery.TrustRootsForTest(pool)
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
