@@ -12,9 +12,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"crypto/tls"
 
@@ -148,7 +150,7 @@ func deliverInvariants(t *testing.T, pool *pg.Pool, code string) {
 	}
 }
 
-// -- §7.2: 2xx → settled --
+// -- §7.2: 2xx → settled; the reply reaches the executor --
 
 func TestDeliver2xxSettles(t *testing.T) {
 	pool := pubTestPool(t)
@@ -158,19 +160,14 @@ func TestDeliver2xxSettles(t *testing.T) {
 	ctx := context.Background()
 
 	code := deliverSyncTask(t, pool, publisher, rcv, 1000)
+	rcv.set(t, http.StatusOK, `{"message":"great bullets"}`)
 	view, subID := deliverSubmit(t, pool, agent, code)
 
 	if view.State != task.SubSettled || view.Paid != 5 {
 		t.Fatalf("view = %+v, want settled/paid 5", view)
 	}
-	var av struct {
-		Accepted  bool   `json:"accepted"`
-		Source    string `json:"source"`
-		Retryable bool   `json:"retryable"`
-	}
-	if view.Verdict == nil || json.Unmarshal(view.Verdict, &av) != nil ||
-		!av.Accepted || av.Source != "receiver" || !av.Retryable {
-		t.Fatalf("verdict = %s", view.Verdict)
+	if view.Reply == nil || view.Reply.Status != 200 || view.Reply.Body != `{"message":"great bullets"}` {
+		t.Fatalf("reply = %+v, want the receiver's 200 and body verbatim", view.Reply)
 	}
 	// executor balance + amount; exactly one earn_task ledger row
 	var balance int64
@@ -189,145 +186,94 @@ func TestDeliver2xxSettles(t *testing.T) {
 	if tr.Settled != 5 || tr.Reserved != 0 {
 		t.Fatalf("task counters settled=%d reserved=%d, want 5/0", tr.Settled, tr.Reserved)
 	}
+	// the payload is kept only until the submission is terminal
+	sub, _ := repository.FindSubmissionByID(ctx, pool, subID)
+	if sub.Payload != nil {
+		t.Fatalf("payload kept after settlement: %s", sub.Payload)
+	}
 	assertEvents(t, pool, subID, task.SubSettled)
 	deliverInvariants(t, pool, code)
 }
 
-// §7.2: 202 on async → under_review --
+// §7.2: 202 is a 2xx → settled --
 
-func TestDeliver202AsyncUnderReview(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	rcv := startProgReceiver(t)
-	rcv.set(t, http.StatusAccepted, `{"ok":true}`)
-	ctx := context.Background()
-
-	c := deliverContract(rcv.url)
-	c.Acceptance.Mode = task.ModeAsync
-	w := int64(3600)
-	c.Acceptance.ReviewWindow = &w
-	code := pubCreateForTest(t, pool, publisher, c, 1000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	before := time.Now()
-	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubUnderReview {
-		t.Fatalf("state = %s, want under_review", view.State)
-	}
-	if view.ReviewDeadline == nil || view.ReviewDeadline.Before(before.Add(3599*time.Second)) ||
-		view.ReviewDeadline.After(before.Add(3601*time.Second)) {
-		t.Fatalf("review_deadline = %v, want ≈ now+3600s", view.ReviewDeadline)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Reserved != 5 {
-		t.Fatalf("reserved = %d, want 5 (review holds the reservation)", tr.Reserved)
-	}
-	assertEvents(t, pool, subID, task.SubUnderReview)
-	deliverInvariants(t, pool, code)
-}
-
-// §7.2: 202 on sync → RECEIVER_PROTOCOL --
-
-func TestDeliver202SyncProtocolError(t *testing.T) {
+func TestDeliver202Settles(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)
 	agent := pubSeedBot(t, pool, 0)
 	rcv := startProgReceiver(t)
 
 	code := deliverSyncTask(t, pool, publisher, rcv, 1000)
-	rcv.set(t, http.StatusAccepted, `{}`) // 202 after a 200 open
+	rcv.set(t, http.StatusAccepted, `stored`)
 	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubFailed || view.Failure == nil || *view.Failure != "RECEIVER_PROTOCOL" {
-		t.Fatalf("view = %+v, want failed/RECEIVER_PROTOCOL", view)
+	if view.State != task.SubSettled || view.Reply == nil || view.Reply.Status != 202 || view.Reply.Body != "stored" {
+		t.Fatalf("view = %+v, want settled with reply 202/stored", view)
 	}
-	tr, _ := repository.FindTaskByCode(context.Background(), pool, code)
+	assertEvents(t, pool, subID, task.SubSettled)
+	deliverInvariants(t, pool, code)
+}
+
+// §7.2 + §10: every 4xx is a rejection and its body reaches the
+// executor verbatim, whatever its format; the reservation is released.
+
+func TestDeliver4xxRejectsWithReplyVerbatim(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	rcv := startProgReceiver(t)
+	ctx := context.Background()
+
+	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens on 200
+	for _, tc := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusUnprocessableEntity, `{"accepted":false,"message":"第三个要点缺少来源","problems":[{"pointer":"/bullets/2"}]}`},
+		{http.StatusBadRequest, `not json at all: bullet 3 has no source`},
+		{http.StatusConflict, ``},
+	} {
+		rcv.set(t, tc.status, tc.body)
+		view, subID := deliverSubmit(t, pool, agent, code)
+		if view.State != task.SubRejected {
+			t.Fatalf("%d: state = %s, want rejected", tc.status, view.State)
+		}
+		if view.Reply == nil || view.Reply.Status != tc.status || view.Reply.Body != tc.body {
+			t.Fatalf("%d: reply = %+v, want the receiver's reply verbatim", tc.status, view.Reply)
+		}
+		// work_status returns the same recorded reply
+		st, err := GetSubmissionStatus(ctx, pool, agent, &subID, "", "")
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		reply, _ := st["reply"].(map[string]any)
+		if reply == nil || reply["body"] != tc.body {
+			t.Fatalf("%d: work_status reply = %v", tc.status, st["reply"])
+		}
+		assertEvents(t, pool, subID, task.SubRejected)
+	}
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	if tr.Reserved != 0 {
-		t.Fatalf("reserved = %d, want 0 (failure releases)", tr.Reserved)
+		t.Fatalf("reserved = %d, want 0 (rejections release)", tr.Reserved)
 	}
-	assertEvents(t, pool, subID, task.SubFailed)
 	deliverInvariants(t, pool, code)
 }
 
-// §7.2: 4xx with a valid rejecting Verdict → rejected --
+// §7.2: the recorded body is the first 4 000 bytes, cut on a rune
+// boundary.
 
-func TestDeliver4xxValidVerdictRejected(t *testing.T) {
+func TestDeliverReplyBodyBounded(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)
 	agent := pubSeedBot(t, pool, 0)
 	rcv := startProgReceiver(t)
 
-	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens on 200
-	rcv.set(t, http.StatusUnprocessableEntity,
-		`{"accepted":false,"criteria":["C1"],"reason":"第三个要点缺少来源","retryable":true,`+
-			`"annotations":[{"pointer":"/bullets/2","criterion":"C1","message":"缺少来源"}]}`)
-	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubRejected {
-		t.Fatalf("state = %s, want rejected", view.State)
+	code := deliverSyncTask(t, pool, publisher, rcv, 1000)
+	rcv.set(t, http.StatusBadRequest, "x"+strings.Repeat("驳", 2000)) // 1 + 6000 bytes
+	view, _ := deliverSubmit(t, pool, agent, code)
+	if view.Reply == nil || len(view.Reply.Body) > 4000 || !utf8.ValidString(view.Reply.Body) ||
+		!strings.HasPrefix(view.Reply.Body, "x驳") {
+		t.Fatalf("reply body = %d bytes (valid=%v), want ≤ 4000 valid UTF-8", len(view.Reply.Body), utf8.ValidString(view.Reply.Body))
 	}
-	var v struct {
-		Accepted bool                `json:"accepted"`
-		Source   string              `json:"source"`
-		Reason   string              `json:"reason"`
-		Annot    []map[string]string `json:"annotations"`
-	}
-	if err := json.Unmarshal(view.Verdict, &v); err != nil || v.Accepted {
-		t.Fatalf("verdict = %s (%v)", view.Verdict, err)
-	}
-	if v.Source != "receiver" || len(v.Annot) != 1 || v.Annot[0]["pointer"] != "/bullets/2" {
-		t.Fatalf("verdict detail = %+v", v)
-	}
-	tr, _ := repository.FindTaskByCode(context.Background(), pool, code)
-	if tr.Reserved != 0 {
-		t.Fatalf("reserved = %d, want 0 (rejection releases)", tr.Reserved)
-	}
-	assertEvents(t, pool, subID, task.SubRejected)
-	deliverInvariants(t, pool, code)
-}
-
-// §7.2: 4xx whose body is not a valid Verdict → RECEIVER_PROTOCOL --
-
-func TestDeliver4xxInvalidBodyProtocol(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	rcv := startProgReceiver(t)
-
-	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens on 200
-	rcv.set(t, http.StatusBadRequest, `not a verdict`)
-	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubFailed || view.Failure == nil || *view.Failure != "RECEIVER_PROTOCOL" {
-		t.Fatalf("view = %+v, want failed/RECEIVER_PROTOCOL", view)
-	}
-	if view.Verdict != nil {
-		t.Fatalf("verdict recorded for a protocol failure: %s", view.Verdict)
-	}
-	assertEvents(t, pool, subID, task.SubFailed)
-	deliverInvariants(t, pool, code)
-}
-
-// §7.2: 4xx verdict citing an undeclared criterion → not a valid
-// rejection → RECEIVER_PROTOCOL --
-
-func TestDeliver4xxUndeclaredCriterion(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	rcv := startProgReceiver(t)
-
-	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens on 200
-	rcv.set(t, http.StatusBadRequest, `{"accepted":false,"criteria":["C9"],"reason":"nope"}`)
-	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubFailed || view.Failure == nil || *view.Failure != "RECEIVER_PROTOCOL" {
-		t.Fatalf("view = %+v, want failed/RECEIVER_PROTOCOL", view)
-	}
-	assertEvents(t, pool, subID, task.SubFailed)
 	deliverInvariants(t, pool, code)
 }
 
@@ -362,7 +308,8 @@ func TestDeliver5xxFault(t *testing.T) {
 	rcv.set(t, http.StatusInternalServerError, `boom`)
 	view, subID := deliverSubmit(t, pool, agent, code)
 
-	if view.State != task.SubFailed || *view.Failure != "RECEIVER_FAULT" {
+	if view.State != task.SubFailed || *view.Failure != "RECEIVER_FAULT" ||
+		view.Reply == nil || view.Reply.Status != 500 || view.Reply.Body != "boom" {
 		t.Fatalf("view = %+v", view)
 	}
 	tr, _ := repository.FindTaskByCode(context.Background(), pool, code)
@@ -393,9 +340,6 @@ func TestDeliverConnectionRefused(t *testing.T) {
 	_ = l.Close()
 
 	c := deliverContract(rcv.url) // opens fine against the live receiver
-	c.Acceptance.Mode = task.ModeAsync
-	w := int64(3600)
-	c.Acceptance.ReviewWindow = &w
 	code := pubCreateForTest(t, pool, publisher, c, 1000)
 	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("open: %v", err)
@@ -559,31 +503,6 @@ func TestDeliverIdempotentOnSettled(t *testing.T) {
 	// exactly two events (submit + settle): the idempotent re-delivery
 	// wrote nothing
 	assertEvents(t, pool, subID, task.SubSettled)
-	deliverInvariants(t, pool, code)
-}
-
-// §5.4: async without a receiver → under_review with the deadline. --
-
-func TestDeliverAsyncNoReceiver(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	ctx := context.Background()
-
-	code := submitOpenedTask(t, pool, publisher, 1000, nil) // async, no receiver, claims optional
-	before := time.Now()
-	view, subID := deliverSubmit(t, pool, agent, code)
-
-	if view.State != task.SubUnderReview {
-		t.Fatalf("state = %s, want under_review", view.State)
-	}
-	if view.ReviewDeadline == nil || view.ReviewDeadline.Before(before.Add(3599*time.Second)) {
-		t.Fatalf("review_deadline = %v, want ≈ now+3600s", view.ReviewDeadline)
-	}
-	events, _ := repository.ListSubmissionEvents(ctx, pool, subID)
-	if len(events) != 2 || events[1].Cause != task.EventNoReceiver {
-		t.Fatalf("events = %+v, want submit + no_receiver", events)
-	}
 	deliverInvariants(t, pool, code)
 }
 

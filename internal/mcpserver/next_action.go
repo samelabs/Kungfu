@@ -1,12 +1,13 @@
 package mcpserver
 
 // NextAction — spec §8.3: the action an executor should take next is
-// a pure function of the submission state (with its verdict) or the
-// not-accepted error code. The retry_after values come from §11 and
-// the work order decision record: delivering 5s, uncertain 30s,
-// under_review 60s, failed 60s, CLAIM_INVALID 0s. RATE_LIMIT's
-// retry_after is the limiter's remaining seconds and is filled in by
-// the caller (NextAction returns nil there).
+// a pure function of the submission state or the not-accepted error
+// code. The retry_after values come from §11 and the work order
+// decision record: delivering 5s, uncertain 30s, CLAIM_INVALID 0s.
+// RATE_LIMIT's retry_after is the limiter's remaining seconds and is
+// filled in by the caller (NextAction returns nil there). A rejected
+// submission is "revise" here; the caller turns it into "stop" once
+// the executor has no rejections left on the task.
 
 import (
 	"kungfu.md/internal/task"
@@ -16,8 +17,6 @@ import (
 const (
 	retryAfterDelivering   = 5
 	retryAfterUncertain    = 30
-	retryAfterUnderReview  = 60
-	retryAfterFailed       = 60
 	retryAfterClaimInvalid = 0
 )
 
@@ -27,7 +26,7 @@ func iptr(i int) *int { return &i }
 // (errCode path) applies: a non-empty errCode selects the error rows;
 // otherwise the submission state decides. Uncovered combinations
 // return ("", nil) — the field is null.
-func NextAction(state string, verdict *task.Verdict, errCode string) (string, *int) {
+func NextAction(state string, errCode string) (string, *int) {
 	if errCode != "" {
 		switch errCode {
 		case "RATE_LIMIT":
@@ -52,19 +51,10 @@ func NextAction(state string, verdict *task.Verdict, errCode string) (string, *i
 		return "poll", iptr(retryAfterDelivering)
 	case task.SubUncertain:
 		return "poll", iptr(retryAfterUncertain)
-	case task.SubUnderReview:
-		return "poll", iptr(retryAfterUnderReview)
-	case task.SubFailed:
-		return "retry", iptr(retryAfterFailed)
 	case task.SubRejected:
-		retryable := true // §6.1: retryable 缺省 true
-		if verdict != nil {
-			retryable = verdict.Retryable
-		}
-		if retryable {
-			return "revise", nil
-		}
-		return "stop", nil
+		return "revise", nil
+	case task.SubFailed:
+		return "stop", nil // the publisher's side failed; nothing for the executor to redo
 	}
 	return "", nil
 }

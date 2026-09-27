@@ -6,17 +6,42 @@ package mcpserver
 // no executor next action for a publisher operation).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"time"
+	"strings"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/service"
 	"kungfu.md/internal/task"
 )
 
-// contractArg mirrors the §3 contract JSON in tool arguments.
-type contractArg = task.Contract
+// decodeContract strictly decodes the §3 contract from tool
+// arguments: an unknown field is VALIDATION_FAILED naming it, never
+// silently dropped (a publisher must know the field did nothing).
+func decodeContract(raw json.RawMessage) (task.Contract, error) {
+	var c task.Contract
+	if len(raw) == 0 {
+		return c, contractError("contract", "required")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		msg := err.Error()
+		field := "contract"
+		if strings.HasPrefix(msg, "json: unknown field ") {
+			field = strings.Trim(strings.TrimPrefix(msg, "json: unknown field "), `"`)
+			msg = "unknown field (see the task_create input schema)"
+		}
+		return c, contractError(field, msg)
+	}
+	return c, nil
+}
+
+func contractError(field, message string) error {
+	return &ToolError{Code: "VALIDATION_FAILED", Message: "Contract validation failed",
+		Details: map[string]any{"errors": []map[string]string{{"field": field, "message": message}}}}
+}
 
 func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	// §11: 20 creates per hour per publisher. Publisher tools carry a
@@ -27,14 +52,18 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 			Details: map[string]any{"retry_after": retry}}
 	}
 	var in struct {
-		Contract contractArg `json:"contract"`
-		Budget   int64       `json:"budget"`
-		Open     bool        `json:"open"`
+		Contract json.RawMessage `json:"contract"`
+		Budget   int64           `json:"budget"`
+		Open     bool            `json:"open"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
-	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, in.Contract, in.Budget)
+	contract, err := decodeContract(in.Contract)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, contract, in.Budget)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -53,13 +82,17 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 
 func handleTaskUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Code     string      `json:"code"`
-		Contract contractArg `json:"contract"`
+		Code     string          `json:"code"`
+		Contract json.RawMessage `json:"contract"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code and contract are required")
 	}
-	view, err := service.UpdateTask(ctx, deps.Pool, agent.ID, in.Code, in.Contract)
+	contract, err := decodeContract(in.Contract)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	view, err := service.UpdateTask(ctx, deps.Pool, agent.ID, in.Code, contract)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -178,28 +211,6 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 		items = append(items, m)
 	}
 	return data(map[string]any{"submissions": items, "total": total})
-}
-
-func handleTaskVerdict(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
-	var in struct {
-		SubmissionID service.WireID  `json:"submission_id"` // string or integer on the wire
-		Verdict      json.RawMessage `json:"verdict"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return ToolResult{}, argError("submission_id must be an integer or a numeric string")
-	}
-	if in.SubmissionID == 0 || len(in.Verdict) == 0 {
-		return ToolResult{}, argError("submission_id and verdict are required")
-	}
-	view, err := service.SubmitVerdict(ctx, deps.Pool, agent.ID, in.SubmissionID.Int64(), in.Verdict, time.Now())
-	if err != nil {
-		return ToolResult{}, err
-	}
-	m, err := asMap(view)
-	if err != nil {
-		return ToolResult{}, err
-	}
-	return data(m) // publisher tools: next_action is always null
 }
 
 func codeOnly(args json.RawMessage) (string, error) {

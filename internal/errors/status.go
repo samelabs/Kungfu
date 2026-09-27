@@ -28,14 +28,12 @@ var statusByCode = map[string]int{
 	"IDEMPOTENCY_CONFLICT":  http.StatusConflict,
 	"INVALID_STATE":         http.StatusConflict,
 	"HAS_RESERVATIONS":      http.StatusConflict,
-	"NOT_UNDER_REVIEW":      http.StatusConflict,
 	"NOTHING_TO_REFUND":     http.StatusConflict,
 	"SCHEMA_MISMATCH":       http.StatusUnprocessableEntity,
 	"CREDENTIAL_IN_PAYLOAD": http.StatusUnprocessableEntity,
 	"INVALID_REVISES":       http.StatusUnprocessableEntity,
 	"INVALID_REQUEST_KEY":   http.StatusUnprocessableEntity,
 	"VALIDATION_FAILED":     http.StatusUnprocessableEntity,
-	"VERDICT_INVALID":       http.StatusUnprocessableEntity,
 	"TEST_DELIVERY_FAILED":  http.StatusUnprocessableEntity,
 
 	// account and storage tools (§8.4「账户与存储工具错误」)

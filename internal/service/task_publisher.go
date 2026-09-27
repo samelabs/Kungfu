@@ -98,22 +98,11 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	var contract task.Contract
 	view := map[string]interface{}{}
 	if err := json.Unmarshal(contractJSON, &contract); err == nil {
+		// The publisher sees the whole effective contract (its own
+		// receiver included) — task_update replaces it as a whole.
+		view["title"] = contract.Title
 		view["price"] = contract.Price
-		view["claim"] = map[string]interface{}{
-			"required":     contract.Claim.Required,
-			"ttl":          derefInt64(contract.Claim.TTL),
-			"max_duration": derefInt64(contract.Claim.MaxDuration),
-		}
-		// The declared criteria (§3 acceptance.criteria[]), for
-		// consumers judging rejections against the contract (the
-		// owner console's reject form cites these ids).
-		criteria := make([]map[string]string, 0, len(contract.Acceptance.Criteria))
-		for _, c := range contract.Acceptance.Criteria {
-			criteria = append(criteria, map[string]string{
-				"id": c.ID, "kind": c.Kind, "description": c.Description,
-			})
-		}
-		view["criteria"] = criteria
+		view["contract"] = json.RawMessage(contractJSON)
 	}
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	slots := int64(0)
@@ -149,13 +138,6 @@ func jsonEqual(a, b []byte) bool {
 	na, _ := json.Marshal(va)
 	nb, _ := json.Marshal(vb)
 	return string(na) == string(nb)
-}
-
-func derefInt64(p *int64) int64 {
-	if p == nil {
-		return 0
-	}
-	return *p
 }
 
 // -- §4 transitions --
@@ -382,32 +364,15 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	return taskView(ctx, pool, after)
 }
 
-// runTestDelivery performs the §5.4 test delivery for sync tasks and
-// async tasks WITH a receiver (async without a receiver skips it).
-// The body is the §7.1 request shape with agent_ref "test" and the
-// first accepted example as the payload; the Idempotency-Key is
-// test-<code>-<version>. sync requires 2xx; async accepts 2xx or
-// 202 — both inside PostJSON's 2xx success classification. Any other
-// outcome is TEST_DELIVERY_FAILED with the status code and the first
-// 500 bytes of the response.
+// runTestDelivery performs the §4 open-time test delivery: the §7.1
+// request shape with agent_ref "test", the contract's sample as the
+// payload, Idempotency-Key test-<code>-<version> and the header
+// Kungfu-Test: 1. The receiver must answer 2xx; any other outcome is
+// TEST_DELIVERY_FAILED with the status code and the first 500 bytes of
+// the response. No reservation, no settlement, no submission.
 func runTestDelivery(ctx context.Context, contract task.Contract, code string, version int32) error {
-	if contract.Acceptance.Mode != task.ModeSync && contract.Receiver.URL == "" {
-		return nil // async without receiver: no test delivery
-	}
 	testKey := fmt.Sprintf("test-%s-%d", code, version)
-
-	var payload json.RawMessage
-	for _, ex := range contract.Examples {
-		if ex.Accepted {
-			payload = ex.Payload
-			break
-		}
-	}
-	if payload == nil {
-		// §5.4: no examples — the test delivery is skipped (examples
-		// are optional since WO-11).
-		return nil
-	}
+	payload := contract.Sample
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(`"` + testKey + `"`),
 		"task_code":     json.RawMessage(`"` + code + `"`),

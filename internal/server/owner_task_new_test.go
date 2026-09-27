@@ -56,14 +56,15 @@ func TestOwnerTaskNewPageSimpleMode(t *testing.T) {
 		t.Fatal("new-task page lacks the editor root")
 	}
 
-	// the console asset carries the simple-mode form (title/objective/
-	// price/units + open now) and falls back to the JSON editor
+	// the console asset carries the simple-mode form (title/
+	// requirements/receiver/sample/price/units + open now) and falls
+	// back to the JSON editor
 	asset := simpleGet(t, s, assetURL(t, s, "/owner/tasks/new", "owner/tasks-console.js", cookie), cookie)
 	if asset.Code != 200 {
 		t.Fatalf("tasks-console.js = %d", asset.Code)
 	}
 	js := asset.Body.String()
-	for _, marker := range []string{"tcvRenderSimpleForm", "tcvSPublish", "tcvSUnits", "tcvSOpen", "tasks.advanced"} {
+	for _, marker := range []string{"tcvRenderSimpleForm", "tcvSPublish", "tcvSUnits", "tcvSOpen", "tcvSReceiver", "tcvSSample", "tasks.advanced"} {
 		if !strings.Contains(js, marker) {
 			t.Fatalf("tasks-console.js missing simple-mode marker %s", marker)
 		}
@@ -76,9 +77,11 @@ func TestOwnerToolTaskCreateOpen(t *testing.T) {
 
 	rec, env := ocCall(t, s, cookie, "task_create", map[string]any{
 		"contract": map[string]any{
-			"title":     "Console minimal",
-			"objective": "Three bullets.",
-			"price":     5,
+			"title":        "Console minimal",
+			"requirements": "Three bullets.",
+			"receiver":     map[string]any{"url": okReceiverURL},
+			"sample":       map[string]any{"result": "three bullets"},
+			"price":        5,
 		},
 		"budget": 10,
 		"open":   true,
@@ -86,8 +89,8 @@ func TestOwnerToolTaskCreateOpen(t *testing.T) {
 	if rec.Code != 200 || env["ok"] != true || env["status"] != "open" {
 		t.Fatalf("console task_create open=true: %d %v", rec.Code, env)
 	}
-	// the minimal contract went through; the response carries the
-	// materialized review window (3 days)
+	// the required-fields contract went through and opened (its
+	// sample test-delivered to the receiver)
 	if env["status"] != "open" {
 		t.Fatalf("status: %v", env["status"])
 	}

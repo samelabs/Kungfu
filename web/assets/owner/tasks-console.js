@@ -12,10 +12,8 @@ function tcvCall(tool, args) {
 
 const TCV_SAMPLE_CONTRACT = {
     title: "Summarize a page",
-    objective: "A 3-bullet summary of the given page, for a newsletter.",
-    inputs: "A public URL fetched by the executor.",
+    requirements: "Fetch the given page and return exactly three summary bullets for a newsletter.",
     output: {
-        description: "One JSON object with the bullets.",
         schema: {
             type: "object",
             properties: {
@@ -25,16 +23,8 @@ const TCV_SAMPLE_CONTRACT = {
             required: ["url", "bullets"]
         }
     },
-    acceptance: {
-        mode: "async",
-        review_window: 3600,
-        criteria: [{id: "C1", kind: "rule", description: "bullets are exactly three sentences"}]
-    },
-    boundaries: ["no credential material"],
-    examples: [{
-        payload: {url: "https://example.com/a", bullets: ["s1", "s2", "s3"]},
-        accepted: true
-    }],
+    receiver: {url: "https://example.com/kungfu/receiver"},
+    sample: {url: "https://example.com/a", bullets: ["s1", "s2", "s3"]},
     price: 5
 };
 
@@ -74,15 +64,16 @@ function tcvEditorInit() {
     const code = window.location.pathname.split('/').pop();
     tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { tcvRenderEditorError(env); return; }
-        tcvRenderEditor({code, view: env, status: env.status});
+        tcvRenderEditor({code, view: env, status: env.status, contract: env.contract});
     }).catch((error) => {
         root.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
     });
 }
 
-// ---- simple mode (task_new default): title / objective / price /
-// units (+ open now). The minimal contract {title, objective, price}
-// goes to task_create with budget = price * units and open as chosen.
+// ---- simple mode (task_new default): title / requirements / receiver
+// URL / sample / price / units (+ open now). The required contract
+// fields go to task_create with budget = price * units and open as
+// chosen (opening test-delivers the sample to the receiver).
 function tcvRenderSimpleForm() {
     const root = qs('#taskEditorRoot');
     if (!root) return;
@@ -99,8 +90,12 @@ function tcvRenderSimpleForm() {
         <div id="taskEditorStatus" class="keybox" hidden></div>
         <label>${escapeHtml(t('tasks.f_title'))}</label>
         <input id="tcvSTitle" maxlength="128">
-        <label>${escapeHtml(t('tasks.f_objective'))}</label>
-        <textarea id="tcvSObjective" rows="3" maxlength="2000"></textarea>
+        <label>${escapeHtml(t('tasks.f_requirements'))}</label>
+        <textarea id="tcvSRequirements" rows="5" maxlength="20000"></textarea>
+        <label>${escapeHtml(t('tasks.f_receiver'))}</label>
+        <input id="tcvSReceiver" type="url" placeholder="https://">
+        <label>${escapeHtml(t('tasks.f_sample'))}</label>
+        <textarea id="tcvSSample" class="mono" rows="3" spellcheck="false">{"result": "example"}</textarea>
         <div class="tcv-pair">
             <div>
                 <label>${escapeHtml(t('tasks.f_price'))}</label>
@@ -136,14 +131,19 @@ function tcvRenderSimpleForm() {
         }).catch(() => {});
     qs('#tcvSPublish').addEventListener('click', () => {
         const title = qs('#tcvSTitle').value.trim();
-        const objective = qs('#tcvSObjective').value.trim();
+        const requirements = qs('#tcvSRequirements').value.trim();
+        const receiverURL = qs('#tcvSReceiver').value.trim();
+        let sample = null;
+        try { sample = JSON.parse(qs('#tcvSSample').value); } catch (e) { sample = null; }
         const price = Number(qs('#tcvSPrice').value || 0);
         const units = Math.max(1, Number(qs('#tcvSUnits').value || 1));
         if (!title) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_title')}}); return; }
-        if (!objective) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_objective')}}); return; }
+        if (!requirements) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_requirements')}}); return; }
+        if (!receiverURL) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_receiver')}}); return; }
+        if (!sample || typeof sample !== 'object' || Array.isArray(sample)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_sample')}}); return; }
         if (!Number.isInteger(price) || price < 1) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_price')}}); return; }
         tcvCall('task_create', {
-            contract: {title, objective, price},
+            contract: {title, requirements, receiver: {url: receiverURL}, sample, price},
             budget: price * units,
             open: qs('#tcvSOpen').checked
         }).then((env) => {
@@ -191,7 +191,6 @@ function tcvRenderEditor(state) {
         <h2>${escapeHtml(t('tasks.delivered'))}</h2>
         <div class="actions" id="tcvSubFilters">
             <select id="tcvSubState">
-                <option value="under_review">under_review</option>
                 <option value="">${escapeHtml(t('logs.all')) || 'all'}</option>
                 <option value="settled">settled</option>
                 <option value="rejected">rejected</option>
@@ -199,10 +198,9 @@ function tcvRenderEditor(state) {
             </select>
         </div>
         <div id="tcvSubmissions"><p class="muted">${escapeHtml(t('tasks.loading'))}</p></div>
-        <div id="tcvVerdictBox" hidden></div>
     </section>`;
     tcvBindEditor(isNew ? null : codeAttr);
-    if (!isNew) tcvLoadSubmissions(codeAttr, 'under_review');
+    if (!isNew) tcvLoadSubmissions(codeAttr, '');
 }
 
 function tcvActionButtons(status) {
@@ -267,7 +265,7 @@ function tcvLifecycle(code, tool, extra) {
     }).catch((error) => tcvShowStatus({ok: false, error: {code: 'NETWORK', message: noticeText(error)}}));
 }
 
-// ---- submissions queue + verdict ----
+// ---- submissions: the delivery record (state + the receiver's reply) ----
 
 function tcvLoadSubmissions(code, state) {
     const box = qs('#tcvSubmissions');
@@ -276,26 +274,21 @@ function tcvLoadSubmissions(code, state) {
     if (state) args.state = state;
     tcvCall('task_submissions', args).then((env) => {
         if (!env.ok) { box.innerHTML = tcvStatusLine(env); return; }
-        tcvRenderSubmissions(env.submissions || [], code);
+        tcvRenderSubmissions(env.submissions || []);
     }).catch((error) => {
         box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
     });
 }
 
-function tcvRenderSubmissions(rows, code) {
+function tcvRenderSubmissions(rows) {
     const box = qs('#tcvSubmissions');
     if (!rows.length) {
         box.innerHTML = `<p class="muted">${escapeHtml(t('tasks.empty'))}</p>`;
         return;
     }
     box.innerHTML = rows.map((r) => {
-        const payload = JSON.stringify(r.payload, null, 2) || '';
-        const short = payload.length > 200 ? payload.slice(0, 200) + '…' : payload;
-        const actions = r.state === 'under_review'
-            ? `<div class="actions">
-                 <button class="btn primary" type="button" data-verdict-accept="${r.submission_id}">✔ Accept</button>
-                 <button class="btn" type="button" data-verdict-reject="${r.submission_id}">✘ Reject</button>
-               </div>` : '';
+        const reply = r.reply ? `HTTP ${r.reply.status} ${r.reply.body || ''}` : (r.failure || '');
+        const short = reply.length > 200 ? reply.slice(0, 200) + '…' : reply;
         return `<div class="task-item">
             <div class="task-facts">
                 <span class="mono">#${r.submission_id}</span>
@@ -304,72 +297,9 @@ function tcvRenderSubmissions(rows, code) {
                 <span>v${r.version}</span>
                 <span>${tcvEscapeHtml(r.created_at || '')}</span>
             </div>
-            <details><summary class="mono">${tcvEscapeHtml(short)}</summary><pre class="mono">${tcvEscapeHtml(payload)}</pre></details>
-            ${actions}
+            <details><summary class="mono">${tcvEscapeHtml(short)}</summary><pre class="mono">${tcvEscapeHtml(reply)}</pre></details>
         </div>`;
     }).join('');
-    qsa('[data-verdict-accept]').forEach((btn) =>
-        btn.addEventListener('click', () => tcvVerdict(btn.dataset.verdictAccept, true)));
-    qsa('[data-verdict-reject]').forEach((btn) =>
-        btn.addEventListener('click', () => tcvVerdictForm(btn.dataset.verdictReject, code)));
-}
-
-function tcvVerdict(submissionID, accepted) {
-    tcvCall('task_verdict', {submission_id: submissionID, verdict: {accepted}})
-        .then((env) => { tcvShowStatus(env); if (env.ok) { tcvEditorInit(); } });
-}
-
-// tcvVerdictForm opens the reject form. The criteria checkboxes come
-// from the task's contract: task_get is read when the form opens
-// (WO-8b). If the read fails, a free-text criteria input stands in so
-// the form still works.
-function tcvVerdictForm(submissionID, code) {
-    const box = qs('#tcvVerdictBox');
-    if (!box) return;
-    box.hidden = false;
-    box.innerHTML = `
-    <div class="panel">
-        <h3>Reject #${submissionID}</h3>
-        <div id="tcvVCriteriaBox"><p class="muted">Loading criteria…</p></div>
-        <label>reason (≤ 500)</label>
-        <textarea id="tcvVReason" rows="2" maxlength="500"></textarea>
-        <label><input type="checkbox" id="tcvVRetryable" checked> retryable</label>
-        <div class="actions"><button class="btn danger" id="tcvVSubmit" type="button">Reject</button></div>
-    </div>`;
-    const collect = () => {
-        const checked = qsa('#tcvVCriteriaBox input[type="checkbox"]:checked').map((c) => c.value);
-        if (checked.length) return checked;
-        const free = qs('#tcvVCriteria'); // fallback text input
-        return free ? free.value.split(',').map((s) => s.trim()).filter(Boolean) : [];
-    };
-    qs('#tcvVSubmit').addEventListener('click', () => {
-        const criteria = collect();
-        const reason = qs('#tcvVReason').value.trim();
-        if (!criteria.length || !reason) {
-            tcvShowStatus({ok: false, error: {code: 'VERDICT_INVALID', message: 'criteria and reason are required'}});
-            return;
-        }
-        tcvCall('task_verdict', {submission_id: submissionID, verdict: {
-            accepted: false, criteria, reason, retryable: qs('#tcvVRetryable').checked
-        }}).then((env) => { tcvShowStatus(env); if (env.ok) { box.hidden = true; tcvEditorInit(); } });
-    });
-    tcvCall('task_get', {code}).then((env) => {
-        const holder = qs('#tcvVCriteriaBox');
-        if (!holder) return;
-        const criteria = (env && env.criteria) || [];
-        if (!criteria.length) {
-            holder.innerHTML = `<input id="tcvVCriteria" placeholder="C1">`;
-            return;
-        }
-        holder.innerHTML = '<label>criteria violated</label>' + criteria.map((c) =>
-            `<label class="tcv-criterion"><input type="checkbox" value="${tcvEscapeHtml(c.id)}">` +
-            `<span class="mono">${tcvEscapeHtml(c.id)}</span> ${tcvEscapeHtml(c.description || '')}</label>`
-        ).join('');
-    }).catch(() => {
-        const holder = qs('#tcvVCriteriaBox');
-        if (!holder) return;
-        holder.innerHTML = '<label>criteria (comma-separated, e.g. C1)</label><input id="tcvVCriteria" placeholder="C1">';
-    });
 }
 
 // wire into the shared page lifecycle

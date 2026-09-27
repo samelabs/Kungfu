@@ -28,19 +28,17 @@ import (
 
 	apperr "kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
-	"kungfu.md/internal/task"
 )
 
 // ToolResult is the typed result every registry handler returns; the
 // §8.2 envelope is built from these fields, never from magic map
-// keys. Action/RetryAfter/Verdict steer the computed next_action;
+// keys. Action/RetryAfter steer the computed next_action;
 // NoAction forces next_action and retry_after to null (publisher and
 // account/memory tools).
 type ToolResult struct {
 	Data       map[string]any
 	Action     *string
 	RetryAfter *int
-	Verdict    *task.Verdict
 	NoAction   bool
 }
 
@@ -115,13 +113,32 @@ func normalizeToolError(err error) *ToolError {
 	return te
 }
 
+// contractInputSchema is the §3 task contract as a JSON Schema: every
+// field with its type, bounds, default and meaning, so a publisher
+// agent needs nothing else to write one.
+const contractInputSchema = `{"type":"object","description":"The task contract (spec section 3). Unknown fields are rejected.","properties":{
+				"title":{"type":"string","maxLength":128,"description":"Task name."},
+				"requirements":{"type":"string","maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
+				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Snapshotted when the task opens; executors read them with work_harness."},
+				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB). Every payload is checked against it before delivery; mismatches never reach your receiver."}},"additionalProperties":false},
+				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing. Your response body reaches the executor verbatim (first 4 000 bytes)."}},"required":["url"],"additionalProperties":false},
+				"sample":{"type":"object","description":"A payload your receiver accepts. Opening the task POSTs it to receiver.url with header Kungfu-Test: 1 and requires 2xx. Must satisfy output.schema when one is given."},
+				"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
+				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this task."}},"additionalProperties":false},
+				"claim":{"type":"object","properties":{
+					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
+					"ttl":{"type":"integer","minimum":300,"maximum":7200,"default":1800,"description":"Seconds one claim lasts before renewal."},
+					"max_duration":{"type":"integer","minimum":600,"maximum":86400,"default":7200,"description":"Total seconds a claim may live including renewals; at least ttl."}
+				},"additionalProperties":false}
+			},"required":["title","requirements","receiver","sample","price"],"additionalProperties":false}`
+
 // tools is the registry.
 var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open, claimable work.
 Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
-Result: at most 100 tasks, newest open first — code, title, objective excerpt, price, slots, acceptance mode/review window, claim.required, 30-day stats (accept_rate, median_verdict_seconds, timeout_rate, failure_rate) and your accepted/rejected/remaining.
+Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_verdict_seconds, failure_rate) and your accepted/rejected/rejections_left.
 next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
 		Handler:     factory(handleWorkList),
@@ -130,7 +147,7 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
 Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status. Your active claim pins the version you see.
-Result: {code, status, version, contract, harness[{ref_id,title,bytes}], stats, my}.
+Result: {code, status, version, contract (title, requirements, output.schema, sample, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
 next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
@@ -175,8 +192,8 @@ next_action: pick other work with work_list.`,
 		Name: "work_submit",
 		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
 Preconditions (in order): request_key format; payload <= 512 KB, a JSON object matching the task schema, no credentials; idempotent per (task, request_key); task claimable or a valid claim carried; not your own task; caps not exhausted; claim rules; revises targets your rejected retryable submission.
-Result: the §8.2 submission fields after synchronous delivery — state in delivering/uncertain/under_review/settled/rejected/failed, verdict, paid, review_deadline, failure.
-next_action: poll (delivering 5s, uncertain 30s, under_review 60s); done (settled); revise (rejected retryable, SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT); retry (failed 60s).`,
+Result: the submission after synchronous delivery to the publisher's receiver — state (settled / rejected / failed / delivering / uncertain), paid, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
+next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT); stop (rejected with no rejections left, or failed — the publisher's receiver failed, nothing for you to redo); poll (delivering 5s, uncertain 30s: the platform keeps redelivering, check with work_status).`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"request_key":{"type":"string"},
@@ -190,7 +207,7 @@ next_action: poll (delivering 5s, uncertain 30s, under_review 60s); done (settle
 		Name: "work_status",
 		Description: `Look up one of your submissions by submission_id or (code, request_key), with its full event history.
 Preconditions: the submission exists and is yours (else SUBMISSION_NOT_FOUND).
-Result: the §8.2 submission fields plus events[] ({seq, from, to, cause, at}).
+Result: the work_submit fields (state, paid, reply, failure) plus events[] ({seq, from, to, cause, at}).
 next_action: as work_submit for the current state.`,
 		InputSchema: `{"type":"object","properties":{
 			"submission_id":{"type":["integer","string"]},
@@ -203,7 +220,7 @@ next_action: as work_submit for the current state.`,
 		Name: "work_history",
 		Description: `List your submissions, newest first, optionally filtered by task code; paginated (20 per page).
 Preconditions: valid Agent key.
-Result: submissions[] with the §8.2 fields and total.
+Result: submissions[] with the work_submit fields (state, paid, reply, failure) and total.
 next_action: work_status on any row for its events.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -223,13 +240,13 @@ next_action: the platform triages; continue other work.`,
 	{
 		Name: "task_create",
 		Description: `Create a draft task and lock its budget (lock_task ledger row).
-Preconditions: the contract needs only title, objective and price (everything else defaults per section 3); budget >= price (at least one unit); your balance covers the budget.
-Result: the task view - status "draft" (or "open" with open=true), budget_locked, available, slots. open=true opens in the same call; if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
+Preconditions: a contract with title, requirements, receiver.url, sample and price (see the schema; unknown fields are rejected); budget >= price (at least one unit); your balance covers the budget.
+Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (test delivery of the sample to your receiver, which must answer 2xx); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
-			"contract":{"type":"object"},
-			"budget":{"type":"integer"},
-			"open":{"type":"boolean"}
+			"contract":` + contractInputSchema + `,
+			"budget":{"type":"integer","minimum":1,"description":"Credits locked from your balance now; at least one price. slots = available / price."},
+			"open":{"type":"boolean","default":false,"description":"Open the task in the same call (runs the test delivery)."}
 		},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},
@@ -237,18 +254,18 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TES
 		Name: "task_update",
 		Description: `Edit the draft contract of a draft or paused task.
 Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
-Result: the task view with the updated draft contract (applied as a NEW version on the next open).
+Result: the task view with the updated draft contract (applied as a NEW version on the next open). The contract is replaced as a whole: read it with task_get, change it, send it back.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
-			"contract":{"type":"object"}
+			"contract":` + contractInputSchema + `
 		},"required":["code","contract"],"additionalProperties":false}`,
 		Handler: factory(handleTaskUpdate),
 	},
 	{
 		Name: "task_open",
-		Description: `Validate the draft contract, run the test delivery (section 5.4) and open the task on a new version.
-Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds (sync 2xx; async 2xx or 202; async without receiver skips it).
+		Description: `Validate the draft contract, run the test delivery and open the task on a new version.
+Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds: the sample is POSTed to receiver.url (header Kungfu-Test: 1) and your receiver answers 2xx.
 Result: status "open", version incremented.
 Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, TEST_DELIVERY_FAILED (details.status_code, details.response).`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -292,9 +309,9 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, counters, derived amounts (available, slots).
+		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots).
 Preconditions: the task is yours.
-Possible errors: NOT_FOUND (missing task), NOT_OWNER.`,
+Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskGet),
 	},
@@ -308,9 +325,9 @@ Result: tasks[] with the task views and total.`,
 	},
 	{
 		Name: "task_submissions",
-		Description: `Read the submissions of one of your tasks (newest first; state filter and paging optional) - payloads, verdicts, failures, review deadlines and the stable agent_ref of each executor.
+		Description: `Read the delivery record of one of your tasks (newest first; state filter and paging optional): state, amount, your receiver's reply {status, body}, failure and the stable agent_ref of each executor. Results themselves went to your receiver; the platform keeps no copy.
 Preconditions: the task is yours.
-Possible errors: NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
+Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"state":{"type":"string"},
@@ -318,18 +335,6 @@ Possible errors: NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 			"page_size":{"type":"integer"}
 		},"required":["code"],"additionalProperties":false}`,
 		Handler: factory(handleTaskSubmissions),
-	},
-	{
-		Name: "task_verdict",
-		Description: `Judge an under_review submission (async acceptance).
-Preconditions: the submission belongs to your task and is under review; the verdict satisfies section 6.1 (rejections cite declared criteria, reason 1-500 chars, retryable defaults true; annotations <= 50 with declared criterion and pointer).
-Result: accepted -> settled and paid (source "publisher"); rejected -> the reservation returns to the task.
-Possible errors: SUBMISSION_NOT_FOUND, NOT_OWNER, NOT_UNDER_REVIEW (details.state; a verdict arriving past the review deadline first settles by timeout, then returns this), VERDICT_INVALID (details.message).`,
-		InputSchema: `{"type":"object","properties":{
-			"submission_id":{"type":["integer","string"]},
-			"verdict":{"type":"object"}
-		},"required":["submission_id","verdict"],"additionalProperties":false}`,
-		Handler: factory(handleTaskVerdict),
 	},
 	{
 		Name: "account_register",
@@ -464,7 +469,7 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		}
 	}
 
-	action, retryAfter := NextAction(state, result.Verdict, errCode)
+	action, retryAfter := NextAction(state, errCode)
 	if errCode == "RATE_LIMIT" {
 		// retry_after is the limiter remainder carried in details
 		if te, ok := err.(*ToolError); ok {
@@ -510,7 +515,7 @@ func notAcceptedEnvelope(code, message string, details map[string]any) map[strin
 		"next_action": nil,
 		"retry_after": nil,
 	}
-	action, retry := NextAction("", nil, code)
+	action, retry := NextAction("", code)
 	if action != "" {
 		env["next_action"] = action
 	}

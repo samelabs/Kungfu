@@ -18,19 +18,15 @@ import (
 	"kungfu.md/internal/task"
 )
 
-// claimAsyncContract is an async contract without a receiver: OpenTask
-// skips the test delivery (§5.4), so claim tests need no HTTP.
-func claimAsyncContract() task.Contract {
-	c := pubContract("")
-	c.Acceptance.Mode = task.ModeAsync
-	w := int64(3600)
-	c.Acceptance.ReviewWindow = &w
-	return c
+// claimContract is the default test contract (claim required) on the
+// package-wide accept-everything receiver.
+func claimContract() task.Contract {
+	return pubContract("")
 }
 
 func claimOpenedTask(t *testing.T, pool *pg.Pool, publisher int64, budget int64, mutate func(*task.Contract)) string {
 	t.Helper()
-	c := claimAsyncContract()
+	c := claimContract()
 	if mutate != nil {
 		mutate(&c)
 	}
@@ -96,7 +92,7 @@ func TestClaimTaskNotOpen(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	draft := pubCreateForTest(t, pool, publisher, claimAsyncContract(), 1000)
+	draft := pubCreateForTest(t, pool, publisher, claimContract(), 1000)
 	paused := claimOpenedTask(t, pool, publisher, 1000, nil)
 	if _, err := PauseTask(ctx, pool, publisher, paused); err != nil {
 		t.Fatalf("pause: %v", err)
@@ -227,25 +223,6 @@ func TestClaimTaskSubmissionLimitRejected(t *testing.T) {
 	appErr := appErrOf(t, err)
 	if appErr.Code != "SUBMISSION_LIMIT" || appErr.Details["limit"] != "rejected" {
 		t.Fatalf("claim: %v (%#v), want SUBMISSION_LIMIT/rejected", err, appErr.Details)
-	}
-	claimTaskReserved(t, pool, code)
-}
-
-func TestClaimTaskSubmissionLimitAccepted(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	ctx := context.Background()
-
-	code := claimOpenedTask(t, pool, publisher, 1000, func(c *task.Contract) {
-		one := int64(1)
-		c.Limits.MaxAcceptedPerAgent = &one
-	})
-	seedSubmission(t, pool, code, agent, task.SubSettled)
-	_, err := ClaimTask(ctx, pool, agent, code, time.Now())
-	appErr := appErrOf(t, err)
-	if appErr.Code != "SUBMISSION_LIMIT" || appErr.Details["limit"] != "accepted" {
-		t.Fatalf("claim: %v (%#v), want SUBMISSION_LIMIT/accepted", err, appErr.Details)
 	}
 	claimTaskReserved(t, pool, code)
 }

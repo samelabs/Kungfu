@@ -117,16 +117,10 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
-	// §5.3 step 5 / §6.3 limits (settled + inflight vs accepted cap;
-	// rejected vs rejected cap).
+	// §5.3 step 5: the rejected cap.
 	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID)
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	if cap := contract.Limits.MaxAcceptedPerAgent; cap != nil && counts.Settled+counts.Inflight >= *cap {
-		return claimView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Accepted-submission limit reached (%d)", *cap),
-			map[string]interface{}{"limit": "accepted"})
 	}
 	rejectedCap := int64(task.DefaultMaxRejectedPerAgent)
 	if contract.Limits.MaxRejectedPerAgent != nil {

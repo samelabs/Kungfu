@@ -1,22 +1,20 @@
 package main
 
-// WO-9b unit tests: no database, no platform — every external surface
-// (the model API and the kungfu verdict write-back) is an httptest
-// server. Verdict bodies are re-checked against the §6.1 rules by a
-// local validator (the reference receiver must not import internal/).
+// WO-9b unit tests: no database, no platform — the one external
+// surface (the model API) is an httptest server. Rejection bodies are
+// re-checked by a local validator: the platform hands them to the
+// executor verbatim, so they must stay readable and within the first
+// 4 000 bytes the platform records.
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 	"unicode/utf8"
 )
 
@@ -75,54 +73,56 @@ func deliver(t *testing.T, ts *httptest.Server, submissionID string, payload str
 	return result{status: resp.StatusCode, body: string(raw)}
 }
 
-// assertRejectingVerdictValid re-checks a 4xx verdict body against the
-// §6.1 rules (the local twin of the platform's parser).
-func assertRejectingVerdictValid(t *testing.T, body string, declared map[string]bool) verdict {
+// assertRejection checks a rejection body: JSON, not accepted, a
+// 1–500-rune message, ≤ 20 problems each citing a configured criterion
+// with an RFC 6901 pointer (or "") and a ≤ 200-rune message, and the
+// whole body within the 4 000 bytes the platform records.
+func assertRejection(t *testing.T, body string, declared map[string]bool) reply {
 	t.Helper()
-	var v verdict
+	var v reply
 	if err := json.Unmarshal([]byte(body), &v); err != nil {
-		t.Fatalf("verdict body is not JSON: %v\n%s", err, body)
+		t.Fatalf("rejection body is not JSON: %v\n%s", err, body)
 	}
 	if v.Accepted {
-		t.Fatalf("verdict is accepting, want a rejection: %s", body)
+		t.Fatalf("reply is accepting, want a rejection: %s", body)
 	}
-	if len(v.Criteria) == 0 {
-		t.Fatalf("a rejecting verdict must cite at least one criterion: %s", body)
+	if n := utf8.RuneCountInString(v.Message); n < 1 || n > 500 {
+		t.Fatalf("message length = %d, want 1–500: %s", n, body)
 	}
-	for _, id := range v.Criteria {
-		if !declared[id] {
-			t.Fatalf("criterion %q is not declared: %s", id, body)
+	if len(v.Problems) > 20 {
+		t.Fatalf("problems = %d, want ≤ 20", len(v.Problems))
+	}
+	for i, p := range v.Problems {
+		if p.Pointer != "" && !strings.HasPrefix(p.Pointer, "/") {
+			t.Fatalf("problems[%d].pointer %q is not an RFC 6901 pointer", i, p.Pointer)
+		}
+		if !declared[p.Criterion] {
+			t.Fatalf("problems[%d].criterion %q is not configured", i, p.Criterion)
+		}
+		if n := utf8.RuneCountInString(p.Message); n > 200 {
+			t.Fatalf("problems[%d].message length = %d, want ≤ 200", i, n)
 		}
 	}
-	if n := utf8.RuneCountInString(v.Reason); n < 1 || n > 500 {
-		t.Fatalf("reason length = %d, want 1–500: %s", n, body)
-	}
-	if !v.Retryable {
-		t.Fatalf("the receiver always marks rejections retryable: %s", body)
-	}
-	if len(v.Annotations) > 50 {
-		t.Fatalf("annotations = %d, want ≤ 50", len(v.Annotations))
-	}
-	for i, a := range v.Annotations {
-		if a.Pointer != "" && !strings.HasPrefix(a.Pointer, "/") {
-			t.Fatalf("annotations[%d].pointer %q is not an RFC 6901 pointer", i, a.Pointer)
-		}
-		if !declared[a.Criterion] {
-			t.Fatalf("annotations[%d].criterion %q is not declared", i, a.Criterion)
-		}
-		if n := utf8.RuneCountInString(a.Message); n > 300 {
-			t.Fatalf("annotations[%d].message length = %d, want ≤ 300", i, n)
-		}
+	if len(body) > 4000 {
+		t.Fatalf("rejection body = %d bytes, want ≤ 4000", len(body))
 	}
 	return v
 }
 
+// failedCriteria lists the criteria a rejection's problems cite.
+func failedCriteria(v reply) []string {
+	out := make([]string, 0, len(v.Problems))
+	for _, p := range v.Problems {
+		out = append(out, p.Criterion)
+	}
+	return out
+}
+
 const goodPayload = `{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`
 
-// syncCfg builds a three-rule sync config (required + pattern + schema).
+// syncCfg builds a three-rule config (required + pattern + schema).
 func syncCfg() string {
 	return `{
-		"mode": "sync",
 		"listen": "127.0.0.1:0",
 		"criteria": [
 			{"id": "C1", "required": ["/url", "/bullets"]},
@@ -141,39 +141,24 @@ func syncCfg() string {
 
 var syncDeclared = map[string]bool{"C1": true, "C2": true, "C3": true}
 
-// §5.4 test delivery: acknowledged, never judged.
-func TestTestDeliveryNotJudged(t *testing.T) {
-	_, syncTS := startReceiver(t, syncCfg(), envConfig{})
-	r := deliver(t, syncTS, "test-task01-1", goodPayload, [2]string{"Kungfu-Test", "1"})
+// §4 test delivery: the sample is judged like a real submission (so a
+// broken sample or receiver cannot open a task) and never cached.
+func TestTestDeliveryJudged(t *testing.T) {
+	_, ts := startReceiver(t, syncCfg(), envConfig{})
+	r := deliver(t, ts, "test-task01-1", goodPayload, [2]string{"Kungfu-Test", "1"})
 	if r.status != http.StatusOK {
-		t.Fatalf("sync test delivery = %d %s, want 200", r.status, r.body)
+		t.Fatalf("good sample = %d %s, want 200", r.status, r.body)
 	}
-	if strings.Contains(r.body, `"accepted"`) {
-		t.Fatalf("test delivery produced a verdict: %s", r.body)
+	r = deliver(t, ts, "test-task01-1", `{"url":"ftp://x","bullets":[]}`, [2]string{"Kungfu-Test", "1"})
+	if r.status != failStatus {
+		t.Fatalf("bad sample (same key, not cached) = %d %s, want %d", r.status, r.body, failStatus)
 	}
-
-	// async: 202, and no verdict write-back happens
-	kungfu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		t.Error("test delivery must not produce a verdict write-back")
-	}))
-	defer kungfu.Close()
-	asyncCfg := `{"mode":"async","listen":"127.0.0.1:0","criteria":[
-		{"id":"C1","required":["/url"]}]}`
-	_, asyncTS := startReceiver(t, asyncCfg, envConfig{kungfuBaseURL: kungfu.URL, agentKey: "pub-key"})
-	r = deliver(t, asyncTS, "test-task01-1", goodPayload, [2]string{"Kungfu-Test", "1"})
-	if r.status != http.StatusAccepted {
-		t.Fatalf("async test delivery = %d %s, want 202", r.status, r.body)
-	}
-	if strings.Contains(r.body, `"accepted"`) {
-		t.Fatalf("test delivery produced a verdict: %s", r.body)
-	}
-	time.Sleep(50 * time.Millisecond) // no write-back above within the grace window
 }
 
-// required: pass and fail; the failing verdict passes the §6.1 checks
+// required: pass and fail; the rejection body passes the reply checks
 // (own single-rule config so the empty array cannot also trip a schema).
 func TestRequiredRule(t *testing.T) {
-	cfg := `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
+	cfg := `{"listen":"127.0.0.1:0","criteria":[
 		{"id":"C1","required":["/url","/bullets"]}]}`
 	_, ts := startReceiver(t, cfg, envConfig{})
 
@@ -184,15 +169,15 @@ func TestRequiredRule(t *testing.T) {
 
 	empty := `{"url":"https://example.com/a","bullets":[]}`
 	r = deliver(t, ts, "req-fail-1", empty)
-	if r.status != syncFailStatus {
-		t.Fatalf("required fail = %d %s, want %d", r.status, r.body, syncFailStatus)
+	if r.status != failStatus {
+		t.Fatalf("required fail = %d %s, want %d", r.status, r.body, failStatus)
 	}
-	v := assertRejectingVerdictValid(t, r.body, map[string]bool{"C1": true})
-	if len(v.Criteria) != 1 || v.Criteria[0] != "C1" {
-		t.Fatalf("failing criteria = %v, want [C1]: %s", v.Criteria, r.body)
+	v := assertRejection(t, r.body, map[string]bool{"C1": true})
+	if fc := failedCriteria(v); len(fc) != 1 || fc[0] != "C1" {
+		t.Fatalf("failing criteria = %v, want [C1]: %s", failedCriteria(v), r.body)
 	}
-	if !strings.Contains(v.Reason, "/bullets") {
-		t.Fatalf("reason does not name the empty pointer: %s", v.Reason)
+	if !strings.Contains(v.Message, "/bullets") {
+		t.Fatalf("message does not name the empty pointer: %s", v.Message)
 	}
 }
 
@@ -202,21 +187,21 @@ func TestPatternRule(t *testing.T) {
 
 	bad := `{"url":"ftp://example.com/a","bullets":["s1","s2","s3"]}`
 	r := deliver(t, ts, "pat-fail-1", bad)
-	if r.status != syncFailStatus {
+	if r.status != failStatus {
 		t.Fatalf("pattern fail = %d %s", r.status, r.body)
 	}
-	v := assertRejectingVerdictValid(t, r.body, syncDeclared)
-	if len(v.Criteria) != 1 || v.Criteria[0] != "C2" {
-		t.Fatalf("failing criteria = %v, want [C2]: %s", v.Criteria, r.body)
+	v := assertRejection(t, r.body, syncDeclared)
+	if fc := failedCriteria(v); len(fc) != 1 || fc[0] != "C2" {
+		t.Fatalf("failing criteria = %v, want [C2]: %s", failedCriteria(v), r.body)
 	}
 	found := false
-	for _, a := range v.Annotations {
+	for _, a := range v.Problems {
 		if a.Criterion == "C2" && a.Pointer == "/url" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("no C2 annotation at /url: %s", r.body)
+		t.Fatalf("no C2 problem at /url: %s", r.body)
 	}
 
 	r = deliver(t, ts, "pat-pass-1", goodPayload)
@@ -231,12 +216,12 @@ func TestSchemaRule(t *testing.T) {
 
 	tooFew := `{"url":"https://example.com/a","bullets":["only one"]}`
 	r := deliver(t, ts, "sch-fail-1", tooFew)
-	if r.status != syncFailStatus {
+	if r.status != failStatus {
 		t.Fatalf("schema fail = %d %s", r.status, r.body)
 	}
-	v := assertRejectingVerdictValid(t, r.body, syncDeclared)
-	if len(v.Criteria) != 1 || v.Criteria[0] != "C3" {
-		t.Fatalf("failing criteria = %v, want [C3]: %s", v.Criteria, r.body)
+	v := assertRejection(t, r.body, syncDeclared)
+	if fc := failedCriteria(v); len(fc) != 1 || fc[0] != "C3" {
+		t.Fatalf("failing criteria = %v, want [C3]: %s", failedCriteria(v), r.body)
 	}
 
 	r = deliver(t, ts, "sch-pass-1", goodPayload)
@@ -260,7 +245,7 @@ func TestIdempotencySameKeyReturnsFirstOutcome(t *testing.T) {
 	}
 
 	reject := deliver(t, ts, "idem-2", `{"url":"ftp://x","bullets":[]}`)
-	if reject.status != syncFailStatus {
+	if reject.status != failStatus {
 		t.Fatalf("first reject = %d", reject.status)
 	}
 	repeatReject := deliver(t, ts, "idem-2", goodPayload)
@@ -321,91 +306,6 @@ func cloneHeaders(in map[string]string) map[string]string {
 	return out
 }
 
-// async: 202 immediately, then the verdict reaches
-// /api/v1/task_verdict with the publisher Bearer key and the exact
-// {submission_id, verdict} body.
-func TestAsyncVerdictWriteBack(t *testing.T) {
-	type capture struct {
-		auth string
-		body string
-	}
-	got := make(chan capture, 1)
-	kungfu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/api/v1/task_verdict" {
-			t.Errorf("write-back path = %s", req.URL.Path)
-		}
-		raw, _ := io.ReadAll(req.Body)
-		got <- capture{auth: req.Header.Get("Authorization"), body: string(raw)}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer kungfu.Close()
-
-	cfg := `{"mode":"async","listen":"127.0.0.1:0","criteria":[{"id":"C1","required":["/url"]}]}`
-	_, ts := startReceiver(t, cfg, envConfig{kungfuBaseURL: kungfu.URL, agentKey: "publisher-key-1"})
-
-	r := deliver(t, ts, "async-1", goodPayload)
-	if r.status != http.StatusAccepted {
-		t.Fatalf("async reply = %d %s, want 202", r.status, r.body)
-	}
-
-	select {
-	case c := <-got:
-		if c.auth != "Bearer publisher-key-1" {
-			t.Fatalf("Authorization = %q, want the publisher Bearer key", c.auth)
-		}
-		var body struct {
-			SubmissionID string  `json:"submission_id"`
-			Verdict      verdict `json:"verdict"`
-		}
-		if err := json.Unmarshal([]byte(c.body), &body); err != nil {
-			t.Fatalf("write-back body: %v (%s)", err, c.body)
-		}
-		if body.SubmissionID != "async-1" || !body.Verdict.Accepted || body.Verdict.Retryable != true {
-			t.Fatalf("write-back body = %s", c.body)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("verdict write-back never arrived")
-	}
-}
-
-// The write-back retries: two 500s then a 200 succeeds on the third
-// attempt.
-func TestWriteBackRetriesUntilSuccess(t *testing.T) {
-	old := verdictRetryBackoff
-	verdictRetryBackoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
-	t.Cleanup(func() { verdictRetryBackoff = old })
-
-	var mu sync.Mutex
-	hits := 0
-	var lastBody string
-	kungfu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		mu.Lock()
-		hits++
-		count := hits
-		mu.Unlock()
-		raw, _ := io.ReadAll(req.Body)
-		lastBody = string(raw)
-		if count < 3 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer kungfu.Close()
-
-	r := newReceiver(Config{}, envConfig{kungfuBaseURL: kungfu.URL, agentKey: "k"})
-	err := r.writeBack("retry-1", verdict{Accepted: true, Retryable: true})
-	if err != nil {
-		t.Fatalf("writeBack after retries: %v", err)
-	}
-	if hits != 3 {
-		t.Fatalf("hits = %d, want 3", hits)
-	}
-	if !strings.Contains(lastBody, `"submission_id":"retry-1"`) || !strings.Contains(lastBody, `"accepted":true`) {
-		t.Fatalf("write-back body = %s", lastBody)
-	}
-}
-
 // chatServer serves one fixed OpenAI-compatible completion reply.
 func chatServer(t *testing.T, content string) *httptest.Server {
 	t.Helper()
@@ -423,7 +323,7 @@ func chatServer(t *testing.T, content string) *httptest.Server {
 }
 
 func rubricCfg() string {
-	return `{"mode":"sync","listen":"127.0.0.1:0","criteria":[
+	return `{"listen":"127.0.0.1:0","criteria":[
 		{"id":"C1","rubric":{"text":"Every bullet must be one complete factual sentence.","threshold":0.7}}]}`
 }
 
@@ -446,15 +346,15 @@ func TestRubricScoring(t *testing.T) {
 		modelBaseURL: low.URL, modelAPIKey: "model-key-1", modelName: "grader-1",
 	})
 	r = deliver(t, ts2, "rub-low-1", goodPayload)
-	if r.status != syncFailStatus {
-		t.Fatalf("rubric low score = %d %s, want %d", r.status, r.body, syncFailStatus)
+	if r.status != failStatus {
+		t.Fatalf("rubric low score = %d %s, want %d", r.status, r.body, failStatus)
 	}
-	v := assertRejectingVerdictValid(t, r.body, map[string]bool{"C1": true})
-	if len(v.Criteria) != 1 || v.Criteria[0] != "C1" {
-		t.Fatalf("failing criteria = %v: %s", v.Criteria, r.body)
+	v := assertRejection(t, r.body, map[string]bool{"C1": true})
+	if fc := failedCriteria(v); len(fc) != 1 || fc[0] != "C1" {
+		t.Fatalf("failing criteria = %v: %s", failedCriteria(v), r.body)
 	}
-	if !strings.Contains(v.Reason, "below threshold") {
-		t.Fatalf("reason does not carry the model score: %s", v.Reason)
+	if !strings.Contains(v.Message, "below threshold") {
+		t.Fatalf("message does not carry the model score: %s", v.Message)
 	}
 
 	junk := chatServer(t, "the payload looks fine, no JSON here")
@@ -463,12 +363,12 @@ func TestRubricScoring(t *testing.T) {
 		modelBaseURL: junk.URL, modelAPIKey: "model-key-1", modelName: "grader-1",
 	})
 	r = deliver(t, ts3, "rub-junk-1", goodPayload)
-	if r.status != syncFailStatus {
-		t.Fatalf("non-JSON model reply = %d %s, want %d", r.status, r.body, syncFailStatus)
+	if r.status != failStatus {
+		t.Fatalf("non-JSON model reply = %d %s, want %d", r.status, r.body, failStatus)
 	}
-	v = assertRejectingVerdictValid(t, r.body, map[string]bool{"C1": true})
-	if !strings.Contains(v.Reason, "model reply") {
-		t.Fatalf("reason does not explain the parse failure: %s", v.Reason)
+	v = assertRejection(t, r.body, map[string]bool{"C1": true})
+	if !strings.Contains(v.Message, "model reply") {
+		t.Fatalf("message does not explain the parse failure: %s", v.Message)
 	}
 }
 
@@ -493,16 +393,13 @@ func TestConfigValidationBasics(t *testing.T) {
 		}
 		return p
 	}
-	if _, err := loadConfig(write(`{"mode":"batch","listen":":9","criteria":[{"id":"C1","required":["/a"]}]}`), envConfig{}); err == nil {
-		t.Fatal("unknown mode accepted")
+	if _, err := loadConfig(write(`{"criteria":[{"id":"C1","required":["/a"]}]}`), envConfig{}); err == nil {
+		t.Fatal("missing listen accepted")
 	}
-	if _, err := loadConfig(write(`{"mode":"sync","listen":":9","criteria":[]}`), envConfig{}); err == nil {
+	if _, err := loadConfig(write(`{"listen":":9","criteria":[]}`), envConfig{}); err == nil {
 		t.Fatal("empty criteria accepted")
 	}
-	if _, err := loadConfig(write(`{"mode":"sync","listen":":9","criteria":[{"id":"C1"}]}`), envConfig{}); err == nil {
+	if _, err := loadConfig(write(`{"listen":":9","criteria":[{"id":"C1"}]}`), envConfig{}); err == nil {
 		t.Fatal("criterion without a rule accepted")
-	}
-	if _, err := loadConfig(write(`{"mode":"async","listen":":9","criteria":[{"id":"C1","required":["/a"]}]}`), envConfig{}); err == nil {
-		t.Fatal("async without KUNGFU_* accepted")
 	}
 }

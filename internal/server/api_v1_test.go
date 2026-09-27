@@ -33,7 +33,7 @@ func apiV1Env(t *testing.T) (*Server, string, int64, string) {
 		Pool:        pool,
 		RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
 	}
-	// publisher task (async, no receiver → under_review submissions)
+	// publisher task on the accept-everything receiver
 	view, err := service.CreateTask(context.Background(), pool, apiV1Publisher(t, pool), apiV1Contract(), 1000)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -89,19 +89,16 @@ func apiV1PublisherID(t *testing.T, pool *pg.Pool) int64 { return apiV1SeedBalan
 
 func apiV1Contract() task.Contract {
 	return task.Contract{
-		Title: "API v1 task", Objective: "o", Inputs: "i",
-		Output: task.Output{Description: "d", Schema: []byte(`{
+		Title:        "API v1 task",
+		Requirements: "Return three bullets for the page.",
+		Output: task.Output{Schema: []byte(`{
 			"type":"object","properties":{
 				"url":{"type":"string"},
 				"bullets":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
 			},"required":["url","bullets"]}`)},
-		Acceptance: task.Acceptance{Mode: task.ModeAsync,
-			ReviewWindow: &[]int64{3600}[0],
-			Criteria:     []task.Criterion{{ID: "C1", Kind: task.KindRule, Description: "r"}}},
-		Examples: []task.Example{
-			{Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), Accepted: true},
-		},
-		Price: 5,
+		Receiver: task.Receiver{URL: okReceiverURL},
+		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
+		Price:    5,
 	}
 }
 
@@ -161,13 +158,15 @@ func TestAPIV1WorkListAndSubmit(t *testing.T) {
 		t.Fatalf("work_list missing this test's task %s (got %d rows)", code, len(tasks))
 	}
 
-	// happy-path submit: async no receiver → under_review + poll/60
+	// happy-path submit: the receiver answers 200 → settled + done,
+	// its body handed over verbatim
 	rec, env = apiV1Call(t, s, key, "work_submit", map[string]any{
 		"code": code, "request_key": "apiv1-ok",
 		"payload": map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
 	})
-	if rec.Code != 200 || env["ok"] != true || env["state"] != task.SubUnderReview ||
-		env["next_action"] != "poll" || env["retry_after"].(float64) != 60 {
+	reply, _ := env["reply"].(map[string]any)
+	if rec.Code != 200 || env["ok"] != true || env["state"] != task.SubSettled ||
+		env["next_action"] != "done" || reply == nil || reply["body"] != `{"message":"accepted"}` {
 		t.Fatalf("work_submit: %d %v", rec.Code, env)
 	}
 

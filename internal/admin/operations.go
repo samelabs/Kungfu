@@ -149,7 +149,6 @@ type TaskStats struct {
 	Settled              int64
 	Rejected             int64
 	Failed               int64
-	TimeoutAccepted      int64
 	TerminalTotal        int64
 	MedianVerdictSeconds *float64
 }
@@ -177,7 +176,6 @@ type TaskDetailView struct {
 	Counts        map[string]int64
 	Submissions   []SubmissionFact
 	AcceptRate    string
-	TimeoutRate   string
 	FailureRate   string
 	MedianSeconds string
 }
@@ -211,7 +209,7 @@ func adminTaskView(t *repository.AdminTaskRow) *TaskRow {
 func adminTaskStats(s repository.TaskStats) TaskStats {
 	return TaskStats{
 		Settled: s.Settled, Rejected: s.Rejected, Failed: s.Failed,
-		TimeoutAccepted: s.TimeoutAccepted, TerminalTotal: s.TerminalTotal,
+		TerminalTotal:        s.TerminalTotal,
 		MedianVerdictSeconds: s.MedianVerdictSeconds,
 	}
 }
@@ -300,7 +298,6 @@ func GetPlatformTask(ctx context.Context, pool *pg.Pool, principal *Principal, c
 		return fmt.Sprintf("%.1f%%", 100*float64(num)/float64(den))
 	}
 	d.AcceptRate = pct(d.Stats.Settled, d.Stats.Settled+d.Stats.Rejected)
-	d.TimeoutRate = pct(d.Stats.TimeoutAccepted, d.Stats.TerminalTotal)
 	d.FailureRate = pct(d.Stats.Failed, d.Stats.TerminalTotal)
 	if d.Stats.MedianVerdictSeconds != nil {
 		d.MedianSeconds = fmt.Sprintf("%.0fs", *d.Stats.MedianVerdictSeconds)

@@ -92,13 +92,16 @@ func startPubReceiver(t *testing.T, status int) *pubReceiver {
 	return r
 }
 
+// pubContract is a complete §3 contract; an empty receiverURL uses the
+// package-wide accept-everything receiver.
 func pubContract(receiverURL string) task.Contract {
-	c := task.Contract{
-		Title:     "Summarize a page",
-		Objective: "Three bullets of the given page for a newsletter.",
-		Inputs:    "A public URL fetched by the executor.",
+	if receiverURL == "" {
+		receiverURL = okReceiverURL
+	}
+	return task.Contract{
+		Title:        "Summarize a page",
+		Requirements: "Fetch the given page and return exactly three summary bullets for a newsletter.",
 		Output: task.Output{
-			Description: "One JSON object with the bullets.",
 			Schema: []byte(`{
 				"type": "object",
 				"properties": {
@@ -108,25 +111,11 @@ func pubContract(receiverURL string) task.Contract {
 				"required": ["url", "bullets"]
 			}`),
 		},
-		Acceptance: task.Acceptance{
-			Mode: task.ModeSync,
-			Criteria: []task.Criterion{
-				{ID: "C1", Kind: task.KindRule, Description: "exactly three bullets"},
-				{ID: "C2", Kind: task.KindSchema, Description: "matches schema"},
-			},
-		},
-		Examples: []task.Example{
-			{Payload: []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), Accepted: true},
-			{Payload: []byte(`{"url":"https://example.com/b","bullets":["one"]}`),
-				Accepted: false, Criteria: []string{"C1"}},
-		},
-		Price: 5,
-		Claim: task.ClaimConfig{Required: true},
+		Receiver: task.Receiver{URL: receiverURL},
+		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
+		Price:    5,
+		Claim:    task.ClaimConfig{Required: true},
 	}
-	if receiverURL != "" {
-		c.Receiver = task.Receiver{URL: receiverURL}
-	}
-	return c
 }
 
 func ledgerSum(t *testing.T, pool *pg.Pool, botID int64, txnType string) int64 {
@@ -165,13 +154,8 @@ func TestPublisherCreateBudgetBelowFloor(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)
 
-	_, err := CreateTask(context.Background(), pool, publisher, pubContract(""), 500)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "VALIDATION_FAILED" {
-		t.Fatalf("code = %s, want VALIDATION_FAILED", appErr.Code)
-	}
-	// budget below price, too
-	_, err = CreateTask(context.Background(), pool, publisher, pubContract(""), 4)
+	// budget below one price
+	_, err := CreateTask(context.Background(), pool, publisher, pubContract(""), 4)
 	if appErrOf(t, err).Code != "VALIDATION_FAILED" {
 		t.Fatalf("budget < price: code = %v, want VALIDATION_FAILED", err)
 	}
@@ -190,8 +174,8 @@ func TestPublisherCreateInvalidContract(t *testing.T) {
 	publisher := pubSeedBot(t, pool, 10_000)
 
 	c := pubContract("")
-	c.Title = "" // §3: title required
-	c.Acceptance.Criteria = nil
+	c.Title = ""        // §3: title required
+	c.Requirements = "" // §3: requirements required
 
 	_, err := CreateTask(context.Background(), pool, publisher, c, 2000)
 	appErr := appErrOf(t, err)
@@ -200,7 +184,7 @@ func TestPublisherCreateInvalidContract(t *testing.T) {
 	}
 	items, ok := appErr.Details["errors"].([]map[string]string)
 	if !ok || len(items) < 2 {
-		t.Fatalf("details.errors = %#v, want field errors for title and criteria", appErr.Details)
+		t.Fatalf("details.errors = %#v, want field errors for title and requirements", appErr.Details)
 	}
 	var rows int64
 	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_task WHERE publisher_id = $1`, publisher).Scan(&rows)
@@ -298,7 +282,7 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 	_ = json.Unmarshal([]byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), &wantPayload)
 	_ = json.Unmarshal(body.Payload, &gotPayload)
 	if fmt.Sprint(wantPayload) != fmt.Sprint(gotPayload) {
-		t.Fatalf("payload = %v, want the first accepted example", gotPayload)
+		t.Fatalf("payload = %v, want the contract sample", gotPayload)
 	}
 
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
@@ -338,61 +322,6 @@ func TestPublisherOpenReceiver500(t *testing.T) {
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	if tr.Status != task.TaskDraft || tr.Version != 0 {
 		t.Fatalf("task = %s/v%d, want draft/v0 after failed delivery", tr.Status, tr.Version)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-func TestPublisherOpenAsyncWithoutReceiverSkipsDelivery(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-
-	c := pubContract("")
-	c.Acceptance.Mode = task.ModeAsync
-	window := int64(3600)
-	c.Acceptance.ReviewWindow = &window
-	c.Acceptance.Criteria = append(c.Acceptance.Criteria,
-		task.Criterion{ID: "C3", Kind: task.KindJudgment, Description: "quality"})
-
-	code := pubCreateForTest(t, pool, publisher, c, 2000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open (async, no receiver): %v", err)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskOpen || tr.Version != 1 {
-		t.Fatalf("task = %s/v%d, want open/v1", tr.Status, tr.Version)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-func TestPublisherOpenAsyncAccepts202(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusAccepted)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-	tr0, _ := repository.FindTaskByCode(ctx, pool, code)
-	var c task.Contract
-	if err := json.Unmarshal(tr0.DraftContract, &c); err != nil {
-		t.Fatalf("draft contract: %v", err)
-	}
-	window := int64(3600)
-	c.Acceptance.Mode = task.ModeAsync
-	c.Acceptance.ReviewWindow = &window
-	if _, err := UpdateTask(ctx, pool, publisher, code, c); err != nil {
-		t.Fatalf("update to async: %v", err)
-	}
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open (async 202): %v", err)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskOpen {
-		t.Fatalf("status = %s, want open", tr.Status)
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)

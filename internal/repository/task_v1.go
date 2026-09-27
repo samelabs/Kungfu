@@ -342,7 +342,7 @@ func RenewClaim(ctx context.Context, q pg.Querier, claimID int64, from string, e
 // behind the §5.3 step-5 limit check (§6.3).
 type AgentSubmissionCounts struct {
 	Settled  int64
-	Inflight int64 // delivering + uncertain + under_review
+	Inflight int64 // delivering + uncertain
 	Rejected int64
 }
 
@@ -353,7 +353,7 @@ func CountAgentSubmissions(ctx context.Context, q pg.Querier, taskID, agentID in
 	err := q.QueryRow(ctx, `
 		SELECT
 		  COUNT(*) FILTER (WHERE state = 'settled'),
-		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain', 'under_review')),
+		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain')),
 		  COUNT(*) FILTER (WHERE state = 'rejected')
 		FROM tb_task_submission
 		WHERE task_id = $1 AND agent_id = $2`, taskID, agentID).
@@ -435,29 +435,6 @@ func UncertainSince(ctx context.Context, q pg.Querier, submissionID int64) (time
 	return at, nil
 }
 
-// ListOverdueReviews returns under_review submissions whose review
-// window has passed (§5.4 review timeout).
-func ListOverdueReviews(ctx context.Context, q pg.Querier, now time.Time, limit int) ([]int64, error) {
-	rows, err := q.Query(ctx, `
-		SELECT submission_id FROM tb_task_submission
-		WHERE state = 'under_review' AND review_deadline <= $1
-		ORDER BY review_deadline, submission_id
-		LIMIT $2`, now, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list overdue reviews: %w", err)
-	}
-	defer rows.Close()
-	var out []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // ListTaskSubmissions returns one task's submissions newest first,
 // optionally filtered by state.
 func ListTaskSubmissions(ctx context.Context, q pg.Querier, taskID int64, state string, limit, offset int) ([]SubmissionRow, error) {
@@ -507,15 +484,14 @@ type TaskStats struct {
 	Settled              int64
 	Rejected             int64
 	Failed               int64
-	TimeoutAccepted      int64 // settled with verdict source = timeout
 	TerminalTotal        int64
 	MedianVerdictSeconds *float64 // over settled+rejected durations; nil when none
 }
 
 // TaskStats computes the §6.3 statistics for terminals entered at or
 // after `since`: verdict latency runs from the first event to the
-// settled/rejected event; timeout acceptance is a settled verdict with
-// source = timeout.
+// settled/rejected event (the receiver's reply, including redelivery
+// time).
 func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Time) (TaskStats, error) {
 	var s TaskStats
 	var median *float64
@@ -524,11 +500,10 @@ func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Ti
 		  COUNT(*) FILTER (WHERE state = 'settled'),
 		  COUNT(*) FILTER (WHERE state = 'rejected'),
 		  COUNT(*) FILTER (WHERE state = 'failed'),
-		  COUNT(*) FILTER (WHERE state = 'settled' AND verdict->>'source' = 'timeout'),
 		  COUNT(*),
 		  percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds)
 		FROM (
-		  SELECT sub.state, sub.verdict,
+		  SELECT sub.state,
 		         EXTRACT(EPOCH FROM (
 		           (SELECT e.at FROM tb_task_submission_event e
 		             WHERE e.submission_id = sub.submission_id
@@ -547,7 +522,7 @@ func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Ti
 		) t
 		WHERE terminal_at IS NOT NULL AND terminal_at >= $2`,
 		taskID, since).
-		Scan(&s.Settled, &s.Rejected, &s.Failed, &s.TimeoutAccepted, &s.TerminalTotal, &median)
+		Scan(&s.Settled, &s.Rejected, &s.Failed, &s.TerminalTotal, &median)
 	if err != nil {
 		return TaskStats{}, fmt.Errorf("task stats: %w", err)
 	}
@@ -641,30 +616,6 @@ func FindOpenReportByReporterTask(ctx context.Context, q pg.Querier, taskID, rep
 	return id, true, nil
 }
 
-// PurgeExpiredPayloads nulls the payload of terminal submissions whose
-// terminal entry is at or before `cutoff` (§9), returning the number
-// purged. payload_hash, verdict and events are kept.
-func PurgeExpiredPayloads(ctx context.Context, q pg.Querier, cutoff time.Time, batch int) (int64, error) {
-	tag, err := q.Exec(ctx, `
-		UPDATE tb_task_submission s
-		SET payload = NULL
-		WHERE s.submission_id IN (
-			SELECT sub.submission_id FROM tb_task_submission sub
-			WHERE sub.payload IS NOT NULL
-			  AND sub.state IN ('settled', 'rejected', 'failed')
-			  AND (SELECT e.at FROM tb_task_submission_event e
-			        WHERE e.submission_id = sub.submission_id
-			        ORDER BY e.seq DESC LIMIT 1) <= $1::timestamptz
-			ORDER BY sub.submission_id
-			LIMIT $2
-			FOR UPDATE SKIP LOCKED
-		)`, cutoff, batch)
-	if err != nil {
-		return 0, fmt.Errorf("purge expired payloads: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
 // ListClosedTasksWithSnapshots returns closed tasks (updated_at at or
 // before `cutoff`) that still carry unpurged version snapshots. The
 // task's updated_at is the close marker: closed is terminal, and the
@@ -676,7 +627,7 @@ func ListClosedTasksWithSnapshots(ctx context.Context, q pg.Querier, cutoff time
 		WHERE t.status = 'closed'
 		  AND t.updated_at <= $1::timestamptz
 		  AND EXISTS (SELECT 1 FROM tb_task_version v
-		               WHERE v.task_id = t.id AND (v.harness <> '[]'::jsonb OR v.contract->'examples' <> '[]'::jsonb))
+		               WHERE v.task_id = t.id AND (v.harness <> '[]'::jsonb OR v.contract->'sample' <> '{}'::jsonb))
 		ORDER BY t.id
 		LIMIT $2`, cutoff, batch)
 	if err != nil {
@@ -695,13 +646,13 @@ func ListClosedTasksWithSnapshots(ctx context.Context, q pg.Querier, cutoff time
 }
 
 // PurgeTaskVersionSnapshots empties one task's snapshot material
-// (§9): harness → [], contract.examples → []; schema and criteria stay
-// for audit.
+// (§9): harness → [], contract.sample → {}; the rest of the contract
+// stays for audit.
 func PurgeTaskVersionSnapshots(ctx context.Context, q pg.Querier, taskID int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_task_version
 		SET harness = '[]'::jsonb,
-		    contract = jsonb_set(contract, '{examples}', '[]'::jsonb)
+		    contract = jsonb_set(contract, '{sample}', '{}'::jsonb)
 		WHERE task_id = $1`, taskID)
 	if err != nil {
 		return fmt.Errorf("purge version snapshots: %w", err)
@@ -776,23 +727,23 @@ func ApplyClaimStatus(ctx context.Context, q pg.Querier, claimID int64, from, ev
 // SubmissionRow is a row of tb_task_submission. Payload and Verdict
 // are raw JSON; both are NULL after retention cleanup (spec §9).
 type SubmissionRow struct {
-	SubmissionID   int64
-	TaskID         int64
-	Version        int32
-	AgentID        int64
-	RequestKey     string
-	Payload        []byte
-	PayloadHash    string
-	Amount         int64
-	State          string
-	Verdict        []byte
-	Failure        *string
-	Revises        *int64
-	ClaimID        *int64
-	ReviewDeadline *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	SettledAt      *time.Time
+	SubmissionID int64
+	TaskID       int64
+	Version      int32
+	AgentID      int64
+	RequestKey   string
+	Payload      []byte
+	PayloadHash  string
+	Amount       int64
+	State        string
+	ResponseCode *int
+	ResponseBody *string
+	Failure      *string
+	Revises      *int64
+	ClaimID      *int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	SettledAt    *time.Time
 }
 
 // NewSubmissionRow is the insert input; the submission is created in
@@ -834,15 +785,15 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 
 const submissionSelect = `
 	SELECT submission_id, task_id, version, agent_id, request_key, payload, payload_hash,
-	       amount, state, verdict, failure, revises, claim_id, review_deadline,
+	       amount, state, response_code, response_body, failure, revises, claim_id,
 	       created_at, updated_at, settled_at
 	FROM tb_task_submission`
 
 func scanSubmission(row pgx.Row) (*SubmissionRow, error) {
 	var s SubmissionRow
 	if err := row.Scan(&s.SubmissionID, &s.TaskID, &s.Version, &s.AgentID, &s.RequestKey,
-		&s.Payload, &s.PayloadHash, &s.Amount, &s.State, &s.Verdict, &s.Failure,
-		&s.Revises, &s.ClaimID, &s.ReviewDeadline,
+		&s.Payload, &s.PayloadHash, &s.Amount, &s.State, &s.ResponseCode, &s.ResponseBody,
+		&s.Failure, &s.Revises, &s.ClaimID,
 		&s.CreatedAt, &s.UpdatedAt, &s.SettledAt); err != nil {
 		return nil, err
 	}
@@ -902,38 +853,46 @@ func ListSubmissionEvents(ctx context.Context, q pg.Querier, submissionID int64)
 // SetSubmissionStateOpts carries the optional facts a transition may
 // record; nil leaves everything untouched.
 type SetSubmissionStateOpts struct {
-	Verdict        []byte     // §6.1 Verdict (rejected / settled)
-	Failure        *string    // §8.4 failure reason
-	ReviewDeadline *time.Time // under_review cutoff
+	ResponseCode *int    // §7.2 the receiver's status code
+	ResponseBody *string // §7.2 the receiver's reply body (bounded)
+	Failure      *string // §8.4 failure reason
 }
 
 // SetSubmissionState is the ONLY way a submission state is written:
 // it validates `event` against the §5.4 kernel, compare-and-swaps the
 // state and appends the SubmissionEvent in the same transaction.
-// settled_at is stamped automatically when the target is settled.
+// settled_at is stamped automatically when the target is settled; a
+// terminal target clears the payload (kept only for redelivery, §9).
 func SetSubmissionState(ctx context.Context, tx pgx.Tx, submissionID int64, from, event string, opts *SetSubmissionStateOpts) error {
 	to, err := task.SubmissionTransition(from, event)
 	if err != nil {
 		return err
 	}
 
-	var verdict, failure, reviewDeadline any
+	var responseCode, responseBody, failure any
 	if opts != nil {
-		verdict, failure, reviewDeadline = opts.Verdict, opts.Failure, opts.ReviewDeadline
+		if opts.ResponseCode != nil {
+			responseCode = *opts.ResponseCode
+		}
+		if opts.ResponseBody != nil {
+			responseBody = *opts.ResponseBody
+		}
+		if opts.Failure != nil {
+			failure = *opts.Failure
+		}
 	}
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE tb_task_submission
 		SET state = $2::varchar,
-		    verdict = COALESCE($3::jsonb, verdict),
-		    failure = COALESCE($4::varchar, failure),
-		    review_deadline = CASE
-		        WHEN $2::varchar = 'under_review' THEN COALESCE($5::timestamptz, review_deadline)
-		        ELSE review_deadline END,
+		    response_code = COALESCE($3::integer, response_code),
+		    response_body = COALESCE($4::text, response_body),
+		    failure = COALESCE($5::varchar, failure),
+		    payload = CASE WHEN $2::varchar IN ('settled', 'rejected', 'failed') THEN NULL ELSE payload END,
 		    settled_at = CASE WHEN $2::varchar = 'settled' THEN NOW() ELSE settled_at END,
 		    updated_at = NOW()
 		WHERE submission_id = $1 AND state = $6::varchar`,
-		submissionID, to, verdict, failure, reviewDeadline, from)
+		submissionID, to, responseCode, responseBody, failure, from)
 	if err != nil {
 		return fmt.Errorf("set submission state: %w", err)
 	}

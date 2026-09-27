@@ -31,17 +31,16 @@ var ClaimStatuses = []string{ClaimActive, ClaimUsed, ClaimExpired, ClaimReleased
 
 // Submission states — spec §5.4.
 const (
-	SubDelivering  = "delivering"
-	SubUncertain   = "uncertain"
-	SubUnderReview = "under_review"
-	SubSettled     = "settled"
-	SubRejected    = "rejected"
-	SubFailed      = "failed"
+	SubDelivering = "delivering"
+	SubUncertain  = "uncertain"
+	SubSettled    = "settled"
+	SubRejected   = "rejected"
+	SubFailed     = "failed"
 )
 
 // SubmissionStates is the complete §5.4 enum.
 var SubmissionStates = []string{
-	SubDelivering, SubUncertain, SubUnderReview,
+	SubDelivering, SubUncertain,
 	SubSettled, SubRejected, SubFailed,
 }
 

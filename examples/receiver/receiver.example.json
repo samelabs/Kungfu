@@ -1,45 +1,25 @@
 {
-  "sync": {
-    "mode": "sync",
-    "listen": ":8080",
-    "criteria": [
-      {
-        "id": "C1",
-        "required": ["/url", "/bullets"]
-      },
-      {
-        "id": "C2",
-        "pattern": { "pointer": "/url", "regex": "^https://[^\\s]+$" }
-      },
-      {
-        "id": "C3",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "url": { "type": "string" },
-            "bullets": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
-          },
-          "required": ["url", "bullets"],
-          "additionalProperties": false
-        }
+  "listen": ":8080",
+  "criteria": [
+    {
+      "id": "C1",
+      "required": ["/url", "/bullets"]
+    },
+    {
+      "id": "C2",
+      "pattern": { "pointer": "/url", "regex": "^https://[^\\s]+$" }
+    },
+    {
+      "id": "C3",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "bullets": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
+        },
+        "required": ["url", "bullets"],
+        "additionalProperties": false
       }
-    ]
-  },
-  "async": {
-    "mode": "async",
-    "listen": ":8080",
-    "criteria": [
-      {
-        "id": "C1",
-        "pattern": { "pointer": "/bullets/0", "regex": "^.+$" }
-      },
-      {
-        "id": "C2",
-        "rubric": {
-          "text": "Grade the payload: every bullet must be one complete factual sentence that is supported by the fetched page. Score 1 only when all bullets qualify, 0 when none do.",
-          "threshold": 0.7
-        }
-      }
-    ]
-  }
+    }
+  ]
 }

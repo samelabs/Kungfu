@@ -15,41 +15,37 @@ func TestNextActionStates(t *testing.T) {
 	cases := []struct {
 		name       string
 		state      string
-		verdict    *task.Verdict
 		errCode    string
 		wantAction string
 		wantRetry  *int
 	}{
 		// §8.3 state rows
-		{"settled done", task.SubSettled, nil, "", "done", nil},
-		{"delivering poll 5s", task.SubDelivering, nil, "", "poll", iptr(5)},
-		{"uncertain poll 30s", task.SubUncertain, nil, "", "poll", iptr(30)},
-		{"under_review poll 60s", task.SubUnderReview, nil, "", "poll", iptr(60)},
-		{"failed retry 60s", task.SubFailed, nil, "", "retry", iptr(60)},
-		{"rejected retryable revise", task.SubRejected, nil, "", "revise", nil}, // retryable 缺省 true
-		{"rejected explicit retryable", task.SubRejected, &task.Verdict{Retryable: true}, "", "revise", nil},
-		{"rejected non-retryable stop", task.SubRejected, &task.Verdict{Retryable: false}, "", "stop", nil},
+		{"settled done", task.SubSettled, "", "done", nil},
+		{"delivering poll 5s", task.SubDelivering, "", "poll", iptr(5)},
+		{"uncertain poll 30s", task.SubUncertain, "", "poll", iptr(30)},
+		{"failed stop", task.SubFailed, "", "stop", nil},         // the publisher's side failed
+		{"rejected revise", task.SubRejected, "", "revise", nil}, // stop once no rejections are left (handler)
 		// §8.3 error rows (executor-side §8.4 codes)
-		{"RATE_LIMIT wait", "", nil, "RATE_LIMIT", "wait", nil}, // retry_after = limiter remainder
-		{"CLAIM_INVALID retry 0s", "", nil, "CLAIM_INVALID", "retry", iptr(0)},
-		{"SCHEMA_MISMATCH revise", "", nil, "SCHEMA_MISMATCH", "revise", nil},
-		{"CREDENTIAL_IN_PAYLOAD revise", "", nil, "CREDENTIAL_IN_PAYLOAD", "revise", nil},
-		{"PAYLOAD_TOO_LARGE revise", "", nil, "PAYLOAD_TOO_LARGE", "revise", nil},
-		{"IDEMPOTENCY_CONFLICT revise", "", nil, "IDEMPOTENCY_CONFLICT", "revise", nil},
-		{"INVALID_REQUEST_KEY revise", "", nil, "INVALID_REQUEST_KEY", "revise", nil},
-		{"INVALID_REVISES revise", "", nil, "INVALID_REVISES", "revise", nil},
-		{"TASK_NOT_OPEN stop", "", nil, "TASK_NOT_OPEN", "stop", nil},
-		{"SLOTS_EXHAUSTED stop", "", nil, "SLOTS_EXHAUSTED", "stop", nil},
-		{"SUBMISSION_LIMIT stop", "", nil, "SUBMISSION_LIMIT", "stop", nil},
-		{"OWN_TASK stop", "", nil, "OWN_TASK", "stop", nil},
-		{"TASK_NOT_FOUND stop", "", nil, "TASK_NOT_FOUND", "stop", nil},
+		{"RATE_LIMIT wait", "", "RATE_LIMIT", "wait", nil}, // retry_after = limiter remainder
+		{"CLAIM_INVALID retry 0s", "", "CLAIM_INVALID", "retry", iptr(0)},
+		{"SCHEMA_MISMATCH revise", "", "SCHEMA_MISMATCH", "revise", nil},
+		{"CREDENTIAL_IN_PAYLOAD revise", "", "CREDENTIAL_IN_PAYLOAD", "revise", nil},
+		{"PAYLOAD_TOO_LARGE revise", "", "PAYLOAD_TOO_LARGE", "revise", nil},
+		{"IDEMPOTENCY_CONFLICT revise", "", "IDEMPOTENCY_CONFLICT", "revise", nil},
+		{"INVALID_REQUEST_KEY revise", "", "INVALID_REQUEST_KEY", "revise", nil},
+		{"INVALID_REVISES revise", "", "INVALID_REVISES", "revise", nil},
+		{"TASK_NOT_OPEN stop", "", "TASK_NOT_OPEN", "stop", nil},
+		{"SLOTS_EXHAUSTED stop", "", "SLOTS_EXHAUSTED", "stop", nil},
+		{"SUBMISSION_LIMIT stop", "", "SUBMISSION_LIMIT", "stop", nil},
+		{"OWN_TASK stop", "", "OWN_TASK", "stop", nil},
+		{"TASK_NOT_FOUND stop", "", "TASK_NOT_FOUND", "stop", nil},
 		// uncovered → null
-		{"unknown code null", "", nil, "SOMETHING_ELSE", "", nil},
-		{"no state null", "", nil, "", "", nil},
+		{"unknown code null", "", "SOMETHING_ELSE", "", nil},
+		{"no state null", "", "", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			action, retry := NextAction(tc.state, tc.verdict, tc.errCode)
+			action, retry := NextAction(tc.state, tc.errCode)
 			if action != tc.wantAction {
 				t.Fatalf("action = %q, want %q", action, tc.wantAction)
 			}
@@ -87,14 +83,12 @@ func TestHTTPStatusTable(t *testing.T) {
 		{"IDEMPOTENCY_CONFLICT", 409},
 		{"INVALID_STATE", 409},
 		{"HAS_RESERVATIONS", 409},
-		{"NOT_UNDER_REVIEW", 409},
 		{"NOTHING_TO_REFUND", 409},
 		{"SCHEMA_MISMATCH", 422},
 		{"CREDENTIAL_IN_PAYLOAD", 422},
 		{"INVALID_REVISES", 422},
 		{"INVALID_REQUEST_KEY", 422},
 		{"VALIDATION_FAILED", 422},
-		{"VERDICT_INVALID", 422},
 		{"TEST_DELIVERY_FAILED", 422},
 		{"INTERNAL_ERROR", 500},
 		{"SOMETHING_UNLISTED", 500}, // everything unlisted collapses to 500

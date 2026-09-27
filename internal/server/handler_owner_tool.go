@@ -28,7 +28,7 @@ var publisherTools = map[string]bool{
 	"task_create": true, "task_update": true, "task_open": true,
 	"task_pause": true, "task_close": true, "task_fund": true,
 	"task_refund": true, "task_get": true, "task_list": true,
-	"task_submissions": true, "task_verdict": true,
+	"task_submissions": true,
 }
 
 func (s *Server) handleOwnerTool(w http.ResponseWriter, r *http.Request) {

@@ -34,18 +34,20 @@ func asMap(v any) (map[string]any, error) {
 	return m, nil
 }
 
-// submissionPayload projects a submission view into the §8.2 flat
-// fields plus the internal verdict hook for NextAction.
-func submissionPayload(v any, verdictJSON []byte) (ToolResult, error) {
-	m, err := asMap(v)
-	if err != nil {
-		return ToolResult{}, err
-	}
+// submissionResult wraps a submission's flat fields (§8.2) and turns
+// a rejection into "stop" once the agent has no rejections left on the
+// task (§8.3); every other state follows NextAction.
+func submissionResult(ctx context.Context, deps *Deps, agentID int64, m map[string]any) (ToolResult, error) {
 	res := ToolResult{Data: m}
-	if len(verdictJSON) > 0 {
-		var verdict task.Verdict
-		if json.Unmarshal(verdictJSON, &verdict) == nil {
-			res.Verdict = &verdict
+	if state, _ := m["state"].(string); state == task.SubRejected {
+		code, _ := m["task_code"].(string)
+		left, err := service.RejectionsLeft(ctx, deps.Pool, agentID, code)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		if left <= 0 {
+			stop := "stop"
+			res.Action = &stop
 		}
 	}
 	return res, nil
@@ -173,7 +175,11 @@ func handleWorkSubmit(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	if err != nil {
 		return ToolResult{}, err
 	}
-	return submissionPayload(view, view.Verdict)
+	m, err := asMap(view)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	return submissionResult(ctx, deps, agent.ID, m)
 }
 
 func handleWorkStatus(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
@@ -192,20 +198,7 @@ func handleWorkStatus(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	if err != nil {
 		return ToolResult{}, err
 	}
-	// events[] carries per-event times; the verdict drives NextAction
-	res := ToolResult{Data: m, NoAction: false}
-	if v, ok := m["verdict"].([]byte); ok {
-		_ = v
-	}
-	if raw, ok := m["verdict"]; ok && raw != nil {
-		if b, err := json.Marshal(raw); err == nil {
-			var verdict task.Verdict
-			if json.Unmarshal(b, &verdict) == nil {
-				res.Verdict = &verdict
-			}
-		}
-	}
-	return res, nil
+	return submissionResult(ctx, deps, agent.ID, m)
 }
 
 func handleWorkHistory(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {

@@ -23,12 +23,11 @@
       <dt>Settled / rejected / failed</dt><dd>{{num .Data.Detail.Stats.Settled}} / {{num .Data.Detail.Stats.Rejected}} / {{num .Data.Detail.Stats.Failed}}</dd>
       <dt>Accept rate</dt><dd>{{.Data.Detail.AcceptRate}}</dd>
       <dt>Median verdict</dt><dd>{{.Data.Detail.MedianSeconds}}</dd>
-      <dt>Timeout rate</dt><dd>{{.Data.Detail.TimeoutRate}}</dd>
       <dt>Failure rate</dt><dd>{{.Data.Detail.FailureRate}}</dd>
     </dl>
     <h2>Submissions by state</h2>
     <dl class="sl-kv">
-      {{range $s := (list "delivering" "uncertain" "under_review" "settled" "rejected" "failed")}}
+      {{range $s := (list "delivering" "uncertain" "settled" "rejected" "failed")}}
       <dt>{{$s}}</dt><dd>{{num (index $.Data.Detail.Counts $s)}}</dd>
       {{end}}
     </dl>

@@ -58,7 +58,7 @@ func AdminDashboard(ctx context.Context, q pg.Querier) (*AdminDashboardCounts, e
 		  (SELECT COUNT(*) FROM tb_task WHERE status = 'paused'),
 		  (SELECT COUNT(*) FROM tb_task WHERE status = 'closed'),
 		  (SELECT COUNT(*) FROM tb_task_submission WHERE state = 'settled' AND settled_at >= NOW() - INTERVAL '7 days'),
-		  (SELECT COUNT(*) FROM tb_task_submission WHERE state IN ('delivering', 'uncertain', 'under_review')),
+		  (SELECT COUNT(*) FROM tb_task_submission WHERE state IN ('delivering', 'uncertain')),
 		  (SELECT COUNT(*) FROM tb_task_submission WHERE state = 'rejected' AND updated_at >= NOW() - INTERVAL '7 days'),
 		  (SELECT COUNT(*) FROM tb_kungfus WHERE status = 'active'),
 		  (SELECT COUNT(*) FROM tb_kungfus WHERE status = 'active' AND visibility = 'public'),

@@ -61,39 +61,30 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	return map[string]any{"report_id": WireID(id), "status": "open"}, nil
 }
 
-// retentionWindow is §9: terminal material is kept 30 days.
+// retentionWindow is §9: snapshot material is kept 30 days after the
+// task closes.
 const retentionWindow = 30 * 24 * time.Hour
 
-// PurgeExpired runs one §9 retention pass:
+// PurgeExpired runs one §9 retention pass: tasks closed ≥ 30 days
+// (measured by the task's updated_at — closed is terminal and the only
+// possible later write is a refund, making updated_at a conservative
+// close marker) have every version snapshot emptied: harness → [],
+// contract.sample → {} (the rest of the contract stays for audit).
+// Submission payloads need no pass: they are cleared the moment the
+// submission is terminal.
 //
-//   - terminal submissions (settled/rejected/failed) whose terminal
-//     entry is ≥ 30 days old lose their payload (hash, verdict and
-//     events stay);
-//   - tasks closed ≥ 30 days (measured by the task's updated_at —
-//     closed is terminal and the only possible later write is the
-//     one-off refund, making updated_at a conservative close marker)
-//     have every version snapshot emptied: harness → [], contract
-//     examples → [] (schema and criteria stay for audit).
-//
-// Returns the number of payloads and snapshots purged.
-func PurgeExpired(ctx context.Context, pool *pg.Pool, now time.Time, batch int) (int, int, error) {
-	cutoff := now.Add(-retentionWindow)
-
-	payloads, err := repository.PurgeExpiredPayloads(ctx, pool, cutoff, batch)
+// Returns the number of tasks whose snapshots were purged.
+func PurgeExpired(ctx context.Context, pool *pg.Pool, now time.Time, batch int) (int, error) {
+	ids, err := repository.ListClosedTasksWithSnapshots(ctx, pool, now.Add(-retentionWindow), batch)
 	if err != nil {
-		return 0, 0, err
-	}
-
-	ids, err := repository.ListClosedTasksWithSnapshots(ctx, pool, cutoff, batch)
-	if err != nil {
-		return int(payloads), 0, err
+		return 0, err
 	}
 	snapshots := 0
 	for _, id := range ids {
 		if err := repository.PurgeTaskVersionSnapshots(ctx, pool, id); err != nil {
-			return int(payloads), snapshots, err
+			return snapshots, err
 		}
 		snapshots++
 	}
-	return int(payloads), snapshots, nil
+	return snapshots, nil
 }

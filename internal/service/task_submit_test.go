@@ -20,10 +20,10 @@ import (
 
 const submitPayloadOK = `{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`
 
-// submitContract: async (no receiver → no test delivery), claim NOT
-// required, price 5.
+// submitContract: the accept-everything receiver, claim NOT required,
+// price 5 — a submission settles on delivery.
 func submitContract() task.Contract {
-	c := claimAsyncContract()
+	c := claimContract()
 	c.Claim = task.ClaimConfig{}
 	return c
 }
@@ -118,7 +118,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if first.State != task.SubUnderReview || first.Amount != 5 || first.Version != 1 {
+	if first.State != task.SubSettled || first.Amount != 5 || first.Version != 1 || first.Paid != 5 {
 		t.Fatalf("view = %+v", first)
 	}
 
@@ -221,8 +221,10 @@ func TestSubmitSlotsExhausted(t *testing.T) {
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	var n int64
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_task_submission WHERE task_id = $1`, tr.ID).Scan(&n)
-	if n != 1 || tr.Reserved != 1000 {
-		t.Fatalf("n = %d reserved = %d, want 1/1000", n, tr.Reserved)
+	// the first submission settled on the receiver's 200: its unit is
+	// spent, so no slot is left
+	if n != 1 || tr.Settled != 1000 || tr.Reserved != 0 {
+		t.Fatalf("n = %d settled = %d reserved = %d, want 1/1000/0", n, tr.Settled, tr.Reserved)
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
@@ -258,19 +260,6 @@ func TestSubmitSubmissionLimit(t *testing.T) {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 
-	accepted := submitOpenedTask(t, pool, publisher, 1000, func(c *task.Contract) {
-		one := int64(1)
-		c.Limits.MaxAcceptedPerAgent = &one
-	})
-	seedSubmission(t, pool, accepted, agent, task.SubSettled)
-	_, err = submitOnce(t, pool, agent, accepted, nil)
-	appErr = appErrOf(t, err)
-	if appErr.Code != "SUBMISSION_LIMIT" || appErr.Details["limit"] != "accepted" {
-		t.Fatalf("%v (%#v), want SUBMISSION_LIMIT/accepted", err, appErr.Details)
-	}
-	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, accepted)); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
 }
 
 // -- (f) claim --
@@ -355,17 +344,18 @@ func TestSubmitWithClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit with claim: %v", err)
 	}
-	// async without receiver: intake goes straight to review (§5.4)
-	if view.Version != 1 || view.Amount != 5 || view.State != task.SubUnderReview {
+	// the receiver answers 200: settled and paid
+	if view.Version != 1 || view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
 		t.Fatalf("view = %+v", view)
 	}
 	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID.Int64())
 	if after.Status != task.ClaimUsed {
 		t.Fatalf("claim status = %s, want used", after.Status)
 	}
-	// the claim's reservation transfers to the submission: no new one
-	if got := claimTaskReserved(t, pool, code); got != reservedBefore {
-		t.Fatalf("reserved = %d, want unchanged %d", got, reservedBefore)
+	// the claim's reservation transferred to the submission (no new
+	// one) and was consumed by the settlement
+	if got := claimTaskReserved(t, pool, code); got != reservedBefore-5 {
+		t.Fatalf("reserved = %d, want %d", got, reservedBefore-5)
 	}
 	sub, _ := repository.FindSubmissionByID(ctx, pool, view.SubmissionID.Int64())
 	if sub.ClaimID == nil || *sub.ClaimID != claim.ClaimID.Int64() {
@@ -418,7 +408,7 @@ func TestSubmitClaimVersionPinned(t *testing.T) {
 	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	updated := claimAsyncContract()
+	updated := claimContract()
 	updated.Output.Schema = []byte(`{
 		"type": "object",
 		"properties": {
@@ -428,11 +418,7 @@ func TestSubmitClaimVersionPinned(t *testing.T) {
 		},
 		"required": ["url", "lang", "bullets"]
 	}`)
-	updated.Examples = []task.Example{
-		{Payload: []byte(`{"url":"https://example.com/a","lang":"en","bullets":["s1","s2","s3"]}`), Accepted: true},
-		{Payload: []byte(`{"url":"https://example.com/b","lang":"en","bullets":["one"]}`),
-			Accepted: false, Criteria: []string{"C1"}},
-	}
+	updated.Sample = []byte(`{"url":"https://example.com/a","lang":"en","bullets":["s1","s2","s3"]}`)
 	updated.Claim = task.ClaimConfig{} // v2 does not require a claim
 	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
 		t.Fatalf("update: %v", err)
@@ -493,15 +479,8 @@ func TestSubmitRevisesInvalid(t *testing.T) {
 		t.Fatalf("foreign rejected target: %v, want INVALID_REVISES", err)
 	}
 
-	// own rejected but verdict.retryable = false
-	notRetryable := seedSubmissionReturningID(t, pool, code, agent, task.SubRejected,
-		&repository.SetSubmissionStateOpts{Verdict: []byte(`{"accepted":false,"retryable":false,"criteria":["C1"],"reason":"final"}`)})
-	_, err = submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = WireIDPtr(&notRetryable) })
-	if appErrOf(t, err).Code != "INVALID_REVISES" {
-		t.Fatalf("non-retryable target: %v, want INVALID_REVISES", err)
-	}
-	if countSubs() != 3 {
-		t.Fatalf("submissions = %d, want 3 (seeded only)", countSubs())
+	if countSubs() != 2 {
+		t.Fatalf("submissions = %d, want 2 (seeded only)", countSubs())
 	}
 	claimTaskReserved(t, pool, code)
 	_ = stranger
@@ -647,6 +626,26 @@ func TestSubmitConcurrentSameKey(t *testing.T) {
 		`SELECT COUNT(*) FROM tb_task_submission WHERE task_id = $1 AND request_key = $2`, tr.ID, key).Scan(&n)
 	if n != 1 {
 		t.Fatalf("rows = %d, want 1", n)
+	}
+	claimTaskReserved(t, pool, code)
+}
+
+// §3: output.schema is optional — without one, any JSON object is
+// delivered and the receiver's reply decides.
+func TestSubmitWithoutSchema(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+
+	code := submitOpenedTask(t, pool, publisher, 1000, func(c *task.Contract) {
+		c.Output = task.Output{}
+		c.Sample = []byte(`{"anything":"goes"}`)
+	})
+	view, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) {
+		in.Payload = []byte(`{"free":"form"}`)
+	})
+	if err != nil || view.State != task.SubSettled {
+		t.Fatalf("submit without schema: %+v, %v", view, err)
 	}
 	claimTaskReserved(t, pool, code)
 }

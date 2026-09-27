@@ -40,7 +40,7 @@ const (
 //	1  budget_locked = settled + reserved + refunded + available,
 //	   available ≥ 0, reserved ≥ 0
 //	2  reserved = Σ active Claim.amount
-//	             + Σ {delivering, uncertain, under_review} Submission.amount
+//	             + Σ {delivering, uncertain} Submission.amount
 //	3  each Submission has at most one settlement record (earn_task
 //	   ledger row); a settled Submission has exactly one and its
 //	   amount equals the Submission's amount
@@ -84,7 +84,7 @@ func CheckInvariants(ctx context.Context, q pg.Querier, taskID int64) error {
 	}
 	if err := q.QueryRow(ctx, `
 		SELECT COALESCE(SUM(amount), 0) FROM tb_task_submission
-		WHERE task_id = $1 AND state IN ('delivering', 'uncertain', 'under_review')`,
+		WHERE task_id = $1 AND state IN ('delivering', 'uncertain')`,
 		taskID).Scan(&submissionSum); err != nil {
 		return fmt.Errorf("sum non-terminal submissions: %w", err)
 	}
