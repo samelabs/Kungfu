@@ -117,12 +117,12 @@ func SubmitVerdict(ctx context.Context, pool *pg.Pool, publisherID int64, submis
 // publisherSubmissionRow is one listed submission (§6.2 async-no-
 // receiver path: publishers read payloads and judge from this list).
 type publisherSubmissionRow struct {
-	SubmissionID   int64           `json:"submission_id"`
+	SubmissionID   WireID          `json:"submission_id"`
 	AgentRef       string          `json:"agent_ref"`
 	Version        int32           `json:"version"`
 	State          string          `json:"state"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
-	Verdict        []byte          `json:"verdict,omitempty"`
+	Verdict        json.RawMessage `json:"verdict,omitempty"`
 	Failure        *string         `json:"failure,omitempty"`
 	ReviewDeadline *time.Time      `json:"review_deadline,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
@@ -174,12 +174,12 @@ func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID
 	for i := range rows {
 		s := &rows[i]
 		out = append(out, publisherSubmissionRow{
-			SubmissionID:   s.SubmissionID,
+			SubmissionID:   WireID(s.SubmissionID),
 			AgentRef:       AgentRef(agentRefKey, t.Code, s.AgentID),
 			Version:        s.Version,
 			State:          s.State,
 			Payload:        s.Payload,
-			Verdict:        s.Verdict,
+			Verdict:        json.RawMessage(s.Verdict),
 			Failure:        s.Failure,
 			ReviewDeadline: s.ReviewDeadline,
 			CreatedAt:      s.CreatedAt,

@@ -329,10 +329,27 @@ func TestFinanceAdminFinanceFiltersAndPagination(t *testing.T) {
 	e := newAdminEnv(t)
 	f := newFinanceFixture(t, e)
 
-	// Stable pagination: same page twice → identical ordering.
-	p1 := e.do(t, "GET", "/api/samelabs/finance/payments?page=1&page_size=5", "", false)
-	p2 := e.do(t, "GET", "/api/samelabs/finance/payments?page=1&page_size=5", "", false)
-	if p1.Body.String() != p2.Body.String() {
+	// Stable pagination: same page twice → identical DATA. The
+	// comparison targets the data field — the envelope's second-granular
+	// timestamp legitimately differs across a second boundary and is
+	// not part of pagination stability (WO-10).
+	page := func() []map[string]interface{} {
+		t.Helper()
+		rec := e.do(t, "GET", "/api/samelabs/finance/payments?page=1&page_size=5", "", false)
+		if rec.Code != 200 {
+			t.Fatalf("payments page: %d %s", rec.Code, rec.Body.String())
+		}
+		var d struct {
+			Data struct {
+				Payments []map[string]interface{} `json:"payments"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+			t.Fatalf("payments page json: %v", err)
+		}
+		return d.Data.Payments
+	}
+	if fmt.Sprint(page()) != fmt.Sprint(page()) {
 		t.Fatal("payment list pagination not stable")
 	}
 

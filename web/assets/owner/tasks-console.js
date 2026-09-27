@@ -236,9 +236,9 @@ function tcvRenderSubmissions(rows, code) {
         </div>`;
     }).join('');
     qsa('[data-verdict-accept]').forEach((btn) =>
-        btn.addEventListener('click', () => tcvVerdict(Number(btn.dataset.verdictAccept), true)));
+        btn.addEventListener('click', () => tcvVerdict(btn.dataset.verdictAccept, true)));
     qsa('[data-verdict-reject]').forEach((btn) =>
-        btn.addEventListener('click', () => tcvVerdictForm(Number(btn.dataset.verdictReject), code)));
+        btn.addEventListener('click', () => tcvVerdictForm(btn.dataset.verdictReject, code)));
 }
 
 function tcvVerdict(submissionID, accepted) {

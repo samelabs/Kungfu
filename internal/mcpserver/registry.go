@@ -159,7 +159,7 @@ next_action: submit before expires_at, or work_claim_renew.`,
 Preconditions: the claim is yours, active, unexpired; the task is open; now < deadline (else CLAIM_INVALID).
 Result: the claim view with the new expires_at.
 next_action: submit.`,
-		InputSchema: `{"type":"object","properties":{"claim_id":{"type":"integer"}},"required":["claim_id"],"additionalProperties":false}`,
+		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkClaimRenew),
 	},
 	{
@@ -168,7 +168,7 @@ next_action: submit.`,
 Preconditions: the claim is yours and active (else CLAIM_INVALID).
 Result: the claim view with status "released".
 next_action: pick other work with work_list.`,
-		InputSchema: `{"type":"object","properties":{"claim_id":{"type":"integer"}},"required":["claim_id"],"additionalProperties":false}`,
+		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkRelease),
 	},
 	{
@@ -181,8 +181,8 @@ next_action: poll (delivering 5s, uncertain 30s, under_review 60s); done (settle
 			"code":{"type":"string"},
 			"request_key":{"type":"string"},
 			"payload":{"type":"object"},
-			"claim_id":{"type":"integer"},
-			"revises":{"type":"integer"}
+			"claim_id":{"type":["integer","string"]},
+			"revises":{"type":["integer","string"]}
 		},"required":["code","request_key","payload"],"additionalProperties":false}`,
 		Handler: factory(handleWorkSubmit),
 	},
@@ -193,7 +193,7 @@ Preconditions: the submission exists and is yours (else SUBMISSION_NOT_FOUND).
 Result: the §8.2 submission fields plus events[] ({seq, from, to, cause, at}).
 next_action: as work_submit for the current state.`,
 		InputSchema: `{"type":"object","properties":{
-			"submission_id":{"type":"integer"},
+			"submission_id":{"type":["integer","string"]},
 			"code":{"type":"string"},
 			"request_key":{"type":"string"}
 		},"additionalProperties":false}`,
@@ -325,7 +325,7 @@ Preconditions: the submission belongs to your task and is under review; the verd
 Result: accepted -> settled and paid (source "publisher"); rejected -> the reservation returns to the task.
 Possible errors: SUBMISSION_NOT_FOUND, NOT_OWNER, NOT_UNDER_REVIEW (details.state; a verdict arriving past the review deadline first settles by timeout, then returns this), VERDICT_INVALID (details.message).`,
 		InputSchema: `{"type":"object","properties":{
-			"submission_id":{"type":"integer"},
+			"submission_id":{"type":["integer","string"]},
 			"verdict":{"type":"object"}
 		},"required":["submission_id","verdict"],"additionalProperties":false}`,
 		Handler: factory(handleTaskVerdict),

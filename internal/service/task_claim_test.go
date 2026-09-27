@@ -81,7 +81,7 @@ func TestClaimTaskSuccessAndIdempotent(t *testing.T) {
 		t.Fatalf("second claim: %v", err)
 	}
 	if second.ClaimID != first.ClaimID {
-		t.Fatalf("second claim created a new claim: %d vs %d", second.ClaimID, first.ClaimID)
+		t.Fatalf("second claim created a new claim: %d vs %d", second.ClaimID.Int64(), first.ClaimID.Int64())
 	}
 	if got := claimTaskReserved(t, pool, code); got != 5 {
 		t.Fatalf("reserved after idempotent claim = %d, want 5", got)
@@ -324,7 +324,7 @@ func TestClaimRenew(t *testing.T) {
 	}
 
 	// renew mid-flight: moves forward, still within the deadline
-	r1, err := RenewClaim(ctx, pool, agent, claim.ClaimID, t0.Add(200*time.Second))
+	r1, err := RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), t0.Add(200*time.Second))
 	if err != nil {
 		t.Fatalf("renew: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestClaimRenew(t *testing.T) {
 	}
 
 	// renew near the deadline: capped at the deadline
-	r2, err := RenewClaim(ctx, pool, agent, claim.ClaimID, t0.Add(400*time.Second))
+	r2, err := RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), t0.Add(400*time.Second))
 	if err != nil {
 		t.Fatalf("renew near deadline: %v", err)
 	}
@@ -342,12 +342,12 @@ func TestClaimRenew(t *testing.T) {
 	}
 
 	// at/after the deadline → CLAIM_INVALID
-	if _, err := RenewClaim(ctx, pool, agent, claim.ClaimID, t0.Add(601*time.Second)); appErrOf(t, err).Code != "CLAIM_INVALID" {
+	if _, err := RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), t0.Add(601*time.Second)); appErrOf(t, err).Code != "CLAIM_INVALID" {
 		t.Fatalf("renew past deadline: %v, want CLAIM_INVALID", err)
 	}
 
 	// someone else's claim → CLAIM_INVALID
-	if _, err := RenewClaim(ctx, pool, stranger, claim.ClaimID, t0.Add(250*time.Second)); appErrOf(t, err).Code != "CLAIM_INVALID" {
+	if _, err := RenewClaim(ctx, pool, stranger, claim.ClaimID.Int64(), t0.Add(250*time.Second)); appErrOf(t, err).Code != "CLAIM_INVALID" {
 		t.Fatalf("stranger renew: %v, want CLAIM_INVALID", err)
 	}
 	claimTaskReserved(t, pool, code)
@@ -369,7 +369,7 @@ func TestClaimRenewTaskNotOpen(t *testing.T) {
 	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	_, err = RenewClaim(ctx, pool, agent, claim.ClaimID, t0.Add(60*time.Second))
+	_, err = RenewClaim(ctx, pool, agent, claim.ClaimID.Int64(), t0.Add(60*time.Second))
 	appErr := appErrOf(t, err)
 	if appErr.Code != "TASK_NOT_OPEN" || appErr.Details["status"] != task.TaskPaused {
 		t.Fatalf("renew on paused: %v (%#v), want TASK_NOT_OPEN/paused", err, appErr.Details)
@@ -394,14 +394,14 @@ func TestClaimRelease(t *testing.T) {
 	}
 
 	// someone else → CLAIM_INVALID, reservation intact
-	if _, err := ReleaseClaim(ctx, pool, stranger, claim.ClaimID, now); appErrOf(t, err).Code != "CLAIM_INVALID" {
+	if _, err := ReleaseClaim(ctx, pool, stranger, claim.ClaimID.Int64(), now); appErrOf(t, err).Code != "CLAIM_INVALID" {
 		t.Fatalf("stranger release: %v, want CLAIM_INVALID", err)
 	}
 	if got := claimTaskReserved(t, pool, code); got != 5 {
 		t.Fatalf("reserved = %d, want 5", got)
 	}
 
-	released, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID, now)
+	released, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID.Int64(), now)
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestClaimRelease(t *testing.T) {
 	}
 
 	// second release → CLAIM_INVALID
-	if _, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID, now); appErrOf(t, err).Code != "CLAIM_INVALID" {
+	if _, err := ReleaseClaim(ctx, pool, agent, claim.ClaimID.Int64(), now); appErrOf(t, err).Code != "CLAIM_INVALID" {
 		t.Fatalf("second release: %v, want CLAIM_INVALID", err)
 	}
 	claimTaskReserved(t, pool, code)
@@ -463,14 +463,14 @@ func TestExpireClaims(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		if err := repository.ApplyClaimStatus(ctx, tx, cUsed.ClaimID, task.ClaimActive, task.EventClaimUse); err != nil {
+		if err := repository.ApplyClaimStatus(ctx, tx, cUsed.ClaimID.Int64(), task.ClaimActive, task.EventClaimUse); err != nil {
 			t.Fatalf("use claim: %v", err)
 		}
 		if _, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
 			TaskID: mustTaskID(t, pool, tUsed), Version: 1, AgentID: user,
-			RequestKey:  fmt.Sprintf("used-%d", cUsed.ClaimID),
+			RequestKey:  fmt.Sprintf("used-%d", cUsed.ClaimID.Int64()),
 			Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
-			PayloadHash: strings.Repeat("b", 64), Amount: cUsed.Amount, ClaimID: &cUsed.ClaimID,
+			PayloadHash: strings.Repeat("b", 64), Amount: cUsed.Amount, ClaimID: cUsed.ClaimID.Int64Ptr(),
 		}); err != nil {
 			t.Fatalf("insert used submission: %v", err)
 		}
@@ -485,7 +485,7 @@ func TestExpireClaims(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim rel: %v", err)
 	}
-	if _, err := ReleaseClaim(ctx, pool, releaser, cRel.ClaimID, t0); err != nil {
+	if _, err := ReleaseClaim(ctx, pool, releaser, cRel.ClaimID.Int64(), t0); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
@@ -500,7 +500,7 @@ func TestExpireClaims(t *testing.T) {
 	if n < 1 {
 		t.Fatalf("expired = %d, want >= 1", n)
 	}
-	after, _ := repository.FindClaimByID(ctx, pool, cExp.ClaimID)
+	after, _ := repository.FindClaimByID(ctx, pool, cExp.ClaimID.Int64())
 	if after.Status != task.ClaimExpired {
 		t.Fatalf("expired claim status = %s", after.Status)
 	}
@@ -513,11 +513,11 @@ func TestExpireClaims(t *testing.T) {
 	if k == nil {
 		t.Fatal("unexpired active claim was expired")
 	}
-	u, _ := repository.FindClaimByID(ctx, pool, cUsed.ClaimID)
+	u, _ := repository.FindClaimByID(ctx, pool, cUsed.ClaimID.Int64())
 	if u.Status != task.ClaimUsed {
 		t.Fatalf("used claim status = %s", u.Status)
 	}
-	r, _ := repository.FindClaimByID(ctx, pool, cRel.ClaimID)
+	r, _ := repository.FindClaimByID(ctx, pool, cRel.ClaimID.Int64())
 	if r.Status != task.ClaimReleased {
 		t.Fatalf("released claim status = %s", r.Status)
 	}

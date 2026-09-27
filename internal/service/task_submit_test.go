@@ -137,7 +137,7 @@ func TestSubmitIdempotency(t *testing.T) {
 		t.Fatalf("submit b: %v", err)
 	}
 	if a.SubmissionID != b.SubmissionID {
-		t.Fatalf("idempotent retry created a new submission: %d vs %d", a.SubmissionID, b.SubmissionID)
+		t.Fatalf("idempotent retry created a new submission: %d vs %d", a.SubmissionID.Int64(), b.SubmissionID.Int64())
 	}
 
 	// the same key still returns the original after the task closes
@@ -149,7 +149,7 @@ func TestSubmitIdempotency(t *testing.T) {
 		t.Fatalf("closed-task retry: %v", err)
 	}
 	if c.SubmissionID != a.SubmissionID {
-		t.Fatalf("closed-task retry returned %d, want the original %d", c.SubmissionID, a.SubmissionID)
+		t.Fatalf("closed-task retry returned %d, want the original %d", c.SubmissionID.Int64(), a.SubmissionID.Int64())
 	}
 
 	// same key, different payload → conflict (priority: idempotency is
@@ -359,7 +359,7 @@ func TestSubmitWithClaim(t *testing.T) {
 	if view.Version != 1 || view.Amount != 5 || view.State != task.SubUnderReview {
 		t.Fatalf("view = %+v", view)
 	}
-	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID)
+	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID.Int64())
 	if after.Status != task.ClaimUsed {
 		t.Fatalf("claim status = %s, want used", after.Status)
 	}
@@ -367,9 +367,9 @@ func TestSubmitWithClaim(t *testing.T) {
 	if got := claimTaskReserved(t, pool, code); got != reservedBefore {
 		t.Fatalf("reserved = %d, want unchanged %d", got, reservedBefore)
 	}
-	sub, _ := repository.FindSubmissionByID(ctx, pool, view.SubmissionID)
-	if sub.ClaimID == nil || *sub.ClaimID != claim.ClaimID {
-		t.Fatalf("submission claim_id = %v, want %d", sub.ClaimID, claim.ClaimID)
+	sub, _ := repository.FindSubmissionByID(ctx, pool, view.SubmissionID.Int64())
+	if sub.ClaimID == nil || *sub.ClaimID != claim.ClaimID.Int64() {
+		t.Fatalf("submission claim_id = %v, want %d", *sub.ClaimID, claim.ClaimID.Int64())
 	}
 }
 
@@ -478,7 +478,7 @@ func TestSubmitRevisesInvalid(t *testing.T) {
 	// a DELIVERING (not rejected) target
 	delivering := seedSubmissionReturningID(t, pool, code, agent, task.SubDelivering, nil)
 	before := countSubs()
-	_, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = &delivering })
+	_, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = WireIDPtr(&delivering) })
 	if appErrOf(t, err).Code != "INVALID_REVISES" {
 		t.Fatalf("delivering target: %v, want INVALID_REVISES", err)
 	}
@@ -488,7 +488,7 @@ func TestSubmitRevisesInvalid(t *testing.T) {
 
 	// someone else's rejected submission
 	foreignRejected := seedSubmissionReturningID(t, pool, code, stranger, task.SubRejected, nil)
-	_, err = submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = &foreignRejected })
+	_, err = submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = WireIDPtr(&foreignRejected) })
 	if appErrOf(t, err).Code != "INVALID_REVISES" {
 		t.Fatalf("foreign rejected target: %v, want INVALID_REVISES", err)
 	}
@@ -496,7 +496,7 @@ func TestSubmitRevisesInvalid(t *testing.T) {
 	// own rejected but verdict.retryable = false
 	notRetryable := seedSubmissionReturningID(t, pool, code, agent, task.SubRejected,
 		&repository.SetSubmissionStateOpts{Verdict: []byte(`{"accepted":false,"retryable":false,"criteria":["C1"],"reason":"final"}`)})
-	_, err = submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = &notRetryable })
+	_, err = submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.Revises = WireIDPtr(&notRetryable) })
 	if appErrOf(t, err).Code != "INVALID_REVISES" {
 		t.Fatalf("non-retryable target: %v, want INVALID_REVISES", err)
 	}

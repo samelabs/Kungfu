@@ -37,32 +37,32 @@ type SubmitInput struct {
 	Code       string          `json:"code"`
 	RequestKey string          `json:"request_key"`
 	Payload    json.RawMessage `json:"payload"`
-	ClaimID    *int64          `json:"claim_id,omitempty"`
-	Revises    *int64          `json:"revises,omitempty"`
+	ClaimID    *WireID         `json:"claim_id,omitempty"`
+	Revises    *WireID         `json:"revises,omitempty"`
 }
 
 // SubmissionView is the intake + delivery return structure.
 type SubmissionView struct {
-	SubmissionID   int64      `json:"submission_id"`
-	TaskCode       string     `json:"task_code"`
-	Version        int32      `json:"version"`
-	State          string     `json:"state"`
-	Amount         int64      `json:"amount"`
-	Verdict        []byte     `json:"verdict,omitempty"`
-	Paid           int64      `json:"paid"`
-	Failure        *string    `json:"failure,omitempty"`
-	ReviewDeadline *time.Time `json:"review_deadline,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	SubmissionID   WireID          `json:"submission_id"`
+	TaskCode       string          `json:"task_code"`
+	Version        int32           `json:"version"`
+	State          string          `json:"state"`
+	Amount         int64           `json:"amount"`
+	Verdict        json.RawMessage `json:"verdict,omitempty"`
+	Paid           int64           `json:"paid"`
+	Failure        *string         `json:"failure,omitempty"`
+	ReviewDeadline *time.Time      `json:"review_deadline,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView {
 	v := SubmissionView{
-		SubmissionID:   s.SubmissionID,
+		SubmissionID:   WireID(s.SubmissionID),
 		TaskCode:       code,
 		Version:        s.Version,
 		State:          s.State,
 		Amount:         s.Amount,
-		Verdict:        s.Verdict,
+		Verdict:        json.RawMessage(s.Verdict),
 		Failure:        s.Failure,
 		ReviewDeadline: s.ReviewDeadline,
 		CreatedAt:      s.CreatedAt,
@@ -89,6 +89,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			fmt.Sprintf("payload must be at most %d bytes, got %d", maxPayloadBytes, len(in.Payload)))
 	}
 	payloadHash := task.PayloadHash(in.Payload)
+	claimID, revises := in.ClaimID.Int64Ptr(), in.Revises.Int64Ptr()
 
 	// (b) idempotency: same (agent, task, request_key).
 	t, err := repository.FindTaskByCode(ctx, pool, in.Code)
@@ -131,7 +132,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "SLOTS_EXHAUSTED", "No claimable budget left")
 		}
 	} else {
-		version, contract, err = resolveSubmissionVersion(ctx, pool, t, in.ClaimID)
+		version, contract, err = resolveSubmissionVersion(ctx, pool, t, in.ClaimID.Int64Ptr())
 		if err != nil {
 			return SubmissionView{}, err
 		}
@@ -165,13 +166,13 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		if contract.Claim.Required {
 			return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
 		}
-	} else if err := checkClaim(ctx, pool, *in.ClaimID, agentID, t.ID, now); err != nil {
+	} else if err := checkClaim(ctx, pool, *claimID, agentID, t.ID, now); err != nil {
 		return SubmissionView{}, err
 	}
 
 	// (g) revises.
 	if in.Revises != nil {
-		if err := checkRevises(ctx, pool, *in.Revises, agentID, t.ID); err != nil {
+		if err := checkRevises(ctx, pool, *revises, agentID, t.ID); err != nil {
 			return SubmissionView{}, err
 		}
 	}
@@ -273,7 +274,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 	} else {
-		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *in.ClaimID)
+		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *claimID)
 		if err != nil || claim == nil ||
 			claim.AgentID != agentID || claim.TaskID != locked.ID ||
 			claim.Status != task.ClaimActive || !claim.ExpiresAt.After(now) {
@@ -293,8 +294,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		Payload:     in.Payload,
 		PayloadHash: payloadHash,
 		Amount:      amount,
-		Revises:     in.Revises,
-		ClaimID:     in.ClaimID,
+		Revises:     revises,
+		ClaimID:     claimID,
 	})
 	if err != nil {
 		if repository.IsUniqueViolation(err) {

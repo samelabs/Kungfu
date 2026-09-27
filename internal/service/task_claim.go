@@ -25,7 +25,7 @@ import (
 
 // claimView is the §5.2 return structure.
 type claimView struct {
-	ClaimID   int64     `json:"claim_id"`
+	ClaimID   WireID    `json:"claim_id"`
 	TaskCode  string    `json:"task_code"`
 	Version   int32     `json:"version"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -36,7 +36,7 @@ type claimView struct {
 
 func newClaimView(c *repository.ClaimRow, code string) claimView {
 	return claimView{
-		ClaimID:   c.ClaimID,
+		ClaimID:   WireID(c.ClaimID),
 		TaskCode:  code,
 		Version:   c.Version,
 		ExpiresAt: c.ExpiresAt,

@@ -164,13 +164,16 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 
 func handleTaskVerdict(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		SubmissionID int64           `json:"submission_id"`
+		SubmissionID service.WireID  `json:"submission_id"` // string or integer on the wire
 		Verdict      json.RawMessage `json:"verdict"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.SubmissionID == 0 || len(in.Verdict) == 0 {
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{}, argError("submission_id must be an integer or a numeric string")
+	}
+	if in.SubmissionID == 0 || len(in.Verdict) == 0 {
 		return ToolResult{}, argError("submission_id and verdict are required")
 	}
-	view, err := service.SubmitVerdict(ctx, deps.Pool, agent.ID, in.SubmissionID, in.Verdict, time.Now())
+	view, err := service.SubmitVerdict(ctx, deps.Pool, agent.ID, in.SubmissionID.Int64(), in.Verdict, time.Now())
 	if err != nil {
 		return ToolResult{}, err
 	}

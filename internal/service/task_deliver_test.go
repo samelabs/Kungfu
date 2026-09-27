@@ -113,7 +113,7 @@ func deliverSubmit(t *testing.T, pool *pg.Pool, agent int64, code string) (Submi
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	return view, view.SubmissionID
+	return view, view.SubmissionID.Int64()
 }
 
 func deliverTaskID(t *testing.T, pool *pg.Pool, code string) int64 {
@@ -445,7 +445,7 @@ func TestDeliverTimeoutUncertain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	subID := view.SubmissionID
+	subID := view.SubmissionID.Int64()
 	if view.State != task.SubUncertain {
 		t.Fatalf("state = %s, want uncertain", view.State)
 	}
@@ -485,7 +485,7 @@ func TestDeliverRequestShape(t *testing.T) {
 		t.Fatalf("Content-Type = %q", ct)
 	}
 	var got struct {
-		SubmissionID json.Number     `json:"submission_id"`
+		SubmissionID string          `json:"submission_id"`
 		TaskCode     string          `json:"task_code"`
 		Version      int             `json:"version"`
 		AgentRef     string          `json:"agent_ref"`
@@ -494,7 +494,7 @@ func TestDeliverRequestShape(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("body: %v (%s)", err, body)
 	}
-	if got.SubmissionID.String() != fmt.Sprint(subID) || got.TaskCode != code || got.Version != 1 {
+	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code || got.Version != 1 {
 		t.Fatalf("body identity = %+v", got)
 	}
 	var wantPayload interface{}
@@ -546,7 +546,7 @@ func TestDeliverIdempotentOnSettled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-deliver: %v", err)
 	}
-	if again.SubmissionID != subID || again.State != task.SubSettled || again.Paid != 5 {
+	if again.SubmissionID.Int64() != subID || again.State != task.SubSettled || again.Paid != 5 {
 		t.Fatalf("re-deliver view = %+v", again)
 	}
 	var n int64

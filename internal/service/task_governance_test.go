@@ -207,7 +207,7 @@ func TestResolveReportDismiss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
-	reportID := rep["report_id"].(int64)
+	reportID := rep["report_id"].(WireID).Int64()
 
 	out, err := ResolveReport(ctx, pool, admin, reportID, "dismiss")
 	if err != nil {
@@ -256,13 +256,13 @@ func TestResolveReportCloseActionsAllOpenReports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report A: %v", err)
 	}
-	reportA := repA["report_id"].(int64)
+	reportA := repA["report_id"].(WireID).Int64()
 	// a second open report on the same task and one already dismissed
 	repB, err := ReportTask(ctx, pool, reporterB, opened.Code, "boundary violation")
 	if err != nil {
 		t.Fatalf("report B: %v", err)
 	}
-	reportB := repB["report_id"].(int64)
+	reportB := repB["report_id"].(WireID).Int64()
 	if _, err := ResolveReport(ctx, pool, admin, reportB, "dismiss"); err != nil {
 		t.Fatalf("pre-dismiss B: %v", err)
 	}

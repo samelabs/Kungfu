@@ -80,9 +80,12 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		return SubmissionViewByID(ctx, pool, submissionID)
 	}
 
-	// §7.1 request, delivered outside any transaction.
+	// §7.1 request, delivered outside any transaction. submission_id
+	// travels as the STRING the spec's request example shows ("…"), so
+	// receivers typed against §7.1 parse it; the Idempotency-Key header
+	// carries the same value.
 	body, err := json.Marshal(map[string]json.RawMessage{
-		"submission_id": json.RawMessage(fmt.Sprintf(`%d`, sub.SubmissionID)),
+		"submission_id": json.RawMessage(fmt.Sprintf(`"%d"`, sub.SubmissionID)),
 		"task_code":     json.RawMessage(`"` + t.Code + `"`),
 		"version":       json.RawMessage(fmt.Sprintf(`%d`, sub.Version)),
 		"agent_ref":     json.RawMessage(`"` + AgentRef(agentRefKey, t.Code, sub.AgentID) + `"`),
