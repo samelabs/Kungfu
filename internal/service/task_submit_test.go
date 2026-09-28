@@ -675,3 +675,16 @@ func TestSubmitPayloadNullRejected(t *testing.T) {
 	}, testAgentRefKey, time.Now())
 	submitState(t, pool, code, err, "SCHEMA_MISMATCH")
 }
+
+// TestSubmitOwnTaskPrecedesClaimParsing (T4): §5.3 order — OWN_TASK is
+// step 4, claim parsing step 6. A publisher probing its own task with
+// a bogus claim_id hears OWN_TASK, never CLAIM_INVALID.
+func TestSubmitOwnTaskPrecedesClaimParsing(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	code := submitOpenedTask(t, pool, publisher, 1000, nil)
+
+	bogus := WireID(999_999_999)
+	_, err := submitOnce(t, pool, publisher, code, func(in *SubmitInput) { in.ClaimID = &bogus })
+	submitState(t, pool, code, err, "OWN_TASK")
+}

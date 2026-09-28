@@ -439,3 +439,73 @@ func TestListHistory(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkGovernanceReasons (T3): with a platform-set reason, work_get
+// exposes paused_reason / closed_reason and the TASK_NOT_OPEN errors of
+// work_claim, work_claim_renew and work_submit carry it in details.
+func TestWorkGovernanceReasons(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+	now := time.Now()
+
+	// claim.required so the agent holds a claim that survives the pause
+	paused := workOpenTask(t, pool, publisher, 1000, func(c *task.Contract) { c.Claim.Required = true })
+	cv, err := ClaimTask(ctx, pool, agent, paused.Code, now)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := PauseTask(ctx, pool, publisher, paused.Code); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	// the production platform pause is §7.3 RECEIVER_FAULT
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_tasks SET paused_reason = 'RECEIVER_FAULT' WHERE code = $1`, paused.Code); err != nil {
+		t.Fatalf("set paused_reason: %v", err)
+	}
+
+	if view, err := GetWork(ctx, pool, agent, paused.Code, now); err != nil || view["paused_reason"] != "RECEIVER_FAULT" {
+		t.Fatalf("work_get: %v paused_reason=%v", err, view["paused_reason"])
+	}
+	if _, err := ClaimTask(ctx, pool, agent, paused.Code, now); err == nil {
+		t.Fatal("claim on paused task succeeded")
+	} else if e := appErrOf(t, err); e.Code != "TASK_NOT_OPEN" || e.Details["reason"] != "RECEIVER_FAULT" {
+		t.Fatalf("claim: %s details=%v", e.Code, e.Details)
+	}
+	if _, err := RenewClaim(ctx, pool, agent, cv.ClaimID.Int64(), now); err == nil {
+		t.Fatal("renew on paused task succeeded")
+	} else if e := appErrOf(t, err); e.Code != "TASK_NOT_OPEN" || e.Details["reason"] != "RECEIVER_FAULT" {
+		t.Fatalf("renew: %s details=%v", e.Code, e.Details)
+	}
+	if _, err := submitOnce(t, pool, agent, paused.Code, nil); err == nil {
+		t.Fatal("claim-less submit on paused task succeeded")
+	} else if e := appErrOf(t, err); e.Code != "TASK_NOT_OPEN" || e.Details["reason"] != "RECEIVER_FAULT" {
+		t.Fatalf("submit: %s details=%v", e.Code, e.Details)
+	}
+
+	// platform close with a reason: closed_reason rides work_get and the
+	// TASK_NOT_OPEN details the same way
+	closed := workOpenTask(t, pool, publisher, 1000, nil)
+	if _, err := CloseTask(ctx, pool, publisher, closed.Code); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_tasks SET closed_reason = 'GOVERNANCE' WHERE code = $1`, closed.Code); err != nil {
+		t.Fatalf("set closed_reason: %v", err)
+	}
+	if view, err := GetWork(ctx, pool, agent, closed.Code, now); err != nil || view["closed_reason"] != "GOVERNANCE" {
+		t.Fatalf("work_get closed: %v closed_reason=%v", err, view["closed_reason"])
+	}
+	if _, err := ClaimTask(ctx, pool, agent, closed.Code, now); err == nil {
+		t.Fatal("claim on closed task succeeded")
+	} else if e := appErrOf(t, err); e.Code != "TASK_NOT_OPEN" || e.Details["reason"] != "GOVERNANCE" {
+		t.Fatalf("claim closed: %s details=%v", e.Code, e.Details)
+	}
+
+	for _, code := range []string{paused.Code, closed.Code} {
+		if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
+			t.Fatalf("CheckInvariants: %v", err)
+		}
+	}
+}

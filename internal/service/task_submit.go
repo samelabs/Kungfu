@@ -120,11 +120,17 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		}
 	}
 
-	// (c) task existence / openness / slots. The submission's version is
-	// the claim's version when a claim is carried (spec §5.3), else the
-	// task's current version.
+	// (c) task existence / then (d) own task — ownership precedes any
+	// claim parsing (§5.3: existence is step 3, OWN_TASK step 4, the
+	// claim itself step 6), so a publisher probing its own task with a
+	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. The
+	// submission's version is the claim's version when a claim is
+	// carried (spec §5.3), else the task's current version.
 	if t == nil {
 		return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
+	}
+	if t.PublisherID == agentID {
+		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}
 	var version int32
 	var contract task.Contract
@@ -135,9 +141,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 		}
 		if t.Status != task.TaskOpen {
-			return SubmissionView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
-				fmt.Sprintf("Task is %s, not open", t.Status),
-				map[string]interface{}{"status": t.Status})
+			return SubmissionView{}, taskNotOpen(t)
 		}
 		version, contract, err = resolveSubmissionVersion(ctx, pool, t, nil)
 		if err != nil {
@@ -151,11 +155,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		if err != nil {
 			return SubmissionView{}, err
 		}
-	}
-
-	// (d) own task.
-	if t.PublisherID == agentID {
-		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}
 
 	// (e) limits — same tallies as WO-3.
@@ -237,9 +236,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	amount := contract.Price
 	if in.ClaimID == nil {
 		if locked.Status != task.TaskOpen {
-			return SubmissionView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
-				fmt.Sprintf("Task is %s, not open", locked.Status),
-				map[string]interface{}{"status": locked.Status})
+			return SubmissionView{}, taskNotOpen(locked)
 		}
 		// The version may have moved under us (a concurrent pause→
 		// update→open). Bind the submission to the LOCKED row's current

@@ -23,6 +23,22 @@ import (
 	"kungfu.md/internal/task"
 )
 
+// taskNotOpen is the shared §8.4 TASK_NOT_OPEN error: the status plus,
+// when the platform recorded one, the reason (paused_reason for a
+// platform pause, closed_reason for a platform close) so executors
+// learn why the task stopped taking work.
+func taskNotOpen(t *repository.TaskRow) *errors.AppError {
+	details := map[string]interface{}{"status": t.Status}
+	if t.Status == task.TaskPaused && t.PausedReason != nil {
+		details["reason"] = *t.PausedReason
+	}
+	if t.Status == task.TaskClosed && t.ClosedReason != nil {
+		details["reason"] = *t.ClosedReason
+	}
+	return errors.NewWithDetails(0, "TASK_NOT_OPEN",
+		fmt.Sprintf("Task is %s, not open", t.Status), details)
+}
+
 // claimView is the §5.2 return structure.
 type claimView struct {
 	ClaimID   WireID    `json:"claim_id"`
@@ -86,9 +102,7 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		return claimView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.Status != task.TaskOpen {
-		return claimView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
-			fmt.Sprintf("Task is %s, not open", t.Status),
-			map[string]interface{}{"status": t.Status})
+		return claimView{}, taskNotOpen(t)
 	}
 	if t.PublisherID == agentID {
 		return claimView{}, errors.New(0, "OWN_TASK", "You cannot claim your own task")
@@ -213,9 +227,7 @@ func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now 
 		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim is not active for you")
 	}
 	if t.Status != task.TaskOpen {
-		return claimView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
-			fmt.Sprintf("Task is %s, not open", t.Status),
-			map[string]interface{}{"status": t.Status})
+		return claimView{}, taskNotOpen(t)
 	}
 	if !now.Before(claim.Deadline) {
 		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim deadline reached")
