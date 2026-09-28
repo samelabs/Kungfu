@@ -23,8 +23,7 @@ import (
 )
 
 // Per-locale markers that must appear in the budget-lock wording.
-// Each marker asserts "locked at creation" AND "still locked while
-// pending" semantics in that locale's own wording.
+// Each marker asserts the locked-at-creation fact in that locale's own wording.
 var budgetLockCreationMarkers = map[string][]string{
 	"en": {"Creating a task locks its budget from the Owner balance"},
 	"zh": {"创建任务时从 Owner 余额锁定其预算"},
@@ -74,7 +73,6 @@ func TestCreditsBudgetLockMatchesTermsAuthority(t *testing.T) {
 			}
 			// Credits must state creation-time lock too (its wording is
 			// free-form per locale but must carry the same two facts).
-			_ = budgetLockCreationMarkers[locale] // markers checked below per locale
 			switch locale {
 			case "en":
 				if !strings.Contains(c, "locked from your account balance when the task is created") {

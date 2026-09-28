@@ -19,9 +19,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -37,20 +35,6 @@ import (
 // testDeliveryResponsePreviewBytes caps the receiver response excerpt
 // carried in TEST_DELIVERY_FAILED details.
 const testDeliveryResponsePreviewBytes = 500
-
-// truncateRunes cuts a string to at most max bytes on a rune boundary
-// (§7.2's reply truncation rule, shared with the submission reply).
-func truncateRunes(s string, max int) string {
-	b := strings.ToValidUTF8(s, "�")
-	if len(b) <= max {
-		return b
-	}
-	cut := max
-	for cut > 0 && !utf8.RuneStart(b[cut]) {
-		cut--
-	}
-	return b[:cut]
-}
 
 // -- helpers --
 

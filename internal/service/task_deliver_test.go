@@ -108,18 +108,6 @@ func deliverSyncTask(t *testing.T, pool *pg.Pool, publisher int64, rcv *progRece
 	return code
 }
 
-// deliverSyncTaskAt opens a sync task whose receiver is an explicit
-// URL (not a progReceiver instance).
-func deliverSyncTaskAt(t *testing.T, pool *pg.Pool, publisher int64, receiverURL string, budget int64) string {
-	t.Helper()
-	c := deliverContract(receiverURL)
-	code := pubCreateForTest(t, pool, publisher, c, budget)
-	if _, err := OpenTask(context.Background(), pool, publisher, code); err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	return code
-}
-
 func deliverSubmit(t *testing.T, pool *pg.Pool, agent int64, code string) (SubmissionView, int64) {
 	t.Helper()
 	view, err := SubmitWork(context.Background(), pool, agent, SubmitInput{

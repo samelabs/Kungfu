@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"sync/atomic"
 	"time"
 )
 
@@ -100,12 +101,13 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 	// sent latches true the first time any attempt writes the full
 	// request to the wire (httptrace WroteRequest with Err == nil) and
 	// never goes back — the single transport fact behind
-	// IsDefinitiveNotDelivered.
-	sent := false
+	// IsDefinitiveNotDelivered. WroteRequest runs on the transport's
+	// write goroutine, hence the atomic.
+	var sent atomic.Bool
 	traceCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			if info.Err == nil {
-				sent = true
+				sent.Store(true)
 			}
 		},
 	})
@@ -129,7 +131,7 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 		}
 		return PostResult{
 			Success:      false,
-			Sent:         sent,
+			Sent:         sent.Load(),
 			ResponseCode: respCode,
 			ErrorCode:    errCfg.NetworkCode,
 			ErrorMessage: errCfg.NetworkMessagePrefix + err.Error(),
