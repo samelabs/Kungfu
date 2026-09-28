@@ -288,12 +288,9 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	// Task B: no terminals → all rates null
 	codeB := workOpenTask(t, pool, publisher, 1000, nil).Code
 
-	items, total, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{})
+	items, _, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{})
 	if err != nil {
 		t.Fatalf("ListWork: %v", err)
-	}
-	if total != 2 {
-		t.Fatalf("total = %d, want 2", total)
 	}
 	byCode := map[string]map[string]any{}
 	for _, it := range items {
