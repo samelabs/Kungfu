@@ -58,7 +58,7 @@ func TestListWorkFilters(t *testing.T) {
 		seedSubmission(t, pool, capped.Code, agent, task.SubRejected)
 	}
 
-	items, err := ListWork(ctx, pool, agent, time.Now())
+	items, _, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{})
 	if err != nil {
 		t.Fatalf("ListWork: %v", err)
 	}
@@ -85,18 +85,22 @@ func TestListWorkOrderAndCap(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	// 102 eligible tasks; the list keeps 100, newest open first
+	// 102 eligible tasks; page 1 at the maximum page size carries 100
+	// of them, newest open first, and total reports all 102 (WO-19 Q1)
 	codes := make([]string, 0, 102)
 	for i := 0; i < 102; i++ {
 		tr := workOpenTask(t, pool, publisher, 1000, nil)
 		codes = append(codes, tr.Code)
 	}
-	items, err := ListWork(ctx, pool, agent, time.Now())
+	items, total, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{PageSize: 100})
 	if err != nil {
 		t.Fatalf("ListWork: %v", err)
 	}
 	if len(items) != 100 {
-		t.Fatalf("items = %d, want the 100 cap", len(items))
+		t.Fatalf("items = %d, want the 100 page size cap", len(items))
+	}
+	if total < 102 {
+		t.Fatalf("total = %d, want at least 102 (all matching rows, not just the page)", total)
 	}
 	got := make([]string, 0, 100)
 	for _, it := range items {
@@ -110,6 +114,144 @@ func TestListWorkOrderAndCap(t *testing.T) {
 		if got[i] != codes[len(codes)-1-i] {
 			t.Fatalf("order broken at %d: %s, want %s", i, got[i], codes[len(codes)-1-i])
 		}
+	}
+}
+
+// -- WO-19 Q1: keyword, code, paging, LIKE escaping --
+//
+// The test database is shared across every package's tests, so
+// assertions never count unfiltered rows; each case scopes itself
+// with a keyword unique to this test (pagingMarker).
+
+func TestListWorkSearchAndPaging(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 1_000_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	const pagingMarker = "wo19pagequery7f3c"
+	marked := func(title string) func(*task.Contract) {
+		return func(c *task.Contract) {
+			c.Title = title
+			c.Requirements = "Paging fixture " + pagingMarker + "."
+		}
+	}
+
+	codesOf := func(items []map[string]any) map[string]bool {
+		out := map[string]bool{}
+		for _, it := range items {
+			out[it["code"].(string)] = true
+		}
+		return out
+	}
+
+	// five eligible tasks carrying the marker
+	needle := workOpenTask(t, pool, publisher, 1000, marked("Translate Hungarian Poetry"))
+	plain := workOpenTask(t, pool, publisher, 1000, marked("Summarize a page"))
+	wild := workOpenTask(t, pool, publisher, 1000, marked("100% done checklist"))
+	snake := workOpenTask(t, pool, publisher, 1000, marked("snake_case naming review"))
+	inReq := workOpenTask(t, pool, publisher, 1000, func(c *task.Contract) {
+		c.Title = "Fetch product facts"
+		c.Requirements = "Fetch the given page and return three summary bullets mentioning Kryptonite. " + pagingMarker
+	})
+
+	// keyword: case-insensitive over title
+	items, total, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: "HUNGARIAN"})
+	if err != nil {
+		t.Fatalf("q title: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0]["code"] != needle.Code {
+		t.Fatalf("q=HUNGARIAN: total=%d items=%v, want only %s", total, codesOf(items), needle.Code)
+	}
+	// keyword over requirements too
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: "kryptonite"})
+	if err != nil {
+		t.Fatalf("q requirements: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0]["code"] != inReq.Code {
+		t.Fatalf("q=kryptonite: total=%d items=%v, want only %s", total, codesOf(items), inReq.Code)
+	}
+
+	// LIKE wildcards are matched literally: q="%" returns ONLY the
+	// task whose title contains a literal percent sign — the other
+	// known tasks (no % anywhere) must not leak in as they would if
+	// the wildcard went unescaped
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: "%"})
+	if err != nil {
+		t.Fatalf("q percent: %v", err)
+	}
+	got := codesOf(items)
+	if !got[wild.Code] || got[needle.Code] || got[plain.Code] || got[snake.Code] || got[inReq.Code] || total != int64(len(items)) {
+		t.Fatalf("q=%% must match only %s: total=%d items=%v", wild.Code, total, got)
+	}
+	// ...and q="_" only the task with a literal underscore
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: "_"})
+	if err != nil {
+		t.Fatalf("q underscore: %v", err)
+	}
+	got = codesOf(items)
+	if !got[snake.Code] || got[needle.Code] || got[plain.Code] || got[wild.Code] || got[inReq.Code] || total != int64(len(items)) {
+		t.Fatalf("q=_ must match only %s: total=%d items=%v", snake.Code, total, got)
+	}
+
+	// code: exact match
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Code: plain.Code})
+	if err != nil {
+		t.Fatalf("code: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0]["code"] != plain.Code {
+		t.Fatalf("code=%s: total=%d items=%v", plain.Code, total, codesOf(items))
+	}
+	// code of a cap-exhausted task: empty list, zero total
+	capped := workOpenTask(t, pool, publisher, 1000, marked("Cap exhausted fixture"))
+	for i := 0; i < 5; i++ {
+		seedSubmission(t, pool, capped.Code, agent, task.SubRejected)
+	}
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Code: capped.Code})
+	if err != nil {
+		t.Fatalf("code capped: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("capped code must yield an empty list: total=%d items=%v", total, codesOf(items))
+	}
+	// the exhausted task never appears in the marker set either
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: "Cap exhausted"})
+	if err != nil {
+		t.Fatalf("q capped: %v", err)
+	}
+	if codesOf(items)[capped.Code] {
+		t.Fatalf("cap-exhausted task must be absent: %v", codesOf(items))
+	}
+
+	// paging: the five marker tasks at page_size 2 → 2 + 2 + 1, newest
+	// first; total is 5 on every page
+	var paged []string
+	for page := 1; page <= 3; page++ {
+		items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: pagingMarker, Page: page, PageSize: 2})
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		if total != 5 {
+			t.Fatalf("page %d: total=%d, want 5 on every page", page, total)
+		}
+		if want := []int{2, 2, 1}[page-1]; len(items) != want {
+			t.Fatalf("page %d: %d items, want %d", page, len(items), want)
+		}
+		for _, it := range items {
+			paged = append(paged, it["code"].(string))
+		}
+	}
+	// the concatenated pages equal one full page of the same filter in order
+	items, _, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: pagingMarker, PageSize: 5})
+	if err != nil {
+		t.Fatalf("full page: %v", err)
+	}
+	full := make([]string, 0, len(items))
+	for _, it := range items {
+		full = append(full, it["code"].(string))
+	}
+	if strings.Join(paged, ",") != strings.Join(full, ",") {
+		t.Fatalf("paged order %v != full order %v", paged, full)
 	}
 }
 
@@ -146,9 +288,12 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	// Task B: no terminals → all rates null
 	codeB := workOpenTask(t, pool, publisher, 1000, nil).Code
 
-	items, err := ListWork(ctx, pool, agent, time.Now())
+	items, total, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{})
 	if err != nil {
 		t.Fatalf("ListWork: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
 	}
 	byCode := map[string]map[string]any{}
 	for _, it := range items {
@@ -313,7 +458,7 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 		}
 	}
 
-	lw, err := ListWork(ctx, pool, stranger, time.Now())
+	lw, _, err := ListWork(ctx, pool, stranger, time.Now(), WorkListFilter{})
 	if err != nil {
 		t.Fatalf("ListWork: %v", err)
 	}

@@ -144,11 +144,17 @@ var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open, claimable work.
-	Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
-	Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left, and total (the number of rows returned).
-	next_action: choose a task, then work_get -> work_claim -> work_submit.`,
-		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
-		Handler:     factory(handleWorkList),
+Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
+Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match, q is ignored when given — an empty list means the task is not currently claimable by you), page (default 1) and page_size (default 20, max 100).
+Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
+next_action: choose a task, then work_get -> work_claim -> work_submit.`,
+		InputSchema: `{"type":"object","properties":{
+			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
+			"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
+		},"additionalProperties":false}`,
+		Handler: factory(handleWorkList),
 	},
 	{
 		Name: "work_get",
@@ -329,9 +335,16 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 		Name: "task_list",
 		Description: `List your tasks, newest first.
 Preconditions: valid Agent key.
-Result: tasks[] with the task views and total.`,
-		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
-		Handler:     factory(handleTaskList),
+Parameters (all optional): status (draft / open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.`,
+		InputSchema: `{"type":"object","properties":{
+			"status":{"type":"string","enum":["draft","open","paused","closed"],"description":"Filter by task status."},
+			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
+			"code":{"type":"string","description":"Exact task code."},
+			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
+		},"additionalProperties":false}`,
+		Handler: factory(handleTaskList),
 	},
 	{
 		Name: "task_submissions",

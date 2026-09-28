@@ -175,11 +175,26 @@ func handleTaskGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.
 }
 
 func handleTaskList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
-	rows, err := service.ListTasks(ctx, deps.Pool, agent.ID)
+	var in struct {
+		Status   string `json:"status"`
+		Q        string `json:"q"`
+		Code     string `json:"code"`
+		Page     int    `json:"page"`
+		PageSize int    `json:"page_size"`
+	}
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`) // a tools/call with no arguments at all
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{}, argError("arguments must match the tool schema")
+	}
+	filter := service.TaskListFilter{Status: in.Status, Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize}
+	filter.Normalize()
+	rows, total, err := service.ListTasks(ctx, deps.Pool, agent.ID, filter)
 	if err != nil {
 		return ToolResult{}, err
 	}
-	return data(map[string]any{"tasks": rows, "total": len(rows)})
+	return data(map[string]any{"tasks": rows, "total": total, "page": filter.Page, "page_size": filter.PageSize})
 }
 
 func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {

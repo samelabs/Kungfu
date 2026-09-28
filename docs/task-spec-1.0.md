@@ -100,7 +100,9 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 ### 5.1 发现
 
-`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按开放时间倒序，至多 100 条。
+`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按开放时间倒序。
+
+参数（均可选）：`q`（关键词，在 `title` 与 `requirements` 中不区分大小写匹配，LIKE 通配符按字面匹配）、`code`（精确匹配；给出时忽略 `q`；任务不可接时返回空列表）、`page`（默认 1）、`page_size`（默认 20，范围 1–100）。返回附 `total`（符合过滤条件的总数，非当页行数）、`page`、`page_size`。过滤、排除与分页在 SQL 中执行，`total` 与分页保持准确。
 
 `work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。持有 Claim 的执行者读取的是 Claim 所属版本。
 `work_harness(code, ref_id)` 返回该版本 Harness 快照内容；`ref_id` 不在快照中返回 `HARNESS_REF_NOT_FOUND`。
@@ -241,7 +243,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `work_claim` | §5.2 | `task_pause` / `task_close` | §4 |
 | `work_claim_renew` / `work_release` | §5.2 | `task_fund` / `task_refund` | §4 |
 | `work_submit` | §5.3 + 同步投递 | `task_get` | 完整契约（含 `receiver`）、状态、版本、派生量、近 30 天统计（`accept_rate` / `median_reply_seconds` / `failure_rate` / `submissions_30d` / `active_claims`，§6.3）；draft / paused 时附 `draft` 与 `draft_pending` |
-| `work_status` | 查询 Submission（`submission_id` 或 `code + request_key`），含事件历史 | `task_list` | 本人任务 |
+| `work_status` | 查询 Submission（`submission_id` 或 `code + request_key`），含事件历史 | `task_list` | 本人任务（`status` / `q` / `code` 过滤，分页；返回 `total` / `page` / `page_size`） |
 | `work_history` | 本人 Submission 与应答 | `task_submissions` | 投递记录：状态、金额、应答、`failure`、`agent_ref`（按状态过滤、分页） |
 | `work_report` | 向平台举报任务（违反边界、恶意驳回） | | |
 

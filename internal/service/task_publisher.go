@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -660,19 +661,61 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 	return view, nil
 }
 
-// ListTasks returns the publisher's own tasks, newest first.
-func ListTasks(ctx context.Context, pool *pg.Pool, publisherID int64) ([]map[string]interface{}, error) {
-	rows, err := repository.ListTasksByPublisher(ctx, pool, publisherID)
+// TaskListFilter is the task_list query surface (WO-19 Q2): status,
+// keyword over title, exact code and paging. All optional.
+type TaskListFilter struct {
+	Status   string
+	Q        string
+	Code     string
+	Page     int
+	PageSize int
+}
+
+// Normalize trims the text filters and applies the paging defaults
+// (page 1; page_size 20, range 1–100).
+func (f *TaskListFilter) Normalize() {
+	f.Q = strings.TrimSpace(f.Q)
+	f.Code = strings.TrimSpace(f.Code)
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 100 {
+		f.PageSize = 20
+	}
+}
+
+// ListTasks returns one page of the publisher's own tasks, newest
+// first, with the total number of matching rows. Filtering and paging
+// run in SQL; an unknown status is VALIDATION_FAILED (mirroring
+// task_submissions' state filter).
+func ListTasks(ctx context.Context, pool *pg.Pool, publisherID int64, filter TaskListFilter) ([]map[string]interface{}, int64, error) {
+	if filter.Status != "" {
+		valid := false
+		for _, s := range task.TaskStatuses {
+			if s == filter.Status {
+				valid = true
+			}
+		}
+		if !valid {
+			return nil, 0, errors.NewWithDetails(400, "VALIDATION_FAILED",
+				"Unknown task status",
+				map[string]interface{}{"errors": []map[string]string{
+					{"field": "status", "message": "must be one of draft, open, paused, closed"}}})
+		}
+	}
+	filter.Normalize()
+	rows, total, err := repository.FindTasksByPublisherPage(ctx, pool, publisherID,
+		filter.Status, filter.Q, filter.Code, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	out := make([]map[string]interface{}, 0, len(rows))
 	for i := range rows {
 		v, err := taskView(ctx, pool, &rows[i])
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, v)
 	}
-	return out, nil
+	return out, total, nil
 }

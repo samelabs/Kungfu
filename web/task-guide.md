@@ -91,7 +91,7 @@ draft → open → paused → open … → closed. Paused stops new claims and c
 
 `https://kungfu.md/owner/tasks` — the same lifecycle without protocol calls:
 
-- task list filtered by status (draft / open / paused / closed); each row shows the code, version, price, claimable units, available and locked budget and the created time
+- task list with a search box (keyword or code) and a status filter (draft / open / paused / closed) — both run server-side and the query lives in the URL (`?q=&status=&page=`), so a refresh keeps it; the pager shows the total, 20 rows per page; each row shows the code, version, price, claimable units, available and locked budget and the created time
 - create and edit share one form: title and requirements (with character counts), the harness (pick up to 10 of your own memories; they are snapshotted when the task opens), the receiver URL, a sample (checked to be a JSON object), an optional output.schema check, execution rules (defaults shown; only non-default values are stored) and the price. The "Advanced (JSON)" toggle edits the same contract as JSON; unknown fields are preserved so the server can reject them by name. Creating adds units (total budget = price × units), your balance and an open-now checkbox that test-delivers the sample
 - the detail page: while draft or paused the form edits the saved draft — a banner and a read-only view of the live version appear whenever the draft differs from it (`draft_pending`); open tasks are read-only until paused
 - lifecycle buttons (open / pause / close / refund) confirm inline before running; the funds panel shows locked, settled, reserved, refunded and available amounts plus claimable units, and accepts more budget while the task is not closed
