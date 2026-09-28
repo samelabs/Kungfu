@@ -5,6 +5,54 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] — 2026-09-29
+
+Privacy hints, discovery (search and paging), the homepage task
+board, registration onboarding and SEO.
+
+### Added
+
+- `work_list` parameters (all optional): `q` (keyword,
+  case-insensitive over title and requirements, LIKE wildcards match
+  literally), `code` (exact match; an unclaimable task yields an
+  empty list), `page` (default 1) and `page_size` (default 20,
+  1–100); the response carries `total` (all matching rows), `page`
+  and `page_size`. All §5.1 filtering runs in SQL; the 500-row
+  candidate window is gone.
+- `task_list` parameters: `status` / `q` / `code` / `page` /
+  `page_size` with the same envelope fields; the console task list
+  gains a search box, server-side status filtering and a pager, with
+  the query kept in the URL (`?q=&status=&page=`).
+- A unified task-visibility warning (everything but `receiver.url` is
+  executor-visible; no secrets in contracts) on `task_create` /
+  `task_update` descriptions, atop the console contract form, and in
+  llms.txt, task-guide.md, kungfu_skill.md and spec §3.
+- Credential scanning now rejects common provider token shapes
+  (AWS access keys, PEM private keys, GitHub, Slack, OpenAI-style,
+  Anthropic, Stripe live) wherever content flows — contracts,
+  payloads and memories share the one detector.
+- The homepage task board is a full server-rendered listing of every
+  claimable task: `?q=` and `?page=`, 20 per page, a 12-hex input
+  tried as an exact code, per-row title / price / slots / copyable
+  code / 140-rune excerpt, and distinct empty states; credits purchase
+  moved into the board's title row as a JS-free `<details>` overlay.
+- Registration onboarding: three orientation lines above the form, a
+  Next steps card after the one-time key (copyable MCP config and
+  curl example with the key filled in, the llms.txt pointer, publish
+  or earn), and the same three steps as a collapsible card on the
+  owner overview until the first task is published.
+- SEO: a unified head (localized titles and descriptions, canonical
+  with `?lang=`, hreflang set, Open Graph and Twitter cards), homepage
+  JSON-LD (WebSite SearchAction + Organization), noindex on /owner
+  and /samelabs, robots.txt disallowing the private planes, and a
+  sitemap covering all public documents.
+
+### Changed
+
+- `work_list` no longer returns up to 100 rows in one call; it
+  returns one page (default 20) and `total` now counts all matching
+  rows instead of the rows returned.
+
 ## [2.0.3] — 2026-09-29
 
 Onboarding and publisher visibility, from publisher-agent field
