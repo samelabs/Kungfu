@@ -5,6 +5,71 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-09-28
+
+Audit fixes from the full v2.0.0 code review. No schema changes, no
+new migrations; every fix is behavior, configuration or copy.
+
+### Fixed
+
+- Delivery no longer aborts when the executor disconnects
+  mid-request: the outbound POST and its outcome write run on a
+  detached context bounded by the 10-second client timeout, and a
+  request that broke off after its headers left the wire is judged
+  uncertain instead of definitively undelivered (spec §7.2).
+- A draft task is invisible to executors everywhere: `work_submit`
+  and `work_claim` answer `TASK_NOT_FOUND` like `work_get`, not
+  `TASK_NOT_OPEN` with a status leak.
+- A no-claim submission racing a pause→update→open can no longer bind
+  to a version whose contract requires a claim.
+- The finance admin pages no longer 500 on nullable columns: pending
+  payments without a provider order and adjustments without a reason
+  scan, serialize as `null` and render as "—".
+- The payment status filter matches the database vocabulary
+  (`cancelled` filterable, `expired` gone).
+- Absurd or zero page numbers answer 200 everywhere instead of a
+  negative-OFFSET 500 (finance lists, owner logs, reward pagination).
+- Owner console: the task list no longer throws `task is not defined`;
+  the credits page shows translated payment statuses instead of raw
+  i18n keys; the "Contract JSON" label is translated; the logs query
+  uses the real `type` parameter.
+- Passwords longer than bcrypt's 72-byte input limit are rejected with
+  400 instead of failing inside the hasher (admin and owner paths).
+- The service worker no longer caches server-rendered `/samelabs` and
+  `/owner` pages or non-ok responses; the cache version bump drops
+  previously cached copies.
+- The reference receiver's model-judged rubric carries the payload in
+  declared data markers, clamps scores to [0, 1], bounds its
+  idempotency map, and sets a read-header timeout; the README warns
+  against model-only payment decisions.
+- `sitemap.xml` lists `/task-guide.md`.
+
+### Security
+
+- Client IP resolution under a trusted proxy walks X-Forwarded-For
+  rightmost-untrusted (multi-line headers flattened, entries
+  normalized) and no longer trusts the client-forgeable
+  CF-Connecting-IP header — login/register rate limits cannot be
+  rotated per request.
+- Password reset, force logout and disable against a superadmin
+  require the wildcard permission, closing a privilege-escalation
+  chain equivalent to editing superadmin membership.
+- The admin API login requires an `application/json` body, and the
+  `/samelabs` login form validates Origin/Referer hosts — closing the
+  login CSRF surfaces.
+- `/api` responses carry `Cache-Control: no-store`.
+- Admin credential fields (`PasswordHash`, `TokenHash`) are excluded
+  from JSON serialization.
+- Background workers join on shutdown before the DB pool closes, and
+  every worker pass runs under its own timeout.
+- nginx: global body limit raised to 1100k so the Go entrances keep
+  the body-cap authority; CSP drops `unsafe-eval` and unused
+  third-party origins; the port-80 redirect no longer reflects the
+  request Host; the database backup script writes 0600 files; CI runs
+  with `contents: read` only.
+- Task money is capped at 2^53−1 (price, budget, fund amounts and the
+  accumulated `budget_locked`), keeping amounts exact in JS Number.
+
 ## [2.0.0] — 2026-09-28
 
 The task mechanism is rebuilt on a written specification ([docs/task-spec-1.0.md](docs/task-spec-1.0.md)). There is no compatibility layer: the v1 task tables, tools and pages are removed, and migration 015 drops the v1 task data.
