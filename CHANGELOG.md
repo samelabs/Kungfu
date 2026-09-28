@@ -53,9 +53,13 @@ view makes paused edits visible. No schema changes.
   reason and the publisher `TASK_NOT_FOUND` entry.
 - The tasks.manage admin permission description no longer mentions
   homepage pin/unpin (migration 020, copy only).
+- Existing owner sessions are signed out once after upgrading (sessions
+  are now bound to the password version).
 
 ### Fixed
 
+- The change-password form no longer shows an error after a successful
+  change.
 - `work_submit` runs the OWN_TASK check before claim parsing (§5.3
   order): a publisher probing its own task with a bogus `claim_id`
   hears `OWN_TASK`, never `CLAIM_INVALID`.

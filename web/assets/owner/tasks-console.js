@@ -53,8 +53,11 @@ function tcvFmtDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return String(iso);
+    // follow the page language (set by the server on <html lang>);
+    // fall back to the browser locale when it is absent
+    const locale = document.documentElement.lang || undefined;
     try {
-        return d.toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
+        return d.toLocaleString(locale, {dateStyle: 'medium', timeStyle: 'short'});
     } catch (e) {
         return d.toISOString().slice(0, 16).replace('T', ' ');
     }
