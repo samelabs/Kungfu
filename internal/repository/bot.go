@@ -145,8 +145,10 @@ func FindActiveBotCredentialsByName(ctx context.Context, q pg.Querier, name stri
 // -- 7. findOwnerSessionBotById --
 // FindOwnerSessionBotByID returns the active bot with fields needed for owner-session views.
 func FindOwnerSessionBotByID(ctx context.Context, q pg.Querier, botID int64) (*model.Bot, error) {
+	// password_hash rides along for the session's pv check (WO-17b A2);
+	// model.Bot never serializes it.
 	row := q.QueryRow(ctx, `
-		SELECT id, bot_name, status, key_issued_at
+		SELECT id, bot_name, status, key_issued_at, password_hash
 		FROM tb_bots
 		WHERE id = $1 AND status = 'active'`, botID)
 	var (
@@ -154,7 +156,7 @@ func FindOwnerSessionBotByID(ctx context.Context, q pg.Querier, botID int64) (*m
 		dbID        int32
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&dbID, &b.BotName, &b.Status, &keyIssuedAt); err != nil {
+	if err := row.Scan(&dbID, &b.BotName, &b.Status, &keyIssuedAt, &b.PasswordHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}

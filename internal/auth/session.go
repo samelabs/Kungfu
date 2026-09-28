@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -16,7 +17,7 @@ import (
 
 // OwnerSession manages owner authentication via a stateless HMAC-signed cookie.
 
-// Cookie format: base64(JSON{bot_id, exp}) + "." + base64(HMAC-SHA256)
+// Cookie format: base64(JSON{bot_id, exp, pv}) + "." + base64(HMAC-SHA256)
 // Cookie name: "kf_owner" (the JS client uses fetch with credentials:same-origin).
 
 const (
@@ -24,10 +25,21 @@ const (
 	OwnerSessionMaxAge = 24 * time.Hour
 )
 
-// OwnerSessionData is the payload encoded in the cookie.
+// OwnerSessionData is the payload encoded in the cookie. PV binds the
+// session to the password version it was issued under (WO-17b A2):
+// changing the password changes the hash, which changes pv, which
+// invalidates every previously issued cookie.
 type OwnerSessionData struct {
-	BotID int64 `json:"bid"`
-	Exp   int64 `json:"exp"`
+	BotID int64  `json:"bid"`
+	Exp   int64  `json:"exp"`
+	PV    string `json:"pv"`
+}
+
+// PasswordVersion derives the pv claim: the first 16 hex characters of
+// SHA-256(password_hash).
+func PasswordVersion(passwordHash string) string {
+	sum := sha256.Sum256([]byte(passwordHash))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 // OwnerLookupFunc is a function that finds a bot by ID for owner session.
@@ -45,14 +57,21 @@ func RequireOwnerSession(ctx context.Context, lookupFn OwnerLookupFunc, r *http.
 		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
 	}
 
+	// The password version must still match: a cookie issued before a
+	// password change (or one without a pv claim at all) is unauthenticated.
+	if PasswordVersion(bot.PasswordHash) != session.PV {
+		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
+	}
+
 	return bot, nil
 }
 
 // SetOwnerSessionCookie sets the authentication cookie on the response.
-func SetOwnerSessionCookie(w http.ResponseWriter, botID int64, secret string, isHTTPS bool) {
+func SetOwnerSessionCookie(w http.ResponseWriter, botID int64, passwordHash, secret string, isHTTPS bool) {
 	data := OwnerSessionData{
 		BotID: botID,
 		Exp:   time.Now().Add(OwnerSessionMaxAge).Unix(),
+		PV:    PasswordVersion(passwordHash),
 	}
 
 	payload, _ := json.Marshal(data)

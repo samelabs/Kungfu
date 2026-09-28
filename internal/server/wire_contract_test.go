@@ -20,7 +20,7 @@ import (
 func (e *econEnv) ownerGET(t *testing.T, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, e.botID, e.s.Config.SessionSecret, false)
+	setOwnerCookie(w, e.botID, "x", e.s.Config.SessionSecret, false)
 	req := httptest.NewRequest("GET", path, nil)
 	req.Header.Set("Cookie", "kf_owner="+cookieValue(w))
 	rec := httptest.NewRecorder()

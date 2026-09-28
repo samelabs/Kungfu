@@ -35,7 +35,7 @@ func TestProxyTrustCookieLifecycleUsesCanonicalHTTPSAuthority(t *testing.T) {
 
 	// owner login + logout (handlers.go)
 	if !strings.Contains(files["internal/server/handlers.go"],
-		"setOwnerCookie(w, result.BotID, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))") {
+		"setOwnerCookie(w, result.BotID, result.PasswordHash, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))") {
 		t.Fatal("owner login does not use middleware.IsHTTPS")
 	}
 	if !strings.Contains(files["internal/server/handlers.go"],

@@ -277,7 +277,7 @@ func TestStoreAdminStorePlanesIsolated(t *testing.T) {
 	// kf_owner cookie cannot either (owner bot session)
 	w := httptest.NewRecorder()
 	_, botID := seededTestServer(t)
-	setOwnerCookie(w, botID, e.s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", e.s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 	req2 := httptest.NewRequest("GET", "/api/samelabs/rewards/products", nil)
 	req2.AddCookie(ownerCookie)

@@ -171,6 +171,52 @@ func (s *Server) handleOwnerRewardsRedeem(w http.ResponseWriter, r *http.Request
 	SuccessResponse(w, map[string]interface{}{"redemption": dto}, msg)
 }
 
+// handleOwnerRewardsRedemptionsList: GET /api/owner/rewards/redemptions
+// ?page=&page_size= — the session bot's own redemptions, newest first,
+// with total and clamped pagination (WO-17b A1).
+func (s *Server) handleOwnerRewardsRedemptionsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+	bot, err := s.requireOwnerAuth(r)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
+	page := getQueryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	pageSize := getQueryInt(r, "page_size", 20)
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	rows, total, err := rewards.ListRedemptionsForBot(r.Context(), s.Pool, bot.ID, page, pageSize)
+	if err != nil {
+		handleAppError(w, err)
+		return
+	}
+	items := make([]rewardsRedemptionDTO, 0, len(rows))
+	for i := range rows {
+		items = append(items, redemptionToDTO(&rows[i]))
+	}
+	totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	SuccessResponse(w, map[string]interface{}{
+		"redemptions": items,
+		"pagination": map[string]interface{}{
+			"page": page, "page_size": pageSize,
+			"total": total, "total_pages": totalPages,
+		},
+	}, "")
+}
+
 // handleOwnerRewardsRedemptionGet: GET /api/owner/rewards/redemptions/{code}
 // — ownership-scoped in the SQL itself.
 func (s *Server) handleOwnerRewardsRedemptionGet(w http.ResponseWriter, r *http.Request) {

@@ -31,10 +31,13 @@ import (
 const dummyBcryptHash = "$2a$10$Y32i7tXf1eM73f06uFMlMulohgIXrlbeYW.9HWWd4q5zbwJ957vKO"
 
 // OwnerSessionResult formats log entries for the owner dashboard.
+// PasswordHash feeds the session cookie's pv claim (WO-17b A2) and is
+// never serialized or returned by any handler.
 type OwnerSessionResult struct {
-	BotID   int64  `json:"bot_id"`
-	BotName string `json:"bot_name"`
-	Status  string `json:"status"`
+	BotID        int64  `json:"bot_id"`
+	BotName      string `json:"bot_name"`
+	Status       string `json:"status"`
+	PasswordHash string `json:"-"`
 }
 
 // OwnerLogin authenticates an owner by name+password.
@@ -86,9 +89,10 @@ func OwnerLogin(ctx context.Context, q pg.Querier, name, password string) (*Owne
 		map[string]interface{}{"bot_name": bot.BotName}, true)
 
 	return &OwnerSessionResult{
-		BotID:   bot.ID,
-		BotName: bot.BotName,
-		Status:  bot.Status,
+		BotID:        bot.ID,
+		BotName:      bot.BotName,
+		Status:       bot.Status,
+		PasswordHash: bot.PasswordHash,
 	}, nil
 }
 

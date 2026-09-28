@@ -341,8 +341,8 @@ Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 	{
 		Name: "account_register",
 		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once — store it now; it cannot be recovered later.
-Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-128 chars; IP registration rate limit applies.
-Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
+	Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-72 chars (bcrypt limit); IP registration rate limit applies.
+	Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
 		InputSchema: `{"type":"object","properties":{
 			"name":{"type":"string"},
 			"password":{"type":"string"}

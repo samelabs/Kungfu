@@ -107,7 +107,7 @@ func TestBoundedIOStoreRedeemOversizedFailClosed(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	w := httptest.NewRecorder()
 	_, botID := seedBoundedIOBot(t, pool, suffix)
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	cookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	prodCode := seedBoundedIOProduct(t, pool, "Oversize "+suffix, 5)
@@ -186,7 +186,7 @@ func TestBoundedIOCheckoutOversizedFailClosed(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	_, botID := seedBoundedIOBot(t, pool, suffix)
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	cookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	var paymentsBefore int

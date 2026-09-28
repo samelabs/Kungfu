@@ -303,7 +303,7 @@ func ocSessionCookie(t *testing.T, s *Server, pool *pg.Pool, name string) *http.
 		t.Fatalf("bot lookup: %v", err)
 	}
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	for _, c := range w.Result().Cookies() {
 		return c
 	}

@@ -173,7 +173,7 @@ func TestFinanceAdminFinanceOwnerAgentRejected(t *testing.T) {
 	// REAL owner session cookie, minted via the production helper for
 	// the fixture bot (setOwnerCookie + parseSetCookie).
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, f.botID, e.s.Config.SessionSecret, false)
+	setOwnerCookie(w, f.botID, "x", e.s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	req := httptest.NewRequest("GET", "/api/samelabs/finance/summary", nil)

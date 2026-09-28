@@ -203,7 +203,7 @@ func TestRequestDeadlineRealCreemCheckoutCancellation(t *testing.T) {
 	// seed the owner bot + session cookie
 	_, ownerID := seededTestServerOn(t, s)
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, ownerID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, ownerID, "x", s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	// baseline: OWNER-SCOPED payment rows (never whole-table counts —

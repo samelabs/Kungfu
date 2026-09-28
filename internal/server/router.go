@@ -190,6 +190,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Post("/api/webhooks/creem", s.handleCreemWebhook)
 	r.Get("/api/owner/rewards/products", s.handleOwnerRewardsProducts)
 	r.Post("/api/owner/rewards/redemptions", ownerMutation(s.handleOwnerRewardsRedeem))
+	r.Get("/api/owner/rewards/redemptions", s.handleOwnerRewardsRedemptionsList)
 	r.Get("/api/owner/rewards/redemptions/{code}", s.handleOwnerRewardsRedemptionGet)
 
 	// -- API routes: Admin (kf_admin server-side session) --

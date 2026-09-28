@@ -80,7 +80,7 @@ func TestLogoutValidSessionSucceedsClearsCookieAndAudits(t *testing.T) {
 
 	// Login path signs the cookie with the same secret the server uses.
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	cookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	before := countOwnerLogoutLogs(t, s, botID)
@@ -163,7 +163,7 @@ func TestLogoutDeletedBotSessionStillSucceeds(t *testing.T) {
 	router := s.buildRouter()
 
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, 999999999, s.Config.SessionSecret, false)
+	setOwnerCookie(w, 999999999, "x", s.Config.SessionSecret, false)
 	cookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/owner/session", nil)

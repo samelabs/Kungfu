@@ -31,7 +31,7 @@ func storeTestServer(t *testing.T) *Server {
 func storeOwnerCookie(t *testing.T, s *Server, botID int64) *http.Cookie {
 	t.Helper()
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	return parseSetCookie(t, w.Header().Get("Set-Cookie"))
 }
 
@@ -428,5 +428,70 @@ func TestStoreRedeemMissingFields(t *testing.T) {
 		map[string]string{"product_code": "x"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing request_key: %d, want 400", rec.Code)
+	}
+}
+
+// -- A1: the owner's own redemption history list --
+
+func TestRewardsRedemptionsListOwnershipAndPaging(t *testing.T) {
+	s := storeTestServer(t)
+	router := s.buildRouter()
+	_, cookieA := seedStoreBot(t, s, 1000)
+	_, cookieB := seedStoreBot(t, s, 1000)
+	product := storeSeedProduct(t, s, 10)
+
+	codes := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		_, b := storeDo(t, router, cookieA, http.MethodPost, "/api/owner/rewards/redemptions",
+			map[string]string{"product_code": product, "request_key": fmt.Sprintf("se_list_%d", i)})
+		codes = append(codes, b["data"].(map[string]interface{})["redemption"].(map[string]interface{})["code"].(string))
+	}
+	_, bb := storeDo(t, router, cookieB, http.MethodPost, "/api/owner/rewards/redemptions",
+		map[string]string{"product_code": product, "request_key": "se_list_b"})
+	otherCode := bb["data"].(map[string]interface{})["redemption"].(map[string]interface{})["code"].(string)
+	_ = otherCode
+
+	// A's page 1 (size 2): only A's rows, newest first, total 3 / 2 pages
+	rec, body := storeDo(t, router, cookieA, http.MethodGet, "/api/owner/rewards/redemptions?page=1&page_size=2", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rec.Code)
+	}
+	data := body["data"].(map[string]interface{})
+	rows := data["redemptions"].([]interface{})
+	pg := data["pagination"].(map[string]interface{})
+	if len(rows) != 2 || pg["total"].(float64) != 3 || pg["total_pages"].(float64) != 2 || pg["page"].(float64) != 1 {
+		t.Fatalf("page 1: rows=%d pagination=%v", len(rows), pg)
+	}
+	if rows[0].(map[string]interface{})["code"] != codes[2] {
+		t.Fatalf("newest first: %v", rows[0])
+	}
+	// page 2 carries the oldest
+	_, body = storeDo(t, router, cookieA, http.MethodGet, "/api/owner/rewards/redemptions?page=2&page_size=2", nil)
+	rows = body["data"].(map[string]interface{})["redemptions"].([]interface{})
+	if len(rows) != 1 || rows[0].(map[string]interface{})["code"] != codes[0] {
+		t.Fatalf("page 2: %v", rows)
+	}
+
+	// B's list: only B's own row — A's codes never appear
+	_, body = storeDo(t, router, cookieB, http.MethodGet, "/api/owner/rewards/redemptions?page=1&page_size=10", nil)
+	data = body["data"].(map[string]interface{})
+	rows = data["redemptions"].([]interface{})
+	if data["pagination"].(map[string]interface{})["total"].(float64) != 1 || len(rows) != 1 {
+		t.Fatalf("B list: %v", data)
+	}
+	if rows[0].(map[string]interface{})["code"] == codes[0] || rows[0].(map[string]interface{})["code"] == codes[2] {
+		t.Fatal("B list leaked A's redemption")
+	}
+
+	// absurd paging values clamp instead of erroring (WO-16 rule)
+	rec, _ = storeDo(t, router, cookieA, http.MethodGet, "/api/owner/rewards/redemptions?page=0&page_size=0", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clamped page status = %d, want 200", rec.Code)
+	}
+
+	// unauthenticated -> auth error
+	rec, _ = storeDo(t, router, nil, http.MethodGet, "/api/owner/rewards/redemptions", nil)
+	if rec.Code == http.StatusOK {
+		t.Fatal("unauthenticated list returned 200")
 	}
 }

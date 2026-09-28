@@ -176,7 +176,7 @@ func TestOwnerCookieCannotAccessAdminPlane(t *testing.T) {
 	router := s.buildRouter()
 
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	ownerCookie := parseSetCookie(t, w.Header().Get("Set-Cookie"))
 
 	req := httptest.NewRequest("GET", "/api/samelabs/session", nil)

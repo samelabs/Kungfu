@@ -32,7 +32,7 @@ func s64Server(t *testing.T) (*Server, int64, *http.Cookie) {
 	}
 	w := httptest.NewRecorder()
 	_, botID := s64SeedBot(t, pool, s, fmt.Sprint(time.Now().UnixNano()))
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	return s, botID, parseSetCookie(t, w.Header().Get("Set-Cookie"))
 }
 
