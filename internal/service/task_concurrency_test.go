@@ -176,6 +176,82 @@ func TestSubmitBindsLockedVersion(t *testing.T) {
 	}
 }
 
+// TestSubmitRebindClaimRequired: a no-claim submit racing pause→update
+// (claim.required=true)→open(v2) must never bind to the claim.required
+// version — the rebind branch re-runs admission step (f) against the
+// new contract and answers CLAIM_REQUIRED (P2-3).
+func TestSubmitRebindClaimRequired(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 100_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	code := submitOpenedTask(t, pool, publisher, 50_000, func(c *task.Contract) {
+		c.Price = 5
+	})
+	claimRequiredErr := 0
+	submit := func(round int) error {
+		_, err := SubmitWork(ctx, pool, agent, SubmitInput{
+			Code: code, RequestKey: fmt.Sprintf("cr-%d-%d", round, time.Now().UnixNano()),
+			Payload: []byte(submitPayloadOK),
+		}, testAgentRefKey, time.Now())
+		if ae := appErrOf(t, err); ae != nil && ae.Code == "CLAIM_REQUIRED" {
+			claimRequiredErr++
+		}
+		return nil // TASK_NOT_OPEN / CLAIM_REQUIRED during the window — legal
+	}
+	reopen := func(round int) error {
+		if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
+			return err
+		}
+		c := submitContract()
+		c.Price = 5
+		c.Claim = task.ClaimConfig{Required: true}
+		if _, err := UpdateTask(ctx, pool, publisher, code, c); err != nil {
+			return err
+		}
+		_, err := OpenTask(ctx, pool, publisher, code)
+		return err
+	}
+	runConcurrent(t, 10, submit, reopen)
+
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
+	if tr.Version < 2 {
+		t.Fatalf("task version = %d, want >= 2", tr.Version)
+	}
+	// THE invariant: no submission of THIS task may be bound to a
+	// version whose contract requires a claim unless it carries one.
+	// (Scoped to the task: other tests' fixtures are not this race's
+	// subject.)
+	rows, err := pool.Query(ctx, `
+		SELECT s.claim_id IS NOT NULL, COALESCE(v.contract->'claim'->>'required', 'false')
+		FROM tb_task_submission s
+		JOIN tb_task_version v ON v.task_id = s.task_id AND v.version = s.version
+		WHERE s.task_id = $1`, tr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	checked := 0
+	for rows.Next() {
+		var hasClaim bool
+		var required string
+		if err := rows.Scan(&hasClaim, &required); err != nil {
+			t.Fatal(err)
+		}
+		if required == "true" && !hasClaim {
+			t.Fatal("a no-claim submission bound to a claim.required version")
+		}
+		checked++
+	}
+	if claimRequiredErr == 0 && checked == 0 {
+		t.Fatal("neither a submission nor a CLAIM_REQUIRED rejection was observed — the race never exercised the branch")
+	}
+	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}
+
 // TestOpenTaskDraftChanged: an update landing between the open phases
 // aborts with INVALID_STATE(DRAFT_CHANGED) and keeps the new draft.
 func TestOpenTaskDraftChanged(t *testing.T) {

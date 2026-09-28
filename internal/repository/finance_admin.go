@@ -35,15 +35,18 @@ var ErrFinanceNotFound = apperr.New(404, "NOT_FOUND", "finance fact not found")
 
 // FinancePayment is one row of the payment list projection. Allowlist
 // only: no API keys, no webhook secrets, no session material (those
-// do not even exist in tb_payments).
+// do not even exist in tb_payments). provider_product_id /
+// provider_order_id are nullable columns (legacy / manual payments
+// have no provider order) — they stay pointers so a NULL scans
+// without error and serializes as JSON null.
 type FinancePayment struct {
 	ID                int64
 	Code              string
 	BotID             int64
 	BotName           string
 	Provider          string
-	ProviderProductID string
-	ProviderOrderID   string
+	ProviderProductID *string
+	ProviderOrderID   *string
 	AmountMinor       int64
 	Currency          string
 	Credits           int64
@@ -55,7 +58,7 @@ type FinancePayment struct {
 
 // FinancePaymentFilter carries the payment list parameters.
 type FinancePaymentFilter struct {
-	Status   string // "" | pending | paid | failed | expired
+	Status   string // "" | pending | paid | failed | cancelled (chk_payments_status)
 	Provider string // "" | creem
 	BotID    int64  // 0 = no filter
 	Q        string // code / bot_name / provider_order_id substring
@@ -64,7 +67,7 @@ type FinancePaymentFilter struct {
 }
 
 var financePaymentStatusVocab = map[string]bool{
-	"pending": true, "paid": true, "failed": true, "expired": true,
+	"pending": true, "paid": true, "failed": true, "cancelled": true,
 }
 
 // AdminListFinancePayments returns the stable paginated payment list
@@ -103,7 +106,11 @@ func AdminListFinancePayments(ctx context.Context, pool *pg.Pool, f FinancePayme
 		return nil, 0, err
 	}
 
-	offset := (f.Page - 1) * f.PageSize
+	// Clamp before splicing: normPage guarantees page ≥ 1 and
+	// 1 ≤ pageSize ≤ 200, so LIMIT/OFFSET can never go negative or
+	// unbounded regardless of what the caller passed.
+	page, size := normPage(f.Page, f.PageSize)
+	offset := (page - 1) * size
 	rows, err := pool.Query(ctx, `
 		SELECT p.id, p.code, p.bot_id, b.bot_name, p.provider,
 		       p.provider_product_id, p.provider_order_id,
@@ -112,7 +119,7 @@ func AdminListFinancePayments(ctx context.Context, pool *pg.Pool, f FinancePayme
 		FROM tb_payments p
 		JOIN tb_bots b ON b.id = p.bot_id`+where+`
 		ORDER BY p.id DESC
-		LIMIT `+strconv.Itoa(f.PageSize)+` OFFSET `+strconv.Itoa(offset), args...)
+		LIMIT `+strconv.Itoa(size)+` OFFSET `+strconv.Itoa(offset), args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -135,6 +142,8 @@ func AdminListFinancePayments(ctx context.Context, pool *pg.Pool, f FinancePayme
 
 // FinanceAdjustment mirrors tb_payment_adjustments facts (allowlist;
 // no raw webhook payload — none is persisted by the Payment domain).
+// object_status / transaction_status / reason / refunded_amount_minor
+// mirror migration 005's nullable columns and stay pointers.
 type FinanceAdjustment struct {
 	ID                     int64
 	PaymentCode            string
@@ -150,10 +159,10 @@ type FinanceAdjustment struct {
 	Currency               string
 	TransactionAmountMinor int64
 	AmountPaidMinor        int64
-	RefundedAmountMinor    int64
-	ObjectStatus           string
-	TransactionStatus      string
-	Reason                 string
+	RefundedAmountMinor    *int64
+	ObjectStatus           *string
+	TransactionStatus      *string
+	Reason                 *string
 	ProviderCreatedAt      int64
 	CreatedAt              time.Time
 }
@@ -371,8 +380,8 @@ func adminFinanceReconcile(ctx context.Context, pool *pg.Pool, p FinancePayment,
 		}
 		basisTxn[a.ProviderTransactionID] = true
 		basisPaid[a.AmountPaidMinor] = true
-		if a.RefundedAmountMinor > r.MaxPersistedRefundedAmount {
-			r.MaxPersistedRefundedAmount = a.RefundedAmountMinor
+		if a.RefundedAmountMinor != nil && *a.RefundedAmountMinor > r.MaxPersistedRefundedAmount {
+			r.MaxPersistedRefundedAmount = *a.RefundedAmountMinor
 		}
 	}
 	r.DistinctAdjustmentProviderTransactionCount = int64(len(basisTxn))
@@ -463,7 +472,9 @@ func AdminListFinanceAdjustments(ctx context.Context, pool *pg.Pool, f FinanceAd
 		return nil, 0, err
 	}
 
-	offset := (f.Page - 1) * f.PageSize
+	// Clamp before splicing (see AdminListFinancePayments).
+	page, size := normPage(f.Page, f.PageSize)
+	offset := (page - 1) * size
 	rows, err := pool.Query(ctx, `
 		SELECT a.id, p.code, p.bot_id, b.bot_name, a.provider,
 		       a.provider_event_id, a.provider_object_id, a.kind,
@@ -476,7 +487,7 @@ func AdminListFinanceAdjustments(ctx context.Context, pool *pg.Pool, f FinanceAd
 		JOIN tb_payments p ON p.id = a.payment_id
 		JOIN tb_bots b ON b.id = p.bot_id`+where+`
 		ORDER BY a.id DESC
-		LIMIT `+strconv.Itoa(f.PageSize)+` OFFSET `+strconv.Itoa(offset), args...)
+		LIMIT `+strconv.Itoa(size)+` OFFSET `+strconv.Itoa(offset), args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -538,13 +549,15 @@ func AdminListFinanceLedger(ctx context.Context, pool *pg.Pool, f FinanceLedgerF
 		return nil, 0, err
 	}
 
-	offset := (f.Page - 1) * f.PageSize
+	// Clamp before splicing (see AdminListFinancePayments).
+	page, size := normPage(f.Page, f.PageSize)
+	offset := (page - 1) * size
 	rows, err := pool.Query(ctx, `
 		SELECT t.id, t.bot_id, b.bot_name, t.type, t.amount, t.balance_after,
 		       t.ref_type, t.ref_id, t.created_at
 		FROM tb_transactions t JOIN tb_bots b ON b.id = t.bot_id`+where+`
 		ORDER BY t.id DESC
-		LIMIT `+strconv.Itoa(f.PageSize)+` OFFSET `+strconv.Itoa(offset), args...)
+		LIMIT `+strconv.Itoa(size)+` OFFSET `+strconv.Itoa(offset), args...)
 	if err != nil {
 		return nil, 0, err
 	}

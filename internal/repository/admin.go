@@ -802,6 +802,23 @@ func ListAdminPermissionCodesByRole(ctx context.Context, q pg.Querier, roleID in
 	return out, rows.Err()
 }
 
+// IsSuperadmin reports whether the admin HOLDS the active superadmin
+// system role, regardless of account status. A disabled superadmin is
+// still a protected target: re-enable plus password reset is a
+// credential-takeover chain, so the caller's guard must not depend on
+// the account being active.
+func IsSuperadmin(ctx context.Context, q pg.Querier, adminID int64) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM tb_admin_user_roles ur
+			JOIN tb_admin_roles r ON r.id = ur.role_id
+			WHERE ur.admin_id = $1 AND r.code = 'superadmin'
+			  AND r.status = 'active'
+		)`, adminID).Scan(&ok)
+	return ok, err
+}
+
 // IsActiveSuperadmin reports whether the admin exists, is active, and
 // holds the active superadmin system role. Call inside the caller's
 // transaction after locking the admin row.

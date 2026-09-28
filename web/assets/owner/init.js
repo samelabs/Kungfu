@@ -184,6 +184,10 @@ function bindOwnerPage() {
     bindCreditsEvents();
 }
 
+// The task console (tasks-console.js, loaded earlier) installs its
+// renderPage wrap here, deterministically, before this file's own
+// decoration chains onto it.
+if (typeof tcvDecorateRenderPage === 'function') tcvDecorateRenderPage();
 decorateRenderPage();
 bindOwnerPage();
 restoreSession();

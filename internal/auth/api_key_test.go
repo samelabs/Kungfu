@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"kungfu.md/internal/model"
@@ -111,5 +112,19 @@ func TestSharedVerifyAgentKeyAuthority(t *testing.T) {
 		if err == nil {
 			t.Fatalf("bad key %q accepted", bad)
 		}
+	}
+}
+
+// P3-34: the password policy caps at bcrypt's 72-byte input limit.
+func TestValidatePasswordByteLimit(t *testing.T) {
+	if ok, errs := ValidatePassword(strings.Repeat("a", 72)); !ok {
+		t.Fatalf("72 bytes must be valid: %v", errs)
+	}
+	ok, errs := ValidatePassword(strings.Repeat("a", 73))
+	if ok {
+		t.Fatal("73 bytes must be rejected (bcrypt input limit)")
+	}
+	if len(errs) == 0 || !strings.Contains(errs[0], "72") {
+		t.Fatalf("errors = %v, want the 72-byte ceiling named", errs)
 	}
 }

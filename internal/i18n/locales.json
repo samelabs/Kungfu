@@ -78,8 +78,8 @@
       "key": {
         "heading": "Owner key",
         "reset": "Reset key",
-        "not_retrievable": "The full current key is not retrievable. Keep it safe; resetting requires the current key.",
-        "current_key": "Current key",
+        "not_retrievable": "The full key is never shown again and cannot be recovered. If it is lost or leaked, reset it here — the old key stops working immediately.",
+        "reset_confirm": "Reset the key now? The current key stops working immediately; every agent using it must switch to the new key.",
         "copy_new": "Copy new key",
         "one_time_warning": "The new key is shown once. Copy it now — after leaving this page it cannot be recovered."
       },
@@ -117,6 +117,8 @@
         "need_receiver": "Receiver URL is required.",
         "need_sample": "The sample must be a JSON object.",
         "need_price": "Price must be a positive whole number.",
+        "contract_json": "Contract JSON",
+        "total_too_large": "The total budget (price × units) is too large.",
         "all_states": "All states",
         "deliveries": "Deliveries"
       },
@@ -182,7 +184,6 @@
         "new_password_diff": "New password must be different from current password",
         "continue_to_owner": "Continue to Owner",
         "key_one_time_warning": "This key is shown once. Copy it now; after continuing it cannot be recovered.",
-        "reset_key_required": "Enter the current key to reset.",
         "kungfu_id_hint": "6–32 characters: letters, digits, dot, dash or underscore. This is your account name; agents never see your password.",
         "password_hint": "At least 6 characters. Used only by you to manage the account and its key.",
         "registered_heading": "Account created"
@@ -260,6 +261,10 @@
         "loading": "Loading packages…",
         "pending_hint": "Your payment is being processed by the payment provider. Use Check status after completing the checkout.",
         "check_status": "Check status",
+        "payment_pending": "Payment pending.",
+        "payment_paid": "Payment completed.",
+        "payment_failed": "Payment failed.",
+        "payment_cancelled": "Payment cancelled.",
         "checkout_failed": "Could not start the checkout.",
         "packages_failed": "Could not load packages."
       },
@@ -409,8 +414,8 @@
       "key": {
         "heading": "Owner 密钥",
         "reset": "重置密钥",
-        "not_retrievable": "完整密钥无法找回。请妥善保管；重置需要提供当前密钥。",
-        "current_key": "当前密钥",
+        "not_retrievable": "完整密钥不会再显示，也无法恢复。如果密钥丢失或泄露，请在此重置——旧密钥会立即失效。",
+        "reset_confirm": "现在重置密钥？当前密钥将立即失效，所有正在使用它的代理都必须改用新密钥。",
         "copy_new": "复制新密钥",
         "one_time_warning": "新密钥仅显示一次。请立即复制——离开本页后无法找回。"
       },
@@ -448,6 +453,8 @@
         "need_receiver": "请填写接收地址。",
         "need_sample": "样例必须是 JSON 对象。",
         "need_price": "单价必须是正整数。",
+        "contract_json": "契约 JSON",
+        "total_too_large": "总预算（单价 × 份数）过大。",
         "all_states": "全部状态",
         "deliveries": "投递记录"
       },
@@ -513,7 +520,6 @@
         "new_password_diff": "新密码不能与当前密码相同",
         "continue_to_owner": "继续进入 Owner",
         "key_one_time_warning": "该密钥仅显示一次。请立即复制；继续后将无法找回。",
-        "reset_key_required": "请输入当前密钥以重置。",
         "kungfu_id_hint": "6–32 个字符：字母、数字、点、短横线或下划线。这是你的账户名；agent 永远看不到你的密码。",
         "password_hint": "至少 6 个字符。仅供你管理账户和密钥使用。",
         "registered_heading": "账户已创建"
@@ -591,6 +597,10 @@
         "loading": "正在加载套餐…",
         "pending_hint": "支付服务商正在处理本次支付。完成付款后可点击“查询状态”。",
         "check_status": "查询状态",
+        "payment_pending": "付款处理中。",
+        "payment_paid": "付款已完成。",
+        "payment_failed": "付款失败。",
+        "payment_cancelled": "付款已取消。",
         "checkout_failed": "无法发起收银台。",
         "packages_failed": "无法加载套餐。"
       },
@@ -740,8 +750,8 @@
       "key": {
         "heading": "Owner キー",
         "reset": "キーをリセット",
-        "not_retrievable": "現在の完全なキーは取得できません。安全に保管してください。リセットには現在のキーが必要です。",
-        "current_key": "現在のキー",
+        "not_retrievable": "完全なキーは二度と表示されず、復元もできません。紛失や漏洩の場合はここでリセットしてください。旧キーは直ちに無効になります。",
+        "reset_confirm": "今すぐキーをリセットしますか？現在のキーは直ちに無効になり、使用中のエージェントはすべて新しいキーへ切り替える必要があります。",
         "copy_new": "新しいキーをコピー",
         "one_time_warning": "新しいキーは一度だけ表示されます。今すぐコピーしてください。ページを離れると復元できません。"
       },
@@ -778,6 +788,8 @@
         "need_receiver": "受信 URL を入力してください。",
         "need_sample": "サンプルは JSON オブジェクトにしてください。",
         "need_price": "単価は正の整数にしてください。",
+        "contract_json": "契約 JSON",
+        "total_too_large": "合計予算（単価 × 件数）が大きすぎます。",
         "pause": "一時停止",
         "all_states": "すべての状態",
         "deliveries": "配信記録"
@@ -844,7 +856,6 @@
         "new_password_diff": "新しいパスワードは現在のパスワードと同じにできません",
         "continue_to_owner": "オーナーへ進む",
         "key_one_time_warning": "このキーは一度だけ表示されます。今すぐコピーしてください。続行後は復元できません。",
-        "reset_key_required": "リセットには現在のキーを入力してください。",
         "kungfu_id_hint": "6〜32 文字（英字・数字・ドット・ハイフン・アンダースコア）。アカウント名です。エージェントにパスワードは見えません。",
         "password_hint": "6 文字以上。アカウントとキーの管理にのみ使います。",
         "registered_heading": "アカウントを作成しました"
@@ -922,6 +933,10 @@
         "loading": "パッケージを読み込み中…",
         "pending_hint": "決済プロバイダーが処理中です。チェックアウト完了後にステータス確認をご利用ください。",
         "check_status": "ステータス確認",
+        "payment_pending": "支払い処理中です。",
+        "payment_paid": "支払いが完了しました。",
+        "payment_failed": "支払いに失敗しました。",
+        "payment_cancelled": "支払いがキャンセルされました。",
         "checkout_failed": "チェックアウトを開始できませんでした。",
         "packages_failed": "パッケージを読み込めませんでした。"
       },
@@ -1071,8 +1086,8 @@
       "key": {
         "heading": "오너 키",
         "reset": "키 재발급",
-        "not_retrievable": "현재 전체 키는 다시 조회할 수 없습니다. 안전하게 보관하세요. 재발급에는 현재 키가 필요합니다.",
-        "current_key": "현재 키",
+        "not_retrievable": "전체 키는 다시 표시되지 않으며 복구할 수 없습니다. 분실하거나 유출된 경우 여기서 재발급하세요. 이전 키는 즉시 작동이 중지됩니다.",
+        "reset_confirm": "지금 키를 재발급하시겠습니까? 현재 키는 즉시 작동이 중지되며, 이를 사용 중인 모든 에이전트가 새 키로 전환해야 합니다.",
         "copy_new": "새 키 복사",
         "one_time_warning": "새 키는 한 번만 표시됩니다. 지금 복사하세요. 페이지를 떠나면 복구할 수 없습니다."
       },
@@ -1109,6 +1124,8 @@
         "need_receiver": "수신 URL을 입력하세요.",
         "need_sample": "샘플은 JSON 객체여야 합니다.",
         "need_price": "단가는 양의 정수여야 합니다.",
+        "contract_json": "계약 JSON",
+        "total_too_large": "총 예산(단가 × 수량)이 너무 큽니다.",
         "pause": "일시정지",
         "all_states": "모든 상태",
         "deliveries": "배송 기록"
@@ -1175,7 +1192,6 @@
         "new_password_diff": "새 비밀번호는 현재 비밀번호와 달라야 합니다",
         "continue_to_owner": "오너로 계속",
         "key_one_time_warning": "이 키는 한 번만 표시됩니다. 지금 복사하세요. 계속한 후에는 복구할 수 없습니다.",
-        "reset_key_required": "재발급하려면 현재 키를 입력하세요.",
         "kungfu_id_hint": "6–32자: 영문, 숫자, 점, 하이픈, 밑줄. 계정 이름이며 에이전트는 비밀번호를 볼 수 없습니다.",
         "password_hint": "6자 이상. 계정과 키 관리에만 사용됩니다.",
         "registered_heading": "계정이 생성되었습니다"
@@ -1253,6 +1269,10 @@
         "loading": "패키지 불러오는 중…",
         "pending_hint": "결제 대행사가 처리 중입니다. 결제 완료 후 상태 확인을 사용하세요.",
         "check_status": "상태 확인",
+        "payment_pending": "결제가 진행 중입니다.",
+        "payment_paid": "결제가 완료되었습니다.",
+        "payment_failed": "결제가 실패했습니다.",
+        "payment_cancelled": "결제가 취소되었습니다.",
         "checkout_failed": "결제를 시작할 수 없습니다.",
         "packages_failed": "패키지를 불러올 수 없습니다."
       },
@@ -1402,8 +1422,8 @@
       "key": {
         "heading": "Clave de owner",
         "reset": "Regenerar clave",
-        "not_retrievable": "La clave actual completa no se puede recuperar. Guárdala bien; restablecer requiere la clave actual.",
-        "current_key": "Clave actual",
+        "not_retrievable": "La clave completa no se vuelve a mostrar y no puede recuperarse. Si se pierde o se filtra, restablécela aquí: la clave antigua deja de funcionar de inmediato.",
+        "reset_confirm": "¿Restablecer la clave ahora? La clave actual deja de funcionar de inmediato; todos los agentes que la usen deben pasar a la nueva clave.",
         "copy_new": "Copiar nueva clave",
         "one_time_warning": "La nueva clave se muestra una sola vez. Cópiala ahora; al salir de esta página no se podrá recuperar."
       },
@@ -1440,6 +1460,8 @@
         "need_receiver": "La URL del receptor es obligatoria.",
         "need_sample": "El ejemplo debe ser un objeto JSON.",
         "need_price": "El precio debe ser un entero positivo.",
+        "contract_json": "JSON del contrato",
+        "total_too_large": "El presupuesto total (precio × unidades) es demasiado grande.",
         "pause": "Pausar",
         "all_states": "Todos los estados",
         "deliveries": "Entregas"
@@ -1506,7 +1528,6 @@
         "new_password_diff": "La nueva contraseña debe ser diferente a la contraseña actual",
         "continue_to_owner": "Continuar a Owner",
         "key_one_time_warning": "Esta clave se muestra una sola vez. Cópiala ahora; después de continuar no se podrá recuperar.",
-        "reset_key_required": "Introduce la clave actual para restablecer.",
         "kungfu_id_hint": "6–32 caracteres: letras, dígitos, punto, guion o guion bajo. Es el nombre de tu cuenta; los agentes nunca ven tu contraseña.",
         "password_hint": "Al menos 6 caracteres. Solo lo usas tú para gestionar la cuenta y su clave.",
         "registered_heading": "Cuenta creada"
@@ -1584,6 +1605,10 @@
         "loading": "Cargando paquetes…",
         "pending_hint": "El proveedor de pagos está procesando tu pago. Usa Comprobar estado después de completar el pago.",
         "check_status": "Comprobar estado",
+        "payment_pending": "Pago pendiente.",
+        "payment_paid": "Pago completado.",
+        "payment_failed": "El pago falló.",
+        "payment_cancelled": "Pago cancelado.",
         "checkout_failed": "No se pudo iniciar el pago.",
         "packages_failed": "No se pudieron cargar los paquetes."
       },

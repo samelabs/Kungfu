@@ -115,7 +115,42 @@ func (s *Server) slLoginPage(w http.ResponseWriter, r *http.Request) {
 		Data: slLoginData{Next: slSafeNext(r.URL.Query().Get("next"))}})
 }
 
+// slOriginRefererOK is the login form's request-forgery boundary
+// (P2-2): browsers send Origin on cross-site POSTs and Referer on
+// form navigations. When either is present, its host must equal the
+// request's Host; when both are present, both are checked (so they
+// must also agree with each other). A request carrying neither is
+// allowed — non-browser clients legitimately omit both, and a
+// headerless request has no ambient browser credentials to forge.
+func slOriginRefererOK(r *http.Request) bool {
+	hostOf := func(raw string) (string, bool) {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return "", false
+		}
+		return u.Host, true
+	}
+	origin, referer := r.Header.Get("Origin"), r.Header.Get("Referer")
+	switch {
+	case origin != "" && referer != "":
+		oh, okO := hostOf(origin)
+		rh, okR := hostOf(referer)
+		return okO && okR && oh == r.Host && rh == r.Host
+	case origin != "":
+		oh, ok := hostOf(origin)
+		return ok && oh == r.Host
+	case referer != "":
+		rh, ok := hostOf(referer)
+		return ok && rh == r.Host
+	}
+	return true
+}
+
 func (s *Server) slLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	if !slOriginRefererOK(r) {
+		http.Error(w, "Sign-in from another site is not allowed.", http.StatusForbidden)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, slFormLimit)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Form too large or malformed", http.StatusBadRequest)

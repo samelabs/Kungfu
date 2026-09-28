@@ -360,6 +360,99 @@ func TestFinanceAdminFinanceFiltersAndPagination(t *testing.T) {
 	}
 }
 
+// Nullable columns must scan: a pending payment without a provider
+// order and an adjustment without a reason used to fail the whole
+// list/detail query once scanned into non-pointer fields (P1-3).
+func TestFinanceAdminNullableColumnsScan(t *testing.T) {
+	e := newAdminEnv(t)
+	f := newFinanceFixture(t, e)
+	ctx := context.Background()
+
+	// a pending payment with provider_order_id NULL (legacy / manual);
+	// code is CHAR(12) — exactly 12 chars, or it comes back space-padded
+	pendCode := "P" + f.payCode[1:]
+	if _, err := e.s.Pool.Exec(ctx, `
+		INSERT INTO tb_payments (code, bot_id, provider, provider_order_id, amount_minor, currency, credits, status, provider_product_id)
+		VALUES ($1, $2, 'creem', NULL, 500, 'USD', 100, 'pending', NULL)`,
+		pendCode, f.botID); err != nil {
+		t.Fatalf("seed pending payment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_payments WHERE code=$1`, pendCode)
+	})
+
+	// an adjustment whose reason is NULL
+	var payID int64
+	_ = e.s.Pool.QueryRow(ctx, `SELECT id FROM tb_payments WHERE code=$1`, f.payCode).Scan(&payID)
+	if _, err := e.s.Pool.Exec(ctx, `
+		INSERT INTO tb_payment_adjustments (payment_id, provider, provider_event_id, provider_object_id, kind,
+			provider_transaction_id, provider_order_id, amount_minor, currency,
+			transaction_amount_minor, amount_paid_minor, refunded_amount_minor,
+			object_status, transaction_status, reason, provider_created_at)
+		VALUES ($1, 'creem', 'evt_null', 'obj_null', 'refund', 'txn_null', 'ord_null', 100, 'USD', 500, 500, 100, 'refunded', 'succeeded', NULL, 0)`,
+		payID); err != nil {
+		t.Fatalf("seed null-reason adjustment: %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/samelabs/finance/payments",
+		"/api/samelabs/finance/payments/" + pendCode, // the NULL payment itself
+		"/api/samelabs/finance/payments/" + f.payCode,
+		"/api/samelabs/finance/adjustments",
+	} {
+		if rec := e.do(t, "GET", path, "", false); rec.Code != 200 {
+			t.Fatalf("%s = %d %s, want 200 with NULL columns present", path, rec.Code, rec.Body.String())
+		}
+	}
+
+	// the NULL payment serializes provider_order_id as JSON null
+	// (bot_id filter — a q filter cannot match its NULL order id)
+	rec := e.do(t, "GET", fmt.Sprintf("/api/samelabs/finance/payments?bot_id=%d", f.botID), "", false)
+	if rec.Code != 200 {
+		t.Fatalf("payments list = %d %s", rec.Code, rec.Body.String())
+	}
+	var wire struct {
+		Data struct {
+			Payments []map[string]interface{} `json:"payments"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("decode payments: %v", err)
+	}
+	var sawNull bool
+	for _, p := range wire.Data.Payments {
+		if p["code"] == pendCode {
+			v, ok := p["provider_order_id"]
+			if !ok || v != nil {
+				t.Fatalf("pending payment provider_order_id = %#v, want JSON null", v)
+			}
+			sawNull = true
+		}
+	}
+	if !sawNull {
+		t.Fatalf("pending payment %s missing from wire: %s", pendCode, rec.Body.String())
+	}
+}
+
+// Pagination is clamped: page=0 and absurdly large pages answer 200,
+// never a negative-OFFSET 500 (P2-7 / P3-33).
+func TestFinanceAdminPaginationClamped(t *testing.T) {
+	e := newAdminEnv(t)
+	_ = newFinanceFixture(t, e)
+
+	for _, path := range []string{
+		"/api/samelabs/finance/payments?page=0",
+		"/api/samelabs/finance/payments?page=0&page_size=0",
+		"/api/samelabs/finance/payments?page=100000000000000000", // (page-1)*size overflows int64 unclamped
+		"/api/samelabs/finance/adjustments?page=99999999999999999999",
+		"/api/samelabs/finance/ledger?page=0",
+	} {
+		if rec := e.do(t, "GET", path, "", false); rec.Code != 200 {
+			t.Fatalf("%s = %d %s, want 200 (pagination clamped)", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // (8)+(10)-(14): integrity flags react to人工构造的不一致事实 — read-only,
 // nothing is ever auto-repaired.
 func TestFinanceAdminFinanceIntegrityAnomalies(t *testing.T) {

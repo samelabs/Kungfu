@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 )
 
 // securityHeadersMiddleware is the ONE global baseline security-header
@@ -24,6 +25,20 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// apiNoStoreMiddleware marks every /api/ response Cache-Control:
+// no-store. The /api plane carries authenticated account, key,
+// payment and admin data; no shared or browser cache may retain it
+// (P3-29). HTML pages and static assets live outside /api/ and keep
+// their own cache policies.
+func apiNoStoreMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

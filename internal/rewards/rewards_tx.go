@@ -19,7 +19,6 @@ package rewards
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"unicode/utf8"
 
@@ -314,5 +313,3 @@ func refundTransitionTx(ctx context.Context, pool *pg.Pool, tx pgx.Tx, code, not
 	}
 	return &TransitionOutcome{Before: r, After: after, Transitioned: true}, nil
 }
-
-var _ = stderrors.Is // parity with legacy file's imports when refactored

@@ -158,6 +158,12 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 			Message: fmt.Sprintf("budget must be at least the price (%d), got %d", defaults.Price, budget),
 		}})
 	}
+	if budget > task.MaxAmount {
+		return nil, validationFailed([]task.FieldError{{
+			Field:   "budget",
+			Message: fmt.Sprintf("budget must be at most %d, got %d", task.MaxAmount, budget),
+		}})
+	}
 	if balance, err := credits.Balance(ctx, pool, publisherID); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if balance < budget {
@@ -508,6 +514,11 @@ func FundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 			Field: "amount", Message: fmt.Sprintf("must be a positive integer, got %d", amount),
 		}})
 	}
+	if amount > task.MaxAmount {
+		return nil, validationFailed([]task.FieldError{{
+			Field: "amount", Message: fmt.Sprintf("must be at most %d, got %d", task.MaxAmount, amount),
+		}})
+	}
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -519,6 +530,14 @@ func FundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	}
 	if t.Status == task.TaskClosed {
 		return nil, invalidTaskState(t.Status)
+	}
+	// budget_locked itself stays ≤ MaxAmount: the accumulated cap
+	// (both operands are ≤ MaxAmount, so the sum cannot overflow).
+	if t.BudgetLocked+amount > task.MaxAmount {
+		return nil, validationFailed([]task.FieldError{{
+			Field:   "amount",
+			Message: fmt.Sprintf("funding %d would push budget_locked past the maximum %d", amount, task.MaxAmount),
+		}})
 	}
 	if err := repository.FundTaskBudget(ctx, pool, tx, t.ID, publisherID, amount); err != nil {
 		if isInsufficientCreditsErr(err) {

@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -229,7 +230,8 @@ func s61Read(t *testing.T, rel string) string {
 // TestKeyAtRestOwnerUIOneTimeDisclosureOnly locks the frontend invariants:
 //   - registration displays the key from the registration RESPONSE
 //     (no /api/key recovery flow)
-//   - reset does NOT auto-load the current raw key; manual input
+//   - reset sends NO key material at all — the owner session is the
+//     authority; nothing named current_key exists anywhere
 //   - copy applies only to a newly issued one-time key
 //   - no localStorage/sessionStorage/URL transport for agent secrets
 //   - normal /api/key rendering is masked-only
@@ -251,14 +253,14 @@ func TestKeyAtRestOwnerUIOneTimeDisclosureOnly(t *testing.T) {
 		t.Fatal("registration flow still uses a /api/key recovery path")
 	}
 
-	// reset: manual current-key input; no auto-load of a stored key
-	if !strings.Contains(auth, "current_key: currentKey") {
-		t.Fatal("reset must send the manually entered current key")
+	// reset: NO key credential is read, stored, or sent
+	if strings.Contains(auth, "current_key") {
+		t.Fatal("reset flow still references current_key")
 	}
-	if strings.Contains(auth, "current_key: state.ownerKey") {
-		t.Fatal("reset auto-loads the stored key")
+	if strings.Contains(auth, "state.ownerKey") {
+		t.Fatal("reset flow sends a stored raw key")
 	}
-	if strings.Contains(auth, "loadOwnerKey()") && strings.Contains(auth, "bindResetKey") {
+	if strings.Contains(auth, "loadOwnerKey") && strings.Contains(auth, "bindResetKey") {
 		t.Fatal("reset flow still fetches key material")
 	}
 
@@ -376,5 +378,35 @@ func TestKeyAtRestNoRuntimePlaintextAgentKeyStoragePath(t *testing.T) {
 		if strings.Contains(string(b), "api_key") {
 			t.Fatalf("%s references the agent api_key column", m.Name())
 		}
+	}
+}
+
+// TestKeyAtRestResetKeyHTTPContract locks the /api/reset-key access
+// facts (WO-16d): unauthenticated → 401; a non-JSON body → 415 from the
+// ownerMutation gate; an authenticated empty-object body → 200 with a
+// fresh one-time key. No current-key credential is involved anywhere.
+func TestKeyAtRestResetKeyHTTPContract(t *testing.T) {
+	s, _, cookie := s64Server(t)
+
+	if rec := s64Mutate(t, s, nil, "POST", "/api/reset-key", "application/json", "{}"); rec.Code != 401 {
+		t.Fatalf("unauthenticated reset = %d, want 401", rec.Code)
+	}
+	if rec := s64Mutate(t, s, cookie, "POST", "/api/reset-key", "text/plain", "{}"); rec.Code != 415 {
+		t.Fatalf("text/plain reset = %d, want 415", rec.Code)
+	}
+	rec := s64Mutate(t, s, cookie, "POST", "/api/reset-key", "application/json", "{}")
+	if rec.Code != 200 {
+		t.Fatalf("authenticated reset = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Data struct {
+			NewKey string `json:"new_key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(out.Data.NewKey, "kf_live_") || len(out.Data.NewKey) != 72 {
+		t.Fatalf("new_key = %q, want a fresh raw key", out.Data.NewKey)
 	}
 }

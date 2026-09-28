@@ -6,7 +6,10 @@
 //     only a fallback for offline. A deployed JS/CSS change is picked
 //     up by a plain online refresh — no manual cache clearing.
 //   - images & fonts: cache-first (content-stable assets).
-//   - navigations: network with offline fallback.
+//   - navigations: network with offline fallback; only public pages
+//     are cached — /samelabs and /owner are server-rendered AUTHORIZED
+//     data pages and must never land in a cache (P2-12), and only
+//     network.ok responses are cached (error pages are not).
 //   - /api/*: never handled here.
 //   - /sw.js itself: served no-cache/no-store by the server.
 //
@@ -17,8 +20,12 @@
 //   v5 — pages reference fingerprinted asset URLs (?v=<content hash>);
 //        v4 caches (which could hold year-long proxy-cached copies)
 //        are dropped, and the shell is fetched bypassing the HTTP cache.
+//   v6 — navigation cache hardened: authorized pages (/samelabs, /owner)
+//        are never cached, and non-ok responses are never cached; the
+//        version bump drops every v5 runtime cache that may already
+//        hold such pages.
 
-const SW_VERSION = 'kungfu-pwa-v5';
+const SW_VERSION = 'kungfu-pwa-v6';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
 
@@ -38,6 +45,12 @@ const SHELL_ASSETS = [
   '/llms.txt',
   '/openai.json'
 ];
+
+// isAuthorizedPage reports the never-cached SSR surfaces: platform
+// admin and owner consoles.
+function isAuthorizedPage(pathname) {
+  return pathname.startsWith('/samelabs') || pathname.startsWith('/owner');
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -76,10 +89,18 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const network = await fetch(event.request);
-        const cache = await caches.open(RUNTIME_CACHE);
-        cache.put(event.request, network.clone());
+        // Only successful responses for PUBLIC pages are cached: a
+        // 4xx/5xx page must not be replayed offline, and the
+        // server-rendered admin (/samelabs) and owner (/owner) pages
+        // carry authorized data that never belongs in a cache.
+        if (network.ok && !isAuthorizedPage(url.pathname)) {
+          const cache = await caches.open(RUNTIME_CACHE);
+          cache.put(event.request, network.clone());
+        }
         return network;
       } catch (error) {
+        // Offline fallback: authorized pages have no cached copy by
+        // construction, so they fall through to the shell.
         return (await caches.match(event.request)) || (await caches.match('/'));
       }
     })());

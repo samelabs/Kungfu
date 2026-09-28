@@ -186,20 +186,29 @@ func TestSubmitTaskNotOpen(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	draft := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
-	_, err := submitOnce(t, pool, agent, draft, nil)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "TASK_NOT_OPEN" || appErr.Details["status"] != task.TaskDraft {
-		t.Fatalf("draft: %v (%#v), want TASK_NOT_OPEN/draft", err, appErr.Details)
-	}
-	submitState(t, pool, draft, err, "TASK_NOT_OPEN")
-
 	closed := submitOpenedTask(t, pool, publisher, 1000, nil)
 	if _, err := CloseTask(ctx, pool, publisher, closed); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	_, err = submitOnce(t, pool, agent, closed, nil)
+	_, err := submitOnce(t, pool, agent, closed, nil)
 	submitState(t, pool, closed, err, "TASK_NOT_OPEN")
+}
+
+// TestSubmitDraftTaskNotFound: a draft task is invisible to executors
+// (§5.1) — work_submit answers TASK_NOT_FOUND, never TASK_NOT_OPEN
+// with a status detail that would leak the draft's existence.
+func TestSubmitDraftTaskNotFound(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+
+	draft := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
+	_, err := submitOnce(t, pool, agent, draft, nil)
+	appErr := appErrOf(t, err)
+	if appErr.Code != "TASK_NOT_FOUND" {
+		t.Fatalf("draft: %v, want TASK_NOT_FOUND", err)
+	}
+	submitState(t, pool, draft, err, "TASK_NOT_FOUND")
 }
 
 func TestSubmitSlotsExhausted(t *testing.T) {

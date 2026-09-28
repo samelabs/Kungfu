@@ -277,35 +277,22 @@ func ChangePassword(ctx context.Context, pool *pg.Pool, name, password, newPassw
 
 // -- ResetKey --
 
-// ResetKey formats log entries for the owner dashboard.
-// Requires the current RAW key (second credential) + rate limit.
-// The stored SHA-256 digest is the only at-rest key material.
-func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, botID int64, currentKey string) (map[string]interface{}, error) {
+// ResetKey rotates the owner's Agent key. Authority is the OWNER
+// SESSION (the /api/reset-key route sits behind ownerMutation: session
+// + application/json gate) — no second credential is demanded. The
+// key exists at rest only as a SHA-256 digest, so requiring the
+// current raw key would lock out forever any owner who lost it; the
+// rate limit and the operation log remain the abuse guards.
+// Preserves: active-account check, reset_key rate limit, digest +
+// last-4-only storage, operation log, and the
+// bot_name/new_key/message/warning return shape.
+func ResetKey(ctx context.Context, pool *pg.Pool, limiter *ratelimit.Limiter, botID int64) (map[string]interface{}, error) {
 	bot, err := repository.FindActiveBotKeyByID(ctx, pool, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error resetting key")
 	}
 	if bot == nil {
 		return nil, errors.New(401, "OWNER_LOGIN_REQUIRED", "Owner login required")
-	}
-
-	currentKey = strings.TrimSpace(currentKey)
-	if currentKey == "" {
-		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Missing required field: current_key",
-			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "is required"}}})
-	}
-
-	// Validate key format (canonical auth helper; case-insensitive hex)
-	if !auth.ValidateKeyFormat(currentKey) {
-		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Current key format is invalid",
-			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "must be a valid Agent key"}}})
-	}
-
-	// Verify the supplied raw key against the stored digest
-	// (constant-time). The plaintext key no longer exists at rest.
-	if subtle.ConstantTimeCompare(bot.APIKeyHash, auth.HashAgentKey(currentKey)) != 1 {
-		return nil, errors.NewWithDetails(0, "VALIDATION_FAILED", "Current key is incorrect",
-			map[string]interface{}{"errors": []map[string]string{{"field": "current_key", "message": "does not match the stored key"}}})
 	}
 
 	// Rate limit check

@@ -33,6 +33,14 @@ const (
 	DefaultClaimMaxDuration    = 7200
 )
 
+// MaxAmount is the ceiling on every task money field (price, budget,
+// fund amount and the accumulated budget_locked). 2^53−1 is the exact
+// integer range of an IEEE-754 double: a task amount is therefore
+// lossless in JSON and in JavaScript Number all the way to the cap
+// (the publisher console's task tools carry them as JSON numbers;
+// see wire.go).
+const MaxAmount = 1<<53 - 1
+
 // §3 bounds.
 const (
 	maxTitleLen        = 128
@@ -180,9 +188,9 @@ func ValidateContract(c Contract) []FieldError {
 		add("harness_refs", "must contain at most %d entries, got %d", maxHarnessRefs, n)
 	}
 
-	// -- price: 正整数 --
-	if c.Price <= 0 {
-		add("price", "must be a positive integer, got %d", c.Price)
+	// -- price: 正整数，≤ MaxAmount --
+	if c.Price <= 0 || c.Price > MaxAmount {
+		add("price", "must be a positive integer no greater than %d, got %d", MaxAmount, c.Price)
 	}
 
 	// -- limits --

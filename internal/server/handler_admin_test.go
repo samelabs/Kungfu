@@ -384,3 +384,116 @@ func TestLegacyAdminPathsAre404(t *testing.T) {
 		}
 	}
 }
+
+// P2-2: the admin API login must be application/json — a cross-site
+// form must not be able to carry the JSON envelope in a text/plain or
+// urlencoded body.
+func TestAdminLoginRequiresJSONContentType(t *testing.T) {
+	s := newAdminTestServer(t)
+	router := s.buildRouter()
+	body := `{"username":"someone","password":"wrong-pass-1"}`
+
+	for _, ct := range []string{"text/plain", "application/x-www-form-urlencoded", ""} {
+		req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
+		if ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("Content-Type %q: code = %d, want 415", ct, rec.Code)
+		}
+	}
+
+	// a proper JSON body passes the gate (and fails on credentials)
+	req := httptest.NewRequest("POST", "/api/samelabs/session", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnsupportedMediaType {
+		t.Fatal("application/json must pass the gate")
+	}
+}
+
+// P2-2: the /samelabs login FORM rejects cross-site submissions via
+// Origin/Referer host checks.
+func TestSamelabsLoginOriginRefererGate(t *testing.T) {
+	s := newAdminTestServer(t)
+	router := s.buildRouter()
+	form := strings.NewReader("username=&password=")
+
+	post := func(origin, referer string) int {
+		req := httptest.NewRequest("POST", "/samelabs/login", form)
+		req.Host = "kungfu.md"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := post("https://evil.example", ""); code != http.StatusForbidden {
+		t.Fatalf("evil Origin: %d, want 403", code)
+	}
+	if code := post("", "https://evil.example/login"); code != http.StatusForbidden {
+		t.Fatalf("evil Referer: %d, want 403", code)
+	}
+	if code := post("https://kungfu.md", "https://evil.example/x"); code != http.StatusForbidden {
+		t.Fatalf("matching Origin + evil Referer: %d, want 403", code)
+	}
+	// same-origin and headerless requests pass the gate (empty form
+	// credentials then answer 400, not 403)
+	if code := post("https://kungfu.md", ""); code == http.StatusForbidden {
+		t.Fatalf("same-origin Origin rejected: %d", code)
+	}
+	if code := post("", "https://kungfu.md/login"); code == http.StatusForbidden {
+		t.Fatalf("same-origin Referer rejected: %d", code)
+	}
+	if code := post("", ""); code == http.StatusForbidden {
+		t.Fatalf("headerless request rejected: %d", code)
+	}
+}
+
+// P3-29: every /api response carries Cache-Control: no-store.
+func TestAPIResponsesAreNoStore(t *testing.T) {
+	s := newAdminTestServer(t)
+	router := s.buildRouter()
+
+	for _, path := range []string{"/api/account", "/api/key", "/api/samelabs/users", "/api/owner/session"} {
+		req := httptest.NewRequest("GET", path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("%s: Cache-Control = %q, want no-store (status %d)", path, got, rec.Code)
+		}
+	}
+
+	// outside /api the header is not forced (static page has its own policy)
+	req := httptest.NewRequest("GET", "/llms.txt", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got == "no-store" {
+		t.Fatalf("/llms.txt must keep its own cache policy, got %q", got)
+	}
+}
+
+// P3-34: passwords above bcrypt's 72-byte input limit are a 400, never
+// a hashing 500.
+func TestAdminPasswordByteLimit(t *testing.T) {
+	e := newAdminEnv(t)
+
+	long := strings.Repeat("a", 73) // 73 bytes > bcrypt's 72
+	body := `{"username":"toolong.pw","display_name":"X","password":"` + long + `"}`
+	rec := e.do(t, "POST", "/api/samelabs/users", body, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create with 73-byte password: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "72") {
+		t.Fatalf("error must name the 72-byte ceiling: %s", rec.Body.String())
+	}
+}

@@ -14,7 +14,7 @@ import (
 // PostResult holds the result of a POST request.
 type PostResult struct {
 	Success      bool
-	Sent         bool    // true once any attempt fully wrote the request (httptrace WroteRequest)
+	Sent         bool    // true once the request headers were written to the wire (httptrace WroteHeaders)
 	ResponseCode *int    // nil if no response received (network error)
 	ResponseBody *string // nil if no response body
 	ErrorCode    string  // empty if success
@@ -24,7 +24,6 @@ type PostResult struct {
 // PostJSON sends a JSON POST request to a URL.
 // Contract:
 //   - Content-Type: application/json
-//   - Content-Length header set explicitly
 //   - 10 second total timeout
 //   - 5 second connect timeout
 //   - Does NOT follow redirects (returns the raw response)
@@ -75,7 +74,6 @@ const maxResponseBytes = 65535
 //
 // Contract:
 //   - Content-Type: application/json (always set here)
-//   - Content-Length header set explicitly
 //   - 10 second total timeout, 5 second connect timeout
 //   - Does NOT follow redirects (returns the raw response)
 //
@@ -98,22 +96,25 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 		}
 	}
 
-	// sent latches true the first time any attempt writes the full
-	// request to the wire (httptrace WroteRequest with Err == nil) and
-	// never goes back — the single transport fact behind
-	// IsDefinitiveNotDelivered. WroteRequest runs on the transport's
-	// write goroutine, hence the atomic.
+	// sent latches true the first time the request HEADERS are written
+	// to the wire (httptrace WroteHeaders) and never goes back — the
+	// single transport fact behind IsDefinitiveNotDelivered. Latching at
+	// the headers (not after the full body) classifies a request that
+	// broke off mid-body as UNCERTAIN per §7.2: the receiver may already
+	// have acted on it. WroteHeaders runs on the transport's write
+	// goroutine, hence the atomic.
 	var sent atomic.Bool
 	traceCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				sent.Store(true)
-			}
+		WroteHeaders: func() {
+			sent.Store(true)
 		},
 	})
 	req = req.WithContext(traceCtx)
 
 	req.Header.Set("Content-Type", "application/json")
+	// No-op on the wire (net/http frames the body itself and ignores
+	// this header field on client requests) — documents the body size
+	// guarantee at the request construction site.
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -163,11 +164,12 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 }
 
 // IsDefinitiveNotDelivered classifies a failed PostResult as PROVABLY
-// not reaching the receiver: no response code and the request was
-// never fully written (SSRF refusal, DNS failure, connect refused,
+// not reaching the receiver: no response code and the request headers
+// were never written (SSRF refusal, DNS failure, connect refused,
 // connect timeout, TLS handshake or certificate failure — everything
-// httptrace never reported as WroteRequest). Once the request left
-// the wire, a later timeout or disconnect is UNCERTAIN by §7.2.
+// httptrace never reported as WroteHeaders). Once the headers left
+// the wire, a later timeout, disconnect or partial body write is
+// UNCERTAIN by §7.2.
 func IsDefinitiveNotDelivered(result PostResult) bool {
 	if result.Success || result.ResponseCode != nil {
 		return false // not in scope: had a usable HTTP response

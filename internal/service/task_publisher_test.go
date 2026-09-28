@@ -169,6 +169,62 @@ func TestPublisherCreateBudgetBelowFloor(t *testing.T) {
 	}
 }
 
+// TestPublisherCreateBudgetOverMax: budget above task.MaxAmount is
+// rejected with the budget field named (§4 cap).
+func TestPublisherCreateBudgetOverMax(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+
+	_, err := CreateTask(context.Background(), pool, publisher, pubContract(""), task.MaxAmount+1)
+	appErr := appErrOf(t, err)
+	if appErr.Code != "VALIDATION_FAILED" {
+		t.Fatalf("budget over max: %v, want VALIDATION_FAILED", err)
+	}
+	items, _ := appErr.Details["errors"].([]map[string]string)
+	if len(items) != 1 || items[0]["field"] != "budget" {
+		t.Fatalf("details.errors = %#v, want a single budget field error", appErr.Details)
+	}
+}
+
+// TestPublisherFundOverMax: a fund amount that would push budget_locked
+// past task.MaxAmount is rejected with the amount field named; the
+// task keeps its budget (§4 cap).
+func TestPublisherFundOverMax(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	ctx := context.Background()
+
+	code := pubCreateForTest(t, pool, publisher, pubContract("https://example.com/hook"), 10)
+
+	// amount itself within the cap, but 10 + MaxAmount overflows it
+	_, err := FundTask(ctx, pool, publisher, code, task.MaxAmount)
+	appErr := appErrOf(t, err)
+	if appErr.Code != "VALIDATION_FAILED" {
+		t.Fatalf("fund over max: %v, want VALIDATION_FAILED", err)
+	}
+	items, _ := appErr.Details["errors"].([]map[string]string)
+	if len(items) != 1 || items[0]["field"] != "amount" {
+		t.Fatalf("details.errors = %#v, want a single amount field error", appErr.Details)
+	}
+
+	// an amount above the cap is rejected on its own
+	_, err = FundTask(ctx, pool, publisher, code, task.MaxAmount+1)
+	if appErrOf(t, err).Code != "VALIDATION_FAILED" {
+		t.Fatalf("fund amount over max: %v, want VALIDATION_FAILED", err)
+	}
+
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
+	if tr.BudgetLocked != 10 {
+		t.Fatalf("budget_locked = %d, want 10 (nothing funded)", tr.BudgetLocked)
+	}
+	if got := ledgerSum(t, pool, publisher, "fund_task"); got != 0 {
+		t.Fatalf("fund_task ledger = %d, want 0", got)
+	}
+	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}
+
 func TestPublisherCreateInvalidContract(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)

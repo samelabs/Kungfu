@@ -92,7 +92,6 @@ func TestClaimTaskNotOpen(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	draft := pubCreateForTest(t, pool, publisher, claimContract(), 1000)
 	paused := claimOpenedTask(t, pool, publisher, 1000, nil)
 	if _, err := PauseTask(ctx, pool, publisher, paused); err != nil {
 		t.Fatalf("pause: %v", err)
@@ -103,7 +102,6 @@ func TestClaimTaskNotOpen(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ code, want string }{
-		{draft, task.TaskDraft},
 		{paused, task.TaskPaused},
 		{closed, task.TaskClosed},
 	} {
@@ -113,9 +111,25 @@ func TestClaimTaskNotOpen(t *testing.T) {
 			t.Fatalf("%s: %v (%#v), want TASK_NOT_OPEN/%s", tc.want, err, appErr.Details, tc.want)
 		}
 	}
-	for _, code := range []string{draft, paused, closed} {
+	for _, code := range []string{paused, closed} {
 		claimTaskReserved(t, pool, code) // + invariants
 	}
+}
+
+// TestClaimDraftTaskNotFound: a draft task is invisible to executors
+// (§5.1) — work_claim answers TASK_NOT_FOUND like work_get, never
+// TASK_NOT_OPEN with a status detail that would leak the draft.
+func TestClaimDraftTaskNotFound(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+
+	draft := pubCreateForTest(t, pool, publisher, claimContract(), 1000)
+	_, err := ClaimTask(context.Background(), pool, agent, draft, time.Now())
+	if appErrOf(t, err).Code != "TASK_NOT_FOUND" {
+		t.Fatalf("draft claim: %v, want TASK_NOT_FOUND", err)
+	}
+	claimTaskReserved(t, pool, draft)
 }
 
 func TestClaimTaskOwnTask(t *testing.T) {

@@ -19,6 +19,12 @@ package server
 //
 // The browser must preserve/display/send these strings verbatim; all
 // business validation stays with the server authority.
+//
+// The publisher console's task tools follow the MCP numeric envelope
+// instead: task amounts (price, budget, fund) stay JSON numbers on the
+// wire. This is exact because task.MaxAmount caps every task money
+// field at 2^53-1 — inside the integer range an IEEE-754 double (and
+// thus JS Number) represents losslessly.
 
 import (
 	"errors"
@@ -33,10 +39,10 @@ func econString(v int64) string {
 
 // parseCanonicalEconInt is the ONE canonical decimal integer string
 // parser for the server package — no trim, no float fallback, no
-// leading zeros, no exponent, no '+', no '-0'. Both parseCredits
-// (owner boundaries) and jsonCredits (admin boundaries) reuse it, so
-// there are not two string-integer rules. Syntax/range only: sign
-// BUSINESS rules stay with the domain authority.
+// leading zeros, no exponent, no '+', no '-0'. Admin boundaries
+// (jsonCredits and friends) reuse it, so there are not two
+// string-integer rules. Syntax/range only: sign BUSINESS rules stay
+// with the domain authority.
 //
 // Canonical form: optional '-', then "0" or [1-9][0-9]*.
 func parseCanonicalEconInt(s string) (int64, error) {

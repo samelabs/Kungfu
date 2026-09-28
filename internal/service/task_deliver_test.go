@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
@@ -430,8 +431,9 @@ func TestDeliverConnectionRefused(t *testing.T) {
 }
 
 // §7.2: timeout (no usable response, not provably undelivered) →
-// uncertain with the reservation held. The caller's context deadline
-// bounds the wait (injectable timeout). --
+// uncertain with the reservation held. The timeout is injected via the
+// delivery request-budget override (the caller's context no longer
+// bounds delivery — P1-1). --
 
 func TestDeliverTimeoutUncertain(t *testing.T) {
 	pool := pubTestPool(t)
@@ -445,10 +447,11 @@ func TestDeliverTimeoutUncertain(t *testing.T) {
 	rcv.sleep = 5 * time.Second
 	rcv.mu.Unlock()
 
-	// intake with a caller deadline shorter than the receiver's sleep
-	deadlineCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
-	defer cancel()
-	view, err := SubmitWork(deadlineCtx, pool, agent, SubmitInput{
+	// intake with a delivery budget shorter than the receiver's sleep:
+	// the request times out after its headers were written → uncertain
+	delivery.SetRequestTimeoutForTest(400 * time.Millisecond)
+	defer delivery.SetRequestTimeoutForTest(0)
+	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
 		Code:       code,
 		RequestKey: fmt.Sprintf("to-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK),
@@ -468,6 +471,63 @@ func TestDeliverTimeoutUncertain(t *testing.T) {
 		t.Fatalf("reserved = %d, want 5 (uncertain holds it)", tr.Reserved)
 	}
 	assertEvents(t, pool, subID, task.SubUncertain)
+	deliverInvariants(t, pool, code)
+}
+
+// §7.2 + P1-1: the caller's ALREADY-CANCELED context must not fail the
+// delivery. Delivery runs on a detached context (WithoutCancel), so an
+// executor disconnecting mid-request can neither mislabel the outcome
+// RECEIVER_UNREACHABLE nor skip the result write: with a healthy
+// receiver the redelivery settles. --
+
+func TestDeliverCanceledCallerContextStillSettles(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	rcv := startProgReceiver(t)
+	ctx := context.Background()
+
+	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens fast
+	// first leave the submission uncertain: the receiver sleeps past
+	// the shortened delivery budget (the request was already written,
+	// so the timeout is UNCERTAIN, §7.2)
+	rcv.mu.Lock()
+	rcv.sleep = 5 * time.Second
+	rcv.mu.Unlock()
+	delivery.SetRequestTimeoutForTest(400 * time.Millisecond)
+	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
+		Code:       code,
+		RequestKey: fmt.Sprintf("cx-%d", time.Now().UnixNano()),
+		Payload:    []byte(submitPayloadOK),
+	}, testAgentRefKey, time.Now())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	subID := view.SubmissionID.Int64()
+	if view.State != task.SubUncertain {
+		t.Fatalf("state = %s, want uncertain", view.State)
+	}
+	delivery.SetRequestTimeoutForTest(0)
+
+	// the receiver answers promptly again; the redelivery carries an
+	// already-canceled caller context and must still settle
+	rcv.mu.Lock()
+	rcv.sleep = 0
+	rcv.mu.Unlock()
+	canceled, cancelCanceled := context.WithCancel(ctx)
+	cancelCanceled()
+	again, err := DeliverSubmission(canceled, pool, subID, testAgentRefKey, time.Now())
+	if err != nil {
+		t.Fatalf("deliver with canceled ctx: %v", err)
+	}
+	if again.State != task.SubSettled || again.Paid != 5 {
+		t.Fatalf("view = %s/paid %d, want settled/5 — a canceled caller ctx must not fail delivery", again.State, again.Paid)
+	}
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
+	if tr.Settled != 5 || tr.Reserved != 0 {
+		t.Fatalf("task counters settled=%d reserved=%d, want 5/0", tr.Settled, tr.Reserved)
+	}
+	assertEvents(t, pool, subID, task.SubUncertain, task.SubSettled)
 	deliverInvariants(t, pool, code)
 }
 

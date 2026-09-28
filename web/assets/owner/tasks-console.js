@@ -5,8 +5,16 @@
 function tcvCall(tool, args) {
     return requestJson(`/api/owner/tool/${tool}`, {method: 'POST', body: JSON.stringify(args || {})})
         .then((json) => {
-            if (!json.success) throw apiErrorFrom(json, 'js.task_load_failed');
-            return json.data;
+            // The tool bridge speaks the §8.2 envelope: ok / error —
+            // there is no success/data wrapper. The raw envelope IS the
+            // data (callers read env.tasks, env.contract, env.ok...),
+            // and a false ok is data for the caller to display, not a
+            // transport failure. Only a reply that is not an envelope
+            // (not an object, or no boolean ok) fails the load.
+            if (!json || typeof json !== 'object' || typeof json.ok !== 'boolean') {
+                throw apiErrorFrom(json, 'js.task_load_failed');
+            }
+            return json;
         });
 }
 
@@ -41,11 +49,14 @@ function tcvShowStatus(env) {
 function tcvLoadList() {
     tcvCall('task_list', {}).then((env) => {
         tcvShowStatus(env);
-        tcvRenderTaskList(env.tasks || []);
-        if (qs('#taskConsoleList')) {
-            const inv = task.CheckInvariants; // placeholder: no-op in browser
-            void inv;
+        if (!env.ok) {
+            // a failed listing shows the tool error where the list
+            // would be — never an empty "no tasks yet" list
+            const box = qs('#taskConsoleList');
+            if (box) box.innerHTML = tcvStatusLine(env);
+            return;
         }
+        tcvRenderTaskList(env.tasks || []);
     }).catch((error) => {
         const box = qs('#taskConsoleList');
         if (box) box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
@@ -124,7 +135,7 @@ function tcvRenderSimpleForm() {
     qs('#tcvAdvancedBtn').addEventListener('click', () => {
         tcvRenderEditor({code: null, contract: TCV_SAMPLE_CONTRACT, budget: 2000, status: 'new'});
     });
-    requestJson('/api/owner/logs?log_type=credits&page=1&page_size=1', {method: 'GET'})
+    requestJson('/api/owner/logs?type=credits&page=1&page_size=1', {method: 'GET'})
         .then((json) => {
             const b = qs('#tcvSBalance');
             if (b && json && json.success) b.textContent = String(json.data.balance ?? '0');
@@ -142,9 +153,14 @@ function tcvRenderSimpleForm() {
         if (!receiverURL) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_receiver')}}); return; }
         if (!sample || typeof sample !== 'object' || Array.isArray(sample)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_sample')}}); return; }
         if (!Number.isInteger(price) || price < 1) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_price')}}); return; }
+        const totalBudget = price * units;
+        // budget = price × units must stay a safe integer: task money
+        // is capped at 2^53-1 server-side (task.MaxAmount); anything
+        // larger is silently corrupted by JS Number, so refuse it here.
+        if (!Number.isSafeInteger(totalBudget)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.total_too_large')}}); return; }
         tcvCall('task_create', {
             contract: {title, requirements, receiver: {url: receiverURL}, sample, price},
-            budget: price * units,
+            budget: totalBudget,
             open: qs('#tcvSOpen').checked
         }).then((env) => {
             tcvShowStatus(env);
@@ -173,7 +189,7 @@ function tcvRenderEditor(state) {
             <p class="muted">${escapeHtml(t('tasks.status'))}: <span class="badge">${tcvEscapeHtml(status)}</span>${v.version !== undefined ? ` · v${v.version}` : ''}</p>
             <label>${escapeHtml(t('tasks.budget'))}</label>
             <input id="tcvBudget" type="number" min="1" value="${state.budget ?? 5}" ${isNew ? '' : 'disabled'}>
-            <label>Contract JSON</label>
+            <label>${escapeHtml(t('tasks.contract_json'))}</label>
             <textarea id="tcvContract" class="mono" rows="18" spellcheck="false">${tcvEscapeHtml(contractJSON)}</textarea>
             <div class="actions">
                 <button class="btn primary" id="tcvSave" type="button">${escapeHtml(t('tasks.save_basics'))}</button>
@@ -302,9 +318,13 @@ function tcvRenderSubmissions(rows) {
     }).join('');
 }
 
-// wire into the shared page lifecycle
-const tcvOrigRenderPage = typeof renderPage === 'function' ? renderPage : null;
-if (tcvOrigRenderPage) {
+// wire into the shared page lifecycle. Defined as a plain function
+// and mounted by init.js right before its own decorateRenderPage()
+// call — deterministic script order instead of load-time typeof
+// probes (init.js, which declares renderPage, loads after this file).
+function tcvDecorateRenderPage() {
+    if (typeof renderPage !== 'function') return;
+    const tcvOrigRenderPage = renderPage;
     renderPage = async function () {
         if (SECTION === 'tasks') { tcvLoadList(); return; }
         if (SECTION === 'task_new' || SECTION === 'task_detail') { tcvEditorInit(); return; }

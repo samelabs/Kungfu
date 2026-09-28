@@ -25,6 +25,29 @@ var roleCodePattern = regexp.MustCompile(`^[a-z0-9._-]{3,64}$`)
 
 const superadminRoleCode = "superadmin"
 
+// requireWildcardForSuperadmin rejects credential- and access-affecting
+// operations on a superadmin unless the actor holds the wildcard
+// permission — the same defense SetAdminRoles applies to membership
+// changes (P2-1). Resetting a superadmin's password to a chosen value,
+// force-logging them out, or disabling them is functionally equivalent
+// to editing their membership. Membership is checked regardless of the
+// target's account status (disable + enable + reset is a takeover
+// chain). Call inside the caller's transaction, after the target's
+// existence check so ADMIN_NOT_FOUND wins.
+func requireWildcardForSuperadmin(ctx context.Context, q pg.Querier, principal *Principal, adminID int64) error {
+	if principal.HasPermission(WildcardPermission) {
+		return nil
+	}
+	isSuper, err := repository.IsSuperadmin(ctx, q, adminID)
+	if err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "Database error")
+	}
+	if isSuper {
+		return errors.New(403, "FORBIDDEN", "Operating on a superadmin requires the wildcard permission")
+	}
+	return nil
+}
+
 // lastSuperadminError is the invariant failure.
 func lastSuperadminError() error {
 	return errors.New(409, "LAST_SUPERADMIN_REQUIRED",
@@ -58,6 +81,12 @@ func CreateAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, in Cr
 	}
 	if len(in.Password) < 8 {
 		return nil, errors.New(400, "INVALID_PASSWORD", "Password must be at least 8 characters")
+	}
+	// shared policy via auth.ValidatePassword: the 72-byte bcrypt
+	// ceiling and the API-key rule (the admin minimum of 8 stays the
+	// stricter local rule)
+	if valid, pwErrs := auth.ValidatePassword(in.Password); !valid {
+		return nil, errors.New(400, "INVALID_PASSWORD", pwErrs[0])
 	}
 	hash, err := auth.HashPassword(in.Password)
 	if err != nil {
@@ -172,6 +201,9 @@ func DisableAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, admi
 		if err != nil || target == nil {
 			return errors.New(404, "ADMIN_NOT_FOUND", "Admin not found")
 		}
+		if err := requireWildcardForSuperadmin(ctx, tx, principal, adminID); err != nil {
+			return err
+		}
 		if target.Status == "disabled" {
 			entry.Before = map[string]interface{}{"status": target.Status}
 			entry.After = map[string]interface{}{"status": target.Status}
@@ -247,6 +279,11 @@ func ChangeOwnPassword(ctx context.Context, pool *pg.Pool, principal *Principal,
 	if len(newPassword) < 8 {
 		return errors.New(400, "INVALID_PASSWORD", "Password must be at least 8 characters")
 	}
+	// shared policy via auth.ValidatePassword (72-byte bcrypt ceiling,
+	// API-key rule); the admin minimum of 8 stays the stricter local rule
+	if valid, pwErrs := auth.ValidatePassword(newPassword); !valid {
+		return errors.New(400, "INVALID_PASSWORD", pwErrs[0])
+	}
 	if !auth.VerifyPassword(currentPassword, principal.Admin.PasswordHash) {
 		return errors.New(401, "INVALID_CREDENTIALS", "Current password is incorrect")
 	}
@@ -279,6 +316,11 @@ func ResetAdminPassword(ctx context.Context, pool *pg.Pool, principal *Principal
 	if len(newPassword) < 8 {
 		return errors.New(400, "INVALID_PASSWORD", "Password must be at least 8 characters")
 	}
+	// shared policy via auth.ValidatePassword (72-byte bcrypt ceiling,
+	// API-key rule); the admin minimum of 8 stays the stricter local rule
+	if valid, pwErrs := auth.ValidatePassword(newPassword); !valid {
+		return errors.New(400, "INVALID_PASSWORD", pwErrs[0])
+	}
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
 		return errors.New(500, "INTERNAL_ERROR", "Failed to hash password")
@@ -297,6 +339,9 @@ func ResetAdminPassword(ctx context.Context, pool *pg.Pool, principal *Principal
 		target, err := repository.FindAdminByID(ctx, tx, adminID)
 		if err != nil || target == nil {
 			return errors.New(404, "ADMIN_NOT_FOUND", "Admin not found")
+		}
+		if err := requireWildcardForSuperadmin(ctx, tx, principal, adminID); err != nil {
+			return err
 		}
 		if err := repository.UpdateAdminPassword(ctx, tx, adminID, hash); err != nil {
 			return errors.New(500, "INTERNAL_ERROR", "Database error")
@@ -726,6 +771,9 @@ func ForceLogoutAdmin(ctx context.Context, pool *pg.Pool, principal *Principal, 
 		target, err := repository.FindAdminByID(ctx, tx, adminID)
 		if err != nil || target == nil {
 			return errors.New(404, "ADMIN_NOT_FOUND", "Admin not found")
+		}
+		if err := requireWildcardForSuperadmin(ctx, tx, principal, adminID); err != nil {
+			return err
 		}
 		return bumpAuthVersionAndRevokeSessions(ctx, tx, adminID)
 	})

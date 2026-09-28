@@ -110,3 +110,108 @@ func mustCIDR(s string) []*net.IPNet {
 	}
 	return []*net.IPNet{cidr}
 }
+
+// s17Req builds a request with a remote addr and any number of
+// X-Forwarded-For header lines.
+func s17Req(remote string, xff ...string) *http.Request {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = remote
+	for _, line := range xff {
+		r.Header.Add("X-Forwarded-For", line)
+	}
+	return r
+}
+
+// TestGetClientIP — table-driven coverage of the rightmost-untrusted
+// X-Forwarded-For evaluation (P1-2).
+func TestGetClientIP(t *testing.T) {
+	trusted := mustCIDR("127.0.0.0/8")
+	cases := []struct {
+		name   string
+		remote string
+		xff    []string
+		cidrs  []*net.IPNet
+		want   string
+	}{
+		{
+			name:   "no trusted proxies: RemoteAddr wins, XFF ignored",
+			remote: "203.0.113.9:5555",
+			xff:    []string{"1.2.3.4"},
+			cidrs:  nil,
+			want:   "203.0.113.9",
+		},
+		{
+			name:   "untrusted peer with XFF: RemoteAddr wins",
+			remote: "203.0.113.9:5555",
+			xff:    []string{"1.2.3.4"},
+			cidrs:  trusted,
+			want:   "203.0.113.9",
+		},
+		{
+			// the appended chain: spoofed leftmost, real client last
+			name:   "trusted peer: forged leftmost, real client rightmost",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"9.9.9.9, 198.51.100.7"},
+			cidrs:  trusted,
+			want:   "198.51.100.7",
+		},
+		{
+			name:   "single appended client",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"198.51.100.7"},
+			cidrs:  trusted,
+			want:   "198.51.100.7",
+		},
+		{
+			// Header.Get would only see the first line
+			name:   "multi-line XFF flattened, rightmost untrusted wins",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"9.9.9.9", "198.51.100.7, 127.0.0.9"},
+			cidrs:  trusted,
+			want:   "198.51.100.7",
+		},
+		{
+			name:   "IPv4-mapped entry normalized to IPv4",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"::ffff:198.51.100.7"},
+			cidrs:  trusted,
+			want:   "198.51.100.7",
+		},
+		{
+			name:   "invalid entries skipped",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"not-an-ip, 198.51.100.7"},
+			cidrs:  trusted,
+			want:   "198.51.100.7",
+		},
+		{
+			name:   "all entries trusted: direct peer returned",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"127.0.0.9, 127.0.0.10"},
+			cidrs:  trusted,
+			want:   "127.0.0.5",
+		},
+		{
+			name:   "no XFF from trusted peer: peer returned",
+			remote: "127.0.0.5:8080",
+			cidrs:  trusted,
+			want:   "127.0.0.5",
+		},
+		{
+			name:   "forged CF-Connecting-IP ignored",
+			remote: "203.0.113.9:5555",
+			xff:    []string{},
+			cidrs:  trusted,
+			want:   "203.0.113.9",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := s17Req(tc.remote, tc.xff...)
+			r.Header.Set("CF-Connecting-IP", "6.6.6.6") // always present: must never win
+			if got := GetClientIP(r, tc.cidrs); got != tc.want {
+				t.Fatalf("GetClientIP = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

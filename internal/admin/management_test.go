@@ -478,6 +478,63 @@ func TestAdminMgmtLastSuperadminProtection(t *testing.T) {
 	}
 }
 
+// An admin holding only admin.users.manage (and, for the force-logout
+// leg, admin.sessions.manage) must NOT operate on a superadmin:
+// password reset, force logout and disable are each functionally a
+// membership takeover (P2-1).
+func TestAdminMgmtSuperadminProtectedFromCredOps(t *testing.T) {
+	dbPool := createPrivateDB(t)
+	bootstrapForTest(t, dbPool)
+	_, root := b12Super(t, dbPool)
+	super, _ := repository.FindAdminRoleByCode(context.Background(), dbPool, "superadmin")
+
+	// a SECOND active superadmin is the target: the last-superadmin
+	// invariant must NOT be what blocks the operation
+	target := b12CreateUserDirect(t, dbPool, "target.super", "target-pass-1", nil)
+	if err := SetAdminRoles(context.Background(), dbPool, root, target.ID, []int64{super.ID}); err != nil {
+		t.Fatalf("promote target: %v", err)
+	}
+
+	usersOnly, _ := CreateRole(context.Background(), dbPool, root, CreateRoleInput{Code: "usersonly", Name: "Users only"})
+	_ = SetRolePermissions(context.Background(), dbPool, root, usersOnly.ID, []string{"admin.users.manage"})
+	manager := b12CreateUserDirect(t, dbPool, "plain.manager", "manager-pass-1", nil)
+	_ = SetAdminRoles(context.Background(), dbPool, root, manager.ID, []int64{usersOnly.ID})
+	mp := b12PrincipalOf(t, dbPool, manager.Username, "manager-pass-1")
+
+	// password reset on a superadmin → 403 (the guard, not permissions)
+	err := ResetAdminPassword(context.Background(), dbPool, mp, target.ID, "hijacked-pass-1")
+	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 403 {
+		t.Fatalf("reset superadmin password by users.manage-only admin: %v, want 403", err)
+	}
+	// disable → 403 (the guard; a second superadmin exists)
+	err = DisableAdmin(context.Background(), dbPool, mp, target.ID)
+	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 403 {
+		t.Fatalf("disable superadmin by users.manage-only admin: %v, want 403", err)
+	}
+	// force logout is rejected too (permission here: sessions.manage missing)
+	err = ForceLogoutAdmin(context.Background(), dbPool, mp, target.ID)
+	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 403 {
+		t.Fatalf("force logout superadmin by users.manage-only admin: %v, want 403", err)
+	}
+
+	// the same admin WITH sessions.manage still hits the superadmin
+	// guard on force logout — permission alone must not be enough
+	both, _ := CreateRole(context.Background(), dbPool, root, CreateRoleInput{Code: "userssess", Name: "Users and sessions"})
+	_ = SetRolePermissions(context.Background(), dbPool, root, both.ID, []string{"admin.users.manage", "admin.sessions.manage"})
+	_ = SetAdminRoles(context.Background(), dbPool, root, manager.ID, []int64{both.ID})
+	mp2 := b12PrincipalOf(t, dbPool, manager.Username, "manager-pass-1")
+	err = ForceLogoutAdmin(context.Background(), dbPool, mp2, target.ID)
+	if ae, _ := errors.IsAppError(err); ae == nil || ae.HTTPCode != 403 {
+		t.Fatalf("force logout superadmin with sessions.manage but no wildcard: %v, want 403", err)
+	}
+
+	// root (wildcard) still may; and the target superadmin's password
+	// is unchanged (no hijack happened)
+	if err := ForceLogoutAdmin(context.Background(), dbPool, root, target.ID); err != nil {
+		t.Fatalf("wildcard force logout: %v", err)
+	}
+}
+
 // Two active superadmins concurrently run destructive ops that would
 // each leave only themselves: at most one succeeds; ≥1 active
 // superadmin remains.

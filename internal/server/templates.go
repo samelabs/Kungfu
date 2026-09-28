@@ -633,8 +633,6 @@ func ownerKeyHTML(d *tmplData) string {
     <div id="keyBox" class="keybox overview-keybox is-empty"></div>
     <p>` + d.T("owner.key.not_retrievable") + `</p>
     <form id="resetKeyForm" novalidate>
-        <label>` + d.T("owner.key.current_key") + `</label>
-        <input name="current_key" type="password" autocomplete="off" required minlength="72" maxlength="72">
         <div class="actions">
             <button class="btn primary" type="submit">` + d.T("owner.key.reset") + `</button>
         </div>

@@ -12,7 +12,7 @@ type Admin struct {
 	ID                int64
 	Username          string
 	DisplayName       string
-	PasswordHash      string
+	PasswordHash      string `json:"-"` // credential material — never serialized
 	Status            string
 	AuthVersion       int64
 	LastLoginAt       *time.Time
@@ -39,7 +39,7 @@ type AdminRole struct {
 type AdminSession struct {
 	ID          int64
 	AdminID     int64
-	TokenHash   string
+	TokenHash   string `json:"-"` // credential material — never serialized
 	AuthVersion int64
 	IPAddress   *string
 	UserAgent   *string

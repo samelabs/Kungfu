@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -55,6 +56,13 @@ func AgentRef(agentRefKey []byte, taskCode string, agentID int64) string {
 // its outcome. Non-delivering/uncertain states return the current view
 // unchanged (idempotent; no re-settlement).
 func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, agentRefKey []byte, now time.Time) (SubmissionView, error) {
+	// The caller's cancellation (an executor disconnecting mid-request)
+	// must NOT abort the delivery or its outcome write: the POST and the
+	// settlement run to completion on this detached context, bounded by
+	// the HTTP client's 10s total timeout (§11), not by the caller. A
+	// submission orphaned by a disconnect is picked up as delivering by
+	// the recovery worker (§5.4).
+	ctx = context.WithoutCancel(ctx)
 	sub, err := repository.FindSubmissionByID(ctx, pool, submissionID)
 	if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
 		return SubmissionView{}, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
@@ -117,10 +125,14 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 		return SubmissionView{}, err
 	}
 
-	// §7.3 receiver-fault governance.
+	// §7.3 receiver-fault governance. The outcome above is already
+	// durable — a governance failure is logged, not returned: masking a
+	// settled/rejected result with INTERNAL_ERROR would tell the caller
+	// nothing new (the next counting failure re-runs the check).
 	if outcome.event == task.EventDeliveryFailed {
 		if err := maybePauseForReceiverFault(ctx, pool, sub.TaskID); err != nil {
-			return SubmissionView{}, err
+			log.Printf("receiver-fault governance failed: task_id=%d submission_id=%d err=%v",
+				sub.TaskID, sub.SubmissionID, err)
 		}
 	}
 	return SubmissionViewByID(context.WithoutCancel(ctx), pool, submissionID)

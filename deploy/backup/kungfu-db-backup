@@ -1,6 +1,9 @@
 #!/bin/sh
 # Daily kungfu_md backup (custom format, restorable with pg_restore).
 # Keeps 14 days. Installed 2026-09-24 during production standardization.
+# The dump carries password hashes, balances and the full ledger: it
+# must never be group/world-readable (umask 077 => 0600 files).
+umask 077
 set -eu
 cd /
 DIR=/var/backups/kungfu/daily

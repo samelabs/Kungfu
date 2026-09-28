@@ -16,6 +16,15 @@ import (
 // type is "credits" or "agent" — each returns a different structure.
 // taskCode is accepted for URL compatibility and ignored.
 func GetOwnerLogs(ctx context.Context, pool *pg.Pool, botID int64, logType string, page, pageSize int, taskCode string) (map[string]interface{}, error) {
+	// Clamp before the offset is derived: page=0 would produce a
+	// negative OFFSET (P3-23); the bounds hold for any caller, not
+	// just today's handler.
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
 	offset := (page - 1) * pageSize
 
 	switch logType {

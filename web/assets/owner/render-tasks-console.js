@@ -51,6 +51,12 @@ function tcvStatusLine(env) {
         fields = err.details.errors.map((e) =>
             `<li><span class="mono">${escapeHtml(e.field || '')}</span>: ${escapeHtml(e.message || '')}</li>`).join('');
     }
-    return `<div class="task-error"><p class="tcv-err"><b>${escapeHtml(err.code || 'ERROR')}</b> ${escapeHtml(err.message || '')}</p>` +
+    // single-fact details (e.g. TEST_DELIVERY_FAILED's status_code)
+    let status = '';
+    const code = (err.details || {}).status_code;
+    if (code !== undefined && code !== null && code !== 0) {
+        status = ` <span class="mono">HTTP ${escapeHtml(String(code))}</span>`;
+    }
+    return `<div class="task-error"><p class="tcv-err"><b>${escapeHtml(err.code || 'ERROR')}</b>${status} ${escapeHtml(err.message || '')}</p>` +
         (fields ? `<ul class="task-error-fields">${fields}</ul>` : '') + `</div>`;
 }

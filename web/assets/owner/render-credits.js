@@ -59,10 +59,10 @@ function renderCreditsPaymentResult() {
         return;
     }
     const statusKey = {
-        pending: 'owner.credits.payment_pending',
-        paid: 'owner.credits.payment_paid',
-        failed: 'owner.credits.payment_failed',
-        cancelled: 'owner.credits.payment_cancelled'
+        pending: 'credits.payment_pending',
+        paid: 'credits.payment_paid',
+        failed: 'credits.payment_failed',
+        cancelled: 'credits.payment_cancelled'
     }[pending.status];
     // i18n label when known, else the raw status value — both escaped.
     const label = statusKey ? t(statusKey) : String(pending.status);

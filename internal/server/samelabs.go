@@ -76,6 +76,15 @@ func slFuncs() template.FuncMap {
 			}
 			return *s
 		},
+		// dash renders a nullable column for the finance tables: NULL is
+		// a fact (legacy payments have no provider order, refunds may
+		// carry no reason) and is shown as "—", never as "<nil>".
+		"dash": func(s *string) string {
+			if s == nil || *s == "" {
+				return "—"
+			}
+			return *s
+		},
 		"prettyjson": func(b []byte) string {
 			if len(b) == 0 {
 				return ""

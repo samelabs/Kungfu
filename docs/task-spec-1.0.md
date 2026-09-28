@@ -54,7 +54,7 @@ Kungfu 只提供机制，不保证结果：
 | `output.schema` | 否 | 无 | JSON Schema（draft 2020-12），根类型必须为 object；≤ 32 KB；给出时每个 payload 投递前按它校验 |
 | `receiver.url` | 是 | — | https；公网可达；不对执行者暴露。每个提交投递到这里 |
 | `sample` | 是 | — | JSON object，≤ 512 KB；给出 `output.schema` 时须通过；开放时的测试投递 payload |
-| `price` | 是 | — | 正整数积分；每个被接受的提交支付一次 |
+| `price` | 是 | — | 正整数积分，≤ 2^53−1；每个被接受的提交支付一次 |
 | `limits.max_rejected_per_agent` | 否 | 5 | 1–50；每个执行者在该任务可被驳回的次数 |
 | `claim.required` | 否 | `false` | 为 true 时提交必须携带有效 Claim |
 | `claim.ttl` | 否 | 1 800 | 单次有效期 300–7 200 秒 |
@@ -76,11 +76,11 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 | 转换 | 前置条件 | 效果 |
 |---|---|---|
-| `create` | 余额 ≥ `budget`；`budget` ≥ `price`（至少一份） | 生成 draft；锁定 `budget`（`lock_task`） |
+| `create` | 余额 ≥ `budget`；`budget` ≥ `price`（至少一份）；`budget` ≤ 2^53−1 | 生成 draft；锁定 `budget`（`lock_task`） |
 | `update` | 状态为 draft 或 paused | 整份替换 Contract；paused 状态下的修改在下次 open 时生成新版本；既有 Claim 与 Submission 保持其原版本 |
 | `open` | 状态为 draft 或 paused；契约校验通过；harness_refs 归属通过；测试投递返回 2xx；非平台暂停 | 生成 TaskVersion（Contract + Harness 快照），`version` 指向它；状态 open |
 | `pause` | 状态为 open | 状态 paused；停止接受新 Claim 与不带 Claim 的 Submission；已有 active Claim 仍可提交（不可续期）；进行中的 Submission 照常完成 |
-| `fund` | 状态非 closed；余额 ≥ 追加额 | `budget_locked` 增加（`fund_task`） |
+| `fund` | 状态非 closed；余额 ≥ 追加额；追加额 ≤ 2^53−1 且追加后 `budget_locked` ≤ 2^53−1 | `budget_locked` 增加（`fund_task`） |
 | `close` | 状态非 closed | 状态 closed；规则同 pause；active Claim 至到期前仍可提交（不可续期）；进行中的 Submission 照常完成 |
 | `refund` | 状态 closed 且 `reserved = 0` 且可用 > 0 | 可用余额退回发布者（`refund_task`） |
 | 平台暂停 | 连续 5 次接收端故障（§7.3） | 状态 paused，`paused_reason` 记录原因；发布者修复后可 open |
@@ -154,7 +154,7 @@ delivering ──2xx────────────────────
 
 | 状态 | 含义 | 预留 | 终态 |
 |---|---|---|---|
-| `delivering` | 正在投递 | 持有 | 否 |
+| `delivering` | 正在投递（同步投递，10 秒总超时；卡滞超过 15 秒仍未终态的，由每 30 秒运行一次的恢复任务转为 `uncertain`） | 持有 | 否 |
 | `uncertain` | 投递结果不明；平台以同一 `Idempotency-Key` 每 30 秒重投 | 持有 | 否 |
 | `settled` | 接收端接受，已向执行者支付 `amount` | 已结算 | 是 |
 | `rejected` | 接收端驳回 | 释放 | 是 |
@@ -323,7 +323,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 1. `budget_locked = settled + reserved + refunded + available`，且 `available ≥ 0`、`reserved ≥ 0`。
 2. `reserved = Σ active Claim.amount + Σ 状态 ∈ {delivering, uncertain} 的 Submission.amount`。
 3. 每个 Submission 至多一条结算记录（`earn_task`，ref_type=`task_submission`，ref_id=submission_id）；结算额 = 该 Submission 的 `amount`。
-4. 每个非终态都有确定的离开条件与时限：Claim ≤ `claim.max_duration`；`uncertain` ≤ 24 小时；`delivering` ≤ 15 秒后转为结果或 `uncertain`。
+4. 每个非终态都有确定的离开条件与时限：Claim ≤ `claim.max_duration`；`uncertain` ≤ 24 小时；`delivering` 的投递本身受 10 秒总超时约束，超过 15 秒仍停留于 `delivering` 的提交由每 30 秒运行一次的恢复任务转为 `uncertain`（最坏 15 秒 + 一个恢复周期）。
 5. 每个 `settled` / `rejected` 都带接收端应答（`response_code`）；每个 `failed` 都带 `failure`。
 6. 同一 (`agent`, `task`, `request_key`) 至多一个 Submission。
 7. 执行者看到的 Contract 与 Harness 与其 Submission 记录的 `version` 一致。

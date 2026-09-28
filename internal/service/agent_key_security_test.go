@@ -132,9 +132,10 @@ func TestKeyAtRestOwnerKeyReadNeverReturnsRawKey(t *testing.T) {
 	}
 }
 
-// TestKeyAtRestResetRequiresCurrentRawKey: missing / malformed / wrong
-// current key fails closed with ZERO key mutation.
-func TestKeyAtRestResetRequiresCurrentRawKey(t *testing.T) {
+// TestKeyAtRestResetNeedsNoCurrentKey: the owner session is the whole
+// authority — a reset carries NO current-key credential. An owner who
+// lost the raw key (it is unrecoverable at rest) can still rotate it.
+func TestKeyAtRestResetNeedsNoCurrentKey(t *testing.T) {
 	pool := s61Pool(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	name := "s61rst_" + suffix
@@ -151,35 +152,51 @@ func TestKeyAtRestResetRequiresCurrentRawKey(t *testing.T) {
 	_ = pool.QueryRow(context.Background(), `SELECT id FROM tb_bots WHERE bot_name=$1`, name).Scan(&botID)
 	limiter := ratelimit.NewLimiter(map[string]ratelimit.Config{})
 
-	cases := []struct {
-		label string
-		key   string
-	}{
-		{"missing", "  "},
-		{"malformed", "kf_live_short"},
-		{"wrong", auth.GenerateKey()},
+	// no credential of any kind is passed — the signature has none
+	out, err := ResetKey(context.Background(), pool, limiter, botID)
+	if err != nil {
+		t.Fatalf("reset without any key: %v", err)
 	}
-	for _, tc := range cases {
-		_, err := ResetKey(context.Background(), pool, limiter, botID, tc.key)
-		ae, ok := apperr.IsAppError(err)
-		if !ok {
-			t.Fatalf("%s: expected AppError, got %v", tc.label, err)
-		}
-		// WO-7d: the status code is decided by the protocol table; the
-		// service emits code 0 + VALIDATION_FAILED(field=current_key)
-		if status, listed := apperr.StatusFor(ae.Code); !listed {
-			t.Fatalf("%s: code %s missing from the protocol table", tc.label, ae.Code)
-		} else if status != 422 {
-			t.Fatalf("%s: status = %d, want 422", tc.label, status)
-		}
-		if ae.Code != "VALIDATION_FAILED" {
-			t.Fatalf("%s: code = %s, want VALIDATION_FAILED", tc.label, ae.Code)
-		}
-		// zero mutation: original key still authenticates
-		bot, err2 := repository.FindActiveBotByAPIKeyHash(context.Background(), pool, auth.HashAgentKey(res.Key))
-		if err2 != nil || bot == nil {
-			t.Fatalf("%s: original key was invalidated by a failed reset", tc.label)
-		}
+	newKey, _ := out["new_key"].(string)
+	if !strings.HasPrefix(newKey, "kf_live_") || newKey == res.Key {
+		t.Fatal("reset did not return a new raw key")
+	}
+	// the old key is immediately invalid, the new one authenticates
+	if bot, err := repository.FindActiveBotByAPIKeyHash(context.Background(), pool, auth.HashAgentKey(res.Key)); err != nil || bot != nil {
+		t.Fatal("old key still authenticates after reset")
+	}
+	if bot, err := repository.FindActiveBotByAPIKeyHash(context.Background(), pool, auth.HashAgentKey(newKey)); err != nil || bot == nil {
+		t.Fatal("new key does not authenticate")
+	}
+}
+
+// TestKeyAtRestResetRateLimited: the reset_key limiter is the abuse
+// guard now that no second credential is demanded.
+func TestKeyAtRestResetRateLimited(t *testing.T) {
+	pool := s61Pool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	name := "s61rl_" + suffix
+	if _, err := Register(context.Background(), pool, name, "password123", "127.0.0.1"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_transactions WHERE bot_id=(SELECT id FROM tb_bots WHERE bot_name=$1)`, name)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_logs WHERE bot_id=(SELECT id FROM tb_bots WHERE bot_name=$1)`, name)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE bot_name=$1`, name)
+	})
+	var botID int64
+	_ = pool.QueryRow(context.Background(), `SELECT id FROM tb_bots WHERE bot_name=$1`, name).Scan(&botID)
+
+	limiter := ratelimit.NewLimiter(map[string]ratelimit.Config{
+		"reset_key": {Window: 3600, Limit: 1, Enabled: true},
+	})
+
+	if _, err := ResetKey(context.Background(), pool, limiter, botID); err != nil {
+		t.Fatalf("first reset: %v", err)
+	}
+	_, err := ResetKey(context.Background(), pool, limiter, botID)
+	if _, ok := apperr.IsRateLimitError(err); !ok {
+		t.Fatalf("second reset: %v, want RATE_LIMIT", err)
 	}
 }
 
@@ -206,7 +223,7 @@ func TestKeyAtRestResetRotatesHashAndInvalidatesOldKey(t *testing.T) {
 	var issuedBefore string
 	_ = pool.QueryRow(context.Background(), `SELECT to_char(key_issued_at,'YYYY-MM-DD HH24:MI:SS') FROM tb_bots WHERE id=$1`, botID).Scan(&issuedBefore)
 
-	out, err := ResetKey(context.Background(), pool, limiter, botID, res.Key)
+	out, err := ResetKey(context.Background(), pool, limiter, botID)
 	if err != nil {
 		t.Fatalf("reset: %v", err)
 	}

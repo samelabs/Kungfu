@@ -171,6 +171,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	SuccessResponse(w, result, "Password changed")
 }
 
+// handleResetKey rotates the signed-in owner's Agent key. No request
+// body is read: the owner session (ownerMutation gate) is the whole
+// authority; the browser sends an empty JSON object.
 func (s *Server) handleResetKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
@@ -181,13 +184,7 @@ func (s *Server) handleResetKey(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
-	input, err := parseJSONBodyRequired(r, false, "Request body must be valid JSON")
-	if err != nil {
-		InvalidJSON(w, err.Error())
-		return
-	}
-	currentKey, _ := input["current_key"].(string)
-	result, err := service.ResetKey(r.Context(), s.Pool, s.RateLimiter, bot.ID, currentKey)
+	result, err := service.ResetKey(r.Context(), s.Pool, s.RateLimiter, bot.ID)
 	if err != nil {
 		handleAppError(w, err)
 		return

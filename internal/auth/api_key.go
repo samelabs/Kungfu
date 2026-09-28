@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"regexp"
 	"strings"
@@ -32,9 +31,6 @@ var (
 // BotLookupFunc is a function that finds a bot by the SHA-256 digest
 // of its API key. The raw credential never crosses into the lookup.
 type BotLookupFunc func(ctx context.Context, keyHash []byte) (*model.Bot, error)
-
-// BotActiveUpdateFunc is a function that updates last_active_at.
-type BotActiveUpdateFunc func(ctx context.Context, botID int64) error
 
 func GenerateKey() string {
 	b := make([]byte, 32) // 32 bytes = 64 hex chars
@@ -70,9 +66,14 @@ func AgentKeyMasked(last4 string) string {
 }
 
 // ValidateKeyFormat checks if a key matches the exact format.
-// - Must be exactly 72 characters
-// - Must start with kf_live_
-// - Remaining 64 chars must be hex (case-insensitive)
+//   - Must be exactly 72 characters
+//   - Must start with kf_live_
+//   - Remaining 64 chars must be hex in either case
+//
+// Upper-case hex PASSES this format check but can never authenticate:
+// keys are generated lower-case only and the digest is computed over
+// the exact bytes presented, so an upper-case spelling hashes to a
+// different (unknown) digest.
 func ValidateKeyFormat(key string) bool {
 	if len(key) != keyTotalLen {
 		return false
@@ -125,23 +126,6 @@ func VerifyBotAuth(ctx context.Context, lookupFn BotLookupFunc, r *http.Request)
 	return VerifyAgentKey(ctx, ExtractAPIKeyFromHeader(r), lookupFn)
 }
 
-// MaybeUpdateLastActive updates last_active_at with 10% probability (sampling)
-// to reduce DB write load. The update runs in a fire-and-forget goroutine.
-func MaybeUpdateLastActive(ctx context.Context, updateFn BotActiveUpdateFunc, botID int64) {
-	// 10% sampling to reduce DB writes
-	if rand.IntN(10) != 0 {
-		return
-	}
-	if updateFn == nil {
-		return
-	}
-	// Fire-and-forget, non-blocking
-	go func() {
-		bgCtx := context.Background()
-		_ = updateFn(bgCtx, botID)
-	}()
-}
-
 // HashPassword creates a bcrypt password hash using bcrypt.DefaultCost.
 // Hashes are interoperable with hashes created with the $2y$ prefix convention
 // (see VerifyPassword / normalizeBcryptPrefix).
@@ -171,8 +155,10 @@ func normalizeBcryptPrefix(hash string) string {
 }
 
 // ValidatePassword validates a password against the rules.
-// - 6-128 bytes
-// - Must not contain API key pattern
+//   - 6-72 bytes (72 is bcrypt's hard input limit — a longer password
+//     cannot be hashed, so it must fail as a 400 validation error,
+//     never reach HashPassword)
+//   - Must not contain API key pattern
 func ValidatePassword(password string) (bool, []string) {
 	var errs []string
 	pLen := len(password)
@@ -180,8 +166,8 @@ func ValidatePassword(password string) (bool, []string) {
 	if pLen < 6 {
 		errs = append(errs, "Password too short (minimum 6 characters)")
 	}
-	if pLen > 128 {
-		errs = append(errs, "Password too long (maximum 128 characters)")
+	if pLen > 72 {
+		errs = append(errs, "Password too long (maximum 72 characters)")
 	}
 	if apiKeyDetect.MatchString(password) {
 		errs = append(errs, "Password must not contain an API key")

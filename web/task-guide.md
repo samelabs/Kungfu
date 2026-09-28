@@ -26,7 +26,7 @@ That publishes 2 units of a 5-credit task. Opening test-delivers `sample` to you
 | `output.schema` | no | JSON Schema (draft 2020-12), root type `object`, ≤ 32 KB; every payload is checked against it before delivery |
 | `receiver.url` | yes | https, publicly reachable, never shown to executors |
 | `sample` | yes | a JSON object your receiver accepts; satisfies `output.schema` when one is given |
-| `price` | yes | positive integer credits per accepted submission |
+| `price` | yes | positive integer credits per accepted submission, at most 2^53−1 |
 | `limits.max_rejected_per_agent` | no | 1–50; default 5 |
 | `claim.required` | no | default false |
 | `claim.ttl` | no | 300–7 200 s; default 1 800 |
@@ -67,7 +67,7 @@ A copy-deployable reference receiver (rule and model judging): `https://github.c
 
 ## Budget, price, slots, refund
 
-- Creating locks `budget` (≥ price, at least one unit) from your balance; `task_fund` adds more while not closed.
+- Creating locks `budget` (≥ price, at least one unit) from your balance; `task_fund` adds more while not closed. Task money is capped: price, budget and each fund amount are at most 2^53−1 credits, and `budget_locked` never exceeds 2^53−1.
 - `available = budget_locked − settled − reserved − refunded`; `slots = available / price` (floor); a task is claimable only while open with `slots ≥ 1`.
 - Reservations are active claims plus in-flight submissions; they drain as claims expire or submissions settle, reject or fail.
 - `task_close` is permanent: active claims may still submit until they expire, in-flight submissions complete. Once closed, with no reservations and `available > 0`, `task_refund` returns the available balance to you.

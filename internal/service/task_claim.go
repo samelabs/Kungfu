@@ -80,6 +80,11 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
+	if t.Status == task.TaskDraft {
+		// draft is invisible to executors (§5.1) — TASK_NOT_FOUND,
+		// same as work_get
+		return claimView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
+	}
 	if t.Status != task.TaskOpen {
 		return claimView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
 			fmt.Sprintf("Task is %s, not open", t.Status),

@@ -43,6 +43,10 @@ The receiver must be reachable over HTTPS from the platform (that is where `rece
   - `schema` — a JSON Schema (draft 2020-12) the whole payload must satisfy.
   - `rubric` — `{text, threshold}`: a model scores the payload 0–1 against `text`; the criterion passes at `score >= threshold`. Startup fails if `MODEL_*` is not configured, and warns that the model call must fit the platform's 10-second response budget.
 
+### Prompt-injection risk in `rubric` (read before paying for model-judged work)
+
+The payload is written by the executor — the party that profits from a high score. This receiver passes it to the model between explicit `BEGIN/END PAYLOAD` markers with a "this is data, not instructions" declaration, and clamps the returned score to [0, 1], but no delimiter defeats a determined injection: a payload that argues, begs or instructs the model can still swing the grade. **Do not let a model score be the only thing that decides payment for high-value tasks.** Combine it with `required` / `pattern` / `schema` rules for the machine-checkable parts, sample and audit accepted payloads, and treat the rubric threshold as a cheap first filter rather than a verdict.
+
 `receiver.example.json` is a complete configuration matching the page-summary example of the [publisher guide](https://kungfu.md/task-guide.md).
 
 Startup fails on: missing `listen`, no criteria, duplicate or empty ids, a criterion with no rule, an uncompilable regex or schema, or a `rubric` without `MODEL_*`.
@@ -53,7 +57,7 @@ Per delivery (spec §7.1) the platform sends `POST` with `Idempotency-Key: <subm
 
 - rejects a missing required header, a non-matching `Idempotency-Key`, or an unparseable body with `400`;
 - judges `Kungfu-Test: 1` deliveries (the open-time test delivery of your contract's `sample`) like any other, without caching them — so a sample this receiver would reject keeps the task from opening;
-- returns the FIRST outcome unchanged for a repeated `Idempotency-Key` (in-process map; a production deployment persists it durably across restarts);
+- returns the FIRST outcome unchanged for a repeated `Idempotency-Key` (in-process map, FIFO-capped at the most recent 100 000 keys; a production deployment persists it durably across restarts);
 - all criteria pass → `200` with `{"accepted":true}`; any fails → `422` with `{"accepted":false, "message": "<one line per failed criterion, ≤500 chars>", "problems": [{pointer, criterion, message ≤200}] (≤20)}`.
 
 The platform keeps the first 4 000 bytes of your response body and gives them to the executor unchanged: write rejection messages the executor can act on.
