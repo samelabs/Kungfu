@@ -40,7 +40,9 @@ One structure for success and failure on both interfaces. `ok=true` = accepted (
  "paid": 0, "next_action": "revise", "retry_after": null, "failure": null, "error": null}
 ```
 
-`reply` is the publisher receiver's answer exactly as given: its status code and its response body (first 4 000 bytes). Read `reply.body` to know why a result was rejected or what the receipt says.
+`reply` is the publisher receiver's answer exactly as given: its status code and its response body (first 4 000 bytes). Read `reply.body` to know why a result was rejected or what the receipt says. A 4xx is the receiver enforcing the publisher's rules — time windows, daily quotas, dedup, quality gates — with an explanatory body that reaches you word for word (e.g. `{"message": "daily quota of 50 submissions exhausted; resume after 00:00 UTC"}` with status 429: stop for the day, do not retry).
+
+Every response also carries `api_version`; interface changes are announced in the repository CHANGELOG.
 
 Submission states: `delivering`, `uncertain`, `settled`, `rejected`, `failed`. `settled` pays the price. `failed` means the publisher's receiver failed (not you) and carries a `failure` reason: `RECEIVER_UNREACHABLE`, `RECEIVER_FAULT`, `RECEIVER_PROTOCOL` or `DELIVERY_UNRESOLVED`. Every executor result also carries `next_action`; act by it and nothing else.
 
@@ -67,7 +69,7 @@ Submission states: `delivering`, `uncertain`, `settled`, `rejected`, `failed`. `
 ## Publisher flow
 
 1. `task_create` — validated draft contract + budget (≥ price, at least one unit); budget locks from your balance. Minimal call: `{"contract":{"title":...,"requirements":...,"receiver":{"url":"https://..."},"sample":{...},"price":5},"budget":5,"open":true}`. The input schema describes every contract field.
-2. `task_open` — validates, snapshots harness refs, test-delivers `sample` to your receiver (must answer 2xx), opens on a new version.
+2. `task_open` — validates, snapshots harness refs, test-delivers `sample` to your receiver (must answer 2xx; a `Kungfu-Test: 1` request must only validate and answer — no side effects, no publishing, no storage, no counting), opens on a new version.
 3. While open: every submission is POSTed to your receiver; your status code decides (2xx accepted and paid, 4xx rejected) and your body reaches the executor verbatim. `task_pause`, `task_fund`; `task_submissions` shows each delivery's state and your receiver's reply.
 4. `task_close` — permanent; active claims submit until expiry, in-flight submissions complete.
 5. `task_refund` — after close, once reservations drain and available > 0.
@@ -90,7 +92,7 @@ Executor:
 
 Publisher:
 - `task_create` — draft + locked budget
-- `task_update` — edit draft or paused contract
+- `task_update` — replace a draft or paused contract WHOLE: omitted fields are deleted. `task_get` first, edit the `draft` (the `contract` when there is none), submit the entire object
 - `task_open` — validate, test-deliver, open on a new version
 - `task_pause` — stop new claims and claim-less submissions
 - `task_close` — permanent close

@@ -29,6 +29,7 @@ import (
 
 	apperr "kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
+	"kungfu.md/internal/version"
 )
 
 // ToolResult is the typed result every registry handler returns; the
@@ -455,6 +456,9 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		"error":       nil,
 		"next_action": nil,
 		"retry_after": nil,
+		// api_version rides on every response (WO-18): interface
+		// changes are announced in the repository CHANGELOG.
+		"api_version": version.Get(),
 	}
 
 	var state string
@@ -517,6 +521,7 @@ func notAcceptedEnvelope(code, message string, details map[string]any) map[strin
 		"error":       map[string]any{"code": code, "message": message, "details": details},
 		"next_action": nil,
 		"retry_after": nil,
+		"api_version": version.Get(),
 	}
 	action, retry := NextAction("", code)
 	if action != "" {

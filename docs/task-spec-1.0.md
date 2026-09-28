@@ -86,7 +86,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 | 平台暂停 | 连续 5 次接收端故障（§7.3） | 状态 paused，`paused_reason` 记录原因；发布者修复后可 open |
 | 平台关闭 | 平台治理 | 状态 closed，`closed_reason` 对发布者与执行者可见 |
 
-**测试投递**（open 时）：以 §7.1 的请求形状投递 `sample`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。
+**测试投递**（open 时）：以 §7.1 的请求形状投递 `sample`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。带 `Kungfu-Test: 1` 的请求必须只做校验并应答，不得产生任何副作用（不发布、不入库、不计数）。
 
 派生量：
 - `available = budget_locked − settled − reserved − refunded`（`reserved` 为全部未终结预留金额之和）
@@ -218,6 +218,8 @@ Kungfu-Task-Version: <version>
 | 超时；连接中途断开 | `uncertain`，保持预留，每 30 秒重投 | — |
 | `uncertain` 满 24 小时 | `failed`，释放预留 | `DELIVERY_UNRESOLVED` |
 
+接收端是规则执行者：时间窗、每日配额、去重、质量门槛等一切业务规则由接收端以 4xx 加说明文字执行，说明文字原样到达执行者（发布者指南含配额示例）。
+
 ### 7.3 故障治理
 
 同一任务最近 5 个终态 Submission 全部为 `failed` 且原因属于 RECEIVER_PROTOCOL、RECEIVER_FAULT、RECEIVER_UNREACHABLE 时，平台暂停任务，`paused_reason = RECEIVER_FAULT`。DELIVERY_UNRESOLVED 不计入并中断连续计数。
@@ -233,7 +235,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | 执行者 | 作用 | 发布者 | 作用 |
 |---|---|---|---|
 | `work_list` | §5.1 | `task_create` | 创建 draft 并锁定预算；`open` 为 true 时创建后在同一调用内开放（开放失败返回该错误，任务保持 draft） |
-| `work_get` | §5.1 | `task_update` | 整份替换 draft / paused 任务的契约；返回中 `draft` 为已保存草稿，`draft_pending` 标记它与生效版本不同（§4） |
+| `work_get` | §5.1 | `task_update` | 整份替换 draft / paused 任务的契约：未包含的字段会被删除。先 `task_get` 读取，在 `draft`（没有 `draft` 时用 `contract`）的基础上修改后整份提交；返回中 `draft` 为已保存草稿，`draft_pending` 标记它与生效版本不同（§4） |
 | `work_harness` | §5.1 | `task_open` | 校验 + 测试投递 + 生效版本 |
 | `work_claim` | §5.2 | `task_pause` / `task_close` | §4 |
 | `work_claim_renew` / `work_release` | §5.2 | `task_fund` / `task_refund` | §4 |
@@ -261,11 +263,12 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
   "failure": null,
   "next_action": "revise",
   "retry_after": null,
-  "error": null
+  "error": null,
+  "api_version": "v2.0.3"
 }
 ```
 
-`work_status` 另返回 `events[]`（SubmissionEvent）。ID 字段（`submission_id`、`claim_id`、`report_id`、`revises`）在输出中为字符串，输入接受字符串或整数。
+每个响应都带 `api_version`（应用版本）；接口变更以仓库 CHANGELOG 为准。`work_status` 另返回 `events[]`（SubmissionEvent）。ID 字段（`submission_id`、`claim_id`、`report_id`、`revises`）在输出中为字符串，输入接受字符串或整数。
 
 ### 8.3 next_action
 
