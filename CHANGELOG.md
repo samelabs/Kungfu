@@ -5,6 +5,35 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] — 2026-09-28
+
+The publisher task console reaches feature completeness, and the task
+view makes paused edits visible. No schema changes.
+
+### Added
+
+- `task_get` (and the `task_update` result) carries the 30-day stats
+  (`accept_rate`, `median_reply_seconds`, `failure_rate`) with
+  `work_get`'s exact scope; `task_list` stays stat-free.
+- While a task is draft or paused, task views expose the saved draft
+  contract under `draft`, with `draft_pending` true once a version
+  exists and the draft differs from the live snapshot — a paused edit
+  no longer looks lost between the update and the next open.
+- The console bridge exposes the read-only `memory_list` (own memories
+  only) for the harness picker.
+- Owner console: one contract form for create and edit (basics with
+  character counts, harness attachment from your memories, sample
+  JSON check, optional output.schema, execution rules with defaults),
+  a draft-pending banner with a read-only view of the live version,
+  translated statuses, pause reasons and failures, funds and 30-day
+  stats panels, a filterable 20-per-page delivery record, and a
+  status-filtered task list — in five languages.
+
+### Changed
+
+- `task-guide.md`: the Owner console section is rewritten for the new
+  interface; the Lifecycle section notes the paused-draft visibility.
+
 ## [2.0.1] — 2026-09-28
 
 Audit fixes from the full v2.0.0 code review. No schema changes, no
