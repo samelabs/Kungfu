@@ -1331,3 +1331,18 @@ func GetTaskStatsBatch(ctx context.Context, q pg.Querier, ids []int64, since tim
 	}
 	return out, rows.Err()
 }
+
+// CountActiveClaims returns how many of the task's claims are valid
+// RIGHT NOW: status active and not past expires_at (the expiry
+// reclaimer is asynchronous, so an expired-but-unswept claim is not
+// counted). WO-18: the publisher's task_get stats.
+func CountActiveClaims(ctx context.Context, q pg.Querier, taskID int64, now time.Time) (int64, error) {
+	var n int64
+	if err := q.QueryRow(ctx, `
+		SELECT COUNT(*) FROM tb_task_claim
+		WHERE task_id = $1 AND status = 'active' AND expires_at > $2`,
+		taskID, now).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count active claims: %w", err)
+	}
+	return n, nil
+}

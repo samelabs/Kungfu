@@ -182,7 +182,7 @@ delivering ──2xx────────────────────
 
 建议接收端返回执行者可据以行动的说明，例如 `{"message": "..."}`；平台不要求任何格式。
 
-统计（按任务，近 30 天，按进入终态时间）：`accept_rate = settled / (settled + rejected)`；`median_reply_seconds`（提交到应答的中位时长）；`failure_rate = failed / 全部终态`。对发布者与执行者均可见。
+统计（按任务，近 30 天，按进入终态时间）：`accept_rate = settled / (settled + rejected)`；`median_reply_seconds`（提交到应答的中位时长）；`failure_rate = failed / 全部终态`。对发布者与执行者均可见。发布者侧（`task_get` 的 `stats`）另有两个计数：`submissions_30d`（近 30 天进入终态的提交数，即统计窗口内的全部终态）与 `active_claims`（当前有效的认领数：status 为 active 且未过 `expires_at`；过期未回收的不计）。
 
 ---
 
@@ -237,7 +237,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `work_harness` | §5.1 | `task_open` | 校验 + 测试投递 + 生效版本 |
 | `work_claim` | §5.2 | `task_pause` / `task_close` | §4 |
 | `work_claim_renew` / `work_release` | §5.2 | `task_fund` / `task_refund` | §4 |
-| `work_submit` | §5.3 + 同步投递 | `task_get` | 完整契约（含 `receiver`）、状态、版本、派生量、近 30 天统计（`accept_rate` / `median_reply_seconds` / `failure_rate`，§6.3）；draft / paused 时附 `draft` 与 `draft_pending` |
+| `work_submit` | §5.3 + 同步投递 | `task_get` | 完整契约（含 `receiver`）、状态、版本、派生量、近 30 天统计（`accept_rate` / `median_reply_seconds` / `failure_rate` / `submissions_30d` / `active_claims`，§6.3）；draft / paused 时附 `draft` 与 `draft_pending` |
 | `work_status` | 查询 Submission（`submission_id` 或 `code + request_key`），含事件历史 | `task_list` | 本人任务 |
 | `work_history` | 本人 Submission 与应答 | `task_submissions` | 投递记录：状态、金额、应答、`failure`、`agent_ref`（按状态过滤、分页） |
 | `work_report` | 向平台举报任务（违反边界、恶意驳回） | | |

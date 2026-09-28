@@ -824,3 +824,85 @@ func TestOpenTestDeliveryUniqueKeyPerAttempt(t *testing.T) {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
+
+// TestPublisherStatsCounters (WO-18): task_get's stats carry the two
+// publisher-only counters — submissions_30d (terminals inside the
+// 30-day window) and active_claims (claims valid right now).
+func TestPublisherStatsCounters(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+	rcv := startPubReceiver(t, http.StatusOK)
+	now := time.Now()
+
+	// claim.required so a claim survives the pause-free open flow
+	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
+	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	// no activity yet: both counters zero
+	view, err := GetTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	flat := map[string]any{}
+	if err := json.Unmarshal(mustMarshalView(t, view), &flat); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	stats := flat["stats"].(map[string]any)
+	if stats["submissions_30d"].(float64) != 0 || stats["active_claims"].(float64) != 0 {
+		t.Fatalf("fresh stats: %#v", stats)
+	}
+
+	// one active claim → active_claims 1
+	cv, err := ClaimTask(ctx, pool, agent, code, now)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// one settled submission through the real intake+delivery path,
+	// carrying the claim (pubContract requires one)
+	claimID := cv.ClaimID
+	if _, err := SubmitWork(ctx, pool, agent, SubmitInput{
+		Code: code, RequestKey: "wo18-stats-1",
+		Payload: []byte(submitPayloadOK),
+		ClaimID: &claimID,
+	}, testAgentRefKey, now); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	view, err = GetTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("get 2: %v", err)
+	}
+	flat = map[string]any{}
+	if err := json.Unmarshal(mustMarshalView(t, view), &flat); err != nil {
+		t.Fatalf("re-unmarshal 2: %v", err)
+	}
+	stats = flat["stats"].(map[string]any)
+	if stats["submissions_30d"].(float64) != 1 {
+		t.Fatalf("submissions_30d = %v, want 1", stats["submissions_30d"])
+	}
+	if stats["active_claims"].(float64) != 0 {
+		t.Fatalf("active_claims = %v, want 0 (the claim was used by the submission)", stats["active_claims"])
+	}
+
+	// a fresh claim counts again; an expired-but-unswept one does not
+	if _, err := ClaimTask(ctx, pool, agent, code, now); err != nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	view, err = GetTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("get 3: %v", err)
+	}
+	flat = map[string]any{}
+	_ = json.Unmarshal(mustMarshalView(t, view), &flat)
+	if got := flat["stats"].(map[string]any)["active_claims"].(float64); got != 1 {
+		t.Fatalf("active_claims after fresh claim = %v, want 1", got)
+	}
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
+	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}

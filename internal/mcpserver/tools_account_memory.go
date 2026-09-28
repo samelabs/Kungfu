@@ -35,10 +35,17 @@ func handleAccountRegister(ctx context.Context, deps *Deps, agent *model.Bot, ar
 	if err != nil {
 		return ToolResult{}, err
 	}
+	// Onboarding pointers ride along with the one-time key (WO-18):
+	// where to point an MCP client, the plain-HTTP alternative, the
+	// docs, and what to do when the key is lost.
 	return data(map[string]any{
-		"bot_name": res.BotName,
-		"api_key":  res.Key, // one-time disclosure — never logged
-		"message":  res.Message,
+		"bot_name":     res.BotName,
+		"api_key":      res.Key, // one-time disclosure — never logged
+		"mcp_endpoint": "https://kungfu.md/mcp",
+		"api_base":     "https://kungfu.md/api/v1/",
+		"docs":         "https://kungfu.md/llms.txt",
+		"message":      res.Message,
+		"key_recovery": "Store the key now. If it is lost, the owner signs in at /owner/key and resets it.",
 	})
 }
 
