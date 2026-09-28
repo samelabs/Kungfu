@@ -37,7 +37,8 @@ const (
 // fund amount and the accumulated budget_locked). 2^53−1 is the exact
 // integer range of an IEEE-754 double: a task amount is therefore
 // lossless in JSON and in JavaScript Number all the way to the cap
-// (the wire.go browser contract keeps them strings regardless).
+// (the publisher console's task tools carry them as JSON numbers;
+// see wire.go).
 const MaxAmount = 1<<53 - 1
 
 // §3 bounds.

@@ -452,15 +452,6 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 
 // helpers
 
-func draftOf(t *testing.T, pool *pg.Pool, publisher int64) string {
-	t.Helper()
-	view, err := service.CreateTask(context.Background(), pool, publisher, wo7Contract(), 1000)
-	if err != nil {
-		t.Fatalf("create draft: %v", err)
-	}
-	return view["code"].(string)
-}
-
 func wo7OpenTaskClaimRequired(t *testing.T, pool *pg.Pool, publisher int64) string {
 	c := wo7Contract()
 	c.Claim = task.ClaimConfig{Required: true}

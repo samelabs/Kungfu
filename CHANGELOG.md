@@ -32,7 +32,10 @@ new migrations; every fix is behavior, configuration or copy.
 - Owner console: the task list no longer throws `task is not defined`;
   the credits page shows translated payment statuses instead of raw
   i18n keys; the "Contract JSON" label is translated; the logs query
-  uses the real `type` parameter.
+  uses the real `type` parameter. The task console now reads the tool
+  bridge's §8.2 envelope and mounts its page hook deterministically —
+  before this, the task list and editor never rendered, and validation
+  errors are again shown field by field.
 - Passwords longer than bcrypt's 72-byte input limit are rejected with
   400 instead of failing inside the hasher (admin and owner paths).
 - The service worker no longer caches server-rendered `/samelabs` and

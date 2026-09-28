@@ -7,8 +7,13 @@ function tcvCall(tool, args) {
         .then((json) => {
             // The tool bridge speaks the §8.2 envelope: ok / error —
             // there is no success/data wrapper. The raw envelope IS the
-            // data (callers read env.tasks, env.contract, env.ok...).
-            if (!json.ok) throw apiErrorFrom(json, 'js.task_load_failed');
+            // data (callers read env.tasks, env.contract, env.ok...),
+            // and a false ok is data for the caller to display, not a
+            // transport failure. Only a reply that is not an envelope
+            // (not an object, or no boolean ok) fails the load.
+            if (!json || typeof json !== 'object' || typeof json.ok !== 'boolean') {
+                throw apiErrorFrom(json, 'js.task_load_failed');
+            }
             return json;
         });
 }
@@ -44,6 +49,13 @@ function tcvShowStatus(env) {
 function tcvLoadList() {
     tcvCall('task_list', {}).then((env) => {
         tcvShowStatus(env);
+        if (!env.ok) {
+            // a failed listing shows the tool error where the list
+            // would be — never an empty "no tasks yet" list
+            const box = qs('#taskConsoleList');
+            if (box) box.innerHTML = tcvStatusLine(env);
+            return;
+        }
         tcvRenderTaskList(env.tasks || []);
     }).catch((error) => {
         const box = qs('#taskConsoleList');
@@ -306,11 +318,11 @@ function tcvRenderSubmissions(rows) {
     }).join('');
 }
 
-// wire into the shared page lifecycle. init.js — which declares
-// renderPage — loads AFTER this file, so the wrap must be deferred to
-// DOMContentLoaded (all classic scripts have executed by then, and
-// restoreSession only calls renderPage after its first await yields).
-document.addEventListener('DOMContentLoaded', () => {
+// wire into the shared page lifecycle. Defined as a plain function
+// and mounted by init.js right before its own decorateRenderPage()
+// call — deterministic script order instead of load-time typeof
+// probes (init.js, which declares renderPage, loads after this file).
+function tcvDecorateRenderPage() {
     if (typeof renderPage !== 'function') return;
     const tcvOrigRenderPage = renderPage;
     renderPage = async function () {
@@ -318,4 +330,4 @@ document.addEventListener('DOMContentLoaded', () => {
         if (SECTION === 'task_new' || SECTION === 'task_detail') { tcvEditorInit(); return; }
         return tcvOrigRenderPage();
     };
-});
+}
