@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"kungfu.md/internal/mcpserver"
 )
 
 // govBot seeds one account and returns its id.
@@ -376,7 +378,7 @@ func TestOwnerToolBodyTooLarge413(t *testing.T) {
 	cookie := ocSessionCookie(t, s, pool, name)
 
 	rec, env := ocCall(t, s, cookie, "task_create", map[string]any{
-		"contract": map[string]any{"title": strings.Repeat("a", 600*1024)},
+		"contract": map[string]any{"title": strings.Repeat("a", mcpserver.MaxRequestBodyBytes)},
 	})
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("over-limit body = %d, want 413", rec.Code)
