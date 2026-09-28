@@ -116,10 +116,16 @@ func TestEdgeKeepsClientSuppliedStrictness(t *testing.T) {
 		t.Fatalf("lying Mcp-Name = %d %q", resp.StatusCode, body)
 	}
 
-	// An explicitly requested unsupported protocol version is refused.
-	resp, body = bare(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, map[string]string{"Mcp-Protocol-Version": "2025-06-18"})
+	// An explicitly requested unsupported protocol version is refused
+	// (2024-11-05 is not in this server's advertised list). The legacy
+	// revisions 2025-03-26 … 2025-11-25 ARE supported (WO-18) and pass.
+	resp, body = bare(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, map[string]string{"Mcp-Protocol-Version": "2024-11-05"})
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("old protocol version = %d %q", resp.StatusCode, body)
+		t.Fatalf("unsupported protocol version = %d %q", resp.StatusCode, body)
+	}
+	resp, body = bare(t, srv, `{"jsonrpc":"2.0","id":4,"method":"tools/list"}`, map[string]string{"Mcp-Protocol-Version": "2025-06-18"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("legacy protocol version = %d %q, want 200", resp.StatusCode, body)
 	}
 
 	// A spec-complete client gets the same plain JSON response.

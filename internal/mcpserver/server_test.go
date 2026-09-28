@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -846,9 +847,12 @@ func TestMCPLegacyProtocolPinnedClient(t *testing.T) {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
-	// seeded agent: the raw key is the bot name (digest = SHA-256(name))
+	// seeded agent with a REAL key: kf_live_ + 64 hex (the verifier
+	// checks the format before hashing), digest = SHA-256(raw key)
 	name := fmt.Sprintf("pinned_%d", time.Now().UnixNano())
-	digest := sha256.Sum256([]byte(name))
+	keySeed := sha256.Sum256([]byte(name))
+	rawKey := "kf_live_" + hex.EncodeToString(keySeed[:])
+	digest := sha256.Sum256([]byte(rawKey))
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance)
 		VALUES ($1, $2, 'pn01', 'x', 100) RETURNING id`, name, digest[:]); err != nil {
@@ -858,7 +862,7 @@ func TestMCPLegacyProtocolPinnedClient(t *testing.T) {
 	hdr := map[string]string{
 		"Mcp-Method":           "", // per-call below
 		"Mcp-Protocol-Version": legacy,
-		"Authorization":        "Bearer " + name,
+		"Authorization":        "Bearer " + rawKey,
 	}
 
 	// initialize: the server must answer with the SAME revision
