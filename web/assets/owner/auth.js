@@ -104,22 +104,22 @@ function bindPasswordForm() {
     });
 }
 
-// Reset requires the user to MANUALLY supply the current raw key —
-// the stored key is not recoverable from the server and is never
-// auto-loaded. On success the NEW key is shown once (state.newKeyOnce)
-// and only that new key is copyable.
+// Reset needs only the signed-in OWNER session — the current raw key
+// is never demanded (it is unrecoverable from the server, so an owner
+// who lost it must still be able to reset). A confirm() guards the
+// click; on success the NEW key is shown once (state.newKeyOnce) and
+// only that new key is copyable.
 function bindResetKey() {
     const form = qs('#resetKeyForm');
     if (!form) return;
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const currentKey = (new FormData(form).get('current_key') || '').trim();
-        if (!currentKey) return showToast(noticeText(t('auth.reset_key_required')), 'error');
+        if (!confirm(t('key.reset_confirm'))) return;
         // transitional: silent
         try {
             const json = await requestJson('/api/reset-key', {
                 method: 'POST',
-                body: JSON.stringify({current_key: currentKey})
+                body: '{}'
             });
             if (!json.success) return showToast(noticeText(json.error || json), 'error');
             state.newKeyOnce = json.data.new_key || '';

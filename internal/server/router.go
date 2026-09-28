@@ -368,7 +368,8 @@ func parseJSONBodyRequired(r *http.Request, requireObject bool, emptyMessage str
 		if requireObject {
 			return nil, &parseError{msg: emptyMessage}
 		}
-		// Empty body is allowed for reset-key: treat as empty input, no error.
+		// An empty body is a legal empty input for the callers that
+		// take optional fields: treat as empty input, no error.
 		return map[string]interface{}{}, nil
 	}
 

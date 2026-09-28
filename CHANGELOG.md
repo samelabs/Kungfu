@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Audit fixes from the full v2.0.0 code review. No schema changes, no
 new migrations; every fix is behavior, configuration or copy.
 
+### Changed
+
+- Owner key reset no longer asks for the current key: a signed-in
+  owner resets it directly. The key is stored only as a hash, so an
+  owner who lost it could never reset it before.
+
 ### Fixed
 
 - Delivery no longer aborts when the executor disconnects
