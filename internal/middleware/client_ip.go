@@ -9,6 +9,21 @@ import (
 // GetClientIP extracts the client IP, only trusting forwarded headers
 // when the direct connection comes from a trusted proxy.
 // If trustedCIDRs is empty, RemoteAddr is always used.
+//
+// Under a trusted direct peer, X-Forwarded-For is evaluated
+// rightmost-untrusted: appended chains ($proxy_add_x_forwarded_for)
+// put the address each proxy saw at the END of the list, so the
+// leftmost entry is fully client-controlled and must not be trusted.
+// The list is walked from the right, skipping entries inside trusted
+// CIDRs; the first valid entry outside every trusted range is the
+// client. Entries are normalized via net.ParseIP(...).String() first
+// (IPv4-mapped "::ffff:1.2.3.4" collapses to "1.2.3.4") so equivalent
+// spellings cannot split rate-limit buckets. When no untrusted entry
+// is found, the direct peer's address is returned.
+//
+// CF-Connecting-IP is deliberately not honored: the reference
+// deployment fronts the server with plain nginx, and that header is
+// client-forgeable and passed through transparently.
 func GetClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 	remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -29,26 +44,37 @@ func GetClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 		return remoteIP
 	}
 
-	// Connection is from a trusted proxy — honor X-Forwarded-For
-	// Take the leftmost (original client) IP
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		ip := strings.TrimSpace(strings.Split(xff, ",")[0])
-		if net.ParseIP(ip) != nil {
-			return ip
+	// Connection is from a trusted proxy — walk every X-Forwarded-For
+	// entry (all header lines, wire order) from the right, skipping
+	// further trusted hops and invalid entries; the first valid
+	// untrusted address is the client.
+	entries := xffEntries(r)
+	for i := len(entries) - 1; i >= 0; i-- {
+		ip := net.ParseIP(entries[i])
+		if ip == nil {
+			continue
 		}
-	}
-
-	// Fall back to CF-Connecting-IP (Cloudflare)
-	cfIP := r.Header.Get("CF-Connecting-IP")
-	if cfIP != "" {
-		ip := strings.TrimSpace(cfIP)
-		if net.ParseIP(ip) != nil {
-			return ip
+		normalized := ip.String()
+		if isTrustedProxy(normalized, trustedCIDRs) {
+			continue
 		}
+		return normalized
 	}
-
 	return remoteIP
+}
+
+// xffEntries flattens every X-Forwarded-For header line into one
+// ordered entry list (Header.Get would hide additional lines).
+func xffEntries(r *http.Request) []string {
+	var entries []string
+	for _, line := range r.Header.Values("X-Forwarded-For") {
+		for _, entry := range strings.Split(line, ",") {
+			if entry = strings.TrimSpace(entry); entry != "" {
+				entries = append(entries, entry)
+			}
+		}
+	}
+	return entries
 }
 
 // directPeerIP extracts the parsed direct TCP peer address from

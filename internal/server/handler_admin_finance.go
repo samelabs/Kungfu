@@ -44,6 +44,15 @@ func botIDQuery(q map[string][]string) (int64, error) {
 	return n, nil
 }
 
+// nullableEconString serializes a nullable economic integer: nil stays
+// JSON null; a value takes the canonical decimal string form.
+func nullableEconString(v *int64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return econString(*v)
+}
+
 func financePaymentDTO(p admin.FinancePayment) map[string]interface{} {
 	return map[string]interface{}{
 		"id":                  p.ID,
@@ -51,7 +60,7 @@ func financePaymentDTO(p admin.FinancePayment) map[string]interface{} {
 		"bot_id":              p.BotID,
 		"bot_name":            p.BotName,
 		"provider":            p.Provider,
-		"provider_product_id": p.ProviderProductID,
+		"provider_product_id": p.ProviderProductID, // nullable — nil marshals as JSON null
 		"provider_order_id":   p.ProviderOrderID,
 		"amount_minor":        econString(p.AmountMinor),
 		"currency":            p.Currency,
@@ -79,7 +88,7 @@ func financeAdjustmentDTO(a admin.FinanceAdjustment) map[string]interface{} {
 		"currency":                 a.Currency,
 		"transaction_amount_minor": econString(a.TransactionAmountMinor),
 		"amount_paid_minor":        econString(a.AmountPaidMinor),
-		"refunded_amount_minor":    econString(a.RefundedAmountMinor),
+		"refunded_amount_minor":    nullableEconString(a.RefundedAmountMinor),
 		"object_status":            a.ObjectStatus,
 		"transaction_status":       a.TransactionStatus,
 		"reason":                   a.Reason,

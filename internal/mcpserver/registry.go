@@ -18,8 +18,9 @@ package mcpserver
 // with the protocol-layer code→status table below (service-internal
 // AppError HTTP codes are ignored).
 //
-// Account and Memory tools keep their existing registration and are
-// deliberately NOT migrated.
+// Account, Memory and publisher tools live in the same registry
+// (tools_account_memory.go, tools_memory_work.go, tools_publisher.go)
+// — every tool on either transport is defined exactly once here.
 
 import (
 	"context"

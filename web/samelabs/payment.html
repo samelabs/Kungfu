@@ -7,7 +7,7 @@
       <dt>Account</dt><dd><a href="/samelabs/accounts/{{$p.BotID}}">@{{$p.BotName}}</a></dd>
       <dt>Amount</dt><dd>{{minor $p.AmountMinor $p.Currency}}</dd>
       <dt>Credits</dt><dd>{{num $p.Credits}}</dd>
-      <dt>Provider</dt><dd>{{$p.Provider}} · product <span class="mono">{{$p.ProviderProductID}}</span></dd>
+      <dt>Provider</dt><dd>{{$p.Provider}} · product <span class="mono">{{dash $p.ProviderProductID}}</span></dd>
       <dt>Provider order</dt><dd class="mono">{{if $p.ProviderOrderID}}{{$p.ProviderOrderID}}{{else}}—{{end}}</dd>
       <dt>Created</dt><dd>{{time $p.CreatedAt}}</dd>
       <dt>Paid</dt><dd>{{ptime $p.PaidAt}}</dd>
@@ -36,7 +36,7 @@
 <section class="sl-card flush">
   <div class="sl-card-head pad"><h2>Refunds &amp; disputes</h2></div>
   {{if .Data.Adjustments}}<table class="sl-table"><thead><tr><th>Kind</th><th class="r">Amount</th><th>Status</th><th>Reason</th><th>Recorded</th></tr></thead><tbody>
-  {{range .Data.Adjustments}}<tr><td>{{template "badge" .Kind}}</td><td class="r">{{minor .AmountMinor .Currency}}</td><td>{{.ObjectStatus}}</td><td>{{.Reason}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
+  {{range .Data.Adjustments}}<tr><td>{{template "badge" .Kind}}</td><td class="r">{{minor .AmountMinor .Currency}}</td><td>{{dash .ObjectStatus}}</td><td>{{dash .Reason}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
   </tbody></table>{{else}}{{template "empty" "None."}}{{end}}
 </section>
 <section class="sl-card flush">

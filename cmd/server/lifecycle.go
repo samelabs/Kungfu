@@ -173,8 +173,8 @@ func ServeLifecycle(ctx context.Context, lc *lifecycle) error {
 // resources, never exits the process — ServeLifecycle owns all of
 // that. This is the runner for the one managed GC loop, not a
 // generic worker framework.
-func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time.Duration, gc func()) {
-	runPeriodic("rate_limiter_gc", stop, failures, interval, gc)
+func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time.Duration, gc func()) <-chan struct{} {
+	return runPeriodic("rate_limiter_gc", stop, failures, interval, gc)
 }
 
 // runPeriodic runs any periodic background worker on the shared
@@ -182,24 +182,42 @@ func runRateLimiterGC(stop <-chan struct{}, failures chan<- error, interval time
 // caught by this boundary and reported (bounded, without the panic
 // value) on failures as a fatal background error routed through the
 // single ServeLifecycle shutdown path.
-func runPeriodic(name string, stop <-chan struct{}, failures chan<- error, interval time.Duration, fn func()) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("[kungfu.md] background worker=%s panicked (panic_type=%T)\n%s",
-				name, rec, debug.Stack())
-			// Bounded report: the panic VALUE stays out of the
-			// returned error; only the worker identity and type.
-			failures <- fmt.Errorf("background worker %s panicked (panic_type=%T)", name, rec)
+//
+// The returned done channel closes exactly when the worker has fully
+// exited — main wires it into lifecycle.backgroundJoins so shutdown
+// JOINS any in-flight pass BEFORE the closers (the PG pool) run. A
+// tick racing shutdown claims no new work: each tick re-checks stop
+// (non-blocking) immediately before calling fn.
+func runPeriodic(name string, stop <-chan struct{}, failures chan<- error, interval time.Duration, fn func()) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[kungfu.md] background worker=%s panicked (panic_type=%T)\n%s",
+					name, rec, debug.Stack())
+				// Bounded report: the panic VALUE stays out of the
+				// returned error; only the worker identity and type.
+				failures <- fmt.Errorf("background worker %s panicked (panic_type=%T)", name, rec)
+			}
+		}()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				// claim gate: a tick already received when shutdown
+				// began must not start a new pass
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				fn()
+			case <-stop:
+				return
+			}
 		}
 	}()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			fn()
-		case <-stop:
-			return
-		}
-	}
+	return done
 }

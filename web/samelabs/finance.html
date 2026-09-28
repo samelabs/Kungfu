@@ -3,7 +3,7 @@
   {{range $s.PaidVolume}}<div class="sl-stat"><span>Paid volume · {{.Currency}}</span><b>{{minor .AmountMinor .Currency}}</b><small>{{num .Count}} payments</small></div>{{else}}<div class="sl-stat"><span>Paid volume</span><b>0</b><small>No paid payments yet</small></div>{{end}}
   <div class="sl-stat"><span>Credits granted</span><b>{{num $s.GrantedCreditsTotal}}</b><small>from paid payments</small></div>
   <div class="sl-stat"><span>Credits reversed</span><b>{{num $s.ReversedCreditsTotal}}</b><small>{{num $s.RefundFactCount}} refunds · {{num $s.DisputeFactCount}} disputes</small></div>
-  <div class="sl-stat"><span>Payments by status</span><b>{{index $s.PaymentsByStatus "paid"}}</b><small>paid · {{index $s.PaymentsByStatus "pending"}} pending · {{index $s.PaymentsByStatus "failed"}} failed · {{index $s.PaymentsByStatus "expired"}} expired</small></div>
+  <div class="sl-stat"><span>Payments by status</span><b>{{index $s.PaymentsByStatus "paid"}}</b><small>paid · {{index $s.PaymentsByStatus "pending"}} pending · {{index $s.PaymentsByStatus "failed"}} failed · {{index $s.PaymentsByStatus "cancelled"}} cancelled</small></div>
 </div>
 <p class="sl-muted">Read-only. Paid volume is what customers paid; it is not revenue (no fees, tax or payouts are recorded here).</p>
 <nav class="sl-tabs">
@@ -14,13 +14,13 @@
 {{if eq .Data.Tab "payments"}}{{$l := .Data.Payments}}
 <form class="sl-filters" method="get">
   <input name="q" value="{{.Q "q"}}" placeholder="Code, account or provider order">
-  <select name="status"><option value="">Any status</option>{{range $x := (list "pending" "paid" "failed" "expired")}}<option value="{{$x}}" {{if eq ($.Q "status") $x}}selected{{end}}>{{$x}}</option>{{end}}</select>
+  <select name="status"><option value="">Any status</option>{{range $x := (list "pending" "paid" "failed" "cancelled")}}<option value="{{$x}}" {{if eq ($.Q "status") $x}}selected{{end}}>{{$x}}</option>{{end}}</select>
   <input name="bot_id" value="{{.Q "bot_id"}}" inputmode="numeric" placeholder="Account #">
   <button class="sl-btn" type="submit">Filter</button>
 </form>
 <section class="sl-card flush">
 {{if $l.Items}}<table class="sl-table"><thead><tr><th>Payment</th><th>Account</th><th class="r">Amount</th><th class="r">Credits</th><th>Status</th><th>Created</th><th>Paid</th></tr></thead><tbody>
-{{range $l.Items}}<tr><td><a class="mono" href="/samelabs/finance/payments/{{.Code}}">{{.Code}}</a><div class="sl-muted mono">{{.ProviderOrderID}}</div></td><td><a href="/samelabs/accounts/{{.BotID}}">@{{.BotName}}</a></td><td class="r">{{minor .AmountMinor .Currency}}</td><td class="r">{{num .Credits}}</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td><td>{{ptime .PaidAt}}</td></tr>{{end}}
+{{range $l.Items}}<tr><td><a class="mono" href="/samelabs/finance/payments/{{.Code}}">{{.Code}}</a><div class="sl-muted mono">{{dash .ProviderOrderID}}</div></td><td><a href="/samelabs/accounts/{{.BotID}}">@{{.BotName}}</a></td><td class="r">{{minor .AmountMinor .Currency}}</td><td class="r">{{num .Credits}}</td><td>{{template "badge" .Status}}</td><td>{{time .CreatedAt}}</td><td>{{ptime .PaidAt}}</td></tr>{{end}}
 </tbody></table>{{else}}{{template "empty" "No payments match these filters."}}{{end}}
 </section>
 {{template "pager" (pager .Query $l.Total $l.Page $l.Size)}}
@@ -33,7 +33,7 @@
 </form>
 <section class="sl-card flush">
 {{if $l.Items}}<table class="sl-table"><thead><tr><th>Kind</th><th>Payment</th><th>Account</th><th class="r">Amount</th><th>Status</th><th>Reason</th><th>Recorded</th></tr></thead><tbody>
-{{range $l.Items}}<tr><td>{{template "badge" .Kind}}</td><td><a class="mono" href="/samelabs/finance/payments/{{.PaymentCode}}">{{.PaymentCode}}</a></td><td><a href="/samelabs/accounts/{{.BotID}}">@{{.BotName}}</a></td><td class="r">{{minor .AmountMinor .Currency}}</td><td>{{.ObjectStatus}}</td><td>{{.Reason}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
+{{range $l.Items}}<tr><td>{{template "badge" .Kind}}</td><td><a class="mono" href="/samelabs/finance/payments/{{.PaymentCode}}">{{.PaymentCode}}</a></td><td><a href="/samelabs/accounts/{{.BotID}}">@{{.BotName}}</a></td><td class="r">{{minor .AmountMinor .Currency}}</td><td>{{dash .ObjectStatus}}</td><td>{{dash .Reason}}</td><td>{{time .CreatedAt}}</td></tr>{{end}}
 </tbody></table>{{else}}{{template "empty" "No refunds or disputes."}}{{end}}
 </section>
 {{template "pager" (pager .Query $l.Total $l.Page $l.Size)}}

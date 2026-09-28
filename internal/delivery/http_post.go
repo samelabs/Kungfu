@@ -24,7 +24,6 @@ type PostResult struct {
 // PostJSON sends a JSON POST request to a URL.
 // Contract:
 //   - Content-Type: application/json
-//   - Content-Length header set explicitly
 //   - 10 second total timeout
 //   - 5 second connect timeout
 //   - Does NOT follow redirects (returns the raw response)
@@ -75,7 +74,6 @@ const maxResponseBytes = 65535
 //
 // Contract:
 //   - Content-Type: application/json (always set here)
-//   - Content-Length header set explicitly
 //   - 10 second total timeout, 5 second connect timeout
 //   - Does NOT follow redirects (returns the raw response)
 //
@@ -114,6 +112,9 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 	req = req.WithContext(traceCtx)
 
 	req.Header.Set("Content-Type", "application/json")
+	// No-op on the wire (net/http frames the body itself and ignores
+	// this header field on client requests) — documents the body size
+	// guarantee at the request construction site.
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	for k, v := range headers {
 		req.Header.Set(k, v)

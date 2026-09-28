@@ -110,6 +110,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// Global baseline security headers — outermost so every response
 	// (HTML, JSON, static, errors, recovered panics) inherits them.
 	r.Use(securityHeadersMiddleware)
+	// The /api JSON plane is never cacheable (authenticated data).
+	r.Use(apiNoStoreMiddleware)
 	// Recovery middleware (catches panics)
 	r.Use(s.recoverMiddleware)
 	r.Use(requestDeadlineMiddleware(deadline))
@@ -193,9 +195,12 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// -- API routes: Admin (kf_admin server-side session) --
 	// Identity foundation + management surface. Every
 	// authenticated mutation requires X-CSRF-Token (enforced in
-	// requireAdminMutation); the only exception remains the login
-	// POST, which is rate-limited instead.
-	r.Post("/api/samelabs/session", s.handleAdminSessionCreate)
+	// requireAdminMutation); the only exceptions are the login POSTs,
+	// which are rate-limited instead. The API login additionally
+	// requires an application/json body (the ownerMutationJSONGate):
+	// a cross-site form must not be able to carry the JSON envelope
+	// in a text/plain body (P2-2).
+	r.Post("/api/samelabs/session", ownerMutation(s.handleAdminSessionCreate))
 	r.Get("/api/samelabs/session", s.handleAdminSessionGet)
 	r.Delete("/api/samelabs/session", s.handleAdminSessionDelete)
 

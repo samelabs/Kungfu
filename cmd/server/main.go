@@ -49,15 +49,19 @@ func main() {
 	// shutdown path instead of crashing the process.
 	gcStop := make(chan struct{})
 	backgroundErrors := make(chan error, 4) // one slot per background worker
-	go runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
+	gcDone := runRateLimiterGC(gcStop, backgroundErrors, 5*time.Minute, srv.RateLimiter.GC)
 
 	// Claim expiry (spec §5.2): expired active claims are marked
 	// expired and their reservation released. A failed pass is logged
 	// and retried on the next tick — only a panic is fatal (through
-	// runPeriodic's boundary and the single shutdown path).
+	// runPeriodic's boundary and the single shutdown path). Each pass
+	// runs under its own 25s budget so a DB network black hole cannot
+	// hang the worker until process exit.
 	claimExpiryStop := make(chan struct{})
-	go runPeriodic("claim_expiry", claimExpiryStop, backgroundErrors, 30*time.Second, func() {
-		expired, err := service.ExpireClaims(context.Background(), pool, time.Now(), 100)
+	claimExpiryDone := runPeriodic("claim_expiry", claimExpiryStop, backgroundErrors, 30*time.Second, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		expired, err := service.ExpireClaims(ctx, pool, time.Now(), 100)
 		if err != nil {
 			log.Printf("[kungfu.md] claim expiry pass failed (expired=%d): %v", expired, err)
 		}
@@ -69,8 +73,10 @@ func main() {
 	// synchronous path will use; WO-7 wires the protocol layer).
 	agentRefKey := []byte(cfg.SessionSecret)
 	recoveryStop := make(chan struct{})
-	go runPeriodic("submission_recovery", recoveryStop, backgroundErrors, 30*time.Second, func() {
-		n, err := service.RecoverSubmissions(context.Background(), pool, agentRefKey, time.Now(), 50)
+	recoveryDone := runPeriodic("submission_recovery", recoveryStop, backgroundErrors, 30*time.Second, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		n, err := service.RecoverSubmissions(ctx, pool, agentRefKey, time.Now(), 50)
 		if err != nil {
 			log.Printf("[kungfu.md] submission recovery pass failed (handled=%d): %v", n, err)
 		}
@@ -79,8 +85,10 @@ func main() {
 	// Data retention (§9): 30 days after a task closes its snapshot
 	// material goes (the rest of the contract, hashes and events stay).
 	retentionStop := make(chan struct{})
-	go runPeriodic("retention", retentionStop, backgroundErrors, 6*time.Hour, func() {
-		snapshots, err := service.PurgeExpired(context.Background(), pool, time.Now(), 500)
+	retentionDone := runPeriodic("retention", retentionStop, backgroundErrors, 6*time.Hour, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		snapshots, err := service.PurgeExpired(ctx, pool, time.Now(), 500)
 		if err != nil {
 			log.Printf("[kungfu.md] retention pass failed (snapshots=%d): %v", snapshots, err)
 		}
@@ -108,10 +116,13 @@ func main() {
 	}()
 
 	err = ServeLifecycle(context.Background(), &lifecycle{
-		httpServer:       httpServer,
-		shutdownBudget:   10 * time.Second,
-		signals:          signals,
-		backgroundStops:  []chan struct{}{gcStop, claimExpiryStop, recoveryStop, retentionStop},
+		httpServer:      httpServer,
+		shutdownBudget:  10 * time.Second,
+		signals:         signals,
+		backgroundStops: []chan struct{}{gcStop, claimExpiryStop, recoveryStop, retentionStop},
+		// Join every worker's in-flight pass before the closers run —
+		// the done channels come straight from runPeriodic/runRateLimiterGC.
+		backgroundJoins:  []<-chan struct{}{gcDone, claimExpiryDone, recoveryDone, retentionDone},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

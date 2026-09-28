@@ -156,16 +156,24 @@ func TestOwnerCSRFAgentRegisterRouteRemoved(t *testing.T) {
 	}
 }
 
-// 8. Admin mutation mechanism is untouched by this gate.
+// 8. Admin mutation mechanism is untouched by this gate. The admin
+// SESSION CREATE is deliberately behind the JSON media-type gate too
+// (P2-2 login-CSRF fix): a form POST there must answer 415 from the
+// media-type gate — never reach admin auth/CSRF handling. Every other
+// admin route stays outside the gate entirely.
 func TestOwnerCSRFAdminRoutesRemainUnderAdminMechanism(t *testing.T) {
 	s, _, _ := s64Server(t)
-	// admin session create is NOT ownerMutation-wired: a form POST
-	// there must be handled by the ADMIN plane (401/400 from admin
-	// auth parsing), never 415 from the Owner gate.
 	rec := s64Mutate(t, s, nil, "POST", "/api/samelabs/session",
 		"application/x-www-form-urlencoded", "u=x")
+	if rec.Code != 415 {
+		t.Fatalf("admin session create = %d, want 415 (deliberate JSON gate, P2-2)", rec.Code)
+	}
+	// a regular admin mutation must NOT be behind the gate: it is
+	// handled by the admin plane (401 without a session, not 415)
+	rec = s64Mutate(t, s, nil, "POST", "/api/samelabs/users",
+		"application/x-www-form-urlencoded", "u=x")
 	if rec.Code == 415 {
-		t.Fatal("Admin route appears to be behind the Owner gate")
+		t.Fatal("regular admin route appears to be behind the Owner JSON gate")
 	}
 }
 

@@ -276,12 +276,19 @@ func AdminListReports(ctx context.Context, q pg.Querier, f AdminReportFilter) ([
 	return out, total, rows.Err()
 }
 
+// normPage clamps pagination before any LIMIT/OFFSET is built from
+// it: page in [1, 10000], size in [1, 200]. The page cap also keeps
+// (page-1)*size inside int64, so a huge page number can never spill
+// into a negative OFFSET (P2-7).
 func normPage(page, size int) (int, int) {
 	if size <= 0 || size > 200 {
 		size = 50
 	}
 	if page < 1 {
 		page = 1
+	}
+	if page > 10000 {
+		page = 10000
 	}
 	return page, size
 }

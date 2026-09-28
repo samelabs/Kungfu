@@ -43,6 +43,3 @@ func readBoundedRequestBody(r *http.Request, maxBytes int64) ([]byte, error) {
 	}
 	return data, nil
 }
-
-// parseCredits extracts a whole-integer Credit value from a decoded
-// JSON field. EXACT integer parsing only — no Credit value ever passes

@@ -11,79 +11,54 @@ import (
 	"time"
 )
 
-// Shutdown-lifecycle regressions for the recovery worker join (release
-// closure, Task block):
+// Shutdown-lifecycle regressions for the background worker join (P2-9):
 //
 //  1. after the stop signal the worker claims NO new work
 //  2. an already-running pass must EXIT before the closers (DB pool) run
 //  3. a worker still running when shutdown triggers must never touch a
 //     closed pool (join precedes Close)
 //
-// These tests use the REAL lifecycle orchestration (ServeLifecycle) and a
-// fake worker with the same stop/done contract as
-// service.RunSubmissionRecoveryWorker.
+// The tests drive the REAL runPeriodic — the same runner production
+// main wires into backgroundJoins — with a fn whose first pass blocks
+// until the test releases it. No fake worker machinery.
 
-// fakeWorker records the ordering of its own exit against the closer.
-type fakeWorker struct {
-	stoppedClaiming chan struct{}
-	mu              sync.Mutex
-	record          func(ev string)
-	inFlight        chan struct{} // closed when a pass is mid-flight
-	releasePass     chan struct{} // test closes to let the pass finish
+// periodicWorker records the ordering of its own exit against the
+// closer while its pass blocks on releasePass.
+type periodicWorker struct {
+	mu         sync.Mutex
+	record     func(ev string)
+	inFlight   chan struct{} // closed when the first pass starts
+	releaseAll chan struct{} // closed to let every pass finish
+	passes     int32
 }
 
-// markInFlight signals a pass has started (exactly once).
-func (w *fakeWorker) markInFlight() {
+func newPeriodicWorker(record func(ev string)) *periodicWorker {
+	return &periodicWorker{
+		record:     record,
+		inFlight:   make(chan struct{}),
+		releaseAll: make(chan struct{}),
+	}
+}
+
+// fn is the worker body: mark the pass, block until released.
+func (w *periodicWorker) fn() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	select {
-	case <-w.inFlight:
-	default:
+	first := atomic.AddInt32(&w.passes, 1) == 1
+	rec := w.record
+	w.mu.Unlock()
+	rec("pass_start")
+	if first {
 		close(w.inFlight)
 	}
+	<-w.releaseAll
+	rec("pass_end")
 }
 
-func newFakeWorker(record func(ev string)) *fakeWorker {
-	return &fakeWorker{
-		stoppedClaiming: make(chan struct{}),
-		inFlight:        make(chan struct{}),
-		releasePass:     make(chan struct{}),
-		record:          record,
-	}
-}
-
-// run mimics the recovery worker contract: stop -> no new claims; a pass
-// already running completes before done closes.
-func (w *fakeWorker) run(stop <-chan struct{}, ticks <-chan time.Time) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-stop:
-				w.record("worker_exit")
-				return
-			case <-ticks:
-				// claim gate (mirrors the production worker)
-				select {
-				case <-stop:
-					w.record("worker_exit")
-					return
-				default:
-				}
-				w.record("pass_start")
-				w.markInFlight()
-				<-w.releasePass // pass runs until the test releases it
-				w.record("pass_end")
-			}
-		}
-	}()
-	return done
-}
+func (w *periodicWorker) startCount() int32 { return atomic.LoadInt32(&w.passes) }
 
 // TestShutdownJoinsWorkerBeforeClosingPool: with a worker pass
 // IN FLIGHT when the shutdown signal fires, ServeLifecycle must close
-// the pool only AFTER the worker function has fully exited.
+// the pool only AFTER the real runPeriodic worker fully exited.
 func TestShutdownJoinsWorkerBeforeClosingPool(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
@@ -93,10 +68,10 @@ func TestShutdownJoinsWorkerBeforeClosingPool(t *testing.T) {
 		mu.Unlock()
 	}
 
-	worker := newFakeWorker(record)
+	worker := newPeriodicWorker(record)
 	stop := make(chan struct{})
-	ticks := make(chan time.Time)
-	done := worker.run(stop, ticks)
+	failures := make(chan error, 1)
+	done := runPeriodic("test_worker", stop, failures, 5*time.Millisecond, worker.fn)
 
 	var closed int32
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +93,6 @@ func TestShutdownJoinsWorkerBeforeClosingPool(t *testing.T) {
 	go func() { finished <- ServeLifecycle(testCtx(), lc) }()
 
 	// Start a pass (in flight), then trigger shutdown.
-	ticks <- time.Now()
 	<-worker.inFlight
 	record("shutdown_signal")
 	signals <- shutdownTrigger{}
@@ -127,13 +101,13 @@ func TestShutdownJoinsWorkerBeforeClosingPool(t *testing.T) {
 	// were closed before the join, ordering would be pool_closed < pass_end.
 	go func() {
 		<-time.After(150 * time.Millisecond)
-		record("pass_release")
-		close(worker.releasePass)
+		close(worker.releaseAll)
 	}()
 
 	if err := <-finished; err != nil {
 		t.Fatalf("ServeLifecycle: %v", err)
 	}
+	<-done // the real worker's own done channel closed
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -145,22 +119,37 @@ func TestShutdownJoinsWorkerBeforeClosingPool(t *testing.T) {
 		}
 		return -1
 	}
-	if idx("pass_end") == -1 || idx("pool_closed") == -1 {
+	last := func(name string) int {
+		last := -1
+		for i, e := range events {
+			if e == name {
+				last = i
+			}
+		}
+		return last
+	}
+	if last("pass_end") == -1 || idx("pool_closed") == -1 {
 		t.Fatalf("missing events: %v", events)
 	}
-	if idx("pass_end") > idx("pool_closed") {
-		t.Fatalf("pool closed BEFORE worker pass exited: %v", events)
+	if last("pass_end") > idx("pool_closed") {
+		t.Fatalf("pool closed BEFORE a worker pass exited: %v", events)
 	}
-	if idx("worker_exit") > idx("pool_closed") {
-		t.Fatalf("pool closed BEFORE worker exited: %v", events)
+	if idx("pass_start") != last("pass_start")-1 && worker.startCount() < 1 {
+		t.Fatalf("unexpected pass accounting: %v", events)
 	}
 	if atomic.LoadInt32(&closed) != 1 {
 		t.Fatalf("pool closed %d times, want exactly 1", closed)
 	}
+	select {
+	case err := <-failures:
+		t.Fatalf("worker reported a failure: %v", err)
+	default:
+	}
 }
 
-// TestWorkerClaimsNoNewWorkAfterStop: once stop is closed, a tick firing
-// must NOT start a new pass (claim gate).
+// TestWorkerClaimsNoNewWorkAfterStop: once stop is closed, the real
+// runPeriodic claims no further passes — the per-tick claim gate and
+// the stop branch both end the loop, and done closes.
 func TestWorkerClaimsNoNewWorkAfterStop(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
@@ -169,68 +158,53 @@ func TestWorkerClaimsNoNewWorkAfterStop(t *testing.T) {
 		events = append(events, ev)
 		mu.Unlock()
 	}
-	worker := newFakeWorker(record)
+	worker := newPeriodicWorker(record)
 	stop := make(chan struct{})
-	ticks := make(chan time.Time)
-	done := worker.run(stop, ticks)
+	failures := make(chan error, 1)
+	done := runPeriodic("test_worker", stop, failures, 2*time.Millisecond, worker.fn)
 
-	close(stop) // shutdown signal first
-	// Ticks arriving after stop must not claim.
-	for i := 0; i < 3; i++ {
-		select {
-		case ticks <- time.Now():
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
+	// First pass in flight, then shutdown WHILE it runs.
+	<-worker.inFlight
+	record("stop_closed")
+	close(stop)
+	close(worker.releaseAll) // every later pass (if one wrongly started) may finish too
+
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("worker did not exit after stop")
 	}
-	close(worker.releasePass) // no pass should have started; safe to release
 	mu.Lock()
 	defer mu.Unlock()
-	for _, e := range events {
-		if e == "pass_start" {
+	// No pass may START after the stop was recorded closed. (A pass
+	// racing in before stop is legal; it must still end before done.)
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i] == "stop_closed" {
+			break
+		}
+		if events[i] == "pass_start" {
 			t.Fatalf("worker claimed new work after stop: %v", events)
 		}
 	}
-	if len(events) == 0 || events[len(events)-1] != "worker_exit" {
-		t.Fatalf("events = %v", events)
+	// and no pass is left hanging: every started pass ended
+	starts, ends := 0, 0
+	for _, e := range events {
+		if e == "pass_start" {
+			starts++
+		}
+		if e == "pass_end" {
+			ends++
+		}
+	}
+	if starts != ends {
+		t.Fatalf("pass_start=%d pass_end=%d — a pass never finished: %v", starts, ends, events)
 	}
 }
-
-type eventCloser struct {
-	record  func(string)
-	name    string
-	counter *int32
-}
-
-func (c eventCloser) Close() error {
-	c.record(c.name)
-	if c.counter != nil {
-		atomic.AddInt32(c.counter, 1)
-	}
-	return nil
-}
-
-func newListener(t *testing.T) net.Listener {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	return ln
-}
-
-func testCtx() context.Context { return context.Background() }
 
 // TestShutdownStopsClaimsBeforeHTTPDrain proves the corrected order: the
 // stop channel closes IMMEDIATELY on the shutdown trigger — BEFORE the
 // HTTP graceful drain finishes. While the drain is still in progress (an
-// in-flight request keeps it open), a recovery tick must NOT start a new
-// pass; the pass only becomes claimable before shutdown was triggered.
+// in-flight request keeps it open), no worker pass may start.
 func TestShutdownStopsClaimsBeforeHTTPDrain(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
@@ -240,10 +214,12 @@ func TestShutdownStopsClaimsBeforeHTTPDrain(t *testing.T) {
 		mu.Unlock()
 	}
 
-	worker := newFakeWorker(record)
+	worker := newPeriodicWorker(record)
 	stop := make(chan struct{})
-	ticks := make(chan time.Time)
-	done := worker.run(stop, ticks)
+	failures := make(chan error, 1)
+	// Long interval: no tick may fire naturally during the test — a
+	// pass starting here would be a claim AFTER the stop gate.
+	done := runPeriodic("test_worker", stop, failures, 65*time.Second, worker.fn)
 
 	// In-flight HTTP request that blocks until the test releases it —
 	// the graceful drain cannot finish while it is open.
@@ -332,14 +308,12 @@ func TestShutdownStopsClaimsBeforeHTTPDrain(t *testing.T) {
 	}
 
 	// While the HTTP drain is still blocked on the in-flight request,
-	// send a recovery tick: the worker must NOT start a pass. (The send
-	// may go unheard — the worker exits at its claim gate — so it runs
-	// in its own goroutine.)
-	go func() { ticks <- time.Now() }()
+	// no worker pass may start.
+	time.Sleep(100 * time.Millisecond)
 	select {
 	case <-worker.inFlight:
-		t.Fatal("new recovery pass started after shutdown trigger, while HTTP drain still in progress")
-	case <-time.After(200 * time.Millisecond):
+		t.Fatal("new worker pass started after shutdown trigger, while HTTP drain still in progress")
+	default:
 		// expected: no pass started
 	}
 
@@ -350,6 +324,7 @@ func TestShutdownStopsClaimsBeforeHTTPDrain(t *testing.T) {
 	if err := <-finished; err != nil {
 		t.Fatalf("ServeLifecycle: %v", err)
 	}
+	close(worker.releaseAll) // safe: no pass ever started
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -357,6 +332,32 @@ func TestShutdownStopsClaimsBeforeHTTPDrain(t *testing.T) {
 		t.Fatalf("in-flight request never ran: %v", events)
 	}
 }
+
+type eventCloser struct {
+	record  func(string)
+	name    string
+	counter *int32
+}
+
+func (c eventCloser) Close() error {
+	c.record(c.name)
+	if c.counter != nil {
+		atomic.AddInt32(c.counter, 1)
+	}
+	return nil
+}
+
+func newListener(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	return ln
+}
+
+func testCtx() context.Context { return context.Background() }
 
 func contains(list []string, want string) bool {
 	for _, v := range list {

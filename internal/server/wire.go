@@ -39,10 +39,10 @@ func econString(v int64) string {
 
 // parseCanonicalEconInt is the ONE canonical decimal integer string
 // parser for the server package — no trim, no float fallback, no
-// leading zeros, no exponent, no '+', no '-0'. Both parseCredits
-// (owner boundaries) and jsonCredits (admin boundaries) reuse it, so
-// there are not two string-integer rules. Syntax/range only: sign
-// BUSINESS rules stay with the domain authority.
+// leading zeros, no exponent, no '+', no '-0'. Admin boundaries
+// (jsonCredits and friends) reuse it, so there are not two
+// string-integer rules. Syntax/range only: sign BUSINESS rules stay
+// with the domain authority.
 //
 // Canonical form: optional '-', then "0" or [1-9][0-9]*.
 func parseCanonicalEconInt(s string) (int64, error) {
