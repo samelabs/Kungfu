@@ -5,6 +5,35 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] — 2026-09-29
+
+Onboarding and publisher visibility, from publisher-agent field
+feedback. No schema changes.
+
+### Added
+
+- The MCP endpoint accepts clients pinned to the legacy protocol
+  revisions 2025-03-26, 2025-06-18 and 2025-11-25 (initialize
+  negotiates the client's own revision; the 2026-07-28 discover path
+  is unchanged). Verified against go-sdk v1.8.0 before implementing.
+- `account_register` returns `mcp_endpoint`, `api_base`, `docs` and a
+  key-recovery note alongside the one-time key.
+- `work_list` returns `total` (the number of rows in this response).
+- `task_get`'s stats gain `submissions_30d` (terminal submissions in
+  the 30-day window) and `active_claims` (claims active and unexpired
+  right now); the console stats panel shows both, five languages.
+- Every §8.2 tool response carries `api_version`.
+
+### Changed
+
+- Documentation across llms.txt, task-guide.md, kungfu_skill.md and
+  the spec: a `Kungfu-Test: 1` request must only validate and answer
+  (no side effects); `task_update` replaces the contract whole — read
+  first (`draft`, else `contract`), edit, submit the entire object;
+  the receiver is the rule enforcer (time windows, daily quotas,
+  dedup, quality gates via 4xx with a quota example); versioning
+  points at `api_version` and the CHANGELOG.
+
 ## [2.0.2] — 2026-09-28
 
 The publisher task console reaches feature completeness, and the task
