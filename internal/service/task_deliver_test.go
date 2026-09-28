@@ -377,9 +377,18 @@ func TestDeliverTLSFailureUnreachable(t *testing.T) {
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	// seed an open task, then repoint its version receiver at the
-	// untrusted server (test-only; the contract URL must be https)
-	code := deliverSyncTaskAt(t, pool, publisher, srv.URL, 1000)
+	// seed an open task with a trusted receiver, then repoint the
+	// version contract at the untrusted server (test-only; opening
+	// directly against the untrusted URL would fail at the test
+	// delivery before we can submit)
+	rcvTrusted := startProgReceiver(t)
+	code := deliverSyncTask(t, pool, publisher, rcvTrusted, 1000)
+	taskID := deliverTaskID(t, pool, code)
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_task_version SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
+		 WHERE task_id = $1 AND version = 1`, taskID, `"`+srv.URL+`"`); err != nil {
+		t.Fatal(err)
+	}
 	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
 		Code:       code,
 		RequestKey: fmt.Sprintf("tls-%d", time.Now().UnixNano()),

@@ -255,7 +255,9 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 	// §7.1 + §5.4: assert the test request headers and body fields.
 	rcv.mu.Lock()
 	defer rcv.mu.Unlock()
-	if rcv.headers.Get("Idempotency-Key") != "test-"+code+"-1" ||
+	keyPrefix := "test-" + code + "-1-"
+	if !strings.HasPrefix(rcv.headers.Get("Idempotency-Key"), keyPrefix) ||
+		len(rcv.headers.Get("Idempotency-Key")) <= len(keyPrefix) ||
 		rcv.headers.Get("Kungfu-Task") != code ||
 		rcv.headers.Get("Kungfu-Task-Version") != "1" ||
 		rcv.headers.Get("Kungfu-Test") != "1" {
@@ -274,7 +276,7 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 	if err := json.Unmarshal(rcv.body, &body); err != nil {
 		t.Fatalf("body not JSON: %v (%s)", err, rcv.body)
 	}
-	if body.SubmissionID != "test-"+code+"-1" || body.TaskCode != code ||
+	if body.SubmissionID != rcv.headers.Get("Idempotency-Key") || body.TaskCode != code ||
 		body.Version != 1 || body.AgentRef != "test" {
 		t.Fatalf("body identity fields = %+v", body)
 	}

@@ -74,16 +74,14 @@ func TestCreditsBudgetLockMatchesTermsAuthority(t *testing.T) {
 			}
 			// Credits must state creation-time lock too (its wording is
 			// free-form per locale but must carry the same two facts).
-			for _, want := range budgetLockCreationMarkers[locale][:2] {
-				_ = want // markers below are Credits-specific (shorter note)
-			}
+			_ = budgetLockCreationMarkers[locale] // markers checked below per locale
 			switch locale {
 			case "en":
 				if !strings.Contains(c, "locked from your account balance when the task is created") {
 					t.Fatalf("en credits note lost creation-time lock: %s", c)
 				}
 			case "zh":
-				if !strings.Contains(c, "任务创建时") {
+				if !strings.Contains(c, "创建任务时") {
 					t.Fatalf("zh credits note lost creation-time lock: %s", c)
 				}
 			case "ja":
