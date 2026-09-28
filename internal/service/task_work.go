@@ -31,9 +31,9 @@ const (
 // workStats is the §6.3 statistic block (rates are nil when the
 // denominator is 0).
 type workStats struct {
-	AcceptRate           *float64 `json:"accept_rate"`
-	MedianVerdictSeconds *float64 `json:"median_verdict_seconds"`
-	FailureRate          *float64 `json:"failure_rate"`
+	AcceptRate         *float64 `json:"accept_rate"`
+	MedianReplySeconds *float64 `json:"median_reply_seconds"`
+	FailureRate        *float64 `json:"failure_rate"`
 }
 
 // myStats is the executor's own tally on one task (§5.1);
@@ -53,9 +53,9 @@ func statsView(s repository.TaskStats) workStats {
 		return &v
 	}
 	return workStats{
-		AcceptRate:           rate(s.Settled, s.Settled+s.Rejected),
-		MedianVerdictSeconds: s.MedianVerdictSeconds,
-		FailureRate:          rate(s.Failed, s.TerminalTotal),
+		AcceptRate:         rate(s.Settled, s.Settled+s.Rejected),
+		MedianReplySeconds: s.MedianReplySeconds,
+		FailureRate:        rate(s.Failed, s.TerminalTotal),
 	}
 }
 

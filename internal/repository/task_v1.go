@@ -481,15 +481,15 @@ func CountTaskSubmissions(ctx context.Context, q pg.Querier, taskID int64, state
 
 // TaskStats is the §6.3 30-day statistic set of one task.
 type TaskStats struct {
-	Settled              int64
-	Rejected             int64
-	Failed               int64
-	TerminalTotal        int64
-	MedianVerdictSeconds *float64 // over settled+rejected durations; nil when none
+	Settled            int64
+	Rejected           int64
+	Failed             int64
+	TerminalTotal      int64
+	MedianReplySeconds *float64 // over settled+rejected durations; nil when none
 }
 
 // TaskStats computes the §6.3 statistics for terminals entered at or
-// after `since`: verdict latency runs from the first event to the
+// after `since`: reply latency runs from the first event to the
 // settled/rejected event (the receiver's reply, including redelivery
 // time).
 func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Time) (TaskStats, error) {
@@ -526,7 +526,7 @@ func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Ti
 	if err != nil {
 		return TaskStats{}, fmt.Errorf("task stats: %w", err)
 	}
-	s.MedianVerdictSeconds = median
+	s.MedianReplySeconds = median
 	return s, nil
 }
 

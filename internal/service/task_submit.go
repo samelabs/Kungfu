@@ -184,7 +184,9 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 
 	// (h) payload: a JSON object, schema-valid, credential-free.
 	var decoded map[string]any
-	if err := json.Unmarshal(in.Payload, &decoded); err != nil {
+	if err := json.Unmarshal(in.Payload, &decoded); err != nil || decoded == nil {
+		// JSON null unmarshals into a nil map without error — a null
+		// payload is not a JSON object
 		return SubmissionView{}, schemaMismatch([]task.PointerError{{
 			Pointer: "", Message: "payload must be a JSON object",
 		}})

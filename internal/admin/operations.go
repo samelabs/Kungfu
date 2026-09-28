@@ -146,11 +146,11 @@ type TaskRow struct {
 
 // TaskStats is the admin view of the §6.3 30-day statistics.
 type TaskStats struct {
-	Settled              int64
-	Rejected             int64
-	Failed               int64
-	TerminalTotal        int64
-	MedianVerdictSeconds *float64
+	Settled            int64
+	Rejected           int64
+	Failed             int64
+	TerminalTotal      int64
+	MedianReplySeconds *float64
 }
 
 // SubmissionFact is the admin view of one recent submission (no
@@ -209,8 +209,8 @@ func adminTaskView(t *repository.AdminTaskRow) *TaskRow {
 func adminTaskStats(s repository.TaskStats) TaskStats {
 	return TaskStats{
 		Settled: s.Settled, Rejected: s.Rejected, Failed: s.Failed,
-		TerminalTotal:        s.TerminalTotal,
-		MedianVerdictSeconds: s.MedianVerdictSeconds,
+		TerminalTotal:      s.TerminalTotal,
+		MedianReplySeconds: s.MedianReplySeconds,
 	}
 }
 
@@ -299,8 +299,8 @@ func GetPlatformTask(ctx context.Context, pool *pg.Pool, principal *Principal, c
 	}
 	d.AcceptRate = pct(d.Stats.Settled, d.Stats.Settled+d.Stats.Rejected)
 	d.FailureRate = pct(d.Stats.Failed, d.Stats.TerminalTotal)
-	if d.Stats.MedianVerdictSeconds != nil {
-		d.MedianSeconds = fmt.Sprintf("%.0fs", *d.Stats.MedianVerdictSeconds)
+	if d.Stats.MedianReplySeconds != nil {
+		d.MedianSeconds = fmt.Sprintf("%.0fs", *d.Stats.MedianReplySeconds)
 	} else {
 		d.MedianSeconds = "—"
 	}

@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"net/http/httptrace"
 	"time"
 )
 
 // PostResult holds the result of a POST request.
 type PostResult struct {
 	Success      bool
+	Sent         bool    // true once any attempt fully wrote the request (httptrace WroteRequest)
 	ResponseCode *int    // nil if no response received (network error)
 	ResponseBody *string // nil if no response body
 	ErrorCode    string  // empty if success
@@ -99,6 +100,20 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 		}
 	}
 
+	// sent latches true the first time any attempt writes the full
+	// request to the wire (httptrace WroteRequest with Err == nil) and
+	// never goes back — the single transport fact behind
+	// IsDefinitiveNotDelivered.
+	sent := false
+	traceCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				sent = true
+			}
+		},
+	})
+	req = req.WithContext(traceCtx)
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	for k, v := range headers {
@@ -117,6 +132,7 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 		}
 		return PostResult{
 			Success:      false,
+			Sent:         sent,
 			ResponseCode: respCode,
 			ErrorCode:    errCfg.NetworkCode,
 			ErrorMessage: errCfg.NetworkMessagePrefix + err.Error(),
@@ -159,56 +175,17 @@ func PostJSONWithKey(ctx context.Context, url string, body []byte, idempotencyKe
 	return PostJSON(ctx, url, body, map[string]string{"Idempotency-Key": idempotencyKey}, errCfg)
 }
 
-// IsDefinitiveNotDelivered classifies a failed PostResult (no reliable HTTP
-// response) as PROVABLY not reaching the receiver. Conservative contract:
-// only SSRF/policy refusal, DNS resolution failure, and connect-phase
-// failures qualify; everything else (TLS errors, timeouts mid-request,
-// response-read failures, unknown transport errors) is treated by the
-// caller as UNCERTAIN — the request may have been delivered.
+// IsDefinitiveNotDelivered classifies a failed PostResult as PROVABLY
+// not reaching the receiver: no response code and the request was
+// never fully written (SSRF refusal, DNS failure, connect refused,
+// connect timeout, TLS handshake or certificate failure — everything
+// httptrace never reported as WroteRequest). Once the request left
+// the wire, a later timeout or disconnect is UNCERTAIN by §7.2.
 func IsDefinitiveNotDelivered(result PostResult) bool {
 	if result.Success || result.ResponseCode != nil {
 		return false // not in scope: had a usable HTTP response
 	}
-	if result.ErrorMessage == "" {
-		return false
-	}
-	return errorIsBeforeRequestSent(result.ErrorMessage)
-}
-
-// errorIsBeforeRequestSent inspects the transport error text surfaced
-// through the PostResult for the three provably-pre-send classes. The
-// messages are produced by this package's own dial authority and error
-// configs — a stable internal contract.
-func errorIsBeforeRequestSent(msg string) bool {
-	m := strings.ToLower(msg)
-	switch {
-	case strings.Contains(m, "postapi outbound ip policy:"):
-		return true // SSRF/policy refusal — refused before any socket
-	case strings.Contains(m, "postapi dns resolve"):
-		return true // resolution failure — no address to send to
-	case strings.Contains(m, "dns ") && strings.Contains(m, "resolved to no addresses"):
-		return true
-	case isConnectPhaseError(m):
-		return true // TCP connect failure — request never left
-	}
-	return false
-}
-
-// connect-phase markers (Go net errors surfaced via the dial path).
-func isConnectPhaseError(m string) bool {
-	for _, marker := range []string{
-		"connection refused",
-		"dial tcp",
-		"no route to host",
-		"network is unreachable",
-		"connection timed out", // connect timeout — SYN never answered
-		"proxyconnect tcp",
-	} {
-		if strings.Contains(m, marker) {
-			return true
-		}
-	}
-	return false
+	return !result.Sent
 }
 
 // BuildSubmissionPayload produces the canonical outbound JSON bytes for a

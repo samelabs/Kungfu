@@ -138,7 +138,7 @@ var tools = []ToolDef{
 		Name: "work_list",
 		Description: `List open, claimable work.
 Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
-Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_verdict_seconds, failure_rate) and your accepted/rejected/rejections_left.
+Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate) and your accepted/rejected/rejections_left.
 next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
 		Handler:     factory(handleWorkList),

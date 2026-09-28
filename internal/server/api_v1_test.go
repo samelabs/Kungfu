@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"kungfu.md/internal/mcpserver"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/ratelimit"
 	"kungfu.md/internal/repository"
@@ -194,11 +195,11 @@ func TestAPIV1BodyTooLarge(t *testing.T) {
 	huge := map[string]any{
 		"code": code, "request_key": "toolarge",
 		"payload": map[string]any{"url": "https://example.com/a",
-			"bullets": []string{strings.Repeat("x", apiV1BodyLimit)}},
+			"bullets": []string{strings.Repeat("x", mcpserver.MaxRequestBodyBytes)}},
 	}
 	body, _ := json.Marshal(huge)
-	if len(body) <= apiV1BodyLimit {
-		t.Fatalf("setup: body %d must exceed %d", len(body), apiV1BodyLimit)
+	if len(body) <= mcpserver.MaxRequestBodyBytes {
+		t.Fatalf("setup: body %d must exceed %d", len(body), mcpserver.MaxRequestBodyBytes)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/work_submit", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -231,5 +232,44 @@ func TestAPIV1BodyTooLarge(t *testing.T) {
 	s.buildRouter().ServeHTTP(rec2, req2)
 	if rec2.Code == http.StatusRequestEntityTooLarge {
 		t.Fatal("in-cap body rejected as 413")
+	}
+}
+
+// TestAPIV1LargeTaskCreateWithinLimit: a ~600 KB body (sample ~510 KB)
+// passes through /api/v1 — the HTTP channel shares the MCP 1 MiB cap,
+// not the old 512 KB + headroom constant.
+func TestAPIV1LargeTaskCreateWithinLimit(t *testing.T) {
+	s, key, _, _ := apiV1Env(t)
+
+	bigSample := map[string]any{
+		"url":     "https://example.com/a",
+		"bullets": []string{"s1", "s2", "s3"},
+		"blob":    strings.Repeat("a", 510*1024),
+	}
+	body, _ := json.Marshal(map[string]any{
+		"contract": map[string]any{
+			"title":        "Big sample",
+			"requirements": "Holds a large sample.",
+			"receiver":     map[string]any{"url": "https://example.com/x"},
+			"sample":       bigSample,
+			"price":        5,
+		},
+		"budget": 10,
+	})
+	if len(body) < 500*1024 || len(body) > mcpserver.MaxRequestBodyBytes {
+		t.Fatalf("setup: body %d must be between 500 KB and the 1 MiB cap", len(body))
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/task_create", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	s.buildRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("large task_create = %d %s", rec.Code, rec.Body.String()[:200])
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env["ok"] != true {
+		t.Fatalf("envelope: %v", env["error"])
 	}
 }

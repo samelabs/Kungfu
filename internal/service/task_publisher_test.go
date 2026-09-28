@@ -587,3 +587,64 @@ func TestPublisherInvalidStateTransitions(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenTestDeliveryUniqueKeyPerAttempt: a receiver that caches by
+// Idempotency-Key replays the first answer forever for that key. With
+// the old fixed key test-<code>-<version>, a second open would replay
+// the cached 500; with a unique key per attempt the second open
+// succeeds.
+func TestOpenTestDeliveryUniqueKeyPerAttempt(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	ctx := context.Background()
+
+	// a keyed cache: the first answer for a key is 500, every replay
+	// of the SAME key returns the cached 500; a NEW key gets 200
+	firstKey := ""
+	var mu sync.Mutex
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("Idempotency-Key")
+		mu.Lock()
+		defer mu.Unlock()
+		if firstKey == "" {
+			// the very first request ever: answer 500 and cache it
+			// for this key
+			firstKey = key
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"receiver cold start"}`))
+			return
+		}
+		if key == firstKey {
+			// cached 500 replayed for the same key
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"receiver cold start (cached)"}`))
+			return
+		}
+		// a different key: healthy answer
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pubTestTLSCert}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	c := pubContract(srv.URL)
+	c.Sample = []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`)
+	code := pubCreateForTest(t, pool, publisher, c, 1000)
+
+	// first open fails: the receiver's very first request gets 500
+	if _, err := OpenTask(ctx, pool, publisher, code); err == nil {
+		t.Fatal("first open should fail (receiver cold start)")
+	}
+	// second open succeeds: the new unique key is not the cached one
+	view, err := OpenTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("second open should succeed with a fresh key: %v", err)
+	}
+	if view["status"] != task.TaskOpen {
+		t.Fatalf("status = %v, want open", view["status"])
+	}
+	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}
