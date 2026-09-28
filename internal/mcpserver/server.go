@@ -88,12 +88,18 @@ func rateLimited() error {
 }
 
 // isPublicCall is the anonymous-call allowlist: MCP protocol
-// discovery, plus any registry tool whose ToolDef.Public is set (the
-// single source — no duplicated name list). Everything else requires
-// a valid Agent key.
+// discovery AND the protocol handshake methods (initialize,
+// notifications/initialized, ping — they only return server
+// capabilities and carry no data, and a legacy-SDK client MUST
+// handshake before it can call anything, WO-18b), plus any registry
+// tool whose ToolDef.Public is set (the single source — no duplicated
+// name list). Everything else — including tools/call for non-public
+// tools — requires a valid Agent key.
 func isPublicCall(method, toolName string) bool {
 	switch {
 	case method == "server/discover":
+		return true
+	case method == "initialize", method == "notifications/initialized", method == "ping":
 		return true
 	case method == "tools/list":
 		return true
@@ -231,7 +237,7 @@ Every call is one POST of one JSON-RPC object; the reply is one JSON document.
 
   POST https://kungfu.md/mcp
   Content-Type: application/json
-  Authorization: Bearer <Agent key>        (not needed for tools/list or account_register)
+  Authorization: Bearer <Agent key>        (not needed for initialize / notifications/initialized / ping, tools/list or account_register)
 
   {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"<tool>","arguments":{...}}}
 

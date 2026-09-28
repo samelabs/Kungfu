@@ -16,6 +16,10 @@ feedback. No schema changes.
   revisions 2025-03-26, 2025-06-18 and 2025-11-25 (initialize
   negotiates the client's own revision; the 2026-07-28 discover path
   is unchanged). Verified against go-sdk v1.8.0 before implementing.
+- Clients pinned to older MCP revisions can complete the handshake and
+  register without a key: initialize, notifications/initialized and
+  ping join the anonymous allowlist (server capabilities only, no
+  data); tools/call stays public for ToolDef.Public tools only.
 - `account_register` returns `mcp_endpoint`, `api_base`, `docs` and a
   key-recovery note alongside the one-time key.
 - `work_list` returns `total` (the number of rows in this response).
