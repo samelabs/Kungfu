@@ -907,3 +907,32 @@ ol.guide-flow li::before {
     .nav #logoutBtn { margin-left: auto; }
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---- Task 1.0 console (tasks-console / render-tasks-console) ---- */
+.badge.draft { background: #eef2ff; color: #4338ca; }
+.badge.paused { background: #fef3c7; color: #92400e; }
+.tcv-ok { color: var(--ok); }
+.tcv-err { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-error { border: 1px solid #fecaca; background: #fef2f2; border-radius: var(--radius-md); padding: 10px 12px; margin: 8px 0; }
+.task-error-fields { margin: 6px 0 0 18px; }
+.tcv-mode { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 6px; }
+.tcv-counter { font-size: 12px; margin: 2px 0 2px; }
+.tcv-hint { margin: 2px 0 14px; font-size: 13px; }
+.tcv-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.tcv-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(47, 124, 115, .06); font-size: 13px;
+}
+.tcv-chip-x {
+    border: none; background: none; cursor: pointer; color: var(--danger);
+    font-size: 14px; line-height: 1; padding: 0 0 0 2px;
+}
+.tcv-picker { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 12px; margin: 8px 0 16px; }
+.tcv-picker summary { cursor: pointer; font-weight: 600; }
+.tcv-pre {
+    white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(23, 21, 18, .04);
+    padding: 10px; border-radius: 8px; max-height: 340px; overflow: auto; font-size: 13px;
+}
+.tcv-note { margin: 10px 0; }
+.tcv-filter { margin-bottom: 12px; flex-wrap: wrap; }
