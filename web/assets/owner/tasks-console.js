@@ -5,8 +5,11 @@
 function tcvCall(tool, args) {
     return requestJson(`/api/owner/tool/${tool}`, {method: 'POST', body: JSON.stringify(args || {})})
         .then((json) => {
-            if (!json.success) throw apiErrorFrom(json, 'js.task_load_failed');
-            return json.data;
+            // The tool bridge speaks the §8.2 envelope: ok / error —
+            // there is no success/data wrapper. The raw envelope IS the
+            // data (callers read env.tasks, env.contract, env.ok...).
+            if (!json.ok) throw apiErrorFrom(json, 'js.task_load_failed');
+            return json;
         });
 }
 
@@ -42,10 +45,6 @@ function tcvLoadList() {
     tcvCall('task_list', {}).then((env) => {
         tcvShowStatus(env);
         tcvRenderTaskList(env.tasks || []);
-        if (qs('#taskConsoleList')) {
-            const inv = task.CheckInvariants; // placeholder: no-op in browser
-            void inv;
-        }
     }).catch((error) => {
         const box = qs('#taskConsoleList');
         if (box) box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
@@ -124,7 +123,7 @@ function tcvRenderSimpleForm() {
     qs('#tcvAdvancedBtn').addEventListener('click', () => {
         tcvRenderEditor({code: null, contract: TCV_SAMPLE_CONTRACT, budget: 2000, status: 'new'});
     });
-    requestJson('/api/owner/logs?log_type=credits&page=1&page_size=1', {method: 'GET'})
+    requestJson('/api/owner/logs?type=credits&page=1&page_size=1', {method: 'GET'})
         .then((json) => {
             const b = qs('#tcvSBalance');
             if (b && json && json.success) b.textContent = String(json.data.balance ?? '0');
@@ -178,7 +177,7 @@ function tcvRenderEditor(state) {
             <p class="muted">${escapeHtml(t('tasks.status'))}: <span class="badge">${tcvEscapeHtml(status)}</span>${v.version !== undefined ? ` · v${v.version}` : ''}</p>
             <label>${escapeHtml(t('tasks.budget'))}</label>
             <input id="tcvBudget" type="number" min="1" value="${state.budget ?? 5}" ${isNew ? '' : 'disabled'}>
-            <label>Contract JSON</label>
+            <label>${escapeHtml(t('tasks.contract_json'))}</label>
             <textarea id="tcvContract" class="mono" rows="18" spellcheck="false">${tcvEscapeHtml(contractJSON)}</textarea>
             <div class="actions">
                 <button class="btn primary" id="tcvSave" type="button">${escapeHtml(t('tasks.save_basics'))}</button>
@@ -307,12 +306,16 @@ function tcvRenderSubmissions(rows) {
     }).join('');
 }
 
-// wire into the shared page lifecycle
-const tcvOrigRenderPage = typeof renderPage === 'function' ? renderPage : null;
-if (tcvOrigRenderPage) {
+// wire into the shared page lifecycle. init.js — which declares
+// renderPage — loads AFTER this file, so the wrap must be deferred to
+// DOMContentLoaded (all classic scripts have executed by then, and
+// restoreSession only calls renderPage after its first await yields).
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderPage !== 'function') return;
+    const tcvOrigRenderPage = renderPage;
     renderPage = async function () {
         if (SECTION === 'tasks') { tcvLoadList(); return; }
         if (SECTION === 'task_new' || SECTION === 'task_detail') { tcvEditorInit(); return; }
         return tcvOrigRenderPage();
     };
-}
+});
