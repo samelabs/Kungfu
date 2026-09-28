@@ -6,6 +6,7 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -127,10 +128,10 @@ func TestMCPProtocolNegotiatesExactly20260728(t *testing.T) {
 
 // The actual contract: legacy initialize is NOT a public/anonymous
 // MCP operation on this surface. The 2026-07-28 handshake is
-// server/discover; a legacy initialize attempt cannot negotiate (the
-// SDK's own legacy fallback to an older revision is never reached
-// because the request is auth-rejected first). Kungfu advertises and
-// negotiates 2026-07-28 only — proven by the discovery test above.
+// server/discover; an ANONYMOUS legacy initialize attempt cannot
+// negotiate (the request is auth-rejected first). An AUTHENTICATED
+// legacy client negotiates its own revision — proven by
+// TestMCPLegacyProtocolPinnedClient below.
 func TestMCPLegacyInitializeIsNotPublic(t *testing.T) {
 	pool := m1TestPool(t)
 	h := m1Handler(t, pool, nil)
@@ -830,5 +831,67 @@ func TestMCPMcpserverHasNoRepositoryDependency(t *testing.T) {
 				t.Fatalf("%s contains forbidden token %q — mcpserver is a protocol adapter only", f, tok)
 			}
 		}
+	}
+}
+
+// TestMCPLegacyProtocolPinnedClient (WO-18): a client pinned to
+// 2025-03-26 completes initialize → tools/list → tools/call(work_list)
+// on its own revision. Every POST is stateless and Bearer-authenticated
+// (legacy initialize is not an anonymous operation); the SDK answers
+// initialize with the client's revision because it is in
+// SupportedProtocolVersions.
+func TestMCPLegacyProtocolPinnedClient(t *testing.T) {
+	pool := m1TestPool(t)
+	h := m1Handler(t, pool, nil)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// seeded agent: the raw key is the bot name (digest = SHA-256(name))
+	name := fmt.Sprintf("pinned_%d", time.Now().UnixNano())
+	digest := sha256.Sum256([]byte(name))
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance)
+		VALUES ($1, $2, 'pn01', 'x', 100) RETURNING id`, name, digest[:]); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	const legacy = "2025-03-26"
+	hdr := map[string]string{
+		"Mcp-Method":           "", // per-call below
+		"Mcp-Protocol-Version": legacy,
+		"Authorization":        "Bearer " + name,
+	}
+
+	// initialize: the server must answer with the SAME revision
+	hdr["Mcp-Method"] = "initialize"
+	sc, body := m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": legacy,
+			"capabilities":    map[string]interface{}{},
+			"clientInfo":      map[string]string{"name": "pinned", "version": "1"},
+		},
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, `"protocolVersion":"`+legacy+`"`) {
+		t.Fatalf("initialize: %d %s", sc, body)
+	}
+
+	// tools/list on the same revision
+	hdr["Mcp-Method"] = "tools/list"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, "work_list") {
+		t.Fatalf("tools/list: %d %s", sc, body)
+	}
+
+	// tools/call work_list on the same revision
+	hdr["Mcp-Method"] = "tools/call"
+	hdr["Mcp-Name"] = "work_list"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+		"params": map[string]interface{}{"name": "work_list", "arguments": map[string]interface{}{}},
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("work_list: %d %s", sc, body)
 	}
 }

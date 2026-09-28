@@ -16,8 +16,10 @@ package mcpserver
 //     literally name both (responses are plain JSON: JSONResponse).
 //   - Mcp-Method / Mcp-Name derived from the JSON-RPC body.
 //   - Mcp-Protocol-Version and params._meta (protocolVersion,
-//     clientInfo, clientCapabilities) defaulted to this server's single
-//     protocol revision, so every request takes the same modern path.
+//     clientInfo, clientCapabilities) defaulted to the client's
+//     DECLARED revision when the initialize body names a supported one,
+//     else the newest revision — so a plain-HTTP client pinned to an
+//     older protocol stays on its own revision end to end.
 //
 // Values the client DID send are never overwritten: a header that
 // disagrees with the body is still rejected by the SDK's consistency
@@ -140,7 +142,7 @@ func fillProtocolVersion(h http.Header, c *rpcCall, raw []byte) []byte {
 
 	switch {
 	case headerVersion == "" && metaVersion == "":
-		headerVersion, metaVersion = ProtocolVersion, ProtocolVersion
+		headerVersion, metaVersion = declaredProtocolVersion(c), declaredProtocolVersion(c)
 	case headerVersion == "":
 		headerVersion = metaVersion
 	case metaVersion == "":
@@ -171,6 +173,23 @@ func fillProtocolVersion(h http.Header, c *rpcCall, raw []byte) []byte {
 		return raw
 	}
 	return out
+}
+
+// declaredProtocolVersion is the fill-in revision for a request that
+// declares none: an initialize whose params name a SUPPORTED revision
+// takes that revision (the client is pinned to it); every other
+// request takes the newest revision.
+func declaredProtocolVersion(c *rpcCall) string {
+	if c.Method == "initialize" {
+		if v, _ := c.Params["protocolVersion"].(string); v != "" {
+			for _, sv := range SupportedProtocolVersions {
+				if sv == v {
+					return v
+				}
+			}
+		}
+	}
+	return ProtocolVersion
 }
 
 // acceptsBoth reports whether the Accept values literally name both

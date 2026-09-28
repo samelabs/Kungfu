@@ -1,12 +1,12 @@
 // Package mcpserver is the MCP protocol adapter for Kungfu.
 //
 // It owns ONLY: protocol wiring (official MCP Go SDK, Streamable HTTP,
-// stateless, protocol 2026-07-28), typed tool schemas, safe error
-// mapping, MCP auth context, and tool-to-existing-domain calls.
-// It holds NO SQL, no Credits mutations, no registration/Memory/Task/
-// payment/rewards/admin business rules — those stay in their owning
-// domains. Dependency direction: server → mcpserver → auth/service/
-// credits read APIs → repository through existing domains.
+// stateless, protocols 2025-03-26 … 2026-07-28), typed tool schemas,
+// safe error mapping, MCP auth context, and tool-to-existing-domain
+// calls. It holds NO SQL, no Credits mutations, no registration/Memory/
+// Task/payment/rewards/admin business rules — those stay in their
+// owning domains. Dependency direction: server → mcpserver → auth/
+// service/credits read APIs → repository through existing domains.
 package mcpserver
 
 import (
@@ -27,8 +27,21 @@ import (
 	"kungfu.md/internal/version"
 )
 
-// ProtocolVersion is the ONLY supported MCP protocol revision.
+// ProtocolVersion is the NEWEST supported MCP protocol revision (the
+// 2026-07-28 server/discover handshake).
 const ProtocolVersion = "2026-07-28"
+
+// SupportedProtocolVersions are the MCP revisions this endpoint
+// negotiates, newest first (WO-18): clients pinned to 2025-03-26,
+// 2025-06-18 or 2025-11-25 negotiate their own revision — the SDK's
+// negotiatedVersion answers initialize with the client's version
+// whenever it is listed, and in stateless mode every POST carries its
+// own Mcp-Protocol-Version header, so no session state is needed.
+// 2026-07-28 clients take the server/discover path (which requires
+// Stateless HTTP — already the mode here).
+var SupportedProtocolVersions = []string{
+	"2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26",
+}
 
 // MaxRequestBodyBytes is the MCP request body cap (1 MiB).
 const MaxRequestBodyBytes = 1 << 20
@@ -212,7 +225,7 @@ func authGate(deps Deps, next http.Handler) http.Handler {
 // mcpOnboardingBody is the shared bootstrap guidance text: what the
 // endpoint is, the one-shot registration path, and where the full
 // docs live. Plain text; safe for every content type.
-const mcpOnboardingBody = `kungfu.md MCP endpoint (protocol ` + ProtocolVersion + `, Streamable HTTP, stateless).
+const mcpOnboardingBody = `kungfu.md MCP endpoint (protocols 2025-03-26 ... 2026-07-28, Streamable HTTP, stateless).
 
 Every call is one POST of one JSON-RPC object; the reply is one JSON document.
 
@@ -272,7 +285,9 @@ func newServer(deps Deps) *mcp.Server {
 		Name:    "kungfu.md",
 		Version: version.Get(),
 	}, &mcp.ServerOptions{
-		SupportedProtocolVersions: []string{ProtocolVersion},
+		// negotiate every revision in SupportedProtocolVersions — a
+		// 2025-03-26 client hears 2025-03-26 back on initialize
+		SupportedProtocolVersions: append([]string(nil), SupportedProtocolVersions...),
 		Logger:                    slog.Default(),
 		// Bootstrap instructions surfaced verbatim in server/discover
 		// (and any initialize result): the anonymous agent learns the
