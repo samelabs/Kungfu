@@ -110,10 +110,16 @@ func TestOwnerToolMemoryListIsReadOnly(t *testing.T) {
 
 	// another bot's memory must never appear in the console listing
 	other := "ocother" + time.Now().Format("150405.000000000")
+	var otherID int64
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance)
+		VALUES ($1, 'x', 'oc02', 'x', 0) RETURNING id`, other).Scan(&otherID); err != nil {
+		t.Fatalf("seed other bot: %v", err)
+	}
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility, status)
-		VALUES ('ocsecret01', (SELECT id FROM tb_bots WHERE bot_name=$1), 'Other memory',
-			'["t"]', 'secret harness body', 'c0ffee', 'private', 'active')`, other); err != nil {
+		VALUES ('ocsecret01', $1, 'Other memory', '["t"]', 'secret harness body', 'c0ffee', 'private', 'active')`,
+		otherID); err != nil {
 		t.Fatalf("seed other memory: %v", err)
 	}
 

@@ -530,10 +530,10 @@ func TestPublisherPauseDraftVisibility(t *testing.T) {
 	if err := json.Unmarshal(view["draft"].(json.RawMessage), &draft); err != nil {
 		t.Fatalf("draft: %v", err)
 	}
-	if live.Title != "Summarize a page" || string(live.Sample) != string(pubContract(rcv.url).Sample) {
+	if live.Title != "Summarize a page" || !jsonEqual(live.Sample, pubContract(rcv.url).Sample) {
 		t.Fatalf("live contract changed before reopen: %q %s", live.Title, live.Sample)
 	}
-	if draft.Title != updated.Title || string(draft.Sample) != string(updated.Sample) {
+	if draft.Title != updated.Title || !jsonEqual(draft.Sample, updated.Sample) {
 		t.Fatalf("draft is not the saved edit: %q %s", draft.Title, draft.Sample)
 	}
 	if view["draft_pending"] != true {
@@ -573,7 +573,7 @@ func TestPublisherPauseDraftVisibility(t *testing.T) {
 	if err := json.Unmarshal(openView["contract"].(json.RawMessage), &live2); err != nil {
 		t.Fatalf("v2 contract: %v", err)
 	}
-	if live2.Title != updated.Title || string(live2.Sample) != string(updated.Sample) {
+	if live2.Title != updated.Title || !jsonEqual(live2.Sample, updated.Sample) {
 		t.Fatalf("v2 contract is not the former draft: %q %s", live2.Title, live2.Sample)
 	}
 
