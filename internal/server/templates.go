@@ -7,6 +7,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 	"kungfu.md/internal/i18n"
 	"kungfu.md/internal/payment"
-	"kungfu.md/internal/repository"
+	"kungfu.md/internal/service"
 	"kungfu.md/web"
 )
 
@@ -105,10 +106,19 @@ func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind str
 	w.Write(web.FingerprintHTML([]byte(htmlOut)))
 }
 
-// renderHome renders the homepage with dynamic task board.
+// renderHome renders the homepage with the server-rendered task board
+// (WO-19 H1/H2): ?q= and ?page= search over ALL claimable tasks, the
+// credits purchase moved into the board's title row as a JS-free
+// <details> overlay, and the bottom credits block removed (the
+// /credits page keeps its own).
 func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	taskBoard := s.buildTaskBoardHTML(r.Context(), data.Locale)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	page := getQueryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	taskBoard := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page)
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/")
 
 	html := `<!DOCTYPE html>
@@ -188,14 +198,15 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
                 <span class="task-kicker">` + data.T("home.task_kicker") + `</span>
                 <div class="task-title-row">
                     <h2>` + data.T("home.task_board_title") + `</h2>
+                    ` + s.homeCreditsPopHTML(r.Context(), data.Locale) + `
                 </div>
             </div>
             <div class="stream-panel active" data-stream-panel="tasks">` + taskBoard + `</div>
         </div>
     </div>
-    ` + s.homeCreditsBlockHTML(r.Context(), data.Locale) + `
     ` + siteFooter(data.Locale, langOpts, "home-lang-switch") + `
 </div>
+<script src="/assets/home.js"></script>
 <script src="/assets/pwa-register.js"></script>
 </body>
 </html>`
@@ -203,40 +214,162 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
-// buildTaskBoardHTML renders the homepage task board from the Task
-// 1.0 model (WO-8): ONE repository query, at most 20 tasks, open and
-// holding at least one open slot (§4 可接单), newest open first. Each
-// entry shows the title, unit price, remaining slots and code; with
-// no eligible task the localized empty state stands.
-func (s *Server) buildTaskBoardHTML(ctx context.Context, locale string) string {
-	rows, err := repository.ListOpenBoardTasks(ctx, s.Pool, taskBoardMax)
+// homeBoardPageSize is the homepage board page size (WO-19 H1).
+const homeBoardPageSize = 20
+
+// homeTaskCodeQuery reports the exact task code a search input stands
+// for: a 12-digit hex string (case-insensitive, lowercased). Anything
+// else returns "" (a keyword search).
+func homeTaskCodeQuery(q string) string {
+	if len(q) != 12 {
+		return ""
+	}
+	for _, c := range q {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return ""
+		}
+	}
+	return strings.ToLower(q)
+}
+
+// homeBoardURL builds a homepage URL that carries the current board
+// query and the locale switch (?q=&page=, plus ?lang= except en).
+func homeBoardURL(locale, q string, page int) string {
+	params := url.Values{}
+	if q != "" {
+		params.Set("q", q)
+	}
+	if page > 1 {
+		params.Set("page", strconv.Itoa(page))
+	}
+	if locale != "" && locale != "en" {
+		params.Set("lang", locale)
+	}
+	if len(params) == 0 {
+		return "/"
+	}
+	return "/?" + params.Encode()
+}
+
+// buildTaskBoardHTML renders the homepage task board (WO-19 H1): the
+// anonymous work_list SQL — open, at least one free slot — searched
+// and paged server-side. A 12-hex input is tried as an exact task
+// code first and falls back to the keyword search; each row shows
+// the title, unit price, remaining slots, a copyable code and a
+// 140-rune requirements excerpt; the pager keeps the query. Empty
+// results of a search and a genuinely empty board read differently.
+func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page int) string {
+	t := func(key string) string { return html.EscapeString(i18n.T(locale, key)) }
+
+	var rows []service.WorkBoardRow
+	var total int64
+	// code first: a 12-hex input is an exact-code lookup; on a miss it
+	// degrades to the keyword search
+	var err error
+	if code := homeTaskCodeQuery(q); code != "" {
+		rows, total, err = service.ListWorkBoard(ctx, s.Pool, "", code, page, homeBoardPageSize)
+		if err == nil && total == 0 {
+			rows, total, err = service.ListWorkBoard(ctx, s.Pool, q, "", page, homeBoardPageSize)
+		}
+	} else {
+		rows, total, err = service.ListWorkBoard(ctx, s.Pool, q, "", page, homeBoardPageSize)
+	}
 	if err != nil {
 		log.Printf("task board: %v", err)
-		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_unavailable")) + "</p>"
+		return "<p>" + t("home.task_unavailable") + "</p>"
 	}
-	if len(rows) == 0 {
-		return "<p>" + html.EscapeString(i18n.T(locale, "home.task_empty")) + "</p>"
-	}
+
 	var b strings.Builder
+	langHidden := ""
+	if locale != "" && locale != "en" {
+		langHidden = `<input type="hidden" name="lang" value="` + html.EscapeString(locale) + `">`
+	}
+	b.WriteString(`<form class="task-search" action="/" method="get" role="search">` + langHidden +
+		`<input type="search" name="q" value="` + html.EscapeString(q) + `" placeholder="` + t("home.search_placeholder") + `" aria-label="` + t("home.search_placeholder") + `">` +
+		`<button class="btn primary" type="submit">` + t("home.search_submit") + `</button></form>`)
+
+	if len(rows) == 0 {
+		emptyKey := "home.task_empty"
+		if q != "" {
+			emptyKey = "home.task_no_match"
+		}
+		b.WriteString(`<p class="task-board-empty">` + t(emptyKey) + `</p>`)
+		return b.String()
+	}
+
+	pages := int((total + homeBoardPageSize - 1) / homeBoardPageSize)
+	if pages < 1 {
+		pages = 1
+	}
 	b.WriteString(`<ul class="task-board-list">`)
 	for _, r := range rows {
 		credit := i18n.T(locale, "home.task_credit_plural")
 		if r.Price == 1 {
 			credit = i18n.T(locale, "home.task_credit_singular")
 		}
+		copyLabel := i18n.T(locale, "home.copy_code")
+		doneLabel := i18n.T(locale, "home.code_copied")
+		code := html.EscapeString(r.Code)
 		b.WriteString(`<li class="task-board-item">` +
 			`<div class="task-board-row"><span class="task-board-title">` + html.EscapeString(r.Title) + `</span>` +
 			`<span class="task-board-price">` + html.EscapeString(fmt.Sprintf("%d %s", r.Price, credit)) + `</span></div>` +
-			`<div class="task-board-meta"><span class="mono task-board-code">` + html.EscapeString(r.Code) + `</span>` +
-			`<span>` + html.EscapeString(fmt.Sprintf("%d %s", r.Slots, i18n.T(locale, "home.task_slots"))) + `</span></div>` +
+			`<p class="task-board-excerpt">` + html.EscapeString(r.Requirements) + `</p>` +
+			`<div class="task-board-meta"><span class="mono task-board-code">` + code + `</span>` +
+			`<span>` + html.EscapeString(fmt.Sprintf("%d %s", r.Slots, i18n.T(locale, "home.task_slots"))) + `</span>` +
+			`<button class="task-copy-btn" type="button" data-copy-code="` + code + `"` +
+			` data-label="` + html.EscapeString(copyLabel) + `" data-done="` + html.EscapeString(doneLabel) + `">` +
+			html.EscapeString(copyLabel) + `</button></div>` +
 			`</li>`)
 	}
 	b.WriteString(`</ul>`)
+
+	// pager: prev/next anchors that keep q (and lang); ends disable
+	prev, next := "", ""
+	if page > 1 {
+		prev = `<a class="btn" href="` + homeBoardURL(locale, q, page-1) + `" rel="prev">` + t("home.task_pager_prev") + `</a>`
+	} else {
+		prev = `<span class="btn is-disabled" aria-disabled="true">` + t("home.task_pager_prev") + `</span>`
+	}
+	if page < pages {
+		next = `<a class="btn" href="` + homeBoardURL(locale, q, page+1) + `" rel="next">` + t("home.task_pager_next") + `</a>`
+	} else {
+		next = `<span class="btn is-disabled" aria-disabled="true">` + t("home.task_pager_next") + `</span>`
+	}
+	pageInfo := strings.NewReplacer("{{page}}", strconv.Itoa(page), "{{pages}}", strconv.Itoa(pages)).
+		Replace(i18n.T(locale, "home.task_pager_page"))
+	totalInfo := strings.NewReplacer("{{total}}", strconv.FormatInt(total, 10)).
+		Replace(i18n.T(locale, "home.task_pager_total"))
+	b.WriteString(`<nav class="task-pager" aria-label="` + t("home.task_board_title") + `">` +
+		prev + `<span class="mono task-pager-info">` + html.EscapeString(pageInfo) + " · " + html.EscapeString(totalInfo) + `</span>` + next + `</nav>`)
 	return b.String()
 }
 
-// taskBoardMax is the homepage board cap (WO-8b): one query, 20 rows.
-const taskBoardMax = 20
+// homeCreditsPopHTML renders the credits purchase affordance in the
+// board's title row (WO-19 H2): a JS-free <details> overlay with the
+// server-rendered package list (Creem requires public pricing) and
+// the buy link.
+func (s *Server) homeCreditsPopHTML(ctx context.Context, locale string) string {
+	pkgs := s.publicCreditsPackages(ctx)
+	var b strings.Builder
+	b.WriteString(`<details class="credits-pop" id="creditsPop">`)
+	b.WriteString(`<summary class="btn credits-pop-btn">` + html.EscapeString(i18n.T(locale, "home.credits_buy")) + `</summary>`)
+	b.WriteString(`<div class="credits-pop-body">`)
+	if len(pkgs) == 0 {
+		b.WriteString(`<p class="muted">` + html.EscapeString(i18n.T(locale, "home.credits_soon")) + `</p>`)
+	} else {
+		b.WriteString(`<div class="credits-packages">`)
+		for _, p := range pkgs {
+			b.WriteString(`<div class="credits-package"><b>` + html.EscapeString(p.Name) + `</b>` +
+				`<span>` + html.EscapeString(fmt.Sprintf("%d %s", p.Credits, i18n.T(locale, "home.credits_unit"))) + `</span>` +
+				`<span class="credits-price">` + html.EscapeString(minorAmount(p.AmountMinor, p.Currency)) + `</span></div>`)
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<div class="actions"><a class="btn primary" href="` + i18n.LocaleURL(locale, "/owner/credits") + `">` +
+		html.EscapeString(i18n.T(locale, "home.credits_buy")) + `</a></div>`)
+	b.WriteString(`</div></details>`)
+	return b.String()
+}
 
 // homeCreditsCatalog caches the public credits-package view for the
 // homepage and /credits (Creem's product API is remote; anonymous page

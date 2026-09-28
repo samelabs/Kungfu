@@ -1145,52 +1145,6 @@ func CountTaskSubmissionsByState(ctx context.Context, q pg.Querier, taskID int64
 }
 
 // ---------------------------------------------------------------------------
-// Homepage task board (WO-8)
-// ---------------------------------------------------------------------------
-
-// TaskBoardRow is one homepage board entry: an open task with at least
-// one open slot (spec §4 可接单).
-type TaskBoardRow struct {
-	Code  string
-	Title string
-	Price int64
-	Slots int64
-}
-
-// ListOpenBoardTasks returns up to `limit` board rows in ONE query,
-// newest open first (the current version's creation time is the open
-// time). Price and title come from the effective version snapshot;
-// slots = ⌊available / price⌋ restricted to ≥ 1 (spec §4).
-func ListOpenBoardTasks(ctx context.Context, q pg.Querier, limit int) ([]TaskBoardRow, error) {
-	rows, err := q.Query(ctx, `
-		SELECT t.code,
-		       COALESCE(v.contract->>'title', ''),
-		       (v.contract->>'price')::bigint AS price,
-		       (t.budget_locked - t.settled - t.reserved - t.refunded)
-		           / (v.contract->>'price')::bigint AS slots
-		FROM tb_task t
-		JOIN tb_task_version v ON v.task_id = t.id AND v.version = t.version
-		WHERE t.status = 'open'
-		  AND (v.contract->>'price')::bigint >= 1
-		  AND t.budget_locked - t.settled - t.reserved - t.refunded
-		      >= (v.contract->>'price')::bigint
-		ORDER BY v.created_at DESC, t.id DESC
-		LIMIT $1`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list open board tasks: %w", err)
-	}
-	defer rows.Close()
-	var out []TaskBoardRow
-	for rows.Next() {
-		var b TaskBoardRow
-		if err := rows.Scan(&b.Code, &b.Title, &b.Price, &b.Slots); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
-}
-
 // ---------------------------------------------------------------------------
 // Money primitives — task counters + credits ledger in one
 // transaction (spec §2 Ledger, §10 items 1–3).

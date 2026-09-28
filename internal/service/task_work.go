@@ -179,6 +179,54 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, 
 	return out, total, nil
 }
 
+// workBoardRequirementsExcerpt is the homepage board excerpt (WO-19
+// H1) — shorter than the §5.1 listing excerpt.
+const workBoardRequirementsExcerpt = 140 // runes
+
+// WorkBoardRow is one row of the anonymous homepage task board
+// (WO-19 H1): no caller identity, no personal data.
+type WorkBoardRow struct {
+	Code         string `json:"code"`
+	Title        string `json:"title"`
+	Requirements string `json:"requirements"`
+	Price        int64  `json:"price"`
+	Slots        int64  `json:"slots"`
+}
+
+// ListWorkBoard is the anonymous homepage board: the SAME query as
+// work_list (§5.1, WO-19 Q1) with agentID 0 — open status, slots >= 1,
+// version join, keyword/code filters, paging — but no own-task or
+// rejection-cap exclusion (an anonymous view excludes no account).
+func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, page, pageSize int) ([]WorkBoardRow, int64, error) {
+	f := WorkListFilter{Q: keyword, Code: code, Page: page, PageSize: pageSize}
+	f.Normalize()
+	rows, total, err := repository.FindOpenWorkPage(ctx, pool, 0,
+		repository.WorkFilter{Keyword: f.Q, Code: f.Code},
+		f.PageSize, (f.Page-1)*f.PageSize)
+	if err != nil {
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	out := make([]WorkBoardRow, 0, len(rows))
+	for i := range rows {
+		var contract task.Contract
+		if err := json.Unmarshal(rows[i].Contract, &contract); err != nil {
+			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		requirements := []rune(contract.Requirements)
+		if len(requirements) > workBoardRequirementsExcerpt {
+			requirements = requirements[:workBoardRequirementsExcerpt]
+		}
+		out = append(out, WorkBoardRow{
+			Code:         rows[i].Task.Code,
+			Title:        contract.Title,
+			Requirements: string(requirements),
+			Price:        contract.Price,
+			Slots:        slotsFor(&rows[i].Task, contract),
+		})
+	}
+	return out, total, nil
+}
+
 // agentVersion resolves the version the agent sees: their active
 // claim's version if any, else the task's current version (§10.7).
 func agentVersion(ctx context.Context, pool *pg.Pool, agentID int64, t *repository.TaskRow) (int32, error) {
