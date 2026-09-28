@@ -161,10 +161,11 @@ func (s *Server) handleOwnerPaymentCheckout(w http.ResponseWriter, r *http.Reque
 // No IP allowlist (Creem has no static source IPs); no session; no API key.
 //
 // checkout.completed → snapshot reconciliation → Payment Core grant.
-// Everything else → 200 acknowledged with a clear log, zero mutation.
-// refund.created / dispute.created are recognized and logged as warnings:
-// the refund economic policy is explicitly undecided (go-live blocker)
-// and this handler must never mutate Credits for them.
+// Everything else → 200 acknowledged with a clear log, zero mutation —
+// except refund.created / dispute.created: both are recorded as
+// payment adjustment facts and drive an authoritative Credits reversal
+// through the reverse_payment ledger by the provider refunded-amount
+// ratio (see the case below and payment.HandleCreemAdjustmentEvent).
 func (s *Server) handleCreemWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)

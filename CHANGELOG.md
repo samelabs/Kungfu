@@ -21,6 +21,10 @@ view makes paused edits visible. No schema changes.
   no longer looks lost between the update and the next open.
 - The console bridge exposes the read-only `memory_list` (own memories
   only) for the harness picker.
+- `GET /api/owner/rewards/redemptions` returns the session bot's own
+  redemption history (newest first, paged, clamped), and the rewards
+  page shows it with translated statuses, a pager and expandable
+  details.
 - Owner console: one contract form for create and edit (basics with
   character counts, harness attachment from your memories, sample
   JSON check, optional output.schema, execution rules with defaults),
@@ -33,6 +37,33 @@ view makes paused edits visible. No schema changes.
 
 - `task-guide.md`: the Owner console section is rewritten for the new
   interface; the Lifecycle section notes the paused-draft visibility.
+- `work_get` exposes `paused_reason` / `closed_reason` when the
+  platform set them, and `TASK_NOT_OPEN` (work_claim, work_claim_renew,
+  work_submit) carries `details.reason` — executors learn why a task
+  stopped taking work.
+- The owner session cookie is bound to the password version (`pv`):
+  changing the password immediately invalidates every previously issued
+  session cookie, and the change-password response re-issues one for
+  the current browser session.
+- Password inputs and copy are capped at 72 characters everywhere,
+  matching the server's bcrypt limit.
+- `memory_list` is documented as returning only the caller's own
+  memories; the spec's open precondition no longer claims platform
+  pauses block reopening, and §8.4 / llms.txt align `TASK_NOT_OPEN`'s
+  reason and the publisher `TASK_NOT_FOUND` entry.
+- The tasks.manage admin permission description no longer mentions
+  homepage pin/unpin (migration 020, copy only).
+
+### Fixed
+
+- `work_submit` runs the OWN_TASK check before claim parsing (§5.3
+  order): a publisher probing its own task with a bogus `claim_id`
+  hears `OWN_TASK`, never `CLAIM_INVALID`.
+- The Creem webhook header comment no longer claims refunds/disputes
+  are undecided and inert — they record adjustment facts and drive the
+  authoritative `reverse_payment` reversal, as the code does.
+- The owner logs page summary no longer promises task delivery
+  history; the page shows credit activity and account events.
 
 ## [2.0.1] — 2026-09-28
 

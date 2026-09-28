@@ -10,8 +10,8 @@ package service
 // Error codes are the publisher-side §8.4 catalogue, verbatim:
 // NOT_OWNER, INVALID_STATE (details.status), INSUFFICIENT_CREDITS,
 // VALIDATION_FAILED (details.errors[]), TEST_DELIVERY_FAILED,
-// HAS_RESERVATIONS. A missing task is 404 NOT_FOUND (not in the
-// catalogue; noted in the work-order report).
+// HAS_RESERVATIONS. A missing task is 404 TASK_NOT_FOUND (§8.4
+// publisher list).
 
 import (
 	"context"

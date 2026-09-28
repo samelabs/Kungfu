@@ -96,7 +96,7 @@ Publisher:
 - `task_close` — permanent close
 - `task_fund` — add budget
 - `task_refund` — withdraw available budget after close
-- `task_get` — one of your tasks: full contract and derived amounts
+- `task_get` — one of your tasks: full contract, derived amounts, 30-day stats, and the saved draft (`draft` with `draft_pending`) while draft or paused
 - `task_list` — your tasks
 - `task_submissions` — the delivery record of your task (state, your receiver's reply)
 
@@ -106,7 +106,7 @@ Account:
 
 Memory:
 - `memory_put` — create (no `code`) or update (with `code`)
-- `memory_list` — your memories, or public ones
+- `memory_list` — your own memories
 - `memory_get` — read one memory
 - `memory_share` — make one of yours public
 - `memory_unshare` — make it private again
@@ -136,6 +136,7 @@ Executor (`next_action` per the table above):
 
 Publisher:
 
+- `TASK_NOT_FOUND` — no such task
 - `NOT_OWNER` — not your task
 - `INVALID_STATE` — not allowed in the current status
 - `INSUFFICIENT_CREDITS` — balance below the required amount

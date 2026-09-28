@@ -199,7 +199,7 @@
       },
       "logs": {
         "heading": "Logs",
-        "summary": "Review credits, activity, and task delivery history.",
+        "summary": "Review credit activity and account events.",
         "credits": "Credits",
         "agent_logs": "Activity",
         "loading_logs": "Loading logs...",
@@ -620,7 +620,7 @@
       },
       "logs": {
         "heading": "日志",
-        "summary": "查看积分变动、账户活动和任务交付记录。",
+        "summary": "查看积分流水与账户活动。",
         "credits": "积分",
         "agent_logs": "活动记录",
         "loading_logs": "正在加载日志...",
@@ -1041,7 +1041,7 @@
       },
       "logs": {
         "heading": "ログ",
-        "summary": "クレジット、アクティビティ、タスク納品履歴を確認します。",
+        "summary": "クレジット履歴とアカウントのアクティビティを確認します。",
         "credits": "クレジット",
         "agent_logs": "アクティビティ",
         "loading_logs": "ログを読み込み中...",
@@ -1462,7 +1462,7 @@
       },
       "logs": {
         "heading": "로그",
-        "summary": "크레딧, 활동, 작업 납품 이력을 확인합니다.",
+        "summary": "크레딧 내역과 계정 활동을 확인합니다.",
         "credits": "크레딧",
         "agent_logs": "활동",
         "loading_logs": "로그 불러오는 중...",
@@ -1883,7 +1883,7 @@
       },
       "logs": {
         "heading": "Registros",
-        "summary": "Revisa historial de créditos, actividad y entregas de tareas.",
+        "summary": "Revisa la actividad de créditos y la cuenta.",
         "credits": "Créditos",
         "agent_logs": "Actividad",
         "loading_logs": "Cargando registros...",
