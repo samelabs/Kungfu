@@ -129,6 +129,11 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	var version int32
 	var contract task.Contract
 	if in.ClaimID == nil {
+		// draft is invisible to executors (§5.1) — same TASK_NOT_FOUND
+		// as work_get, never TASK_NOT_OPEN
+		if t.Status == task.TaskDraft {
+			return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
+		}
 		if t.Status != task.TaskOpen {
 			return SubmissionView{}, errors.NewWithDetails(0, "TASK_NOT_OPEN",
 				fmt.Sprintf("Task is %s, not open", t.Status),
@@ -245,6 +250,12 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 				return SubmissionView{}, rerr
 			}
 			version, contract = nv, nc
+			// The rebound contract governs admission exactly like
+			// step (f): a no-claim submission must not bind to a
+			// claim.required version (P2-3).
+			if contract.Claim.Required {
+				return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
+			}
 			if errs := payloadSchemaErrors(locked.ID, version, contract.Output.Schema, in.Payload); len(errs) > 0 {
 				return SubmissionView{}, schemaMismatch(errs)
 			}

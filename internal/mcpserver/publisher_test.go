@@ -270,7 +270,14 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			return call(agentBot, "work_get", map[string]any{"code": "nope00000000"})
 		}},
 		{"TASK_NOT_OPEN", "stop", 409, func() (map[string]any, int) {
-			return call(agentBot, "work_claim", map[string]any{"code": draftOf(t, pool, pubID)})
+			// paused, not draft: a draft is TASK_NOT_FOUND for
+			// executors (§5.1 invisibility), a paused task is the
+			// TASK_NOT_OPEN source
+			c := wo7OpenTask(t, pool, pubID)
+			if _, err := service.PauseTask(ctx, pool, pubID, c); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+			return call(agentBot, "work_claim", map[string]any{"code": c})
 		}},
 		{"OWN_TASK", "stop", 403, func() (map[string]any, int) {
 			return call(otherBot, "work_claim", map[string]any{"code": ownCode})

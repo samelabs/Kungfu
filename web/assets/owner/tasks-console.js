@@ -142,9 +142,14 @@ function tcvRenderSimpleForm() {
         if (!receiverURL) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_receiver')}}); return; }
         if (!sample || typeof sample !== 'object' || Array.isArray(sample)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_sample')}}); return; }
         if (!Number.isInteger(price) || price < 1) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.need_price')}}); return; }
+        const totalBudget = price * units;
+        // budget = price × units must stay a safe integer: task money
+        // is capped at 2^53-1 server-side (task.MaxAmount); anything
+        // larger is silently corrupted by JS Number, so refuse it here.
+        if (!Number.isSafeInteger(totalBudget)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: t('tasks.total_too_large')}}); return; }
         tcvCall('task_create', {
             contract: {title, requirements, receiver: {url: receiverURL}, sample, price},
-            budget: price * units,
+            budget: totalBudget,
             open: qs('#tcvSOpen').checked
         }).then((env) => {
             tcvShowStatus(env);

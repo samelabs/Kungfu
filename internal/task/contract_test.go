@@ -135,6 +135,7 @@ func TestValidateContractViolations(t *testing.T) {
 		// -- price --
 		{"price positive", func(c *Contract) { c.Price = 0 }, "price"},
 		{"price positive (negative)", func(c *Contract) { c.Price = -1 }, "price"},
+		{"price max MaxAmount", func(c *Contract) { c.Price = MaxAmount + 1 }, "price"},
 
 		// -- limits --
 		{"max_rejected_per_agent min 1", func(c *Contract) {

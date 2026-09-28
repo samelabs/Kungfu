@@ -19,6 +19,12 @@ package server
 //
 // The browser must preserve/display/send these strings verbatim; all
 // business validation stays with the server authority.
+//
+// The publisher console's task tools follow the MCP numeric envelope
+// instead: task amounts (price, budget, fund) stay JSON numbers on the
+// wire. This is exact because task.MaxAmount caps every task money
+// field at 2^53-1 — inside the integer range an IEEE-754 double (and
+// thus JS Number) represents losslessly.
 
 import (
 	"errors"

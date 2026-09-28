@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
@@ -28,18 +29,20 @@ func ageSubmission(t *testing.T, pool *pg.Pool, subID int64) {
 	}
 }
 
-// makeUncertain submits against a sleeping receiver with a short
-// caller deadline (§7.2 timeout → uncertain), leaving the reservation
-// held.
+// makeUncertain submits against a sleeping receiver with a shortened
+// HTTP-client budget (§7.2 timeout → uncertain), leaving the
+// reservation held. The delivery runs on a detached context (P1-1), so
+// the timeout comes from delivery.SetRequestTimeoutForTest, not a
+// caller deadline.
 func makeUncertain(t *testing.T, pool *pg.Pool, publisher, agent int64, rcv *progReceiver) (string, int64) {
 	t.Helper()
 	rcv.mu.Lock()
 	rcv.sleep = 3 * time.Second
 	rcv.mu.Unlock()
 	code := deliverSyncTask(t, pool, publisher, rcv, 1000) // opens fast (200)
-	deadlineCtx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-	defer cancel()
-	view, err := SubmitWork(deadlineCtx, pool, agent, SubmitInput{
+	delivery.SetRequestTimeoutForTest(400 * time.Millisecond)
+	defer delivery.SetRequestTimeoutForTest(0)
+	view, err := SubmitWork(context.Background(), pool, agent, SubmitInput{
 		Code:       code,
 		RequestKey: fmt.Sprintf("unc-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK),

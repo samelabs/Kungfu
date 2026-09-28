@@ -117,6 +117,7 @@
         "need_receiver": "Receiver URL is required.",
         "need_sample": "The sample must be a JSON object.",
         "need_price": "Price must be a positive whole number.",
+        "total_too_large": "The total budget (price × units) is too large.",
         "all_states": "All states",
         "deliveries": "Deliveries"
       },
@@ -448,6 +449,7 @@
         "need_receiver": "请填写接收地址。",
         "need_sample": "样例必须是 JSON 对象。",
         "need_price": "单价必须是正整数。",
+        "total_too_large": "总预算（单价 × 份数）过大。",
         "all_states": "全部状态",
         "deliveries": "投递记录"
       },
@@ -778,6 +780,7 @@
         "need_receiver": "受信 URL を入力してください。",
         "need_sample": "サンプルは JSON オブジェクトにしてください。",
         "need_price": "単価は正の整数にしてください。",
+        "total_too_large": "合計予算（単価 × 件数）が大きすぎます。",
         "pause": "一時停止",
         "all_states": "すべての状態",
         "deliveries": "配信記録"
@@ -1109,6 +1112,7 @@
         "need_receiver": "수신 URL을 입력하세요.",
         "need_sample": "샘플은 JSON 객체여야 합니다.",
         "need_price": "단가는 양의 정수여야 합니다.",
+        "total_too_large": "총 예산(단가 × 수량)이 너무 큽니다.",
         "pause": "일시정지",
         "all_states": "모든 상태",
         "deliveries": "배송 기록"
@@ -1440,6 +1444,7 @@
         "need_receiver": "La URL del receptor es obligatoria.",
         "need_sample": "El ejemplo debe ser un objeto JSON.",
         "need_price": "El precio debe ser un entero positivo.",
+        "total_too_large": "El presupuesto total (precio × unidades) es demasiado grande.",
         "pause": "Pausar",
         "all_states": "Todos los estados",
         "deliveries": "Entregas"
