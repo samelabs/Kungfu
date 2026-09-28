@@ -8,17 +8,11 @@
 -- review deadline are gone. The payload is kept only until the
 -- submission is terminal (redelivery needs it), then cleared.
 --
--- Applies on any 1.0 database: leftover under_review rows are
--- normalized to failed; balances are aligned manually after launch.
+-- Applies on a database with no under_review submissions (the 1.0
+-- task tables have never carried production data).
 -- ============================================================
 
 BEGIN;
-
--- Normalize the pre-2.0 review state before the constraint swap.
-DELETE FROM tb_task_submission_event
-    WHERE from_state = 'under_review' OR to_state = 'under_review';
-UPDATE tb_task_submission SET state = 'failed'
-    WHERE state = 'under_review';
 
 ALTER TABLE tb_task_submission
     ADD COLUMN response_code INTEGER DEFAULT NULL,

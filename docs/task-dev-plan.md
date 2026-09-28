@@ -204,7 +204,8 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-10：端到端旅程位于 examples/receiver/e2e_test.go，全部经 /api/v1 与参考接收端，时间推进通过显式调用周期任务完成；ID 字段 wire 统一为字符串。
 - WO-11：任务最小必填为 title、objective、price，其余按 §3 缺省补全并写入版本快照；预算下限为一份单价；task_create 可带 open；发布频率 20 次/小时。
 - WO-12：积分充值包在首页公开展示（Creem 审核要求）；积分兑换功能更名为 Rewards（奖励兑换），store 命名、路由、表名与权限码全部改为 rewards，无兼容。
-- WO-14：019 迁移规整 under_review 为 failed；i18n 清理未用键（五语言键集一致，197 键）；发布文案下限改为「预算 ≥ 单价」；verdict/review/retryable 措辞清理；VERSION v2.0.0。work_list N+1 查询记为 2.0.x 优化项。
 - WO-13：任务机制落回「接收端应答即判定」：删除 `acceptance`（mode、review_window、criteria）、`objective`/`inputs`/`output.description`/`boundaries`/`examples`/`limits.max_accepted_per_agent`，改为 `requirements` + 必填 `receiver.url` + 必填 `sample`（开放时测试投递须 2xx）；删除 `under_review`、`task_verdict`、Verdict 结构与判定超时；接收端的状态码决定结局，应答（状态码 + 响应体前 4 000 字节）记录在 Submission（迁移 019）并原样返回执行者；`failed` 的 next_action 为 `stop`，驳回次数用尽时驳回的 next_action 为 `stop`；payload 进入终态即清空；契约未知字段按名拒绝。
+- WO-14：i18n 清理未用键（五语言键集一致）；发布文案下限改为「预算 ≥ 单价」；verdict/review/retryable 措辞清理；VERSION v2.0.0。
+- WO-15：投递「已发出」以 httptrace WroteRequest 判定（请求未发出→RECEIVER_UNREACHABLE）；测试投递每次尝试唯一键；payload null 判 SCHEMA_MISMATCH；统计字段改名 median_reply_seconds；HTTP 通道请求体上限统一为 1 MiB；work_list 改批量查询。
 - 门禁：凡改动迁移或被多包依赖的代码，PR 前必须跑全仓 `scripts/dev.sh test`。
 - 部署：WO-7 完成前不部署生产。
