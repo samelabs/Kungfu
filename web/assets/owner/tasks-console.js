@@ -172,7 +172,7 @@ function tcvRenderEditor(state) {
             <h2>${isNew ? escapeHtml(t('tasks.new_task')) : `<span class="mono">${codeAttr}</span>`}</h2>
             <p class="muted">${escapeHtml(t('tasks.status'))}: <span class="badge">${tcvEscapeHtml(status)}</span>${v.version !== undefined ? ` · v${v.version}` : ''}</p>
             <label>${escapeHtml(t('tasks.budget'))}</label>
-            <input id="tcvBudget" type="number" min="1000" value="${state.budget ?? 2000}" ${isNew ? '' : 'disabled'}>
+            <input id="tcvBudget" type="number" min="1" value="${state.budget ?? 5}" ${isNew ? '' : 'disabled'}>
             <label>Contract JSON</label>
             <textarea id="tcvContract" class="mono" rows="18" spellcheck="false">${tcvEscapeHtml(contractJSON)}</textarea>
             <div class="actions">
@@ -188,10 +188,10 @@ function tcvRenderEditor(state) {
         <div class="panel" id="tcvStatsPanel">${tcvStatsHTML(v)}</div>
     </div>
     <section class="panel" id="tcvSubmissionsPanel">
-        <h2>${escapeHtml(t('tasks.delivered'))}</h2>
+        <h2>${escapeHtml(t('tasks.deliveries'))}</h2>
         <div class="actions" id="tcvSubFilters">
             <select id="tcvSubState">
-                <option value="">${escapeHtml(t('logs.all')) || 'all'}</option>
+                <option value="">${escapeHtml(t('tasks.all_states'))}</option>
                 <option value="settled">settled</option>
                 <option value="rejected">rejected</option>
                 <option value="failed">failed</option>
@@ -207,7 +207,7 @@ function tcvActionButtons(status) {
     const btn = (id, label, show) => show
         ? `<button class="btn" id="${id}" type="button">${escapeHtml(label)}</button>` : '';
     return btn('tcvOpen', t('tasks.open'), status === 'draft' || status === 'paused')
-        + btn('tcvPause', t('tasks.pause') || 'Pause', status === 'open')
+        + btn('tcvPause', t('tasks.pause'), status === 'open')
         + btn('tcvClose', t('tasks.close'), status !== 'closed');
 }
 

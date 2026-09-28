@@ -694,22 +694,6 @@ func ownerLogsHTML(d *tmplData) string {
 
 // --- Utility functions ---
 
-func truncateStr(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
-}
-
-// formatCredits renders whole integer Credits (no decimals, ever).
-func formatCredits(c int64) string {
-	return strconv.FormatInt(c, 10)
-}
-
-func intToStr(n int64) string {
-	return strconv.FormatInt(n, 10)
-}
-
 // ownerTasksConsoleHTML is the /owner/tasks list shell: the JS layer
 // calls task_list through /api/owner/tool and renders the rows.
 func ownerTasksConsoleHTML(d *tmplData) string {

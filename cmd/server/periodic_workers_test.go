@@ -1,6 +1,6 @@
 package main
 
-// The WO-5b workers (submission_recovery, review_timeout) ride the
+// The background workers (submission_recovery, retention) ride the
 // same runPeriodic lifecycle as every background worker: clean stop is
 // not a failure.
 
@@ -19,7 +19,7 @@ func TestPeriodicWorkersStopCleanly(t *testing.T) {
 		fn   func()
 	}{
 		{"submission_recovery", func() { atomic.AddInt32(&ticks, 1) }},
-		{"review_timeout", func() { atomic.AddInt32(&ticks, 1) }},
+		{"retention", func() { atomic.AddInt32(&ticks, 1) }},
 	}
 
 	stops := make([]chan struct{}, 0, len(workers))

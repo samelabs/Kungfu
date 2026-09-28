@@ -191,7 +191,7 @@ next_action: pick other work with work_list.`,
 	{
 		Name: "work_submit",
 		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
-Preconditions (in order): request_key format; payload <= 512 KB, a JSON object matching the task schema, no credentials; idempotent per (task, request_key); task claimable or a valid claim carried; not your own task; caps not exhausted; claim rules; revises targets your rejected retryable submission.
+Preconditions (in order): request_key format; payload <= 512 KB, a JSON object matching the task schema, no credentials; idempotent per (task, request_key); task claimable or a valid claim carried; not your own task; caps not exhausted; claim rules; revises targets your rejected submission on this task.
 Result: the submission after synchronous delivery to the publisher's receiver — state (settled / rejected / failed / delivering / uncertain), paid, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
 next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT); stop (rejected with no rejections left, or failed — the publisher's receiver failed, nothing for you to redo); poll (delivering 5s, uncertain 30s: the platform keeps redelivering, check with work_status).`,
 		InputSchema: `{"type":"object","properties":{

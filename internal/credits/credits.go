@@ -21,18 +21,12 @@ package credits
 import (
 	"context"
 	"fmt"
-	"math"
 
 	"github.com/jackc/pgx/v5"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 )
-
-// maxBalance is the largest representable balance. Balance storage is
-// BIGINT; the guard below this constant keeps newBalance provably inside
-// int64 so the ledger row can never be written with an overflowed value.
-const maxBalance = math.MaxInt64
 
 // errOverflow reports an integer Credits operation that would leave the
 // int64 range. It fails closed BEFORE any mutation.

@@ -89,18 +89,6 @@ func kungfuListItemFromRepo(k *repository.KungfuListItem) map[string]interface{}
 	}
 }
 
-func kungfuListItemFromModel(k *model.Kungfu) map[string]interface{} {
-	return map[string]interface{}{
-		"code":        k.Code,
-		"title":       k.Title,
-		"tags":        parseJSONTags(k.TagsJSON),
-		"description": k.Description,
-		"visibility":  k.Visibility,
-		"created_at":  k.CreatedAt,
-		"updated_at":  k.UpdatedAt,
-	}
-}
-
 func kungfuDetailFromModel(k *model.Kungfu) map[string]interface{} {
 	return map[string]interface{}{
 		"code":        k.Code,

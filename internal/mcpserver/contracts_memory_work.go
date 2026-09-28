@@ -133,25 +133,6 @@ func reqStrings(m map[string]interface{}, k string) ([]string, error) {
 // reqInt64 extracts a required CREDIT-bearing integer fact from a
 // service result map. The authoritative service values are typed Go
 // int64 (task price/budget, billing reward/balance — populated from
-// model.Task fields and the ledger package's typed results, never
-// decoded JSON),
-// so the ONLY accepted dynamic types are int64/int. A float64 value
-// means the source is no longer a service-authoritative integer —
-// that is a projection failure (fail closed, no float fallback, no
-// int64-truncating conversion).
-func reqInt64(m map[string]interface{}, k string) (int64, error) {
-	switch t := m[k].(type) {
-	case int64:
-		return t, nil
-	case int:
-		return int64(t), nil
-	}
-	if _, exists := m[k]; !exists {
-		return 0, fmt.Errorf("projection: missing required field %q", k)
-	}
-	return 0, fmt.Errorf("projection: field %q has wrong type %T (service int64 fact expected)", k, m[k])
-}
-
 func reqInt(m map[string]interface{}, k string) (int, error) {
 	switch t := m[k].(type) {
 	case int:

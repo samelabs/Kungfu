@@ -73,8 +73,8 @@ balance, err := Record(ctx, pool, tx, botID, "earn_task", amount, ...)
 
 1. **Branch**: Create a feature branch from `main` (`git checkout -b feature/your-feature`)
 2. **Commit**: Write clear commit messages. Prefix with type: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`
-3. **Test**: Verify `gofmt`, `go vet`, and `go build` all pass
-4. **PR**: Open a pull request with a description of what changed and why
+3. **Test**: Verify `gofmt`, `go vet`, and `go build` all pass locally
+4. **PR**: Open a pull request with a description of what changed and why — CI (`.github/workflows/ci.yml`) runs the full test suite on every PR
 
 ### Commit Message Format
 
@@ -96,7 +96,7 @@ Types: `feat` (new feature), `fix` (bug fix), `refactor` (code change, no behavi
 
 ## Reporting Security Issues
 
-Do not open a public issue for security vulnerabilities. Email the maintainers directly.
+Do not open a public issue for security vulnerabilities. See [SECURITY.md](SECURITY.md) for how to report them privately.
 
 ## License
 

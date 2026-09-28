@@ -18,7 +18,6 @@ import (
 	stderrors "errors"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -395,22 +394,6 @@ func FulfillRedemption(ctx context.Context, pool *pg.Pool, code string, fulfillm
 		return nil, err
 	}
 	return res, nil
-}
-
-// applyTransition mirrors a committed transition onto the in-memory copy.
-func applyTransition(r *model.Redemption, target string, note *string) {
-	r.Status = target
-	now := time.Now()
-	switch target {
-	case model.RedemptionStatusApproved, model.RedemptionStatusRejected:
-		r.ReviewNote = note
-		r.ReviewedAt = &now
-	case model.RedemptionStatusFulfilled:
-		r.FulfillmentNote = note
-		r.FulfilledAt = &now
-	case model.RedemptionStatusCancelled:
-		r.CancelledAt = &now
-	}
 }
 
 // GetRedemption returns a redemption by code (read-only, no lock).

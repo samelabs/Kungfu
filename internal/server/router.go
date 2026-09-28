@@ -427,19 +427,6 @@ type parseError struct {
 
 func (e *parseError) Error() string { return e.msg }
 
-// getIntParam gets an integer URL parameter with default.
-func getIntParam(r *http.Request, key string, def int) int {
-	v := chi.URLParam(r, key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}
-
 // getQueryInt gets an integer query parameter with default.
 func getQueryInt(r *http.Request, key string, def int) int {
 	v := r.URL.Query().Get(key)

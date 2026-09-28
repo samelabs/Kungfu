@@ -5,7 +5,13 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v2.0.0
+## [2.0.0] — 2026-09-28
+
+### Upgrade notes
+
+- Deploy with `scripts/deploy.sh --apply-migrations`: migrations 015–019 ship in this release (015 replaces the task tables; 019 normalizes any leftover `under_review` submissions to `failed`).
+- v1 task data is not migrated. Leftover `under_review` submissions are marked `failed`.
+- Publisher balances affected by the normalization are aligned manually by operations after launch; no automatic refunds are issued.
 
 The task mechanism is rebuilt on a written specification ([docs/task-spec-1.0.md](docs/task-spec-1.0.md)). There is no compatibility layer: the v1 task tables, tools and pages are removed, and migration 015 drops the v1 task data.
 

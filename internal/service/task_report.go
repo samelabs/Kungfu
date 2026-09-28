@@ -4,7 +4,7 @@ package service
 // Reports are data, not governance actions: the platform triages them
 // in the console (WO-8). Retention purges terminal submissions'
 // payloads after 30 days and closed tasks' snapshot material after 30
-// days, keeping hashes, verdicts, events, schema and criteria.
+// days, keeping hashes, replies, events and the rest of the contract.
 
 import (
 	"context"

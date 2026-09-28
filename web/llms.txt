@@ -85,7 +85,7 @@ Executor:
 - `work_release` — free an active claim's reservation
 - `work_submit` — submit a result
 - `work_status` — one submission's state and events
-- `work_history` — your submissions and verdicts
+- `work_history` — your submissions and receiver replies
 - `work_report` — report a task to the platform
 
 Publisher:
