@@ -76,15 +76,13 @@ func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind str
         </section>`)
 	}
 
-	htmlOut := `<!DOCTYPE html>
-<html lang="` + html.EscapeString(data.Locale) + `">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>` + html.EscapeString(data.T(kind+".title")) + ` | Kungfu.md</title>
-    <meta name="robots" content="index,follow">
-    <link rel="stylesheet" href="/assets/site.css">
-</head>
+	htmlOut := buildHead(headInput{
+		Locale:    data.Locale,
+		Path:      "/" + kind,
+		TitleKey:  "seo." + kind + "_title",
+		DescKey:   "seo." + kind + "_desc",
+		ExtraHead: `<link rel="stylesheet" href="/assets/site.css">`,
+	}) + `
 <body class="legal-body">
 <div class="wrap legal-wrap">
     <header class="legal-header">
@@ -121,15 +119,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	taskBoard := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page)
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/")
 
-	html := `<!DOCTYPE html>
-<html lang="` + html.EscapeString(data.Locale) + `">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Give AI Memory. Give AI Work. | Kungfu.md</title>
-    <meta name="description" content="Kungfu.md gives AI agents portable storage for reusable memory, skills, scripts, and documents plus task APIs for useful work and delivered value.">
-    <meta name="keywords" content="AI agent memory, agent storage, agent tasks, agent work, agent skills, llms.txt, openai.json, agent API">
-    <meta name="robots" content="index,follow,max-image-preview:large">
+	extra := `<meta name="keywords" content="AI agent memory, agent storage, agent tasks, agent work, agent skills, llms.txt, openai.json, agent API">
     <meta name="application-name" content="Kungfu.md">
     <meta name="theme-color" content="#2f7c73">
     <meta name="msapplication-TileColor" content="#2f7c73">
@@ -137,9 +127,8 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Kungfu.md">
-    <link rel="canonical" href="https://kungfu.md/">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="llms-txt" href="/llms.txt">
+    <link rel="llms-txt" href="https://kungfu.md/llms.txt">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/app-icon.svg">
@@ -147,17 +136,17 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
     <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu_skill.md" title="Kungfu skill file">
-    <meta property="og:site_name" content="Kungfu.md">
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="Give AI Memory. Give AI Work.">
-    <meta property="og:description" content="Portable storage for agent memory, skills, scripts, and documents plus task APIs for delivered AI work.">
-    <meta property="og:url" content="https://kungfu.md/">
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Give AI Memory. Give AI Work.">
-    <meta name="twitter:description" content="Portable agent storage plus task execution for useful AI work.">
     <link rel="stylesheet" href="/assets/site.css">
     <link rel="stylesheet" href="/assets/home.css">
-</head>
+    ` + homeJSONLD()
+
+	html := buildHead(headInput{
+		Locale:    data.Locale,
+		Path:      "/",
+		TitleKey:  "seo.home_title",
+		DescKey:   "seo.home_desc",
+		ExtraHead: extra,
+	}) + `
 <body>
 <div class="wrap">
     <div class="card hero-card" data-backdrop="AI AGENT WORKFLOW">
@@ -451,23 +440,20 @@ func (s *Server) renderCredits(w http.ResponseWriter, r *http.Request, data *tmp
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/credits")
 	creditsBlock := s.homeCreditsBlockHTML(r.Context(), data.Locale)
 
-	html := `<!DOCTYPE html>
-<html lang="` + html.EscapeString(data.Locale) + `">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>` + data.T("credits.title") + ` | Kungfu.md</title>
-    <meta name="description" content="` + data.T("credits.summary") + `">
-    <meta name="robots" content="index,follow">
-    <meta name="application-name" content="Kungfu.md">
+	html := buildHead(headInput{
+		Locale:   data.Locale,
+		Path:     "/credits",
+		TitleKey: "seo.credits_title",
+		DescKey:  "seo.credits_desc",
+		ExtraHead: `<meta name="application-name" content="Kungfu.md">
     <meta name="theme-color" content="#2f7c73">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/app-icon.svg">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
-    <link rel="stylesheet" href="/assets/site.css">
-</head>
+    <link rel="stylesheet" href="/assets/site.css">`,
+	}) + `
 <body>
 <div class="wrap">
     ` + creditsBlock + `
@@ -519,14 +505,13 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
 
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/owner")
 
-	html := `<!DOCTYPE html>
-<html lang="` + data.Locale + `">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Owner Workspace - Kungfu.md</title>
-    <meta name="robots" content="noindex,nofollow">
-    <meta name="application-name" content="Kungfu.md">
+	html := buildHead(headInput{
+		Locale:   data.Locale,
+		Path:     "/owner",
+		TitleKey: "seo.owner_title",
+		DescKey:  "seo.owner_desc",
+		NoIndex:  true,
+		ExtraHead: `<meta name="application-name" content="Kungfu.md">
     <meta name="theme-color" content="#2f7c73">
     <meta name="msapplication-TileColor" content="#2f7c73">
     <meta name="mobile-web-app-capable" content="yes">
@@ -541,8 +526,8 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
     <link rel="stylesheet" href="/assets/site.css">
-    <link rel="stylesheet" href="/assets/owner.css">
-</head>
+    <link rel="stylesheet" href="/assets/owner.css">`,
+	}) + `
 <body class="booting guest" data-section="` + data.Section + `" data-locale="` + data.Locale + `">
 <div class="shell">
     <header class="owner-header">

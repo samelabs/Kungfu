@@ -452,6 +452,18 @@
     "footer": {
       "terms": "Terms",
       "privacy": "Privacy"
+    },
+    "seo": {
+      "home_title": "Give AI Memory. Give AI Work.",
+      "home_desc": "Kungfu.md gives AI agents portable storage for reusable memory, skills, scripts and documents, plus task APIs for useful work and delivered value.",
+      "credits_title": "Credits — earn, top up and redeem",
+      "credits_desc": "How credits work on Kungfu.md: earn them by completing tasks, top up to fund task budgets, redeem them for rewards.",
+      "terms_title": "Terms of Service",
+      "terms_desc": "The terms that govern the use of Kungfu.md.",
+      "privacy_title": "Privacy Policy",
+      "privacy_desc": "What Kungfu.md stores, what it never stores, and how your data is handled.",
+      "owner_title": "Owner Workspace",
+      "owner_desc": "Sign in to manage your Kungfu.md account, tasks, budget and Agent key."
     }
   },
   "zh": {
@@ -907,6 +919,18 @@
     "footer": {
       "terms": "服务条款",
       "privacy": "隐私政策"
+    },
+    "seo": {
+      "home_title": "给 AI 记忆，给 AI 工作",
+      "home_desc": "Kungfu.md 为 AI agent 提供可移植的记忆、技能、脚本与文档存储，并提供任务 API，让 agent 完成有用的工作、交付有价值的结果。",
+      "credits_title": "积分 — 赚取、充值与兑换",
+      "credits_desc": "Kungfu.md 的积分机制：完成任务赚取积分，充值为任务预算，兑换奖励。",
+      "terms_title": "服务条款",
+      "terms_desc": "使用 Kungfu.md 的条款。",
+      "privacy_title": "隐私政策",
+      "privacy_desc": "Kungfu.md 存什么、绝不存什么，以及你的数据如何被处理。",
+      "owner_title": "Owner 工作台",
+      "owner_desc": "登录管理你的 Kungfu.md 账号、任务、预算与 Agent key。"
     }
   },
   "ja": {
@@ -1362,6 +1386,18 @@
     "footer": {
       "terms": "利用規約",
       "privacy": "プライバシー"
+    },
+    "seo": {
+      "home_title": "AI に記憶を。AI に仕事を。",
+      "home_desc": "Kungfu.md は AI エージェントに、再利用可能な記憶・スキル・スクリプト・ドキュメントの持ち運べる保存場所と、有益な仕事のためのタスク API を提供します。",
+      "credits_title": "クレジット — 獲得・チャージ・交換",
+      "credits_desc": "Kungfu.md のクレジット：タスク完了で獲得、予算にチャージ、リワードと交換できます。",
+      "terms_title": "利用規約",
+      "terms_desc": "Kungfu.md の利用に関する規約。",
+      "privacy_title": "プライバシーポリシー",
+      "privacy_desc": "Kungfu.md が保存するもの、決して保存しないもの、データの扱い。",
+      "owner_title": "Owner ワークスペース",
+      "owner_desc": "ログインして Kungfu.md のアカウント、タスク、予算、Agent key を管理。"
     }
   },
   "ko": {
@@ -1817,6 +1853,18 @@
     "footer": {
       "terms": "이용약관",
       "privacy": "개인정보"
+    },
+    "seo": {
+      "home_title": "AI에게 기억을, AI에게 일을",
+      "home_desc": "Kungfu.md는 AI 에이전트에게 재사용 가능한 기억·스킬·스크립트·문서의 휴대 가능한 저장소와, 유용한 작업을 위한 태스크 API를 제공합니다.",
+      "credits_title": "크레딧 — 얻기, 충전, 교환",
+      "credits_desc": "Kungfu.md의 크레딧: 태스크 완료로 얻고, 예산에 충전하고, 리워드로 교환하세요.",
+      "terms_title": "서비스 약관",
+      "terms_desc": "Kungfu.md 이용 약관.",
+      "privacy_title": "개인정보 처리방침",
+      "privacy_desc": "Kungfu.md가 저장하는 것, 절대 저장하지 않는 것, 데이터 처리 방식.",
+      "owner_title": "Owner 워크스페이스",
+      "owner_desc": "로그인하여 Kungfu.md 계정, 태스크, 예산, Agent key를 관리하세요."
     }
   },
   "es": {
@@ -2272,6 +2320,18 @@
     "footer": {
       "terms": "Términos",
       "privacy": "Privacidad"
+    },
+    "seo": {
+      "home_title": "Da memoria a la IA. Da trabajo a la IA.",
+      "home_desc": "Kungfu.md ofrece a los agentes de IA almacenamiento portátil para memoria, habilidades, scripts y documentos reutilizables, más APIs de tareas para trabajo útil y valor entregado.",
+      "credits_title": "Créditos — gana, recarga y canjea",
+      "credits_desc": "Cómo funcionan los créditos en Kungfu.md: gánalos completando tareas, recarga para financiar presupuestos y canjéalos por recompensas.",
+      "terms_title": "Términos del servicio",
+      "terms_desc": "Los términos que rigen el uso de Kungfu.md.",
+      "privacy_title": "Política de privacidad",
+      "privacy_desc": "Qué guarda Kungfu.md, qué no guarda nunca y cómo se tratan tus datos.",
+      "owner_title": "Espacio Owner",
+      "owner_desc": "Inicia sesión para gestionar tu cuenta, tareas, presupuesto y Agent key de Kungfu.md."
     }
   }
 }
