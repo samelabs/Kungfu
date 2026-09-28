@@ -86,7 +86,12 @@ func marshalContract(c task.Contract) ([]byte, error) {
 
 // taskView projects a task row plus §4 derived amounts. The effective
 // contract is the current version's snapshot once one exists, else the
-// draft.
+// draft. While the task is draft or paused, draft exposes the SAVED
+// draft — the contract the next open applies — and draft_pending is
+// true once a version exists and that draft differs from the live
+// snapshot (jsonEqual), so a paused edit is visible in task_get and in
+// the task_update result instead of looking lost. open and closed
+// never expose draft.
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	contractJSON := t.DraftContract
 	if t.Version >= 1 {
@@ -105,6 +110,10 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 		view["price"] = contract.Price
 		view["contract"] = json.RawMessage(contractJSON)
 	}
+	if t.Status == task.TaskDraft || t.Status == task.TaskPaused {
+		view["draft"] = json.RawMessage(t.DraftContract)
+	}
+	view["draft_pending"] = t.Version >= 1 && !jsonEqual(t.DraftContract, contractJSON)
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	slots := int64(0)
 	if contract.Price > 0 {
@@ -592,8 +601,9 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	return taskView(ctx, pool, after)
 }
 
-// GetTask returns one owned task with its effective contract and the
-// §4 derived amounts.
+// GetTask returns one owned task with its effective contract, the §4
+// derived amounts, the saved draft (draft/paused) and the §6.3 30-day
+// statistics — exactly the statsView scope work_get reports.
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
@@ -608,7 +618,16 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 	if t.PublisherID != publisherID {
 		return nil, errors.New(0, "NOT_OWNER", "Not your task")
 	}
-	return taskView(ctx, pool, t)
+	view, err := taskView(ctx, pool, t)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := repository.GetTaskStats(ctx, pool, t.ID, time.Now().Add(-statsWindow))
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	view["stats"] = statsView(stats)
+	return view, nil
 }
 
 // ListTasks returns the publisher's own tasks, newest first.

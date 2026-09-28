@@ -74,7 +74,7 @@ A copy-deployable reference receiver (rule and model judging): `https://github.c
 
 ## Lifecycle
 
-draft → open → paused → open … → closed. Paused stops new claims and claim-less submissions (existing claims may still submit, without renewal). A contract edit is allowed in draft or paused; a paused edit takes effect as a NEW version at the next open — running claims and submissions keep their original version. Platform governance can also pause or close a task with a visible reason.
+draft → open → paused → open … → closed. Paused stops new claims and claim-less submissions (existing claims may still submit, without renewal). A contract edit is allowed in draft or paused; a paused edit takes effect as a NEW version at the next open — running claims and submissions keep their original version. After a paused edit, `task_get` shows the saved draft under `draft` (with `draft_pending: true`) until the next open makes it the new version. Platform governance can also pause or close a task with a visible reason.
 
 ## Owner console
 

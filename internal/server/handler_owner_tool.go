@@ -4,9 +4,10 @@ package server
 // the unified tool registry (WO-8a). No business logic lives here:
 // ownerMutation enforces the JSON/CSRF gate, requireOwnerAuth resolves
 // the session bot, and mcpserver.CallTool runs the tool with the §8.2
-// envelope. Only the eleven publisher task_* tools are exposed; every
-// other name — including all executor, account and memory tools — is
-// 404 UNKNOWN_TOOL.
+// envelope. The publisher task_* tools are exposed plus the read-only
+// memory_list (the console's harness picker; it only ever returns the
+// session bot's own memories); every other name — including all
+// executor and account tools — is 404 UNKNOWN_TOOL.
 
 import (
 	"encoding/json"
@@ -19,12 +20,13 @@ import (
 	"kungfu.md/internal/mcpserver"
 )
 
-// publisherTools is the console allowlist: the §8.1 publisher column.
+// publisherTools is the console allowlist: the §8.1 publisher column
+// and memory_list for the harness_refs picker.
 var publisherTools = map[string]bool{
 	"task_create": true, "task_update": true, "task_open": true,
 	"task_pause": true, "task_close": true, "task_fund": true,
 	"task_refund": true, "task_get": true, "task_list": true,
-	"task_submissions": true,
+	"task_submissions": true, "memory_list": true,
 }
 
 func (s *Server) handleOwnerTool(w http.ResponseWriter, r *http.Request) {

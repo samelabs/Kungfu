@@ -92,13 +92,40 @@ func TestOwnerToolAuthAndCSRF(t *testing.T) {
 	}
 
 	// non-publisher tool → 404 UNKNOWN_TOOL (even a real registry tool)
-	for _, banned := range []string{"work_list", "account_register", "memory_list", "no_such_tool"} {
+	for _, banned := range []string{"work_list", "account_register", "memory_get", "no_such_tool"} {
 		rec, env = ocCall(t, s, cookie, banned, map[string]any{})
 		if rec.Code != 404 || env["error"].(map[string]any)["code"] != "UNKNOWN_TOOL" {
 			t.Fatalf("%s: %d %v, want 404 UNKNOWN_TOOL", banned, rec.Code, env)
 		}
 	}
 	_ = botID
+}
+
+// TestOwnerToolMemoryListIsReadOnly: the console's harness picker calls
+// memory_list through the bridge; it returns the session bot's own
+// memories only (here: none) and never exposes anyone else's.
+func TestOwnerToolMemoryListIsReadOnly(t *testing.T) {
+	s, pool, name, _ := ownerConsoleEnv(t)
+	cookie := ocSessionCookie(t, s, pool, name)
+
+	// another bot's memory must never appear in the console listing
+	other := "ocother" + time.Now().Format("150405.000000000")
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility, status)
+		VALUES ('ocsecret01', (SELECT id FROM tb_bots WHERE bot_name=$1), 'Other memory',
+			'["t"]', 'secret harness body', 'c0ffee', 'private', 'active')`, other); err != nil {
+		t.Fatalf("seed other memory: %v", err)
+	}
+
+	rec, env := ocCall(t, s, cookie, "memory_list", map[string]any{})
+	if rec.Code != 200 || env["ok"] != true {
+		t.Fatalf("memory_list: %d %v", rec.Code, env)
+	}
+	for _, m := range env["kungfus"].([]any) {
+		if m.(map[string]any)["code"] == "ocsecret01" {
+			t.Fatal("console memory_list returned another bot's memory")
+		}
+	}
 }
 
 // TestOwnerToolLifecycleAndParity: task_create → task_open → task_list
