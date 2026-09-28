@@ -59,7 +59,9 @@ Rollback = deploy an earlier commit of `main`: `scripts/deploy.sh <older-sha>` (
 | Daily DB backups (14 days, 03:30) | `/var/backups/kungfu/daily/`, log `/var/log/kungfu-db-backup.log` |
 | Deploy log | `/var/log/kungfu-deploy.log` |
 
-Reference copies of the server configuration live in `deploy/` (nginx site and headers, systemd unit, backup script and cron). Change them in the repo first, apply on the server by hand, then check with `scripts/deploy.sh config-diff`. The nginx edge overwrites `X-Forwarded-For` (rate limits key on it), leaves JS/CSS caching to the app, and allows 1 MiB MCP bodies.
+Reference copies of the server configuration live in `deploy/` (nginx site and headers, systemd unit, backup script and cron). Change them in the repo first, apply on the server by hand, then check with `scripts/deploy.sh config-diff`. The nginx edge overwrites `X-Forwarded-For` (rate limits key on it), leaves JS/CSS caching to the app, and allows request bodies up to 1100k on every route (the Go entrances enforce their own 1 MiB caps).
+
+PostgreSQL must run with timezone = UTC (`SHOW timezone;`). The admin session and other pre-2.0 tables use TIMESTAMP WITHOUT TIME ZONE with database-side defaults, while expiry checks use Go's clock; a non-UTC database shifts session idle/expiry checks by the offset.
 
 Payment settings (Creem) are data, not configuration: `/samelabs/settings/payment`.
 
