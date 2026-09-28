@@ -62,9 +62,9 @@ func RecoverSubmissions(ctx context.Context, pool *pg.Pool, agentRefKey []byte, 
 					func(ctx context.Context, tx pgx.Tx) error {
 						return repository.ReleaseTaskReservation(ctx, tx, sub.TaskID, sub.Amount)
 					}); err == nil {
-					_ = maybePauseForReceiverFault(ctx, pool, sub.TaskID)
+					// DELIVERY_UNRESOLVED 不计入并中断连续计数（§7.3）
+					handled++
 				}
-				handled++
 				continue
 			}
 			// redelivery cadence (§5.4: every 30s) — the lease already

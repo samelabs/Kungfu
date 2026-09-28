@@ -3,7 +3,6 @@ package delivery
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,11 +62,9 @@ var requestTimeoutOverride time.Duration
 // for the whole process (tests only; zero restores the §11 10s).
 func SetRequestTimeoutForTest(d time.Duration) { requestTimeoutOverride = d }
 
-// maxExistingResponseBytes is the largest byte budget any existing
-// consumer stores or displays (the 65535-byte TestTask DB log column).
-// Transport reads at most this + 1 byte — bounded I/O, existing
-// truncation contracts unchanged.
-const maxExistingResponseBytes = 65535
+// maxResponseBytes is the response-body read cap (spec §7.1: 64 KB).
+// Transport reads at most this + 1 byte — bounded I/O.
+const maxResponseBytes = 65535
 
 // PostJSON sends a POST request with a JSON body and arbitrary
 // headers, classifying failures via errCfg. It is the single
@@ -163,18 +160,6 @@ func PostJSON(ctx context.Context, url string, body []byte, headers map[string]s
 	}
 }
 
-// PostJSONWithKey sends a POST request with a JSON body and a stable
-// receiver idempotency key (Idempotency-Key header). Every retry of the
-// same durable submission MUST send the identical header value and body —
-// the header carries the submission's opaque stable identity so a
-// compliant receiver can deduplicate side effects end-to-end.
-//
-// It is a thin wrapper over PostJSON (same SSRF dial authority,
-// timeouts and bounded read).
-func PostJSONWithKey(ctx context.Context, url string, body []byte, idempotencyKey string, errCfg ErrorConfig) PostResult {
-	return PostJSON(ctx, url, body, map[string]string{"Idempotency-Key": idempotencyKey}, errCfg)
-}
-
 // IsDefinitiveNotDelivered classifies a failed PostResult as PROVABLY
 // not reaching the receiver: no response code and the request was
 // never fully written (SSRF refusal, DNS failure, connect refused,
@@ -188,28 +173,10 @@ func IsDefinitiveNotDelivered(result PostResult) bool {
 	return !result.Sent
 }
 
-// BuildSubmissionPayload produces the canonical outbound JSON bytes for a
-// submission. The bytes are hashed for the payload identity, persisted as
-// the durable payload_body, and replayed byte-identically on every retry.
-func BuildSubmissionPayload(taskCode string, payload map[string]interface{}) []byte {
-	built := BuildPayload(taskCode, payload)
-	b, _ := json.Marshal(built)
-	return b
-}
-
-// BuildPayload attaches task_code to the submission payload.
-func BuildPayload(taskCode string, payload map[string]interface{}) map[string]interface{} {
-	if payload == nil {
-		payload = map[string]interface{}{}
-	}
-	payload["task_code"] = taskCode
-	return payload
-}
-
 // readBounded performs the bounded body read shared by PostJSON and
-// PostJSONWithKey (maxExistingResponseBytes cap, one byte over-detect).
+// PostJSON (maxResponseBytes cap, one byte over-detect).
 func readBounded(body io.ReadCloser) ([]byte, *string) {
-	maxBody := maxExistingResponseBytes
+	maxBody := maxResponseBytes
 	respBodyBytes, _ := io.ReadAll(io.LimitReader(body, int64(maxBody)+1))
 	if len(respBodyBytes) > maxBody {
 		respBodyBytes = respBodyBytes[:maxBody]
@@ -233,7 +200,7 @@ func AgentSubmitErrorConfig() ErrorConfig {
 	}
 }
 
-// TestTaskErrorConfig returns the error config for owner test task.
+// TestTaskErrorConfig returns the error config for the open-time test delivery.
 func TestTaskErrorConfig() ErrorConfig {
 	return ErrorConfig{
 		NetworkCode:          "TESTTASK_NETWORK_ERROR",

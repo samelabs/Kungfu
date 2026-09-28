@@ -80,57 +80,92 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 }
 
 // ListWork is §5.1 work_list: open, claimable, not-own, not-exhausted
-// tasks, newest open first, at most 100.
+// tasks, newest open first, at most 100. Candidates and their three
+// data classes (contracts, agent counts, 30-day stats) are fetched in
+// at most three batch queries — no per-task round trips.
 func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) ([]map[string]any, error) {
 	rows, err := repository.ListOpenTasksForAgent(ctx, pool, agentID, listOpenWorkingSet)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	since := now.Add(-statsWindow)
-	out := make([]map[string]any, 0, workListMax)
+	if len(rows) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	// Batch 1: the current-version contract for every candidate task.
+	taskIDs := make([]int64, len(rows))
 	for i := range rows {
-		if len(out) == workListMax {
+		taskIDs[i] = rows[i].ID
+	}
+	contractsRaw, err := repository.FindTaskVersionsBatch(ctx, pool, taskIDs)
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+
+	// Batch 2: this agent's submission tallies across all candidates.
+	countsByTask, err := repository.CountAgentSubmissionsBatch(ctx, pool, agentID, taskIDs)
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+
+	// Filter on slots and the rejection cap; only survivors need stats.
+	type kept struct {
+		row      *repository.TaskRow
+		contract task.Contract
+		my       myStats
+	}
+	keptRows := make([]kept, 0, workListMax)
+	for i := range rows {
+		if len(keptRows) == workListMax {
 			break
 		}
 		t := &rows[i]
-		contract, err := effectiveContract(ctx, pool, t)
-		if goerrors.Is(err, pgx.ErrNoRows) {
+		raw, ok := contractsRaw[t.ID]
+		if !ok || raw == nil {
 			// an open row without a version snapshot is not listable
-			// (only reachable from directly-seeded test rows; opens
-			// always write the snapshot first)
 			continue
 		}
-		if err != nil {
+		var contract task.Contract
+		if err := json.Unmarshal(raw, &contract); err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		if slotsFor(t, contract) < 1 {
 			continue
 		}
-		counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID)
-		if err != nil {
-			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-		}
+		counts := countsByTask[t.ID] // zero value when no submissions
 		my := myTally(counts, contract)
 		if my.RejectionsLeft <= 0 {
 			continue // executor exhausted this task's rejection cap
 		}
-		stats, err := repository.GetTaskStats(ctx, pool, t.ID, since)
-		if err != nil {
-			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-		}
-		requirements := []rune(contract.Requirements)
+		keptRows = append(keptRows, kept{row: t, contract: contract, my: my})
+	}
+
+	// Batch 3: §6.3 statistics for the survivors only.
+	survivorIDs := make([]int64, len(keptRows))
+	for i, k := range keptRows {
+		survivorIDs[i] = k.row.ID
+	}
+	statsByTask, err := repository.GetTaskStatsBatch(ctx, pool, survivorIDs, now.Add(-statsWindow))
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+
+	out := make([]map[string]any, 0, len(keptRows))
+	for _, k := range keptRows {
+		stats := statsByTask[k.row.ID] // zero value when no terminals
+		requirements := []rune(k.contract.Requirements)
 		if len(requirements) > workRequirementsExcerpt {
 			requirements = requirements[:workRequirementsExcerpt]
 		}
 		out = append(out, map[string]any{
-			"code":         t.Code,
-			"title":        contract.Title,
+			"code":         k.row.Code,
+			"title":        k.contract.Title,
 			"requirements": string(requirements),
-			"price":        contract.Price,
-			"slots":        slotsFor(t, contract),
-			"claim":        map[string]any{"required": contract.Claim.Required},
+			"price":        k.contract.Price,
+			"slots":        slotsFor(k.row, k.contract),
+			"claim":        map[string]any{"required": k.contract.Claim.Required},
 			"stats":        statsView(stats),
-			"my":           my,
+			"my":           k.my,
 		})
 	}
 	return out, nil

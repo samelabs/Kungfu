@@ -39,8 +39,6 @@ func testPool(t *testing.T) *pg.Pool {
 	return pool
 }
 
-var nameCounter int64
-
 func uniq() string {
 	return time.Now().Format("150405.000000000") + fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
 }

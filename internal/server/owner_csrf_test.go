@@ -207,7 +207,7 @@ func TestOwnerCSRFAllOwnerUnsafeRoutesUseSingleGate(t *testing.T) {
 		}
 		lineStart := strings.LastIndex(src[:i], "\n") + 1
 		line := src[lineStart : strings.Index(src[i:], "\n")+i]
-		if "ownerMutation(" != strings.TrimSpace(strings.SplitN(strings.SplitN(line, ",", 2)[1], "ownerMutation", 2)[0])+"ownerMutation"[:0] && !strings.Contains(line, "ownerMutation(") {
+		if !strings.Contains(line, "ownerMutation(") {
 			t.Fatalf("ungated route line: %s", line)
 		}
 	}

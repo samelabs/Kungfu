@@ -17,14 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"kungfu.md/internal/i18n"
-
 	"bytes"
 )
-
-// i18nLocaleURLForTest wraps the production locale URL helper used by
-// the nav so the active-state assertion matches the rendered href.
-func i18nLocaleURLForTest(path string) string { return i18n.LocaleURL("en", path) }
 
 // newBcpFake: packages fake with TWO products at different prices plus
 // an INVALID one (wrong billing_type) for fail-closed checks.

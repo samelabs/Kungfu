@@ -27,25 +27,6 @@ func finRoot(t *testing.T) string {
 	return repoRoot(t)
 }
 
-func finProductionFiles(t *testing.T, rel string) []string {
-	t.Helper()
-	var out []string
-	err := filepath.Walk(filepath.Join(finRoot(t), rel), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		out = append(out, path)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	return out
-}
-
 // Finance admin domain + handlers: forbidden imports.
 func TestFinanceAdminFinanceDependencyDirection(t *testing.T) {
 	forbidden := map[string][]string{

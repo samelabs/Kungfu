@@ -7,12 +7,10 @@ package server
 // stay valid, and no silent rounding ever happens. Real PostgreSQL.
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -46,59 +44,11 @@ func newEconEnv(t *testing.T, balance int64) *econEnv {
 	return e
 }
 
-// ownerPOST drives an owner-session endpoint with a raw JSON body.
-func (e *econEnv) ownerPOST(t *testing.T, path, body string) (*httptest.ResponseRecorder, map[string]interface{}) {
-	t.Helper()
-	w := httptest.NewRecorder()
-	setOwnerCookie(w, e.botID, e.s.Config.SessionSecret, false)
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cookie", "kf_owner="+cookieValue(w))
-	rec := httptest.NewRecorder()
-	e.s.buildRouter().ServeHTTP(rec, req)
-	var out map[string]interface{}
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	return rec, out
-}
-
 func cookieValue(w *httptest.ResponseRecorder) string {
 	h := w.Header().Get("Set-Cookie")
 	parts := strings.SplitN(h, ";", 2)
 	kv := strings.SplitN(parts[0], "=", 2)
 	return kv[1]
-}
-
-func errCode(t *testing.T, out map[string]interface{}) string {
-	t.Helper()
-	c, _ := out["error"].(map[string]interface{})
-	if c == nil {
-		return ""
-	}
-	s, _ := c["code"].(string)
-	return s
-}
-
-func (e *econEnv) lastTaskCode(t *testing.T) string {
-	t.Helper()
-	var code string
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT code FROM tb_tasks WHERE bot_id=$1 ORDER BY id DESC LIMIT 1`, e.botID).Scan(&code); err != nil {
-		t.Fatal(err)
-	}
-	return code
-}
-
-func (e *econEnv) assertNoLeak(t *testing.T) {
-	t.Helper()
-	var n int
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT COUNT(*) FROM tb_tasks WHERE bot_id=$1`, e.botID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("task rows leaked: %d (err %v)", n, err)
-	}
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT COUNT(*) FROM tb_transactions WHERE bot_id=$1`, e.botID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("ledger rows leaked: %d (err %v)", n, err)
-	}
 }
 
 // Fractional admin rewards product price → 400 (create and PATCH); integer OK.

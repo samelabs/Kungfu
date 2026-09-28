@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -266,23 +264,8 @@ func TestRepairPartialRolePATCHViaRouter(t *testing.T) {
 	}
 }
 
-// readTemplateSource reads the admin template Go source that renders
-// the create form (the HTML lives in Go string literals).
-func readTemplateSource(t *testing.T) string {
-	t.Helper()
-	b, err := osReadFile(filepath.Join("templates_admin.go"))
-	if err != nil {
-		t.Fatalf("read templates_admin.go: %v", err)
-	}
-	return string(b)
-}
-
 func jsonDecode(body string, v interface{}) error {
 	return json.Unmarshal([]byte(body), v)
-}
-
-func osReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
 }
 
 // Picker normal path through the real API: with the catalog loaded

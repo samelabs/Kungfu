@@ -926,8 +926,3 @@ func TestSSRFCoreTestsNeverUsedBypass(t *testing.T) {
 		t.Fatalf("ssrf_test.go calls %s %d times, want exactly 1 (the restore-policy guard only)", pattern, n)
 	}
 }
-
-// roundTripFunc adapts a function to http.RoundTripper.
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

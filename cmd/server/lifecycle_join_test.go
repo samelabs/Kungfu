@@ -27,11 +27,9 @@ import (
 type fakeWorker struct {
 	stoppedClaiming chan struct{}
 	mu              sync.Mutex
-	events          []string // ordered global event log
 	record          func(ev string)
 	inFlight        chan struct{} // closed when a pass is mid-flight
 	releasePass     chan struct{} // test closes to let the pass finish
-	claimsAfterStop int32
 }
 
 // markInFlight signals a pass has started (exactly once).

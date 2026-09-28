@@ -249,6 +249,65 @@ func FindTaskVersion(ctx context.Context, q pg.Querier, taskID int64, version in
 	return &v, nil
 }
 
+// FindTaskVersionsBatch loads the current-version contract JSON for
+// every (task_id, version) pair implied by the given task rows, in
+// ONE query keyed by task_id.
+func FindTaskVersionsBatch(ctx context.Context, q pg.Querier, taskIDs []int64) (map[int64][]byte, error) {
+	out := make(map[int64][]byte, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT v.task_id, v.contract
+		FROM tb_task_version v
+		JOIN tb_task t ON t.id = v.task_id AND t.version = v.version
+		WHERE v.task_id = ANY($1)`, taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("find task versions batch: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var contract []byte
+		if err := rows.Scan(&id, &contract); err != nil {
+			return nil, err
+		}
+		out[id] = contract
+	}
+	return out, rows.Err()
+}
+
+// CountAgentSubmissionsBatch tallies one agent's submissions across a
+// set of tasks in ONE query, keyed by task_id. Tasks with no
+// submissions are absent from the map (the zero value applies).
+func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64, taskIDs []int64) (map[int64]AgentSubmissionCounts, error) {
+	out := make(map[int64]AgentSubmissionCounts, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT task_id,
+		  COUNT(*) FILTER (WHERE state = 'settled'),
+		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain')),
+		  COUNT(*) FILTER (WHERE state = 'rejected')
+		FROM tb_task_submission
+		WHERE agent_id = $1 AND task_id = ANY($2)
+		GROUP BY task_id`, agentID, taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("count agent submissions batch: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var c AgentSubmissionCounts
+		if err := rows.Scan(&id, &c.Settled, &c.Inflight, &c.Rejected); err != nil {
+			return nil, err
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // tb_task_claim
 // ---------------------------------------------------------------------------
@@ -1219,4 +1278,56 @@ func bumpTaskCounter(ctx context.Context, q pg.Querier, taskID int64, column str
 func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// GetTaskStatsBatch computes the §6.3 statistics for every task in
+// `ids` in ONE query, keyed by task_id — the batch twin of
+// GetTaskStats, identical in scope and cutoff semantics.
+func GetTaskStatsBatch(ctx context.Context, q pg.Querier, ids []int64, since time.Time) (map[int64]TaskStats, error) {
+	out := make(map[int64]TaskStats, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT t.task_id,
+		  COUNT(*) FILTER (WHERE t.state = 'settled'),
+		  COUNT(*) FILTER (WHERE t.state = 'rejected'),
+		  COUNT(*) FILTER (WHERE t.state = 'failed'),
+		  COUNT(*),
+		  percentile_cont(0.5) WITHIN GROUP (ORDER BY t.seconds)
+		FROM (
+		  SELECT sub.task_id, sub.state,
+		         EXTRACT(EPOCH FROM (
+		           (SELECT e.at FROM tb_task_submission_event e
+		             WHERE e.submission_id = sub.submission_id
+		               AND e.to_state IN ('settled', 'rejected')
+		             ORDER BY e.seq DESC LIMIT 1)
+		           -
+		           (SELECT e.at FROM tb_task_submission_event e
+		             WHERE e.submission_id = sub.submission_id
+		             ORDER BY e.seq LIMIT 1)
+		         ))::double precision AS seconds,
+		         (SELECT e.at FROM tb_task_submission_event e
+		           WHERE e.submission_id = sub.submission_id
+		           ORDER BY e.seq DESC LIMIT 1) AS terminal_at
+		  FROM tb_task_submission sub
+		  WHERE sub.task_id = ANY($1) AND sub.state IN ('settled', 'rejected', 'failed')
+		) t
+		WHERE t.terminal_at IS NOT NULL AND t.terminal_at >= $2
+		GROUP BY t.task_id`, ids, since)
+	if err != nil {
+		return nil, fmt.Errorf("task stats batch: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var s TaskStats
+		var median *float64
+		if err := rows.Scan(&id, &s.Settled, &s.Rejected, &s.Failed, &s.TerminalTotal, &median); err != nil {
+			return nil, err
+		}
+		s.MedianReplySeconds = median
+		out[id] = s
+	}
+	return out, rows.Err()
 }

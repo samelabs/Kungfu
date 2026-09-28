@@ -190,7 +190,7 @@ WO-1 → WO-2 → WO-3 → WO-4 → WO-5 → WO-6
 - WO-4：payload 规范化哈希（键排序，数字按原文）；schema 编译按 (task_id, version) 进程内缓存；非 object 的 payload 归为 SCHEMA_MISMATCH（pointer ""）；CREDENTIAL_IN_PAYLOAD 取首个命中位置。
 - WO-5a：状态机补边 uncertain --delivery_failed--> failed；投递结果写入使用不随请求取消的上下文；202 与其他 2xx 以响应码区分。
 - WO-5b：恢复租约为 UPDATE…SKIP LOCKED 并刷新 updated_at；delivering 超 15 秒、uncertain 每 30 秒重投、满 24 小时 failed(DELIVERY_UNRESOLVED)；agent_ref 密钥取 SESSION_SECRET（轮换会改变 agent_ref，部署说明需写明）；判定已过期时先超时结算再返回 NOT_UNDER_REVIEW。
-- WO-6a：work_list 至多 100 条、候选窗口 500；my.remaining 为两类上限剩余的较小值，全不限为 null；统计窗口按进入终态时间；harness bytes 为快照内容字节数。已知优化项：ListWork 逐任务查询统计，规模增长后改为批量查询。
+- WO-6a：work_list 至多 100 条、候选窗口 500；my.remaining 为两类上限剩余的较小值，全不限为 null；统计窗口按进入终态时间；harness bytes 为快照内容字节数。ListWork 为批量查询（WO-15）。
 - WO-7a：协议层统一 code→HTTP 状态表（429 仅 RATE_LIMIT）；retry_after：delivering 5、uncertain 30、under_review 60、failed 60 秒；未知工具 UNKNOWN_TOOL(404)。
 - WO-7b：执行者与发布者共用一个注册表；发布者工具 next_action 恒为 null；/api/v1 请求体超限为 PAYLOAD_TOO_LARGE(413)。
 - WO-7c：全局锁序 Task → Claim → Submission；无 Claim 提交以锁内版本为准；OpenTask 以草稿内容比较防并发修改；过期未清理的 Claim 在领取时就地过期；续期 TTL 取 Claim 所属版本；delivering 转 uncertain 后按 30 秒节奏重投；故障暂停在锁内按失败原因判定。
