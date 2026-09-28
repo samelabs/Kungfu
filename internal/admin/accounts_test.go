@@ -19,11 +19,6 @@ func newAccountTestDB(t *testing.T) *pg.Pool {
 	return createPrivateDB(t)
 }
 
-// testKeyHash is a REAL 32-byte SHA-256 digest (008 schema requires
-// LENGTH(api_key_hash) = 32). Fixed input "011-test-seed" — test
-// data goes through the same constraint as production keys.
-var testKeyHash = sha256.Sum256([]byte("011-test-seed"))
-
 // testKeyHashN returns a UNIQUE real 32-byte digest per seed row
 // (uk_api_key_hash): hash the fixed seed plus a discriminator.
 func testKeyHashN(discriminator string) []byte {

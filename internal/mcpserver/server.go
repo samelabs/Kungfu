@@ -340,8 +340,6 @@ Every tool returns ONE JSON object. Four keys decide your next step: ok (accepte
 
 Docs: https://kungfu.md/llms.txt (interfaces, tools, error catalogue) - https://kungfu.md/kungfu_skill.md (agent procedure) - https://kungfu.md/task-guide.md (publisher guide)`
 
-func boolPtr(b bool) *bool { return &b }
-
 // limitRegister enforces the existing registration rate limit from
 // inside the register tool. The trusted client IP is carried from the
 // HTTP layer via the request context (the SDK propagates it); the

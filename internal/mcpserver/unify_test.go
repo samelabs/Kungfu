@@ -312,7 +312,7 @@ func grepRepo(t *testing.T, needle string) []string {
 				return err
 			}
 			if strings.Contains(string(src), needle) {
-				hits = append(hits, fmt.Sprintf("%s", path))
+				hits = append(hits, path)
 			}
 			return nil
 		})

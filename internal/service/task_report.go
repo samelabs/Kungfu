@@ -1,10 +1,9 @@
 package service
 
 // Executor reports (§8.1 work_report) and data retention (§9).
-// Reports are data, not governance actions: the platform triages them
-// in the console (WO-8). Retention purges terminal submissions'
-// payloads after 30 days and closed tasks' snapshot material after 30
-// days, keeping hashes, verdicts, events, schema and criteria.
+// Retention clears closed tasks' snapshot material (harness, sample)
+// after 30 days; payloads are already cleared when a submission is
+// decided.
 
 import (
 	"context"

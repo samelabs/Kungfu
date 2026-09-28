@@ -147,11 +147,6 @@ func TestAdminStoreCreateEditStringWriteback(t *testing.T) {
 	}
 }
 
-func jsonInt(v int64) string {
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
 func nanoEconSuffix() string {
 	return fmt.Sprint(time.Now().UnixNano())
 }

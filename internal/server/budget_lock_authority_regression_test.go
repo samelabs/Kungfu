@@ -23,14 +23,13 @@ import (
 )
 
 // Per-locale markers that must appear in the budget-lock wording.
-// Each marker asserts "locked at creation" AND "still locked while
-// pending" semantics in that locale's own wording.
+// Each marker asserts the locked-at-creation fact in that locale's own wording.
 var budgetLockCreationMarkers = map[string][]string{
-	"en": {"Creating a task locks the full task budget", "stays locked while the task is pending"},
-	"zh": {"创建任务时即从 Owner 余额锁定完整任务预算", "pending 状态期间预算保持锁定"},
-	"ja": {"タスク作成時に", "タスク予算の全額が直ちにロック", "pending の間も予算はロックされたまま"},
-	"ko": {"작업을 생성하면", "예산 전액이 즉시 잠깁니다", "pending 상태인 동안에도 예산은 잠겨 있으며"},
-	"es": {"Crear una tarea bloquea el presupuesto completo", "permanece bloqueado mientras la tarea está pending"},
+	"en": {"Creating a task locks its budget from the Owner balance"},
+	"zh": {"创建任务时从 Owner 余额锁定其预算"},
+	"ja": {"タスクを作成すると Owner 残高から予算がロックされます"},
+	"ko": {"작업을 만들면 Owner 잔액에서 예산이 잠깁니다"},
+	"es": {"Crear una tarea bloquea su presupuesto del saldo del Owner"},
 }
 
 // Phrases that would re-introduce the WRONG authority (lock at
@@ -74,16 +73,13 @@ func TestCreditsBudgetLockMatchesTermsAuthority(t *testing.T) {
 			}
 			// Credits must state creation-time lock too (its wording is
 			// free-form per locale but must carry the same two facts).
-			for _, want := range budgetLockCreationMarkers[locale][:2] {
-				_ = want // markers below are Credits-specific (shorter note)
-			}
 			switch locale {
 			case "en":
 				if !strings.Contains(c, "locked from your account balance when the task is created") {
 					t.Fatalf("en credits note lost creation-time lock: %s", c)
 				}
 			case "zh":
-				if !strings.Contains(c, "任务创建时") {
+				if !strings.Contains(c, "创建任务时") {
 					t.Fatalf("zh credits note lost creation-time lock: %s", c)
 				}
 			case "ja":
@@ -123,7 +119,7 @@ func TestTermsCreditsRenderBudgetLockAuthority(t *testing.T) {
 		wantMarkers []string
 	}{
 		{"/terms", budgetLockCreationMarkers["en"]},
-		{"/credits", []string{"locked from your account balance when the task is created", "including while it is pending"}},
+		{"/credits", []string{"locked from your account balance when the task is created", "including while it is a draft"}},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

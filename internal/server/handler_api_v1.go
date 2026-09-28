@@ -19,10 +19,6 @@ import (
 	"kungfu.md/internal/model"
 )
 
-// apiV1BodyLimit bounds one tool-call body (§5.3 payload 512 KB plus
-// envelope headroom).
-const apiV1BodyLimit = 512*1024 + 4096
-
 func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "tool")
 	def, ok := mcpserver.Tool(name)
@@ -50,7 +46,7 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 		bot = verified
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, apiV1BodyLimit+1))
+	body, err := io.ReadAll(io.LimitReader(r.Body, mcpserver.MaxRequestBodyBytes+1))
 	if err != nil {
 		writeAPIV1JSON(w, http.StatusUnprocessableEntity,
 			map[string]any{"ok": false,
@@ -58,12 +54,12 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 			})
 		return
 	}
-	if len(body) > apiV1BodyLimit {
+	if len(body) > mcpserver.MaxRequestBodyBytes {
 		// over the cap BEFORE any decoding: the same §8.2 structure,
 		// the protocol status table's 413
 		env := map[string]any{"ok": false, "error": map[string]any{
 			"code":    "PAYLOAD_TOO_LARGE",
-			"message": fmt.Sprintf("Request body exceeds %d bytes", apiV1BodyLimit),
+			"message": fmt.Sprintf("Request body exceeds %d bytes", mcpserver.MaxRequestBodyBytes),
 		}, "next_action": "revise", "retry_after": nil}
 		writeAPIV1JSON(w, http.StatusRequestEntityTooLarge, env)
 		return

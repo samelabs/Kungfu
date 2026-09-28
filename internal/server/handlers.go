@@ -9,13 +9,6 @@ import (
 	"kungfu.md/internal/service"
 )
 
-// Kungfu list pagination defaults — server-owned (no global config coupling).
-const (
-	defaultKungfuListLimit = 50
-	maxKungfuListLimit     = 100
-	maxKungfuListOffset    = 10000
-)
-
 // -- Kungfu Handlers --
 
 // -- Task Handlers (Agent) --
@@ -261,15 +254,4 @@ func setOwnerCookie(w http.ResponseWriter, botID int64, secret string, isHTTPS b
 // clearOwnerCookie wraps auth.ClearOwnerSessionCookie.
 func clearOwnerCookie(w http.ResponseWriter, isHTTPS bool) {
 	authImpl.ClearOwnerSessionCookie(w, isHTTPS)
-}
-
-// getStr extracts a string from an interface{} value.
-func getStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }

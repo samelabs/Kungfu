@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -90,30 +89,6 @@ func createPrivateDB(t *testing.T) *pg.Pool {
 		_, _ = m2.Exec(context.Background(), "DROP DATABASE IF EXISTS "+dbName+" WITH (FORCE)")
 	})
 	return dbPool
-}
-
-// sharedPool is the package-wide private DB (one migration run for the
-// whole package). Tests needing a pristine admin table use their own
-// fresh DB instead.
-var (
-	sharedPoolOnce sync.Once
-	sharedPool     *pg.Pool
-)
-
-func adminTestPool(t *testing.T) *pg.Pool {
-	t.Helper()
-	sharedPoolOnce.Do(func() {
-		// createPrivateDB registers cleanup on ITS test (t0), which
-		// runs for the whole package lifetime via t.Cleanup — safe.
-	})
-	if sharedPool == nil {
-		sharedPool = createPrivateDBOneshot(t)
-	}
-	return sharedPool
-}
-
-func createPrivateDBOneshot(t *testing.T) *pg.Pool {
-	return createPrivateDB(t)
 }
 
 // seedAdmin creates an admin directly and returns

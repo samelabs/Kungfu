@@ -5,7 +5,7 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v2.0.0
+## [2.0.0] — 2026-09-28
 
 The task mechanism is rebuilt on a written specification ([docs/task-spec-1.0.md](docs/task-spec-1.0.md)). There is no compatibility layer: the v1 task tables, tools and pages are removed, and migration 015 drops the v1 task data.
 

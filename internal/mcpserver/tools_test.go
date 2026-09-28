@@ -245,7 +245,7 @@ func TestMCPToolsMemoryLifecycleAndFreeEconomics(t *testing.T) {
 	if sc != 200 {
 		t.Fatalf("memory_delete: %d", sc)
 	}
-	sc, body = m2CallTool(t, ts, keyA, "memory_list", map[string]interface{}{})
+	_, body = m2CallTool(t, ts, keyA, "memory_list", map[string]interface{}{})
 	if strings.Contains(body, "\""+code+"\"") {
 		t.Fatalf("deleted memory still listed: %.200s", body)
 	}

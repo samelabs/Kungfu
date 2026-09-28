@@ -193,46 +193,6 @@ func readCreemResponse(resp *http.Response) ([]byte, error) {
 	return data, nil
 }
 
-func (c *CreemClient) do(ctx context.Context, method, path string, body interface{}, out interface{}) error {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("x-api-key", c.apiKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err // network ambiguity — not definitive
-	}
-	defer resp.Body.Close()
-	raw, rerr := readCreemResponse(resp)
-	if rerr != nil {
-		// I/O ambiguity — never definitive, never partial-body facts.
-		return fmt.Errorf("creem response read: %w", rerr)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if out == nil {
-			return nil
-		}
-		return json.Unmarshal(raw, out)
-	}
-	if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 404 {
-		return &ErrCreemDefinitive{Status: resp.StatusCode, Body: string(raw)}
-	}
-	// 429 / 5xx / anything else: ambiguous.
-	return fmt.Errorf("creem ambiguous failure (HTTP %d): %s", resp.StatusCode, truncate(string(raw), 200))
-}
-
 // GetProduct fetches the configured product live via the official
 // GET /v1/products/{id} endpoint (path-escaped id). The caller validates
 // it against expectations (id, onetime, active, mode, price, currency).

@@ -10,7 +10,6 @@ package server
 // its existing read-failure contract.
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -47,32 +46,3 @@ func readBoundedRequestBody(r *http.Request, maxBytes int64) ([]byte, error) {
 
 // parseCredits extracts a whole-integer Credit value from a decoded
 // JSON field. EXACT integer parsing only — no Credit value ever passes
-// through float64 (which silently corrupts integers above 2^53).
-// json.Number (UseNumber bodies) and canonical integer strings parse
-// via strconv-grade exact integer semantics; fractional presentations
-// ("1000.5", "0.0001", "9007199254740993.0") are REJECTED — never
-// rounded, never float-converted. Returns (value, present, ok).
-func parseCredits(v interface{}) (int64, bool, bool) {
-	switch t := v.(type) {
-	case nil:
-		return 0, false, true
-	case json.Number:
-		// Lossless path (body parsed with UseNumber): the exact source
-		// text. Int64() rejects fractions and >int64 range alike.
-		if n, err := t.Int64(); err == nil {
-			return n, true, true
-		}
-		return 0, true, false
-	case string:
-		// The ONE canonical parser (shared with jsonCredits): no
-		// trim, no float, no coercion. The browser may trim user
-		// input once as UX normalization before sending; non-canonical
-		// wire input is rejected here, never silently repaired.
-		if n, err := parseCanonicalEconInt(t); err == nil {
-			return n, true, true
-		}
-		return 0, true, false
-	default:
-		return 0, true, false
-	}
-}

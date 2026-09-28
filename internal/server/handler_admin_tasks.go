@@ -128,17 +128,17 @@ func taskStatsDTO(s admin.TaskStats) map[string]interface{} {
 		return float64(num) / float64(den)
 	}
 	var median interface{}
-	if s.MedianVerdictSeconds != nil {
-		median = *s.MedianVerdictSeconds
+	if s.MedianReplySeconds != nil {
+		median = *s.MedianReplySeconds
 	}
 	return map[string]interface{}{
-		"settled":                s.Settled,
-		"rejected":               s.Rejected,
-		"failed":                 s.Failed,
-		"terminal_total":         s.TerminalTotal,
-		"accept_rate":            rate(s.Settled, s.Settled+s.Rejected),
-		"median_verdict_seconds": median,
-		"failure_rate":           rate(s.Failed, s.TerminalTotal),
+		"settled":              s.Settled,
+		"rejected":             s.Rejected,
+		"failed":               s.Failed,
+		"terminal_total":       s.TerminalTotal,
+		"accept_rate":          rate(s.Settled, s.Settled+s.Rejected),
+		"median_reply_seconds": median,
+		"failure_rate":         rate(s.Failed, s.TerminalTotal),
 	}
 }
 

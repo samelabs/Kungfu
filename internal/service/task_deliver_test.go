@@ -6,9 +6,15 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,8 +23,6 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
-
-	"crypto/tls"
 
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
@@ -323,6 +327,70 @@ func TestDeliver5xxFault(t *testing.T) {
 // §7.2: connection refused (definitively not delivered) →
 // RECEIVER_UNREACHABLE. The version snapshot is repointed at a closed
 // local port after a normal open (test-only seeding). --
+
+// TestDeliverTLSFailureUnreachable: a receiver presenting a
+// self-signed certificate the hardened client does not trust fails
+// during the TLS handshake — the request is never written (httptrace
+// never fires WroteRequest), so the outcome is failed /
+// RECEIVER_UNREACHABLE, not uncertain.
+func TestDeliverTLSFailureUnreachable(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	// a TLS server whose certificate is NOT the test CA (so the
+	// client rejects the handshake)
+	untrustedKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &untrustedKey.PublicKey, untrustedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: untrustedKey}}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	// seed an open task with a trusted receiver, then repoint the
+	// version contract at the untrusted server (test-only; opening
+	// directly against the untrusted URL would fail at the test
+	// delivery before we can submit)
+	rcvTrusted := startProgReceiver(t)
+	code := deliverSyncTask(t, pool, publisher, rcvTrusted, 1000)
+	taskID := deliverTaskID(t, pool, code)
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_task_version SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
+		 WHERE task_id = $1 AND version = 1`, taskID, `"`+srv.URL+`"`); err != nil {
+		t.Fatal(err)
+	}
+	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
+		Code:       code,
+		RequestKey: fmt.Sprintf("tls-%d", time.Now().UnixNano()),
+		Payload:    []byte(submitPayloadOK),
+	}, testAgentRefKey, time.Now())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if view.State != task.SubFailed || view.Failure == nil || *view.Failure != "RECEIVER_UNREACHABLE" {
+		t.Fatalf("view = %s/%v, want failed/RECEIVER_UNREACHABLE", view.State, view.Failure)
+	}
+
+	deliverInvariants(t, pool, code)
+}
 
 func TestDeliverConnectionRefused(t *testing.T) {
 	pool := pubTestPool(t)

@@ -2,6 +2,7 @@
 kungfu-server
 /server
 *.exe
+/examples/receiver/receiver
 
 # Environment / secrets
 .env

@@ -36,19 +36,7 @@ func a6CleanupBot(t *testing.T, pool *pg.Pool, botID int64) {
 	_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE id = $1`, botID)
 }
 
-// failNameExistsQuerier fails only the bot-name existence probe
-// (SELECT ... FROM tb_bots WHERE bot_name = $1 ... LIMIT 1 shape), letting
-// every other query pass. Parallel-safe: no schema mutation.
-type failNameExistsQuerier struct{ pg.Querier }
-
 var errA6NameExists = stderrors.New("a6: bot name exists query failure")
-
-func (f failNameExistsQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if strings.Contains(sql, "bot_name") && strings.Contains(sql, "tb_bots") {
-		return failRow{err: errA6NameExists}
-	}
-	return f.Querier.QueryRow(ctx, sql, args...)
-}
 
 // failRow always errors on Scan.
 type failRow struct{ err error }

@@ -409,7 +409,7 @@ func TestMCPAuthBoundary(t *testing.T) {
 		t.Fatalf("no-auth status = %d body=%s", resp.StatusCode, body)
 	}
 	// invalid bearer => 401
-	resp, body = m1CallStatusRaw(t, srv, "Bearer kf_live_"+strings.Repeat("b", 64))
+	resp, _ = m1CallStatusRaw(t, srv, "Bearer kf_live_"+strings.Repeat("b", 64))
 	if resp.StatusCode != 401 {
 		t.Fatalf("invalid bearer = %d", resp.StatusCode)
 	}

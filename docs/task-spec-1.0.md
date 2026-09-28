@@ -86,7 +86,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 | 平台暂停 | 连续 5 次接收端故障（§7.3） | 状态 paused，`paused_reason` 记录原因；发布者修复后可 open |
 | 平台关闭 | 平台治理 | 状态 closed，`closed_reason` 对发布者与执行者可见 |
 
-**测试投递**（open 时）：以 §7.1 的请求形状投递 `sample`，`Idempotency-Key = test-<code>-<version>`、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。
+**测试投递**（open 时）：以 §7.1 的请求形状投递 `sample`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。
 
 派生量：
 - `available = budget_locked − settled − reserved − refunded`（`reserved` 为全部未终结预留金额之和）
@@ -99,7 +99,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 ### 5.1 发现
 
-`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_verdict_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按开放时间倒序，至多 100 条。
+`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按开放时间倒序，至多 100 条。
 
 `work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数。持有 Claim 的执行者读取的是 Claim 所属版本。
 `work_harness(code, ref_id)` 返回该版本 Harness 快照内容；`ref_id` 不在快照中返回 `HARNESS_REF_NOT_FOUND`。
@@ -182,7 +182,7 @@ delivering ──2xx────────────────────
 
 建议接收端返回执行者可据以行动的说明，例如 `{"message": "..."}`；平台不要求任何格式。
 
-统计（按任务，近 30 天，按进入终态时间）：`accept_rate = settled / (settled + rejected)`；`median_verdict_seconds`（提交到应答的中位时长）；`failure_rate = failed / 全部终态`。对发布者与执行者均可见。
+统计（按任务，近 30 天，按进入终态时间）：`accept_rate = settled / (settled + rejected)`；`median_reply_seconds`（提交到应答的中位时长）；`failure_rate = failed / 全部终态`。对发布者与执行者均可见。
 
 ---
 
@@ -214,7 +214,7 @@ Kungfu-Task-Version: <version>
 | 4xx | `rejected`，释放预留 | — |
 | 5xx | `failed`，释放预留 | `RECEIVER_FAULT` |
 | 1xx；3xx | `failed`，释放预留 | `RECEIVER_PROTOCOL` |
-| 连接被拒；DNS 失败 | `failed`，释放预留 | `RECEIVER_UNREACHABLE` |
+| 连接被拒；DNS 失败；TLS 握手失败（请求未发出） | `failed`，释放预留 | `RECEIVER_UNREACHABLE` |
 | 超时；连接中途断开 | `uncertain`，保持预留，每 30 秒重投 | — |
 | `uncertain` 满 24 小时 | `failed`，释放预留 | `DELIVERY_UNRESOLVED` |
 

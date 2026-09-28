@@ -393,3 +393,96 @@ func TestTaskV1BudgetClosedConstraintRejected(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestGetTaskStatsBatchMatchesSingular: the batch computation returns
+// exactly the same numbers as calling GetTaskStats per task, for
+// tasks with terminals, tasks with none, and absent task ids.
+func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
+	pool := taskV1Pool(t)
+	ctx := context.Background()
+
+	// seed two tasks with different terminal mixes
+	seedTask := func(code string, n int) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO tb_task (code, publisher_id, status, version, budget_locked, draft_contract)
+			 VALUES ($1, 1, 'open', 1, 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
+			t.Fatalf("seed task: %v", err)
+		}
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO tb_task_version (task_id, version, contract, harness)
+			 VALUES ($1, 1, '{}', '[]')`, id); err != nil {
+			t.Fatalf("seed version: %v", err)
+		}
+		for i := 0; i < n; i++ {
+			var sid int64
+			state := "settled"
+			if i%2 == 1 {
+				state = "rejected"
+			}
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
+				 VALUES ($1, 1, 2, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
+				fmt.Sprintf("%s-%d", code, i)).Scan(&sid); err != nil {
+				t.Fatalf("seed submission: %v", err)
+			}
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO tb_task_submission_event (submission_id, seq, to_state, cause)
+				 VALUES ($1, 1, 'delivering', 'submit')`, sid); err != nil {
+				t.Fatalf("seed event1: %v", err)
+			}
+			cause := "deliver_2xx"
+			if state == "rejected" {
+				cause = "deliver_4xx"
+			}
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO tb_task_submission_event (submission_id, seq, to_state, cause)
+				 VALUES ($1, 2, $2, $3)`, sid, state, cause); err != nil {
+				t.Fatalf("seed event2: %v", err)
+			}
+			if _, err := pool.Exec(ctx,
+				`UPDATE tb_task_submission SET state = $2, payload = NULL WHERE submission_id = $1`, sid, state); err != nil {
+				t.Fatalf("settle: %v", err)
+			}
+		}
+		return id
+	}
+
+	idA := seedTask(fmt.Sprintf("statbatch%06d", time.Now().UnixNano()%1000000), 4)
+	idB := seedTask(fmt.Sprintf("statbatch2%06d", time.Now().UnixNano()%1000000), 0) // no terminals
+
+	since := time.Now().Add(-30 * 24 * time.Hour)
+	ids := []int64{idA, idB}
+	batch, err := GetTaskStatsBatch(ctx, pool, ids, since)
+	if err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	if len(batch) == 0 {
+		t.Fatal("batch returned nothing")
+	}
+	for _, id := range ids {
+		single, err := GetTaskStats(ctx, pool, id, since)
+		if err != nil {
+			t.Fatalf("singular %d: %v", id, err)
+		}
+		got, ok := batch[id]
+		if !ok {
+			if single.TerminalTotal == 0 {
+				continue // no terminals → absent from both
+			}
+			t.Fatalf("batch missing task %d (has %d terminals)", id, single.TerminalTotal)
+		}
+		if got.Settled != single.Settled || got.Rejected != single.Rejected ||
+			got.Failed != single.Failed || got.TerminalTotal != single.TerminalTotal {
+			t.Fatalf("task %d: batch %+v != singular %+v", id, got, single)
+		}
+		if (got.MedianReplySeconds == nil) != (single.MedianReplySeconds == nil) {
+			t.Fatalf("task %d: median nil mismatch %v vs %v", id, got.MedianReplySeconds, single.MedianReplySeconds)
+		}
+		if got.MedianReplySeconds != nil && single.MedianReplySeconds != nil &&
+			*got.MedianReplySeconds != *single.MedianReplySeconds {
+			t.Fatalf("task %d: median %v != %v", id, *got.MedianReplySeconds, *single.MedianReplySeconds)
+		}
+	}
+}

@@ -407,7 +407,7 @@ func jsonCredits(v interface{}) (int64, bool) {
 			return n, true
 		}
 	case string:
-		// Same ONE canonical parser as parseCredits — exactly one
+		// Uses the ONE canonical decimal parser — exactly one
 		// string-integer rule across owner and admin boundaries.
 		if n, err := parseCanonicalEconInt(t); err == nil {
 			return n, true

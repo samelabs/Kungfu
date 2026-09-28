@@ -649,3 +649,20 @@ func TestSubmitWithoutSchema(t *testing.T) {
 	}
 	claimTaskReserved(t, pool, code)
 }
+
+// TestSubmitPayloadNullRejected: JSON null unmarshals into a nil map
+// without error — it must be rejected as SCHEMA_MISMATCH before any
+// submission is created.
+func TestSubmitPayloadNullRejected(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+
+	code := submitOpenedTask(t, pool, publisher, 1000, nil)
+	_, err := SubmitWork(context.Background(), pool, agent, SubmitInput{
+		Code:       code,
+		RequestKey: fmt.Sprintf("null-%d", time.Now().UnixNano()),
+		Payload:    []byte("null"),
+	}, testAgentRefKey, time.Now())
+	submitState(t, pool, code, err, "SCHEMA_MISMATCH")
+}

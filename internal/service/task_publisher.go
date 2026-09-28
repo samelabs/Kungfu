@@ -15,6 +15,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
@@ -366,12 +367,19 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 
 // runTestDelivery performs the §4 open-time test delivery: the §7.1
 // request shape with agent_ref "test", the contract's sample as the
-// payload, Idempotency-Key test-<code>-<version> and the header
-// Kungfu-Test: 1. The receiver must answer 2xx; any other outcome is
-// TEST_DELIVERY_FAILED with the status code and the first 500 bytes of
-// the response. No reservation, no settlement, no submission.
+// payload, and the header Kungfu-Test: 1. The idempotency key is
+// test-<code>-<version>-<random hex>, unique per open attempt, so a
+// receiver that caches by key never replays a stale 500 from a
+// previous attempt. The receiver must answer 2xx; any other outcome
+// is TEST_DELIVERY_FAILED with the status code and the first 500
+// bytes of the response (cut on a rune boundary). No reservation, no
+// settlement, no submission.
 func runTestDelivery(ctx context.Context, contract task.Contract, code string, version int32) error {
-	testKey := fmt.Sprintf("test-%s-%d", code, version)
+	var randBytes [4]byte
+	if _, err := rand.Read(randBytes[:]); err != nil {
+		return errors.New(0, "INTERNAL_ERROR", "Internal error")
+	}
+	testKey := fmt.Sprintf("test-%s-%d-%x", code, version, randBytes)
 	payload := contract.Sample
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(`"` + testKey + `"`),
@@ -400,11 +408,7 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 		details["status_code"] = *res.ResponseCode
 	}
 	if res.ResponseBody != nil {
-		preview := *res.ResponseBody
-		if len(preview) > testDeliveryResponsePreviewBytes {
-			preview = preview[:testDeliveryResponsePreviewBytes]
-		}
-		details["response"] = preview
+		details["response"] = truncateRunes(*res.ResponseBody, testDeliveryResponsePreviewBytes)
 	}
 	message := "Test delivery to the receiver failed"
 	if res.ErrorMessage != "" {

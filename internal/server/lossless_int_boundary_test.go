@@ -13,34 +13,8 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"strconv"
 	"testing"
 )
-
-func (e *econEnv) countTasks(t *testing.T) int {
-	var n int
-	if err := e.s.Pool.QueryRow(ctxBg(),
-		`SELECT COUNT(*) FROM tb_tasks WHERE bot_id=$1`, e.botID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-func (e *econEnv) createPendingTask(t *testing.T, budget, price int64) string {
-	rec, out := e.ownerPOST(t, "/api/owner/tasks",
-		`{"title":"P","requirements":"r","postapi":"https://example.com/h","budget":`+
-			strconv.FormatInt(budget, 10)+`,"price":`+strconv.FormatInt(price, 10)+`,"open_now":false}`)
-	if rec.Code != 200 {
-		t.Fatalf("seed task: %d %s", rec.Code, rec.Body.String())
-	}
-	data, _ := out["data"].(map[string]interface{})
-	task, _ := data["task"].(map[string]interface{})
-	c, _ := task["code"].(string)
-	if c == "" {
-		t.Fatalf("no code: %v", out)
-	}
-	return c
-}
 
 func TestAdminStorePrice2p53Plus1Lossless(t *testing.T) {
 	// Decode-path proof for the admin boundary: with UseNumber the exact

@@ -19,37 +19,6 @@ import (
 
 // ---- 1. UI control-flow guard ------------------------------------------
 
-func readOwnerAsset(t *testing.T, name string) string {
-	t.Helper()
-	return s61Read(t, "web/assets/owner/"+name)
-}
-
-func extractJSFunc(t *testing.T, src, name string) string {
-	t.Helper()
-	i := strings.Index(src, "function "+name+"(")
-	if i < 0 {
-		t.Fatalf("function %s not found", name)
-	}
-	depth := 0
-	start := -1
-	for j := i; j < len(src); j++ {
-		switch src[j] {
-		case '{':
-			if depth == 0 {
-				start = j
-			}
-			depth++
-		case '}':
-			depth--
-			if depth == 0 && start >= 0 {
-				return src[start:j]
-			}
-		}
-	}
-	t.Fatalf("unbalanced braces in %s", name)
-	return ""
-}
-
 // ---- 2. /api/key wire ----------------------------------------------------
 
 func TestKeyBalanceWireIsCanonicalString(t *testing.T) {
@@ -96,12 +65,8 @@ func TestCanonicalEconIntTable(t *testing.T) {
 			t.Errorf("parseCanonicalEconInt(%q) accepted (%d)", in, got)
 		}
 	}
-	// Both boundary entry points share the ONE parser: identical
-	// accept/reject on the table.
+	// The admin boundary shares the ONE parser with the canonical table.
 	for _, in := range invalid {
-		if _, _, ok := parseCredits(in); ok {
-			t.Errorf("parseCredits accepted non-canonical %q", in)
-		}
 		if _, ok := jsonCredits(in); ok {
 			t.Errorf("jsonCredits accepted non-canonical %q", in)
 		}
@@ -109,9 +74,6 @@ func TestCanonicalEconIntTable(t *testing.T) {
 	for in, want := range valid {
 		if in == "-1" {
 			continue // business sign rules are domain authority
-		}
-		if v, _, ok := parseCredits(in); !ok || v != want {
-			t.Errorf("parseCredits(%q) = (%d,%v)", in, v, ok)
 		}
 		if v, ok := jsonCredits(in); !ok || v != want {
 			t.Errorf("jsonCredits(%q) = (%d,%v)", in, v, ok)

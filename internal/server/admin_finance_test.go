@@ -14,33 +14,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"kungfu.md/internal/pg"
 )
-
-// repoRootForTest walks up from this test file to the repo root.
-func repoRootForTest(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("no caller info")
-	}
-	dir := filepath.Dir(thisFile)
-	for i := 0; i < 5; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		dir = filepath.Dir(dir)
-	}
-	t.Fatal("repo root not found")
-	return ""
-}
 
 // financeFixture seeds one throwaway bot with a full, CONSISTENT
 // local fact chain: paid payment + grant_payment ledger + account
@@ -349,7 +328,8 @@ func TestFinanceAdminFinanceFiltersAndPagination(t *testing.T) {
 		}
 		return d.Data.Payments
 	}
-	if fmt.Sprint(page()) != fmt.Sprint(page()) {
+	first, second := page(), page()
+	if fmt.Sprint(first) != fmt.Sprint(second) {
 		t.Fatal("payment list pagination not stable")
 	}
 

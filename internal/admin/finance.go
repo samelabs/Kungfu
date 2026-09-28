@@ -21,7 +21,6 @@ package admin
 import (
 	"context"
 
-	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 )
@@ -86,7 +85,3 @@ func GetFinanceSummary(ctx context.Context, pool *pg.Pool, principal *Principal)
 	}
 	return repository.AdminGetFinanceSummary(ctx, pool)
 }
-
-// errFinanceReadOnly is the standing answer to any future caller
-// asking the Finance domain to mutate economic facts.
-var errFinanceReadOnly = errors.New(403, "FINANCE_READ_ONLY", "Finance Admin is a read-only control plane: economic mutations belong to Credits/Payment/Rewards authorities")

@@ -8,9 +8,10 @@ package server
 //     production Credit parsers.
 //
 // HTTP-level cases run through the real owner task-create endpoint so
-// the whole chain (parser → parseCredits → handler) is exercised.
+// the whole chain (parser → handler) is exercised.
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -42,9 +43,14 @@ func TestNumbersParserStrictSingleDocument(t *testing.T) {
 				t.Errorf("%s: rejected: %v", tc.name, err)
 				continue
 			}
-			v, present, ok := parseCredits(m["budget"])
-			if !present || !ok || v != tc.wantVal {
-				t.Errorf("%s: budget = %d (present %v ok %v), want %d", tc.name, v, present, ok, tc.wantVal)
+			num, isNum := m["budget"].(json.Number)
+			if !isNum {
+				t.Errorf("%s: budget is not json.Number", tc.name)
+				continue
+			}
+			v, err := num.Int64()
+			if err != nil || v != tc.wantVal {
+				t.Errorf("%s: budget = %d (err %v), want %d", tc.name, v, err, tc.wantVal)
 			}
 		} else if err == nil {
 			t.Errorf("%s: accepted, must reject non-single-document body", tc.name)
@@ -53,37 +59,6 @@ func TestNumbersParserStrictSingleDocument(t *testing.T) {
 }
 
 // ---- 2. zero-float Credit string parsing --------------------------------
-
-func TestParseCreditsExactIntegerStringsOnly(t *testing.T) {
-	cases := []struct {
-		in      interface{}
-		want    int64
-		present bool
-		ok      bool
-	}{
-		{"1000", 1000, true, true},
-		{"9007199254740993", 9007199254740993, true, true},       // 2^53+1 exact
-		{"9223372036854775807", 9223372036854775807, true, true}, // MaxInt64 exact parse; rules reject later
-		{"9223372036854775808", 0, true, false},                  // 2^63 reject
-		{"1000.5", 0, true, false},
-		{"0.0001", 0, true, false},
-		{"9007199254740993.0", 0, true, false}, // integral presentation still rejected — never float-converted
-		{"", 0, true, false},
-		{" 42 ", 0, true, false}, // non-canonical: server never trims wire input (browser trims once as UX before sending)
-		{nil, 0, false, true},
-		{jsonNum(t, "9007199254740993"), 9007199254740993, true, true},
-		{jsonNum(t, "1000.5"), 0, true, false},
-		{jsonNum(t, "9223372036854775808"), 0, true, false},
-		{42.5, 0, true, false}, // float64 input no longer has an accept path
-	}
-	for _, tc := range cases {
-		v, present, ok := parseCredits(tc.in)
-		if v != tc.want || present != tc.present || ok != tc.ok {
-			t.Errorf("parseCredits(%v) = (%d,%v,%v), want (%d,%v,%v)",
-				tc.in, v, present, ok, tc.want, tc.present, tc.ok)
-		}
-	}
-}
 
 func jsonNum(t *testing.T, s string) interface{} {
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(`{"n":`+s+`}`))

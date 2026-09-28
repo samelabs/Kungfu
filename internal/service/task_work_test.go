@@ -161,11 +161,11 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	if a.FailureRate == nil || *a.FailureRate != 0.25 {
 		t.Fatalf("failure_rate = %v, want 1/4", a.FailureRate)
 	}
-	if a.MedianVerdictSeconds == nil {
+	if a.MedianReplySeconds == nil {
 		t.Fatalf("median missing: %+v", a)
 	}
 	b := byCode[codeB]["stats"].(workStats)
-	if b.AcceptRate != nil || b.FailureRate != nil || b.MedianVerdictSeconds != nil {
+	if b.AcceptRate != nil || b.FailureRate != nil || b.MedianReplySeconds != nil {
 		t.Fatalf("empty stats must be all null: %+v", b)
 	}
 	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, codeA)); err != nil {
