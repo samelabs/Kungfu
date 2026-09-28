@@ -305,13 +305,14 @@ func validateKungfuPayload(input map[string]interface{}, maxTitleLen, maxTags, m
 		return nil, errors.New(400, "CONTENT_TOO_SHORT", "Content too short (minimum 50 characters)")
 	}
 
-	// Security check
+	// Security check — the shared credential detector (contracts,
+	// payloads and memories reject the same shapes).
 	allFields := map[string]interface{}{
 		"code": code, "title": title, "tags": tags,
 		"description": description, "content": content,
 	}
-	if security.ContainsAPIKey(allFields) {
-		return nil, errors.New(400, "SENSITIVE_CONTENT", "kungfu payload must not contain API keys")
+	if security.ContainsCredentialValue(allFields) {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "kungfu payload must not contain credential-shaped strings")
 	}
 
 	// Checksum

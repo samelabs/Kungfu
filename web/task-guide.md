@@ -34,6 +34,8 @@ That publishes 2 units of a 5-credit task. Opening test-delivers `sample` to you
 
 The contract with its defaults filled in is snapshotted at open; `task_get` shows it whole (your receiver included) and `task_update` replaces it whole: fields you leave out are DELETED. Read it first with `task_get`, edit the `draft` (the `contract` when there is no draft), and submit the entire object back.
 
+Who sees the contract: the `title`, `requirements`, `sample` and `output.schema` — plus the memories attached as `harness_refs`, snapshotted when the task opens — are visible to every executor; only `receiver.url` is hidden from them. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields. Anything that needs authentication belongs on the receiver, validated by the receiver itself. The platform also rejects credential-shaped strings anywhere in the contract (Kungfu Agent keys and the common provider token formats: AWS access keys, PEM private keys, GitHub, Slack, OpenAI-style, Anthropic and Stripe live keys).
+
 ## Receiver protocol
 
 Per delivery, the platform sends:

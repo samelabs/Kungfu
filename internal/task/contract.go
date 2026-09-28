@@ -290,7 +290,7 @@ func scanCredentialStrings(c Contract, add func(field, format string, args ...an
 		{"requirements", c.Requirements},
 		{"receiver.url", c.Receiver.URL},
 	} {
-		if s.value != "" && security.ContainsAPIKey(s.value) {
+		if s.value != "" && security.ContainsCredential(s.value) {
 			add(s.field, "must not contain credential-shaped strings")
 		}
 	}
@@ -298,7 +298,7 @@ func scanCredentialStrings(c Contract, add func(field, format string, args ...an
 		add("sample"+ptr, "must not contain credential-shaped strings")
 	}
 	for i, ref := range c.HarnessRefs {
-		if security.ContainsAPIKey(ref) {
+		if security.ContainsCredential(ref) {
 			add(fmt.Sprintf("harness_refs[%d]", i), "must not contain credential-shaped strings")
 		}
 	}

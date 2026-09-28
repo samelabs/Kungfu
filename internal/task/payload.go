@@ -66,7 +66,7 @@ func ScanCredentials(raw []byte) []string {
 			// keys too: a credential as a property name is just as leaked
 			for k, item := range v {
 				child := joinPointer(pointer, escapeJSONPointerToken(k))
-				if security.ContainsAPIKey(k) {
+				if security.ContainsCredential(k) {
 					out = append(out, child)
 				}
 				walk(item, child)
@@ -76,7 +76,7 @@ func ScanCredentials(raw []byte) []string {
 				walk(item, joinPointer(pointer, fmt.Sprintf("%d", i)))
 			}
 		case string:
-			if security.ContainsAPIKey(v) {
+			if security.ContainsCredential(v) {
 				out = append(out, pointer)
 			}
 		}

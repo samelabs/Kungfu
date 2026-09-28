@@ -61,7 +61,8 @@ Kungfu 只提供机制，不保证结果：
 | `claim.max_duration` | 否 | 7 200 | 含续期的总时长上限 600–86 400 秒；须 ≥ `claim.ttl` |
 
 - 未列出的字段一律拒绝（`VALIDATION_FAILED`，`field` 为该字段名），不静默忽略。
-- 全部字段与 `sample` 不得包含凭据形态的字符串。
+- 全部字段与 `sample` 不得包含凭据形态的字符串（平台自有 Agent key 及常见密钥格式：AWS Access Key、PEM 私钥、GitHub / Slack / OpenAI 风格 / Anthropic / Stripe live token）。
+- 可见范围：`title`、`requirements`、`sample`、`output.schema` 与 `harness_refs` 引用的记忆（开放时快照）对所有执行者可见；只有 `receiver.url` 不可见。不得在这些内容中写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据；需要鉴权的信息放在接收端，由接收端自行校验。
 - 补全缺省后的完整契约写入版本快照；`task_get` 返回它（含 `receiver`），执行者读取的是去掉 `receiver` 的同一份。
 
 ---

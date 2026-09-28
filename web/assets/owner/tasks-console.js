@@ -101,6 +101,7 @@ function tcvContractForm(mount, opts) {
         <button class="btn" id="tcvFormModeBtn" type="button" hidden>${escapeHtml(tcvT('form_mode'))}</button>
     </div>
     <div id="tcvFormArea">
+        <p class="tcv-privacy" role="note">${escapeHtml(tcvT('privacy_notice'))}</p>
         <label for="tcvFTitle">${escapeHtml(tcvT('f_title'))}</label>
         <input id="tcvFTitle" maxlength="128"${disabled}>
         <div class="tcv-counter muted" id="tcvTitleCount"></div>
@@ -112,6 +113,7 @@ function tcvContractForm(mount, opts) {
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_requirements_hint'))}</p>
 
         <label>${escapeHtml(tcvT('f_harness'))}</label>
+        <p class="tcv-hint tcv-harness-visible">${escapeHtml(tcvT('f_harness_visibility'))}</p>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_harness_hint'))}</p>
         <div id="tcvHarnessChips" class="tcv-chips"></div>
         <p class="tcv-hint muted" id="tcvHarnessMsg"></p>

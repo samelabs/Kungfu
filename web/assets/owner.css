@@ -913,6 +913,8 @@ ol.guide-flow li::before {
 .badge.paused { background: #fef3c7; color: #92400e; }
 .tcv-ok { color: var(--ok); }
 .tcv-err { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tcv-privacy { margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-md); background: #fffaeb; border: 1px solid #fedf89; color: #93370d; font-size: 13px; }
+.tcv-harness-visible { color: #93370d; }
 .task-error { border: 1px solid #fecaca; background: #fef2f2; border-radius: var(--radius-md); padding: 10px 12px; margin: 8px 0; }
 .task-error-fields { margin: 6px 0 0 18px; }
 .tcv-mode { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 6px; }
