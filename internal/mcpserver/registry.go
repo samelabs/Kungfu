@@ -147,9 +147,9 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 	{
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
-Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status. Your active claim pins the version you see.
-Result: {code, status, version, contract (title, requirements, output.schema, sample, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
-next_action: work_harness for materials, then work_claim.`,
+	Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status, with paused_reason / closed_reason when the platform set one. Your active claim pins the version you see.
+	Result: {code, status, version, contract (title, requirements, output.schema, sample, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
+	next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
 	},
@@ -254,9 +254,9 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TES
 	{
 		Name: "task_update",
 		Description: `Edit the draft contract of a draft or paused task.
-Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
-Result: the task view with the updated draft contract (applied as a NEW version on the next open). The contract is replaced as a whole: read it with task_get, change it, send it back.
-Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+	Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
+	Result: the task view with the saved draft contract (applied as a NEW version on the next open) — while draft or paused it is also exposed as draft, and draft_pending is true when it differs from the live version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+	Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"contract":` + contractInputSchema + `
@@ -310,9 +310,10 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots).
-Preconditions: the task is yours.
-Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
+		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate).
+	While the task is draft or paused, draft is the saved contract the next open applies as a new version; draft_pending is true when a version exists and that draft differs from the live one.
+	Preconditions: the task is yours.
+	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskGet),
 	},
@@ -340,8 +341,8 @@ Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 	{
 		Name: "account_register",
 		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once — store it now; it cannot be recovered later.
-Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-128 chars; IP registration rate limit applies.
-Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
+	Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-72 chars (bcrypt limit); IP registration rate limit applies.
+	Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
 		InputSchema: `{"type":"object","properties":{
 			"name":{"type":"string"},
 			"password":{"type":"string"}

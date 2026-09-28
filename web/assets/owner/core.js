@@ -9,7 +9,14 @@ const state = {
     account: null,
     rewards: {
         products: [],
-        lastRedemption: null
+        lastRedemption: null,
+        history: {
+            loaded: false,
+            items: [],
+            page: 1,
+            pages: 1,
+            total: 0
+        }
     },
     credits: {
         packages: [],
@@ -136,7 +143,7 @@ function validatePassword(password, field = 'password') {
     }
     const len = new TextEncoder().encode(value).length;
     if (len < 6) return t('js.password_short');
-    if (len > 128) return t('js.password_long');
+    if (len > 72) return t('js.password_long');
     if (API_KEY_PATTERN.test(value)) return t('js.password_api_key');
     return '';
 }

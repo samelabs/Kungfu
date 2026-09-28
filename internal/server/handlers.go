@@ -6,6 +6,7 @@ import (
 	authImpl "kungfu.md/internal/auth"
 	apperrors "kungfu.md/internal/errors"
 	"kungfu.md/internal/middleware"
+	"kungfu.md/internal/repository"
 	"kungfu.md/internal/service"
 )
 
@@ -80,7 +81,7 @@ func (s *Server) handleOwnerSessionLogin(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Set session cookie
-	setOwnerCookie(w, result.BotID, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))
+	setOwnerCookie(w, result.BotID, result.PasswordHash, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))
 
 	SuccessResponse(w, map[string]interface{}{
 		"bot_id":   result.BotID,
@@ -168,6 +169,12 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		handleAppError(w, err)
 		return
 	}
+	// A2: the password just changed, so every outstanding session cookie
+	// (including this request's) stopped validating — re-issue one bound
+	// to the NEW password version so the signed-in owner stays signed in.
+	if fresh, ferr := repository.FindOwnerSessionBotByID(r.Context(), s.Pool, bot.ID); ferr == nil && fresh != nil {
+		setOwnerCookie(w, bot.ID, fresh.PasswordHash, s.Config.SessionSecret, middleware.IsHTTPS(r, s.TrustedProxies))
+	}
 	SuccessResponse(w, result, "Password changed")
 }
 
@@ -243,9 +250,11 @@ func handleAppError(w http.ResponseWriter, err error) {
 	ErrorResponse(w, 500, "INTERNAL_ERROR", "An internal error occurred", nil)
 }
 
-// setOwnerCookie wraps auth.SetOwnerSessionCookie.
-func setOwnerCookie(w http.ResponseWriter, botID int64, secret string, isHTTPS bool) {
-	authImpl.SetOwnerSessionCookie(w, botID, secret, isHTTPS)
+// setOwnerCookie wraps auth.SetOwnerSessionCookie. The password hash
+// seeds the cookie's pv claim: a later password change invalidates the
+// cookie (WO-17b A2).
+func setOwnerCookie(w http.ResponseWriter, botID int64, passwordHash, secret string, isHTTPS bool) {
+	authImpl.SetOwnerSessionCookie(w, botID, passwordHash, secret, isHTTPS)
 }
 
 // clearOwnerCookie wraps auth.ClearOwnerSessionCookie.

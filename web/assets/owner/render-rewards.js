@@ -45,6 +45,39 @@ function renderRewards() {
     }
 
     renderRedemptionResult();
+
+    // A1: the own-redemption history loads once per page visit (and
+    // after a redeem); its pager and expansion live in rewards.js.
+    if (state.rewards.history && !state.rewards.history.loaded && qs('#rewardsHistory')) {
+        loadRewardsHistory(1);
+    }
+}
+
+// renderRewardsHistory paints the paged own-redemption list (A1).
+function renderRewardsHistory() {
+    const box = qs('#rewardsHistory');
+    if (!box) return;
+    const h = state.rewards.history;
+    if (!h.items.length) {
+        box.innerHTML = `<p class="muted">${escapeHtml(t('rewards.history_empty'))}</p>`;
+    } else {
+        box.innerHTML = h.items.map((r) => `
+            <div class="task-item" data-rh-code="${escapeHtml(r.code)}">
+                <div class="task-facts">
+                    <span class="badge">${escapeHtml(rewardsStatusText(r.status))}</span>
+                    <span>${escapeHtml(r.product_title || r.code)}</span>
+                    <span>${escapeHtml(String(r.credits_cost))}</span>
+                    <span class="muted">${escapeHtml(tcvFmtDate(r.created_at))}</span>
+                </div>
+                <div class="rh-detail detail-box" hidden></div>
+            </div>`).join('');
+    }
+    const info = qs('#rewardsHistoryPageInfo');
+    if (info) info.textContent = t('rewards.page_info', {page: h.page, pages: h.pages, total: h.total});
+    const prev = qs('#rewardsHistoryPrev');
+    const next = qs('#rewardsHistoryNext');
+    if (prev) prev.disabled = h.page <= 1;
+    if (next) next.disabled = h.page >= h.pages;
 }
 
 function renderRedemptionResult() {

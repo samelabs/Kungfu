@@ -265,7 +265,7 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 			"bytes":  len(h.Content),
 		})
 	}
-	return map[string]any{
+	view := map[string]any{
 		"code":     t.Code,
 		"status":   t.Status,
 		"version":  version,
@@ -273,7 +273,17 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 		"harness":  directory,
 		"stats":    statsView(stats),
 		"my":       my,
-	}, nil
+	}
+	// T3: the platform-set reason is visible to executors wherever the
+	// status is — work_get, and the TASK_NOT_OPEN details of
+	// work_claim / work_claim_renew / work_submit (taskNotOpen).
+	if t.PausedReason != nil {
+		view["paused_reason"] = *t.PausedReason
+	}
+	if t.ClosedReason != nil {
+		view["closed_reason"] = *t.ClosedReason
+	}
+	return view, nil
 }
 
 // contractJSONOf marshals a contract for projection.

@@ -421,3 +421,12 @@ func GetRedemptionForBot(ctx context.Context, pool *pg.Pool, botID int64, code s
 	}
 	return r, nil
 }
+
+// ListRedemptionsForBot (WO-17b A1) returns one bot's OWN redemptions,
+// newest first, paginated — the owner console's history list. The same
+// stably-ordered query the admin list uses, hard-scoped to botID.
+func ListRedemptionsForBot(ctx context.Context, pool *pg.Pool, botID int64, page, pageSize int) ([]model.Redemption, int64, error) {
+	return ListRedemptionsForAdmin(ctx, pool, RedemptionListFilter{
+		BotID: botID, Page: page, PageSize: pageSize,
+	})
+}

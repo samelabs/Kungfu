@@ -85,7 +85,10 @@ function bindPasswordForm() {
     if (!qs('#passwordForm')) return;
     qs('#passwordForm').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const data = payload(event.currentTarget);
+        // capture before the first await: event.currentTarget is null
+        // by the time the request settles
+        const form = event.currentTarget;
+        const data = payload(form);
         const error = validatePassword(data.password) || validatePassword(data.new_password, 'new_password');
         if (error) return showToast(noticeText(error), 'error');
         if (data.password === data.new_password) return showToast(noticeText(t('auth.new_password_diff')), 'error');
@@ -96,7 +99,7 @@ function bindPasswordForm() {
                 body: JSON.stringify({password: data.password, new_password: data.new_password})
             });
             if (!json.success) return showToast(noticeText(json.error || json), 'error');
-            event.currentTarget.reset();
+            form.reset();
             showToast(noticeText(t('auth.password_changed')), 'ok');
         } catch (error) {
             showToast(noticeText(String(error)), 'error');

@@ -482,6 +482,124 @@ func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
 	}
 }
 
+// TestPublisherPauseDraftVisibility (WO-17): a paused edit is visible —
+// the task_update result and task_get carry the saved draft plus
+// draft_pending while the effective contract stays on the opened
+// version; the next open applies the draft as the new version.
+// task_get also carries the §6.3 stats block (work_get's scope).
+func TestPublisherPauseDraftVisibility(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	ctx := context.Background()
+	rcv := startPubReceiver(t, http.StatusOK)
+
+	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
+	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("open v1: %v", err)
+	}
+	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+
+	updated := pubContract(rcv.url)
+	updated.Title = "Summarize a page, revised"
+	updated.Sample = []byte(`{"url":"https://example.com/b","bullets":["x","y","z"]}`)
+	updView, err := UpdateTask(ctx, pool, publisher, code, updated)
+	if err != nil {
+		t.Fatalf("update while paused: %v", err)
+	}
+	if updView["draft_pending"] != true {
+		t.Fatalf("task_update result draft_pending = %v, want true", updView["draft_pending"])
+	}
+	var updDraft task.Contract
+	if err := json.Unmarshal(updView["draft"].(json.RawMessage), &updDraft); err != nil || updDraft.Title != updated.Title {
+		t.Fatalf("task_update result draft: %+v (%v)", updDraft, err)
+	}
+
+	view, err := GetTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("task_get: %v", err)
+	}
+	if view["version"] != int32(1) {
+		t.Fatalf("version = %v, want 1 (still the opened snapshot)", view["version"])
+	}
+	var live, draft task.Contract
+	if err := json.Unmarshal(view["contract"].(json.RawMessage), &live); err != nil {
+		t.Fatalf("live contract: %v", err)
+	}
+	if err := json.Unmarshal(view["draft"].(json.RawMessage), &draft); err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if live.Title != "Summarize a page" || !jsonEqual(live.Sample, pubContract(rcv.url).Sample) {
+		t.Fatalf("live contract changed before reopen: %q %s", live.Title, live.Sample)
+	}
+	if draft.Title != updated.Title || !jsonEqual(draft.Sample, updated.Sample) {
+		t.Fatalf("draft is not the saved edit: %q %s", draft.Title, draft.Sample)
+	}
+	if view["draft_pending"] != true {
+		t.Fatalf("draft_pending = %v, want true", view["draft_pending"])
+	}
+
+	// task_get carries the §6.3 stats (accept_rate / median_reply_seconds
+	// / failure_rate — null on a fresh task with no terminals)
+	flat := map[string]any{}
+	if err := json.Unmarshal(mustMarshalView(t, view), &flat); err != nil {
+		t.Fatalf("re-unmarshal view: %v", err)
+	}
+	stats, ok := flat["stats"].(map[string]any)
+	if !ok {
+		t.Fatalf("task_get stats missing: %#v", flat["stats"])
+	}
+	for _, k := range []string{"accept_rate", "median_reply_seconds", "failure_rate"} {
+		if _, ok := stats[k]; !ok {
+			t.Fatalf("stats.%s missing: %#v", k, stats)
+		}
+	}
+
+	openView, err := OpenTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("open v2: %v", err)
+	}
+	if openView["version"] != int32(2) {
+		t.Fatalf("version = %v, want 2", openView["version"])
+	}
+	if _, has := openView["draft"]; has {
+		t.Fatal("open view must not carry draft")
+	}
+	if openView["draft_pending"] != false {
+		t.Fatalf("draft_pending after open = %v, want false", openView["draft_pending"])
+	}
+	var live2 task.Contract
+	if err := json.Unmarshal(openView["contract"].(json.RawMessage), &live2); err != nil {
+		t.Fatalf("v2 contract: %v", err)
+	}
+	if live2.Title != updated.Title || !jsonEqual(live2.Sample, updated.Sample) {
+		t.Fatalf("v2 contract is not the former draft: %q %s", live2.Title, live2.Sample)
+	}
+
+	// paused again without editing: the draft equals the snapshot →
+	// nothing pending
+	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("pause again: %v", err)
+	}
+	if view2, err := GetTask(ctx, pool, publisher, code); err != nil || view2["draft_pending"] != false {
+		t.Fatalf("task_get after reopen: %v draft_pending=%v, want false", err, view2["draft_pending"])
+	}
+	tr, _ := repository.FindTaskByCode(ctx, pool, code)
+	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}
+
+func mustMarshalView(t *testing.T, v map[string]interface{}) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	return b
+}
+
 // -- §4 close + refund --
 
 func TestPublisherCloseAndRefund(t *testing.T) {

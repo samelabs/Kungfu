@@ -540,7 +540,7 @@ func ownerAuthLoginHTML(d *tmplData) string {
         <label>` + d.T("owner.auth.kungfu_id") + `</label>
         <input name="name" autocomplete="username" required minlength="6" maxlength="32">
         <label>` + d.T("owner.auth.password") + `</label>
-        <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="128">
+        <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="72">
         <div class="actions">
             <button class="btn primary" type="submit">` + d.T("owner.auth.login") + `</button>
             <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/register") + `">` + d.T("owner.auth.register") + `</a>
@@ -557,10 +557,10 @@ func ownerAuthRegisterHTML(d *tmplData) string {
         <input name="name" autocomplete="username" required minlength="6" maxlength="32" pattern="[A-Za-z0-9_.\-]{6,32}" aria-describedby="kungfuIdHint">
         <p class="field-help" id="kungfuIdHint">` + d.T("owner.auth.kungfu_id_hint") + `</p>
         <label>` + d.T("owner.auth.password") + `</label>
-        <input name="password" type="password" autocomplete="new-password" required minlength="6" maxlength="128" aria-describedby="passwordHint">
+        <input name="password" type="password" autocomplete="new-password" required minlength="6" maxlength="72" aria-describedby="passwordHint">
         <p class="field-help" id="passwordHint">` + d.T("owner.auth.password_hint") + `</p>
         <label>` + d.T("owner.auth.confirm_password") + `</label>
-        <input name="confirm_password" type="password" autocomplete="new-password" required minlength="6" maxlength="128">
+        <input name="confirm_password" type="password" autocomplete="new-password" required minlength="6" maxlength="72">
         <div class="actions">
             <button class="btn primary" type="submit">` + d.T("owner.auth.register") + `</button>
             <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/login") + `">` + d.T("owner.auth.login") + `</a>
@@ -617,9 +617,9 @@ func ownerAccountHTML(d *tmplData) string {
     <h2>` + d.T("owner.account.heading") + `</h2>
     <form id="passwordForm" novalidate>
         <label>` + d.T("owner.account.current_password") + `</label>
-        <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="128">
+        <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="72">
         <label>` + d.T("owner.account.new_password") + `</label>
-        <input name="new_password" type="password" autocomplete="new-password" required minlength="6" maxlength="128">
+        <input name="new_password" type="password" autocomplete="new-password" required minlength="6" maxlength="72">
         <div class="actions">
             <button class="btn primary" type="submit">` + d.T("owner.account.submit") + `</button>
         </div>
@@ -656,6 +656,13 @@ func ownerRewardsHTML(d *tmplData) string {
     <h3>` + d.T("owner.rewards.products") + `</h3>
     <div id="rewardsProducts" class="rewards-products"><div class="muted">` + d.T("owner.rewards.loading") + `</div></div>
     <div id="rewardsResult" class="detail-box" hidden></div>
+    <h3>` + d.T("owner.rewards.history") + `</h3>
+    <div id="rewardsHistory"><p class="muted">` + d.T("owner.rewards.history_loading") + `</p></div>
+    <div class="actions" id="rewardsHistoryPager">
+        <button class="btn" id="rewardsHistoryPrev" type="button">` + d.T("owner.rewards.prev") + `</button>
+        <div class="mono" id="rewardsHistoryPageInfo"></div>
+        <button class="btn" id="rewardsHistoryNext" type="button">` + d.T("owner.rewards.next") + `</button>
+    </div>
 </section>`
 }
 

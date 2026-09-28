@@ -7,6 +7,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -92,13 +93,48 @@ func TestOwnerToolAuthAndCSRF(t *testing.T) {
 	}
 
 	// non-publisher tool → 404 UNKNOWN_TOOL (even a real registry tool)
-	for _, banned := range []string{"work_list", "account_register", "memory_list", "no_such_tool"} {
+	for _, banned := range []string{"work_list", "account_register", "memory_get", "no_such_tool"} {
 		rec, env = ocCall(t, s, cookie, banned, map[string]any{})
 		if rec.Code != 404 || env["error"].(map[string]any)["code"] != "UNKNOWN_TOOL" {
 			t.Fatalf("%s: %d %v, want 404 UNKNOWN_TOOL", banned, rec.Code, env)
 		}
 	}
 	_ = botID
+}
+
+// TestOwnerToolMemoryListIsReadOnly: the console's harness picker calls
+// memory_list through the bridge; it returns the session bot's own
+// memories only (here: none) and never exposes anyone else's.
+func TestOwnerToolMemoryListIsReadOnly(t *testing.T) {
+	s, pool, name, _ := ownerConsoleEnv(t)
+	cookie := ocSessionCookie(t, s, pool, name)
+
+	// another bot's memory must never appear in the console listing
+	// (api_key_hash satisfies the ck_bots_api_key_hash_len check)
+	other := "ocother" + time.Now().Format("150405.000000000")
+	otherDigest := sha256.Sum256([]byte(other))
+	var otherID int64
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance)
+		VALUES ($1, $2, 'oc02', 'x', 0) RETURNING id`, other, otherDigest[:]).Scan(&otherID); err != nil {
+		t.Fatalf("seed other bot: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility, status)
+		VALUES ('ocsecret01', $1, 'Other memory', '["t"]', 'secret harness body', 'c0ffee', 'private', 'active')`,
+		otherID); err != nil {
+		t.Fatalf("seed other memory: %v", err)
+	}
+
+	rec, env := ocCall(t, s, cookie, "memory_list", map[string]any{})
+	if rec.Code != 200 || env["ok"] != true {
+		t.Fatalf("memory_list: %d %v", rec.Code, env)
+	}
+	for _, m := range env["kungfus"].([]any) {
+		if m.(map[string]any)["code"] == "ocsecret01" {
+			t.Fatal("console memory_list returned another bot's memory")
+		}
+	}
 }
 
 // TestOwnerToolLifecycleAndParity: task_create → task_open → task_list
@@ -267,7 +303,7 @@ func ocSessionCookie(t *testing.T, s *Server, pool *pg.Pool, name string) *http.
 		t.Fatalf("bot lookup: %v", err)
 	}
 	w := httptest.NewRecorder()
-	setOwnerCookie(w, botID, s.Config.SessionSecret, false)
+	setOwnerCookie(w, botID, "x", s.Config.SessionSecret, false)
 	for _, c := range w.Result().Cookies() {
 		return c
 	}

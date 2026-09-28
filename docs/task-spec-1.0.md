@@ -77,8 +77,8 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 | 转换 | 前置条件 | 效果 |
 |---|---|---|
 | `create` | 余额 ≥ `budget`；`budget` ≥ `price`（至少一份）；`budget` ≤ 2^53−1 | 生成 draft；锁定 `budget`（`lock_task`） |
-| `update` | 状态为 draft 或 paused | 整份替换 Contract；paused 状态下的修改在下次 open 时生成新版本；既有 Claim 与 Submission 保持其原版本 |
-| `open` | 状态为 draft 或 paused；契约校验通过；harness_refs 归属通过；测试投递返回 2xx；非平台暂停 | 生成 TaskVersion（Contract + Harness 快照），`version` 指向它；状态 open |
+| `update` | 状态为 draft 或 paused | 整份替换 Contract；paused 状态下的修改在下次 open 时生成新版本；既有 Claim 与 Submission 保持其原版本。`task_update` 的返回与 `task_get` 在 draft / paused 状态下以 `draft` 携带该已保存草稿（下次 open 时生效的那份），`draft_pending` 为 true 表示版本 ≥ 1 且草稿与当前生效版本语义不同；open / closed 状态不返回 `draft` |
+| `open` | 状态为 draft 或 paused；契约校验通过；harness_refs 归属通过；测试投递返回 2xx | 生成 TaskVersion（Contract + Harness 快照），`version` 指向它；状态 open |
 | `pause` | 状态为 open | 状态 paused；停止接受新 Claim 与不带 Claim 的 Submission；已有 active Claim 仍可提交（不可续期）；进行中的 Submission 照常完成 |
 | `fund` | 状态非 closed；余额 ≥ 追加额；追加额 ≤ 2^53−1 且追加后 `budget_locked` ≤ 2^53−1 | `budget_locked` 增加（`fund_task`） |
 | `close` | 状态非 closed | 状态 closed；规则同 pause；active Claim 至到期前仍可提交（不可续期）；进行中的 Submission 照常完成 |
@@ -101,7 +101,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 `work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按开放时间倒序，至多 100 条。
 
-`work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数。持有 Claim 的执行者读取的是 Claim 所属版本。
+`work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。持有 Claim 的执行者读取的是 Claim 所属版本。
 `work_harness(code, ref_id)` 返回该版本 Harness 快照内容；`ref_id` 不在快照中返回 `HARNESS_REF_NOT_FOUND`。
 
 draft 任务对执行者不可见（`TASK_NOT_FOUND`）；其他状态均可 `work_get` / `work_harness`。
@@ -233,11 +233,11 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | 执行者 | 作用 | 发布者 | 作用 |
 |---|---|---|---|
 | `work_list` | §5.1 | `task_create` | 创建 draft 并锁定预算；`open` 为 true 时创建后在同一调用内开放（开放失败返回该错误，任务保持 draft） |
-| `work_get` | §5.1 | `task_update` | 整份替换 draft / paused 任务的契约 |
+| `work_get` | §5.1 | `task_update` | 整份替换 draft / paused 任务的契约；返回中 `draft` 为已保存草稿，`draft_pending` 标记它与生效版本不同（§4） |
 | `work_harness` | §5.1 | `task_open` | 校验 + 测试投递 + 生效版本 |
 | `work_claim` | §5.2 | `task_pause` / `task_close` | §4 |
 | `work_claim_renew` / `work_release` | §5.2 | `task_fund` / `task_refund` | §4 |
-| `work_submit` | §5.3 + 同步投递 | `task_get` | 完整契约（含 `receiver`）、状态、版本、派生量 |
+| `work_submit` | §5.3 + 同步投递 | `task_get` | 完整契约（含 `receiver`）、状态、版本、派生量、近 30 天统计（`accept_rate` / `median_reply_seconds` / `failure_rate`，§6.3）；draft / paused 时附 `draft` 与 `draft_pending` |
 | `work_status` | 查询 Submission（`submission_id` 或 `code + request_key`），含事件历史 | `task_list` | 本人任务 |
 | `work_history` | 本人 Submission 与应答 | `task_submissions` | 投递记录：状态、金额、应答、`failure`、`agent_ref`（按状态过滤、分页） |
 | `work_report` | 向平台举报任务（违反边界、恶意驳回） | | |
@@ -288,7 +288,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `UNAUTHORIZED` | 缺少或无效 Agent key | —（修正凭据） |
 | `RATE_LIMIT` | 频率超限，附 `retry_after` | `wait` |
 | `TASK_NOT_FOUND` | 任务不存在 | `stop` |
-| `TASK_NOT_OPEN` | 任务非 open，附 `status` | `stop` |
+| `TASK_NOT_OPEN` | 任务非 open，附 `status`；平台暂停 / 平台关闭原因存在时附 `reason` | `stop` |
 | `SLOTS_EXHAUSTED` | 可用预算不足一份 | `stop` |
 | `OWN_TASK` | 提交本人发布的任务 | `stop` |
 | `SUBMISSION_LIMIT` | 驳回次数已用尽 | `stop` |
