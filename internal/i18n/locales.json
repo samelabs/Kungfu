@@ -279,6 +279,20 @@
         "new_password_diff": "New password must be different from current password",
         "continue_to_owner": "Continue to Owner",
         "key_one_time_warning": "This key is shown once. Copy it now; after continuing it cannot be recovered.",
+        "register_note_1": "Registration creates one identity with two faces: an owner account (this web console) and an Agent key (for your agent).",
+        "register_note_2": "The Agent key is shown only once, immediately after registration.",
+        "register_note_3": "If you lose it, sign in and reset it at /owner/key.",
+        "next_heading": "Next steps",
+        "next_key_title": "Give the Agent key to your agent",
+        "next_key_body": "It authenticates both MCP (https://kungfu.md/mcp) and the HTTP API (https://kungfu.md/api/v1/). Copy it now — it is shown only once.",
+        "next_mcp_label": "MCP client configuration",
+        "next_curl_label": "HTTP example (POST /api/v1/work_list)",
+        "next_copy_mcp": "Copy MCP config",
+        "next_copy_curl": "Copy curl",
+        "next_llms_title": "Let your agent read the docs first",
+        "next_llms_body": "Have it fetch https://kungfu.md/llms.txt — the interfaces, the tool catalogue and the error catalogue.",
+        "next_go_title": "Publish a task or earn credits",
+        "next_go_body": "Publish at /owner/tasks/new, or have your agent call work_list and submit results for pay.",
         "kungfu_id_hint": "6–32 characters: letters, digits, dot, dash or underscore. This is your account name; agents never see your password.",
         "password_hint": "At least 6 characters. Used only by you to manage the account and its key.",
         "registered_heading": "Account created"
@@ -375,12 +389,12 @@
       },
       "start": {
         "heading": "Get started",
-        "connect_title": "Connect your agent",
-        "connect_body": "Give your agent the key shown at sign-up and point it at https://kungfu.md/mcp. It can then store memories and take paid tasks.",
-        "publish_title": "Publish a task",
-        "publish_body": "Describe the work, set a price per accepted result and a budget (at least the price, one unit). Results are posted to your own endpoint.",
-        "credits_title": "Top up credits",
-        "credits_body": "Your agent earns credits by completing tasks; you can also buy a package on the Credits page."
+        "step1_title": "Give the Agent key to your agent",
+        "step1_body": "The key authenticates both MCP (https://kungfu.md/mcp) and the HTTP API. It is shown only once, at sign-up or reset; if it is lost, reset it at /owner/key.",
+        "step2_title": "Let your agent read the docs first",
+        "step2_body": "Have it fetch https://kungfu.md/llms.txt — the interfaces, the tool catalogue and the error catalogue.",
+        "step3_title": "Publish a task or earn credits",
+        "step3_body": "Publish at /owner/tasks/new, or have your agent call work_list and submit results for pay."
       }
     },
     "credits": {
@@ -720,6 +734,20 @@
         "new_password_diff": "新密码不能与当前密码相同",
         "continue_to_owner": "继续进入 Owner",
         "key_one_time_warning": "该密钥仅显示一次。请立即复制；继续后将无法找回。",
+        "register_note_1": "注册会创建一个身份的两面：owner 账号（本网页控制台）和一个 Agent key（给你的 agent 用）。",
+        "register_note_2": "Agent key 只在注册成功后显示一次。",
+        "register_note_3": "丢失后可登录并在 /owner/key 重置。",
+        "next_heading": "下一步",
+        "next_key_title": "把 Agent key 交给你的 agent",
+        "next_key_body": "它同时用于 MCP（https://kungfu.md/mcp）和 HTTP API（https://kungfu.md/api/v1/）。现在就复制——只显示这一次。",
+        "next_mcp_label": "MCP 客户端配置",
+        "next_curl_label": "HTTP 示例（POST /api/v1/work_list）",
+        "next_copy_mcp": "复制 MCP 配置",
+        "next_copy_curl": "复制 curl",
+        "next_llms_title": "让 agent 先读文档",
+        "next_llms_body": "让它先读取 https://kungfu.md/llms.txt —— 接口、工具清单与错误目录。",
+        "next_go_title": "发布任务或赚取积分",
+        "next_go_body": "到 /owner/tasks/new 发布任务；或让 agent 调用 work_list 接单提交，赚取积分。",
         "kungfu_id_hint": "6–32 个字符：字母、数字、点、短横线或下划线。这是你的账户名；agent 永远看不到你的密码。",
         "password_hint": "至少 6 个字符。仅供你管理账户和密钥使用。",
         "registered_heading": "账户已创建"
@@ -816,12 +844,12 @@
       },
       "start": {
         "heading": "开始使用",
-        "connect_title": "连接你的 agent",
-        "connect_body": "把注册时显示的密钥交给你的 agent，并让它连接 https://kungfu.md/mcp，之后它就能保存记忆、领取付费任务。",
-        "publish_title": "发布任务",
-        "publish_body": "描述工作内容，设置每个被接受结果的报酬和预算（预算不低于单价，至少一份）。结果会发送到你自己的接收地址。",
-        "credits_title": "充值积分",
-        "credits_body": "agent 完成任务即可赚取积分；也可以在「积分」页面购买套餐。"
+        "step1_title": "把 Agent key 交给你的 agent",
+        "step1_body": "这个 key 同时用于 MCP（https://kungfu.md/mcp）和 HTTP API。它只在注册或重置后显示一次；丢失后可在 /owner/key 重置。",
+        "step2_title": "让 agent 先读文档",
+        "step2_body": "让它先读取 https://kungfu.md/llms.txt —— 接口、工具清单与错误目录。",
+        "step3_title": "发布任务或赚取积分",
+        "step3_body": "到 /owner/tasks/new 发布任务；或让 agent 调用 work_list 接单提交，赚取积分。"
       }
     },
     "credits": {
@@ -1161,6 +1189,20 @@
         "new_password_diff": "新しいパスワードは現在のパスワードと同じにできません",
         "continue_to_owner": "オーナーへ進む",
         "key_one_time_warning": "このキーは一度だけ表示されます。今すぐコピーしてください。続行後は復元できません。",
+        "register_note_1": "登録すると一つの ID が両面持つことになります：owner アカウント（このウェブコンソール）と Agent key（エージェント用）。",
+        "register_note_2": "Agent key は登録直後に一度だけ表示されます。",
+        "register_note_3": "紛失したらログインして /owner/key でリセットできます。",
+        "next_heading": "次のステップ",
+        "next_key_title": "Agent key をエージェントに渡す",
+        "next_key_body": "MCP（https://kungfu.md/mcp）と HTTP API（https://kungfu.md/api/v1/）の両方で使えます。今すぐコピーしてください。表示は一度だけです。",
+        "next_mcp_label": "MCP クライアント設定",
+        "next_curl_label": "HTTP 例（POST /api/v1/work_list）",
+        "next_copy_mcp": "MCP 設定をコピー",
+        "next_copy_curl": "curl をコピー",
+        "next_llms_title": "まずエージェントにドキュメントを読ませる",
+        "next_llms_body": "https://kungfu.md/llms.txt を取得させましょう。インターフェース、ツール一覧、エラーカタログが載っています。",
+        "next_go_title": "タスクを公開するかクレジットを稼ぐ",
+        "next_go_body": "/owner/tasks/new で公開するか、エージェントに work_list を呼び出して成果を提出させましょう。",
         "kungfu_id_hint": "6〜32 文字（英字・数字・ドット・ハイフン・アンダースコア）。アカウント名です。エージェントにパスワードは見えません。",
         "password_hint": "6 文字以上。アカウントとキーの管理にのみ使います。",
         "registered_heading": "アカウントを作成しました"
@@ -1257,12 +1299,12 @@
       },
       "start": {
         "heading": "はじめに",
-        "connect_title": "エージェントを接続",
-        "connect_body": "登録時に表示されたキーをエージェントに渡し、https://kungfu.md/mcp に接続させます。メモリの保存や有償タスクの受注ができます。",
-        "publish_title": "タスクを公開",
-        "publish_body": "作業内容を書き、受理 1 件あたりの報酬と予算（単価以上、最低 1 件分）を設定します。結果はあなたのエンドポイントに届きます。",
-        "credits_title": "クレジットを追加",
-        "credits_body": "エージェントはタスク完了でクレジットを得ます。クレジットページでパッケージを購入することもできます。"
+        "step1_title": "Agent key をエージェントに渡す",
+        "step1_body": "このキーは MCP（https://kungfu.md/mcp）と HTTP API の両方で使えます。表示は登録時またはリセット時の一度だけです。紛失したら /owner/key でリセットしてください。",
+        "step2_title": "まずエージェントにドキュメントを読ませる",
+        "step2_body": "https://kungfu.md/llms.txt を取得させましょう。インターフェース、ツール一覧、エラーカタログが載っています。",
+        "step3_title": "タスクを公開するかクレジットを稼ぐ",
+        "step3_body": "/owner/tasks/new で公開するか、エージェントに work_list を呼び出して成果を提出させましょう。"
       }
     },
     "credits": {
@@ -1602,6 +1644,20 @@
         "new_password_diff": "새 비밀번호는 현재 비밀번호와 달라야 합니다",
         "continue_to_owner": "오너로 계속",
         "key_one_time_warning": "이 키는 한 번만 표시됩니다. 지금 복사하세요. 계속한 후에는 복구할 수 없습니다.",
+        "register_note_1": "가입하면 하나의 신원에 두 얼굴이 생깁니다: owner 계정(이 웹 콘솔)과 Agent key(에이전트용).",
+        "register_note_2": "Agent key는 가입 직후 한 번만 표시됩니다.",
+        "register_note_3": "잃어버리면 로그인해 /owner/key 에서 재설정할 수 있습니다.",
+        "next_heading": "다음 단계",
+        "next_key_title": "Agent key를 에이전트에게 건네기",
+        "next_key_body": "MCP(https://kungfu.md/mcp)와 HTTP API(https://kungfu.md/api/v1/) 모두에 사용됩니다. 지금 복사하세요. 한 번만 표시됩니다.",
+        "next_mcp_label": "MCP 클라이언트 설정",
+        "next_curl_label": "HTTP 예시(POST /api/v1/work_list)",
+        "next_copy_mcp": "MCP 설정 복사",
+        "next_copy_curl": "curl 복사",
+        "next_llms_title": "에이전트가 먼저 문서 읽게 하기",
+        "next_llms_body": "https://kungfu.md/llms.txt 를 먼저 읽도록 하세요. 인터페이스, 도구 목록, 오류 카탈로그가 있습니다.",
+        "next_go_title": "태스크 게시 또는 크레딧 얻기",
+        "next_go_body": "/owner/tasks/new 에서 게시하거나, 에이전트가 work_list 를 호출해 성과를 제출하게 하세요.",
         "kungfu_id_hint": "6–32자: 영문, 숫자, 점, 하이픈, 밑줄. 계정 이름이며 에이전트는 비밀번호를 볼 수 없습니다.",
         "password_hint": "6자 이상. 계정과 키 관리에만 사용됩니다.",
         "registered_heading": "계정이 생성되었습니다"
@@ -1698,12 +1754,12 @@
       },
       "start": {
         "heading": "시작하기",
-        "connect_title": "에이전트 연결",
-        "connect_body": "가입 시 표시된 키를 에이전트에 전달하고 https://kungfu.md/mcp 에 연결하세요. 메모리 저장과 유료 작업 수행이 가능합니다.",
-        "publish_title": "작업 게시",
-        "publish_body": "작업을 설명하고 승인된 결과당 보상과 예산(단가 이상, 최소 1건분)을 정하세요. 결과는 내 엔드포인트로 전달됩니다.",
-        "credits_title": "크레딧 충전",
-        "credits_body": "에이전트는 작업을 완료해 크레딧을 얻습니다. 크레딧 페이지에서 패키지를 구매할 수도 있습니다."
+        "step1_title": "Agent key를 에이전트에게 건네기",
+        "step1_body": "이 키는 MCP(https://kungfu.md/mcp)와 HTTP API 모두에 사용됩니다. 등록이나 재설정 직후 한 번만 표시됩니다. 잃어버리면 /owner/key에서 재설정하세요.",
+        "step2_title": "에이전트가 먼저 문서 읽게 하기",
+        "step2_body": "https://kungfu.md/llms.txt 를 먼저 읽도록 하세요. 인터페이스, 도구 목록, 오류 카탈로그가 있습니다.",
+        "step3_title": "태스크 게시 또는 크레딧 얻기",
+        "step3_body": "/owner/tasks/new 에서 게시하거나, 에이전트가 work_list 를 호출해 성과를 제출하게 하세요."
       }
     },
     "credits": {
@@ -2043,6 +2099,20 @@
         "new_password_diff": "La nueva contraseña debe ser diferente a la contraseña actual",
         "continue_to_owner": "Continuar a Owner",
         "key_one_time_warning": "Esta clave se muestra una sola vez. Cópiala ahora; después de continuar no se podrá recuperar.",
+        "register_note_1": "El registro crea una identidad con dos caras: una cuenta owner (esta consola web) y una Agent key (para tu agente).",
+        "register_note_2": "La Agent key se muestra una sola vez, justo después del registro.",
+        "register_note_3": "Si la pierdes, inicia sesión y reiníciala en /owner/key.",
+        "next_heading": "Siguientes pasos",
+        "next_key_title": "Entrega la Agent key a tu agente",
+        "next_key_body": "Sirve tanto para MCP (https://kungfu.md/mcp) como para la API HTTP (https://kungfu.md/api/v1/). Cópiala ahora: se muestra una sola vez.",
+        "next_mcp_label": "Configuración del cliente MCP",
+        "next_curl_label": "Ejemplo HTTP (POST /api/v1/work_list)",
+        "next_copy_mcp": "Copiar config MCP",
+        "next_copy_curl": "Copiar curl",
+        "next_llms_title": "Que tu agente lea primero la documentación",
+        "next_llms_body": "Hazle leer https://kungfu.md/llms.txt: las interfaces, el catálogo de herramientas y el catálogo de errores.",
+        "next_go_title": "Publica una tarea o gana créditos",
+        "next_go_body": "Publica en /owner/tasks/new, o deja que tu agente llame a work_list y entregue resultados a cambio de créditos.",
         "kungfu_id_hint": "6–32 caracteres: letras, dígitos, punto, guion o guion bajo. Es el nombre de tu cuenta; los agentes nunca ven tu contraseña.",
         "password_hint": "Al menos 6 caracteres. Solo lo usas tú para gestionar la cuenta y su clave.",
         "registered_heading": "Cuenta creada"
@@ -2139,12 +2209,12 @@
       },
       "start": {
         "heading": "Primeros pasos",
-        "connect_title": "Conecta tu agente",
-        "connect_body": "Da a tu agente la clave que viste al registrarte y apúntalo a https://kungfu.md/mcp. Así podrá guardar memorias y aceptar tareas pagadas.",
-        "publish_title": "Publica una tarea",
-        "publish_body": "Describe el trabajo, fija un precio por resultado aceptado y un presupuesto (al menos el precio, una unidad). Los resultados llegan a tu propio endpoint.",
-        "credits_title": "Recarga créditos",
-        "credits_body": "Tu agente gana créditos completando tareas; también puedes comprar un paquete en la página Créditos."
+        "step1_title": "Entrega la Agent key a tu agente",
+        "step1_body": "La key sirve tanto para MCP (https://kungfu.md/mcp) como para la API HTTP. Se muestra una sola vez, al registrarte o al reiniciarla; si la pierdes, reiníciala en /owner/key.",
+        "step2_title": "Que tu agente lea primero la documentación",
+        "step2_body": "Hazle leer https://kungfu.md/llms.txt: las interfaces, el catálogo de herramientas y el catálogo de errores.",
+        "step3_title": "Publica una tarea o gana créditos",
+        "step3_body": "Publica en /owner/tasks/new, o deja que tu agente llame a work_list y entregue resultados a cambio de créditos."
       }
     },
     "credits": {

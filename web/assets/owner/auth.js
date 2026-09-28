@@ -16,6 +16,60 @@ function bindLoginForm() {
     });
 }
 
+// buildRegisterNextSteps (WO-19 R2): the post-registration card —
+// ① the key filled into a copyable MCP config plus a curl example,
+// ② the llms.txt pointer, ③ publish or earn. The snippets carry the
+// JUST-ISSUED one-time key (state.newKeyOnce) as plain textContent;
+// copy buttons reuse the key-copy mechanism (clipboard + toast).
+function buildRegisterNextSteps() {
+    const mcpSnippet = JSON.stringify({
+        mcpServers: {
+            kungfu: {
+                url: 'https://kungfu.md/mcp',
+                headers: {Authorization: `Bearer ${state.newKeyOnce}`}
+            }
+        }
+    });
+    const curlSnippet = `curl -s https://kungfu.md/api/v1/work_list -H 'Content-Type: application/json' -H "Authorization: Bearer ${state.newKeyOnce}" -d '{}'`;
+    const card = document.createElement('section');
+    card.className = 'next-steps';
+    card.id = 'registerNextSteps';
+    const h3 = document.createElement('h3');
+    h3.textContent = t('auth.next_heading');
+    card.appendChild(h3);
+    const steps = document.createElement('ol');
+    steps.className = 'start-steps';
+    steps.innerHTML = `
+        <li><b>${escapeHtml(t('auth.next_key_title'))}</b><span>${escapeHtml(t('auth.next_key_body'))}</span>
+            <div class="next-snippets">
+                <span class="muted">${escapeHtml(t('auth.next_mcp_label'))}</span>
+                <div class="keybox mono" id="mcpConfigBox"></div>
+                <button type="button" class="btn" id="copyMcpBtn">${escapeHtml(t('auth.next_copy_mcp'))}</button>
+                <span class="muted">${escapeHtml(t('auth.next_curl_label'))}</span>
+                <div class="keybox mono" id="curlExampleBox"></div>
+                <button type="button" class="btn" id="copyCurlBtn">${escapeHtml(t('auth.next_copy_curl'))}</button>
+            </div>
+        </li>
+        <li><b>${escapeHtml(t('auth.next_llms_title'))}</b><span>${escapeHtml(t('auth.next_llms_body'))}</span></li>
+        <li><b>${escapeHtml(t('auth.next_go_title'))}</b><span>${escapeHtml(t('auth.next_go_body'))}</span></li>`;
+    card.appendChild(steps);
+    const mcpBox = steps.querySelector('#mcpConfigBox');
+    const curlBox = steps.querySelector('#curlExampleBox');
+    if (mcpBox) mcpBox.textContent = mcpSnippet;
+    if (curlBox) curlBox.textContent = curlSnippet;
+    const bindCopy = (id, text) => {
+        const btn = steps.querySelector(id);
+        if (!btn) return;
+        btn.addEventListener('click', async () => {
+            await navigator.clipboard.writeText(text);
+            showToast(noticeText(t('auth.key_copied')), 'ok');
+        });
+    };
+    bindCopy('#copyMcpBtn', mcpSnippet);
+    bindCopy('#copyCurlBtn', curlSnippet);
+    return card;
+}
+
 function bindRegisterForm() {
     if (!qs('#registerForm')) return;
     qs('#registerForm').addEventListener('submit', async (event) => {
@@ -46,7 +100,8 @@ function bindRegisterForm() {
             const form = qs('#registerForm');
             if (form) {
                 // The account exists now: retire the form so only the
-                // one-time key and the way forward remain.
+                // one-time key, the next steps and the way forward
+                // remain.
                 form.hidden = true;
                 const heading = form.parentElement && form.parentElement.querySelector('h2');
                 if (heading) heading.textContent = t('auth.registered_heading');
@@ -54,7 +109,6 @@ function bindRegisterForm() {
                 keyLine.classList.add('key-reveal');
                 form.after(warn);
                 warn.after(keyLine);
-                keyLine.after(continueBtn);
                 const copyBtn = document.createElement('button');
                 copyBtn.type = 'button';
                 copyBtn.className = 'btn';
@@ -65,6 +119,12 @@ function bindRegisterForm() {
                     showToast(noticeText(t('auth.key_copied')), 'ok');
                 });
                 keyLine.after(copyBtn);
+                // Next steps (WO-19 R2): the key filled into a
+                // copyable MCP config and a curl example, the docs
+                // pointer, and the publish/earn split. Same clipboard
+                // mechanism as the key copy; no inline handlers.
+                copyBtn.after(continueBtn);
+                copyBtn.after(buildRegisterNextSteps());
             }
             continueBtn.addEventListener('click', async () => {
                 // The user explicitly continues; the session is created

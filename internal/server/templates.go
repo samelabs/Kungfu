@@ -685,6 +685,11 @@ func ownerAuthLoginHTML(d *tmplData) string {
 func ownerAuthRegisterHTML(d *tmplData) string {
 	return `<section class="auth-shell panel">
     <h2>` + d.T("owner.auth.register_heading") + `</h2>
+    <div class="register-notes" role="note">
+        <p>` + d.T("owner.auth.register_note_1") + `</p>
+        <p>` + d.T("owner.auth.register_note_2") + `</p>
+        <p>` + d.T("owner.auth.register_note_3") + `</p>
+    </div>
     <form id="registerForm" novalidate>
         <label>` + d.T("owner.auth.kungfu_id") + `</label>
         <input name="name" autocomplete="username" required minlength="6" maxlength="32" pattern="[A-Za-z0-9_.\-]{6,32}" aria-describedby="kungfuIdHint">
@@ -735,14 +740,14 @@ func ownerOverviewHTML(d *tmplData) string {
         <code id="keyBox" class="keybox overview-keybox is-empty"></code>
     </div>
 </section>
-<section class="panel start-panel" id="ownerStart" hidden>
-    <h2>` + d.T("owner.start.heading") + `</h2>
+<details class="panel start-panel" id="ownerStart" open hidden>
+    <summary class="start-summary">` + d.T("owner.start.heading") + `</summary>
     <ol class="start-steps">
-        <li><b>` + d.T("owner.start.connect_title") + `</b><span>` + d.T("owner.start.connect_body") + `</span></li>
-        <li><b>` + d.T("owner.start.publish_title") + `</b><span>` + d.T("owner.start.publish_body") + `</span></li>
-        <li><b>` + d.T("owner.start.credits_title") + `</b><span>` + d.T("owner.start.credits_body") + `</span></li>
+        <li><b>` + d.T("owner.start.step1_title") + `</b><span>` + d.T("owner.start.step1_body") + `</span></li>
+        <li><b>` + d.T("owner.start.step2_title") + `</b><span>` + d.T("owner.start.step2_body") + `</span></li>
+        <li><b>` + d.T("owner.start.step3_title") + `</b><span>` + d.T("owner.start.step3_body") + `</span></li>
     </ol>
-</section>`
+</details>`
 }
 
 func ownerAccountHTML(d *tmplData) string {
