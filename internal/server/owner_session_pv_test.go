@@ -8,6 +8,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,11 +38,12 @@ func pvTestServer(t *testing.T) (*Server, string, string) {
 		t.Fatalf("hash: %v", err)
 	}
 	name := "pvbot" + time.Now().Format("150405.000000000")
+	keyDigest := sha256.Sum256([]byte(name)) // 32 bytes: ck_bots_api_key_hash_len
 	var botID int64
 	if err := pool.QueryRow(context.Background(), `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, status, balance)
-		VALUES ($1, 'pv00', 'pv00', $2, 'active', 10) RETURNING id`,
-		name, hash).Scan(&botID); err != nil {
+		VALUES ($1, $2, 'pv00', $3, 'active', 10) RETURNING id`,
+		name, keyDigest[:], hash).Scan(&botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
 	t.Cleanup(func() {

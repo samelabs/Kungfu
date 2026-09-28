@@ -461,7 +461,7 @@ func TestWorkGovernanceReasons(t *testing.T) {
 	}
 	// the production platform pause is §7.3 RECEIVER_FAULT
 	if _, err := pool.Exec(ctx,
-		`UPDATE tb_tasks SET paused_reason = 'RECEIVER_FAULT' WHERE code = $1`, paused.Code); err != nil {
+		`UPDATE tb_task SET paused_reason = 'RECEIVER_FAULT' WHERE code = $1`, paused.Code); err != nil {
 		t.Fatalf("set paused_reason: %v", err)
 	}
 
@@ -491,7 +491,7 @@ func TestWorkGovernanceReasons(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`UPDATE tb_tasks SET closed_reason = 'GOVERNANCE' WHERE code = $1`, closed.Code); err != nil {
+		`UPDATE tb_task SET closed_reason = 'GOVERNANCE' WHERE code = $1`, closed.Code); err != nil {
 		t.Fatalf("set closed_reason: %v", err)
 	}
 	if view, err := GetWork(ctx, pool, agent, closed.Code, now); err != nil || view["closed_reason"] != "GOVERNANCE" {
