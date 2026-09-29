@@ -119,12 +119,12 @@ func normalizeToolError(err error) *ToolError {
 // field with its type, bounds, default and meaning, so a publisher
 // agent needs nothing else to write one.
 const contractInputSchema = `{"type":"object","description":"The task contract (spec section 3). Unknown fields are rejected.","properties":{
-				"title":{"type":"string","maxLength":128,"description":"Task name."},
-				"requirements":{"type":"string","maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
+				"title":{"type":"string","minLength":1,"maxLength":128,"description":"Task name."},
+				"requirements":{"type":"string","minLength":1,"maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
 				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Executors read them live with work_harness."},
 				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB). Every payload is checked against it before delivery; mismatches never reach your receiver."}},"additionalProperties":false},
 				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing. Your response body reaches the executor verbatim (first 4 000 bytes)."}},"required":["url"],"additionalProperties":false},
-								"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
+								"price":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits paid per accepted submission."},
 				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this task."}},"additionalProperties":false},
 				"claim":{"type":"object","properties":{
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
@@ -136,7 +136,7 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
 // executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor, in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
@@ -166,8 +166,8 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 	},
 	{
 		Name: "work_harness",
-		Description: `Read one harness snapshot entry of a task version.
-Preconditions: same visibility as work_get; ref_id must be in the version snapshot (else HARNESS_REF_NOT_FOUND).
+		Description: `Read one harness memory's current content.
+Preconditions: same visibility as work_get; ref_id must be one of the contract's harness_refs and the memory must still exist (else HARNESS_REF_NOT_FOUND — a deleted memory drops out of the directory).
 Result: {ref_id, title, content}.
 next_action: execute per the contract, then work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"}},"required":["code","ref_id"],"additionalProperties":false}`,
@@ -253,7 +253,7 @@ next_action: the platform triages; continue other work.`,
 		Name: "task_create",
 		Description: contractVisibilityNote + `
 Create a paused task and lock its budget (lock_task ledger row).
-Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected — including the removed sample); budget >= price (at least one unit); your balance covers the budget.
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); budget >= price (at least one unit); your balance covers the budget.
 Result: the task view - status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
@@ -268,7 +268,7 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RAT
 		Description: contractVisibilityNote + `
 Edit the contract of a paused task.
 Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
-Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Edits apply to new claims and submissions; existing ones keep the contract they were accepted under.
+Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Every later submission (including under existing claims) is checked against the current schema and delivered to the current receiver.url; a claim keeps the amount it reserved.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -280,7 +280,6 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		Name: "task_open",
 		Description: `Open a paused task.
 Preconditions: status paused; contract valid; harness refs are your own active memories.
-Result: status "open".
 Result: status "open".
 Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -324,7 +323,7 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
+		Description: `Read one of your tasks: status, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
 	Preconditions: the task is yours.
 	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,

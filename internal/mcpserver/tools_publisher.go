@@ -69,7 +69,7 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	}
 	if in.Open {
 		// §8.1: open in the same call; a failed open leaves the task a
-		// draft with the budget locked (task_close + task_refund
+		// paused with the budget locked (task_close + task_refund
 		// recover it) and returns that error.
 		code, _ := view["code"].(string)
 		view, err = service.OpenTask(ctx, deps.Pool, agent.ID, code)

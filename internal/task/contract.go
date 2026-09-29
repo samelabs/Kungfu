@@ -7,11 +7,10 @@ package task
 // names of the spec table. output.schema stays raw JSON; optional
 // numeric fields are pointers so an explicit invalid value stays
 // distinguishable from "absent"; WithDefaults materializes the spec
-// defaults. There is no sample field (WO-20b): a contract that still
-// sends one is rejected by the strict decoder, by name.
+// defaults. Unknown fields are rejected by the strict decoder, by name.
 //
 // ValidateContract is a pure function: no IO, no database. Ownership
-// of harness_refs (发布者本人所有) and receiver reachability are
+// of harness_refs (发布者本人所有) are
 // service-layer checks and live outside this file.
 
 import (
@@ -98,8 +97,7 @@ type ClaimConfig struct {
 	MaxDuration *int64 `json:"max_duration,omitempty"`
 }
 
-// Receiver is the §3 receiver section (必填; 公网可达性 is proven by
-// the platform, not by a format check).
+// Receiver is the §3 receiver section (必填).
 type Receiver struct {
 	URL string `json:"url"`
 }
