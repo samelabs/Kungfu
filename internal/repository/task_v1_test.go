@@ -403,13 +403,8 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 		var id int64
 		if err := pool.QueryRow(ctx,
 			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
-			 VALUES ($1, 1, 'open', 1, 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
+			 VALUES ($1, 1, 'open', 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
 			t.Fatalf("seed task: %v", err)
-		}
-		if _, err := pool.Exec(ctx,
-			`INSERT INTO tb_task_version (task_id, contract, harness)
-			 VALUES ($1, 1, '{}', '[]')`, id); err != nil {
-			t.Fatalf("seed version: %v", err)
 		}
 		for i := 0; i < n; i++ {
 			var sid int64
