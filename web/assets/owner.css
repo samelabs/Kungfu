@@ -1012,3 +1012,5 @@ details[open] > .start-summary::after { transform: rotate(-135deg); }
 .tcv-mem-main { flex: 1 1 auto; min-width: 0; }
 .tcv-mem-title { font-weight: 600; }
 .tcv-mem-meta { font-size: 12px; flex: 0 0 auto; }
+.tcv-harness-dir { margin: 0; padding-left: 18px; }
+.tcv-harness-dir li { margin: 1px 0; }

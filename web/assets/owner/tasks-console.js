@@ -849,6 +849,18 @@ function tcvAskConfirm(message, fn) {
 // EFFECTIVE contract: the first 280 runes of requirements, the
 // receiver endpoint, the price, the harness size and the execution
 // rules — plus the full contract as an expandable read-only JSON.
+// tcvHarnessDirectoryHTML renders the live version's harness
+// directory (title + size, publisher's order); a draft without a
+// snapshot falls back to the attached refs count.
+function tcvHarnessDirectoryHTML(view) {
+    const dir = view.harness;
+    if (!Array.isArray(dir) || !dir.length) {
+        return `${Number(((view.contract || {}).harness_refs || []).length)}`;
+    }
+    return `<ul class="tcv-harness-dir">` + dir.map((h) =>
+        `<li>${escapeHtml(h.title || h.ref_id || '')} <span class="muted">${escapeHtml(tcvFmtBytes(Number(h.bytes ?? 0)))}</span></li>`).join('') + `</ul>`;
+}
+
 // tcvRevisionHTML is the summary's revision line (C3): which contract
 // revision is live and when it opened; a never-opened draft says so;
 // saved-but-not-live changes name the next revision.
@@ -878,7 +890,7 @@ function tcvContractSummaryHTML(view) {
         <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerpt.length > 280 ? excerpt.slice(0, 280) + '…' : excerpt)}</dd>
         <dt>${escapeHtml(tcvT('f_receiver'))}</dt><dd class="mono">${tcvEscapeHtml(c.receiver && c.receiver.url ? c.receiver.url : '')}</dd>
         <dt>${escapeHtml(tcvT('f_price'))}</dt><dd>${Number(c.price ?? 0)}</dd>
-        <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${Number((c.harness_refs || []).length)}</dd>
+        <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${tcvHarnessDirectoryHTML(view)}</dd>
         <dt>${escapeHtml(tcvT('f_rules'))}</dt><dd>${escapeHtml(rules || '—')}</dd>
     </dl>
     <details class="tcv-picker"><summary>${escapeHtml(view.draft_pending === true ? tcvT('view_effective', {n: Number(view.version ?? 0)}) : tcvT('view_contract'))}</summary>

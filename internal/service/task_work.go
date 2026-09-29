@@ -166,14 +166,15 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, 
 			requirements = requirements[:workRequirementsExcerpt]
 		}
 		out = append(out, map[string]any{
-			"code":         k.row.Task.Code,
-			"title":        k.contract.Title,
-			"requirements": string(requirements),
-			"price":        k.contract.Price,
-			"slots":        slotsFor(&k.row.Task, k.contract),
-			"claim":        map[string]any{"required": k.contract.Claim.Required},
-			"stats":        statsView(stats),
-			"my":           k.my,
+			"code":          k.row.Task.Code,
+			"title":         k.contract.Title,
+			"requirements":  string(requirements),
+			"price":         k.contract.Price,
+			"slots":         slotsFor(&k.row.Task, k.contract),
+			"harness_count": len(k.contract.HarnessRefs),
+			"claim":         map[string]any{"required": k.contract.Claim.Required},
+			"stats":         statsView(stats),
+			"my":            k.my,
 		})
 	}
 	return out, total, nil

@@ -120,11 +120,13 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	contractJSON := t.DraftContract
 	var versionOpenedAt *time.Time
+	var versionHarness []byte
 	if t.Version >= 1 {
 		if v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version); err == nil && v != nil {
 			contractJSON = v.Contract
 			opened := v.CreatedAt
 			versionOpenedAt = &opened
+			versionHarness = v.Harness
 		} else if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
@@ -153,6 +155,24 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	if versionOpenedAt != nil {
 		// when the current contract revision was opened (WO-20b C3)
 		view["version_opened_at"] = versionOpenedAt.UTC().Format(time.RFC3339)
+		// the live version's harness directory, in the publisher's
+		// order, without the material bodies (WO-21)
+		var entries []harnessEntry
+		if err := json.Unmarshal(versionHarness, &entries); err == nil {
+			directory := make([]map[string]any, 0, len(entries))
+			for _, h := range entries {
+				e := map[string]any{
+					"ref_id": h.RefID,
+					"title":  h.Title,
+					"bytes":  len(h.Content),
+				}
+				if h.Description != nil {
+					e["description"] = *h.Description
+				}
+				directory = append(directory, e)
+			}
+			view["harness"] = directory
+		}
 	}
 	view["budget_locked"] = t.BudgetLocked
 	view["settled"] = t.Settled

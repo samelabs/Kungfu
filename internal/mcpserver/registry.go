@@ -145,7 +145,7 @@ var tools = []ToolDef{
 		Description: `List open, claimable work.
 Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
 Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match, q is ignored when given — an empty list means the task is not currently claimable by you), page (default 1) and page_size (default 20, max 100).
-Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
+Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, harness_count, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
 next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{
 			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
@@ -323,7 +323,7 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
+		Description: `Read one of your tasks: status, version, the full contract (receiver included), the live revision's harness directory (harness: ref_id, title, description, bytes — your order, no content), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
 	While the task is draft or paused, draft is the saved contract the next open applies as a new version; draft_pending is true when a version exists and that draft differs from the live one.
 	Preconditions: the task is yours.
 	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,

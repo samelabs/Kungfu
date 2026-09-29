@@ -665,3 +665,61 @@ func TestWorkGovernanceReasons(t *testing.T) {
 		}
 	}
 }
+
+// TestHarnessVisibility (WO-21): work_list carries harness_count,
+// and task_get returns the live version's harness directory in the
+// publisher's order (description included, content absent).
+func TestHarnessVisibility(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	pubSeedKungfu(t, pool, publisher, "harvisi0001", "First material")
+	pubSeedKungfu(t, pool, publisher, "harvisi0002", "Second material")
+	c := pubContract("")
+	c.HarnessRefs = []string{"harvisi0002", "harvisi0001"} // publisher's order
+	code := pubCreateForTest(t, pool, publisher, c, 1000)
+	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	items, total, err := ListWork(ctx, pool, agent, time.Now(), WorkListFilter{})
+	if err != nil || total < 1 {
+		t.Fatalf("work_list: %v total=%d", err, total)
+	}
+	var row map[string]any
+	for _, it := range items {
+		if it["code"] == code {
+			row = it
+		}
+	}
+	if row == nil || row["harness_count"] != 2 {
+		t.Fatalf("harness_count: %v", row)
+	}
+
+	view, err := GetTask(ctx, pool, publisher, code)
+	if err != nil {
+		t.Fatalf("task_get: %v", err)
+	}
+	dir, ok := view["harness"].([]map[string]any)
+	if !ok || len(dir) != 2 {
+		t.Fatalf("task_get harness: %#v", view["harness"])
+	}
+	// publisher's order: harvisi0002 first
+	if dir[0]["ref_id"] != "harvisi0002" || dir[1]["ref_id"] != "harvisi0001" {
+		t.Fatalf("directory order: %v", dir)
+	}
+	for _, e := range dir {
+		if _, has := e["content"]; has {
+			t.Fatal("directory leaks content")
+		}
+		if _, has := e["bytes"]; !has {
+			t.Fatal("directory entry lacks bytes")
+		}
+	}
+
+	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
+		t.Fatalf("CheckInvariants: %v", err)
+	}
+}

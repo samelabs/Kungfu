@@ -102,7 +102,7 @@ Publisher:
 - `task_close` — permanent close
 - `task_fund` — add budget
 - `task_refund` — withdraw available budget after close
-- `task_get` — one of your tasks: full contract, derived amounts, 30-day stats (accept rate, median reply time, failure rate, submissions in the window, active claims), and the saved draft (`draft` with `draft_pending`) while draft or paused
+- `task_get` — one of your tasks: full contract, the live revision's harness directory (`harness`: ref_id/title/description/bytes, your order), derived amounts, 30-day stats (accept rate, median reply time, failure rate, submissions in the window, active claims), and the saved draft (`draft` with `draft_pending`) while draft or paused
 - `task_list` — your tasks (`status` / `q` / `code` filters, paged; returns `total`, `page`, `page_size`)
 - `task_submissions` — the delivery record of your task (state, your receiver's reply)
 
