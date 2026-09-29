@@ -213,8 +213,11 @@ func buildCompletion(pCode string, botID int64, orderID string, mutate func(*Cre
 		OrderID: orderID, Mode: "test",
 		Metadata: map[string]string{"payment_code": pCode, "bot_id": fmt.Sprintf("%d", botID), "source": "kungfu_owner"},
 	}
-	// defaults match a starter checkout snapshot; tests mutate as needed
-	co.Order = &CreemOrder{ID: orderID, Status: "paid", Product: "prod_a", Currency: "USD", Amount: 1000, Units: 1}
+	// defaults match a starter checkout snapshot; tests mutate as needed.
+	// sub_total is the pre-tax reconciliation base (equal to amount
+	// here: no tax, no discount in the fixture).
+	subTotal := int64(1000)
+	co.Order = &CreemOrder{ID: orderID, Status: "paid", Product: "prod_a", Currency: "USD", Amount: 1000, SubTotal: &subTotal, Units: 1}
 	if mutate != nil {
 		mutate(&co)
 	}
@@ -350,6 +353,8 @@ func TestValidCompletionGrantsSnapshotCredits(t *testing.T) {
 	raw, _ := buildCompletion(res.Payment.Code, botID, "ord_1", func(c *CreemCheckoutObject) {
 		c.Order.Product = "prod_b"
 		c.Order.Amount = 4000
+		subTotal := int64(4000)
+		c.Order.SubTotal = &subTotal
 	})
 	var ev CreemWebhookEvent
 	_ = json.Unmarshal(raw, &ev)
@@ -403,7 +408,8 @@ func TestSnapshotReconciliationGates(t *testing.T) {
 		mutate func(*CreemCheckoutObject)
 	}{
 		{"wrong product", func(c *CreemCheckoutObject) { c.Order.Product = "prod_b" }},
-		{"wrong amount", func(c *CreemCheckoutObject) { c.Order.Amount = 999 }},
+		{"wrong sub_total", func(c *CreemCheckoutObject) { wrong := int64(999); c.Order.SubTotal = &wrong }},
+		{"absent sub_total", func(c *CreemCheckoutObject) { c.Order.SubTotal = nil }},
 		{"wrong currency", func(c *CreemCheckoutObject) { c.Order.Currency = "EUR" }},
 		{"wrong mode", func(c *CreemCheckoutObject) { c.Mode = "prod" }},
 		{"order not paid", func(c *CreemCheckoutObject) { c.Order.Status = "refunded" }},

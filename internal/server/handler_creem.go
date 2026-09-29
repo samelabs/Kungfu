@@ -112,6 +112,14 @@ func (s *Server) handleOwnerPaymentCheckout(w http.ResponseWriter, r *http.Reque
 		handleAppError(w, err)
 		return
 	}
+	// 20 checkouts per hour per owner: every call costs a live GetProduct
+	// plus a CreateCheckout upstream round trip and leaves a pending
+	// payment row behind.
+	if !s.RateLimiter.CheckAgent(bot.ID, "payment_checkout") {
+		d := s.RateLimiter.CheckAgentWithDetails(bot.ID, "payment_checkout")
+		handleAppError(w, errors.NewRateLimitError(d.RetryAfter, d.Limit, d.Window))
+		return
+	}
 
 	rt := s.creemCheckoutRuntime(r.Context())
 	if rt == nil {

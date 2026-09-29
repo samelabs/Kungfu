@@ -21,7 +21,7 @@ func handleAccountRegister(ctx context.Context, deps *Deps, agent *model.Bot, ar
 		Name     string `json:"name"`
 		Password string `json:"password"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Name == "" || in.Password == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Name == "" || in.Password == "" {
 		return ToolResult{}, argError("name and password are required")
 	}
 	if err := deps.limitRegister(ctx); err != nil {
@@ -50,6 +50,15 @@ func handleAccountRegister(ctx context.Context, deps *Deps, agent *model.Bot, ar
 }
 
 func handleAccountStatus(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	// The schema declares no arguments: {} (or none) is fine, anything
+	// else is VALIDATION_FAILED naming the field.
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`)
+	}
+	var in struct{}
+	if err := decodeArgs(args, &in); err != nil {
+		return ToolResult{}, err
+	}
 	bot := agent
 	if bot == nil {
 		var err error
@@ -79,7 +88,7 @@ func handleMemoryList(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		Limit  int `json:"limit"`
 		Offset int `json:"offset"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "list") {
@@ -106,7 +115,7 @@ func handleMemoryGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "get") {
@@ -131,7 +140,7 @@ func handleMemoryPut(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 		Description string   `json:"description"`
 		Content     string   `json:"content"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Title == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Title == "" {
 		return ToolResult{}, argError("title and content are required")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "push") {
@@ -169,7 +178,7 @@ func handleMemoryShare(ctx context.Context, deps *Deps, agent *model.Bot, args j
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	result, err := service.Share(ctx, deps.Pool, agent.ID, in.Code)
@@ -187,7 +196,7 @@ func handleMemoryUnshare(ctx context.Context, deps *Deps, agent *model.Bot, args
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	result, err := service.Unshare(ctx, deps.Pool, agent.ID, in.Code)
@@ -205,7 +214,7 @@ func handleMemoryDelete(ctx context.Context, deps *Deps, agent *model.Bot, args 
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	result, err := service.Delete(ctx, deps.Pool, agent.ID, in.Code)

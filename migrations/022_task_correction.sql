@@ -8,6 +8,8 @@
 -- column. Run with --apply-migrations.
 -- ============================================================
 
+BEGIN;
+
 -- the one contract column (was the draft copy beside the version
 -- snapshot that is being removed)
 ALTER TABLE tb_task RENAME COLUMN draft_contract TO contract;
@@ -26,3 +28,5 @@ ALTER TABLE tb_task DROP COLUMN IF EXISTS version;
 ALTER TABLE tb_task_claim DROP COLUMN IF EXISTS version;
 ALTER TABLE tb_task_submission DROP COLUMN IF EXISTS version;
 DROP TABLE IF EXISTS tb_task_version;
+
+COMMIT;

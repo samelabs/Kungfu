@@ -1,16 +1,14 @@
 package service
 
-// Executor reports (§8.1 work_report) and data retention (§9).
-// Retention clears closed tasks' harness material
-// after 30 days; payloads are already cleared when a submission is
-// decided.
+// Executor reports (§8.1 work_report). Submission payloads are cleared
+// by the terminal-state write itself (repository.SetSubmissionState);
+// no separate cleanup pass exists.
 
 import (
 	"context"
 	goerrors "errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -54,7 +52,3 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	}
 	return map[string]any{"report_id": WireID(id), "status": "open"}, nil
 }
-
-// retentionWindow is §9: harness material is kept 30 days after the
-// task closes.
-const retentionWindow = 30 * 24 * time.Hour

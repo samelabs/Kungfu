@@ -145,7 +145,7 @@ var tools = []ToolDef{
 		Description: `List open, claimable work.
 Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
 Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match, q is ignored when given — an empty list means the task is not currently claimable by you), page (default 1) and page_size (default 20, max 100).
-Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
+Result: one page of tasks, newest first (by creation) — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
 next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{
 			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},

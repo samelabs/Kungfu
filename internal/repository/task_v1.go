@@ -769,8 +769,10 @@ func ApplyClaimStatus(ctx context.Context, q pg.Querier, claimID int64, from, ev
 // tb_task_submission (+ events)
 // ---------------------------------------------------------------------------
 
-// SubmissionRow is a row of tb_task_submission. Payload and Verdict
-// are raw JSON; both are NULL after retention cleanup (spec §9).
+// SubmissionRow is a row of tb_task_submission. Payload is raw JSON,
+// kept only while the submission is non-terminal (redelivery needs
+// it) and set to NULL by the terminal-state write itself; the reply
+// fields hold the receiver's recorded answer.
 type SubmissionRow struct {
 	SubmissionID int64
 	TaskID       int64

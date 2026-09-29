@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
@@ -222,6 +224,11 @@ func FindPaymentByProviderOrder(ctx context.Context, q pg.Querier, provider, pro
 // InsertPaymentAdjustment persists one tb_payment_adjustments row
 // idempotently: duplicate (provider, provider_event_id) or
 // (provider, kind, provider_object_id) → inserted=false, zero rows.
+// The ON CONFLICT arbitrates the object index; the SAME provider
+// event replayed under a different object id would hit the bare
+// uk_payment_adjustments_event unique index — that too is "already
+// processed", detected by constraint name and reported as
+// inserted=false, never as an error.
 func InsertPaymentAdjustment(ctx context.Context, tx pgx.Tx, f *model.PaymentAdjustmentFact) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO tb_payment_adjustments (
@@ -247,6 +254,11 @@ func InsertPaymentAdjustment(ctx context.Context, tx pgx.Tx, f *model.PaymentAdj
 		f.ObjectStatus, f.TransactionStatus, f.Reason,
 		f.ProviderCreatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if stderrors.As(err, &pgErr) && pgErr.Code == "23505" &&
+			pgErr.ConstraintName == "uk_payment_adjustments_event" {
+			return false, nil // same provider event already recorded
+		}
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil

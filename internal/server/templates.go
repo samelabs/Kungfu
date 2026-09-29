@@ -116,6 +116,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	if page < 1 {
 		page = 1
 	}
+	page = clampPage(page, homeBoardPageSize)
 	taskBoard := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page)
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/")
 

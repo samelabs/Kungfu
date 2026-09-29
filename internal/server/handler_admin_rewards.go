@@ -378,16 +378,13 @@ func parseAdminOptionalJSONObject(r *http.Request) (map[string]interface{}, erro
 
 // -- helpers --
 
-// pageParams parses list pagination. page is bounded above by 10000:
-// (page-1)*page_size must stay a sane non-negative offset even before
-// the repository's own clamp (P3-33).
+// pageParams parses list pagination. page runs through clampPage so
+// (page-1)*page_size stays a sane non-negative offset even before the
+// repository's own clamp (P3-33).
 func pageParams(pageStr, sizeStr string) (int, int) {
 	page, pageSize := 1, 50
 	if v, err := strconv.Atoi(pageStr); err == nil && v > 0 {
 		page = v
-		if page > 10000 {
-			page = 10000
-		}
 	}
 	if v, err := strconv.Atoi(sizeStr); err == nil && v > 0 {
 		pageSize = v
@@ -395,7 +392,7 @@ func pageParams(pageStr, sizeStr string) (int, int) {
 			pageSize = 100
 		}
 	}
-	return page, pageSize
+	return clampPage(page, pageSize), pageSize
 }
 
 // jsonCredits extracts a whole-integer Credit value. EXACT integer

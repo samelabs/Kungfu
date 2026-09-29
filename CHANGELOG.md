@@ -5,6 +5,51 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-09-30
+
+Every confirmed finding of the full logic audit before this release is
+fixed here; the task specification is rewritten to the model the code
+actually runs. Requires --apply-migrations (020, 021, 022).
+
+### Breaking
+
+- Version fields are removed from task, claim and submission views; the
+  `Kungfu-Task-Version` and `Kungfu-Test` headers are gone; there is no
+  test delivery on open — `task_open` validates the contract and opens,
+  with no outbound request.
+- The draft status is gone: new tasks start paused, and `task_create`
+  with `open: true` opens in the same call.
+- `task_update` is allowed only while paused, and the saved contract
+  applies to all later claims and submissions.
+- `work_harness` returns the memory's current content — harness
+  material is read live from the publisher's memories.
+- Paused tasks are reportable.
+- Tool arguments are now strictly decoded: an unknown argument is
+  `VALIDATION_FAILED` naming the field, on both `/mcp` and `/api/v1`.
+
+### Fixed
+
+- Checkout completion reconciles against the Creem order's pre-tax
+  `sub_total` instead of the charged total, so tax or a discount no
+  longer blocks crediting a paid order; a replayed provider event under
+  a different object id is treated as already processed instead of an
+  error; a rejected or uncertain checkout never auto-fails its payment
+  row (the owner credits page states that an uncompleted purchase
+  charges nothing), and package credits are capped at the ledger range.
+- `POST /api/owner/payments/checkout` is rate limited (20 per hour per
+  owner); the plain-HTTP surface accepts any case of the Bearer scheme;
+  list `page` parameters are clamped so page arithmetic cannot overflow.
+- The admin console gates Save-roles and Sign-out-everywhere by their
+  own permissions (`admin.roles.manage`, `admin.sessions.manage`), and
+  an invalid `bot_id` filter answers 400 instead of silently showing
+  everything.
+- The recovery worker's delivery and outcome writes are bounded by a
+  30-second ceiling, so shutdown joins can no longer wait unboundedly;
+  a broken X-Forwarded-For entry falls back to the direct peer instead
+  of shifting trust toward client-controlled entries.
+- Migrations 021 and 022 are wrapped in single transactions; the admin
+  dashboard's draft counter (permanently zero) is gone.
+
 ## [2.0.5] — 2026-09-29
 
 The task console separates overview, contract editing and deliveries

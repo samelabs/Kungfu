@@ -1,5 +1,5 @@
 {{define "crumbs"}}<a class="sl-crumb" href="/samelabs/admins">← Admins</a>{{end}}
-{{define "content"}}{{$u := .Data.User.Admin}}{{$mine := .Data.User.Roles}}{{$manage := .Can "admin.users.manage"}}
+{{define "content"}}{{$u := .Data.User.Admin}}{{$mine := .Data.User.Roles}}{{$manage := .Can "admin.users.manage"}}{{$roles := .Data.CanManageRoles}}{{$sessions := .Data.CanManageSessions}}
 <div class="sl-grid two">
   <section class="sl-card">
     <div class="sl-card-head"><h2>Profile</h2>{{template "badge" $u.Status}}</div>
@@ -20,9 +20,9 @@
     <h2>Roles</h2>
     <form class="sl-form" method="post" action="/samelabs/admins/{{$u.ID}}/roles">{{template "csrf" .CSRF}}
       <div class="sl-checklist">
-      {{range .Data.Roles}}<label class="sl-check"><input type="checkbox" name="role" value="{{.Role.ID}}" {{if has $mine .Role.Code}}checked{{end}} {{if not $manage}}disabled{{end}}> <b>{{.Role.Name}}</b> <span class="sl-muted mono">{{.Role.Code}}</span>{{if ne .Role.Status "active"}} {{template "badge" .Role.Status}}{{end}}</label>{{end}}
+      {{range .Data.Roles}}<label class="sl-check"><input type="checkbox" name="role" value="{{.Role.ID}}" {{if has $mine .Role.Code}}checked{{end}} {{if not $roles}}disabled{{end}}> <b>{{.Role.Name}}</b> <span class="sl-muted mono">{{.Role.Code}}</span>{{if ne .Role.Status "active"}} {{template "badge" .Role.Status}}{{end}}</label>{{end}}
       </div>
-      {{if $manage}}<button class="sl-btn primary" type="submit">Save roles</button>{{end}}
+      {{if $roles}}<button class="sl-btn primary" type="submit">Save roles</button>{{end}}
     </form>
   </section>
   {{end}}
@@ -36,7 +36,7 @@
   <section class="sl-card danger">
     <h2>Access</h2>
     <div class="sl-actions">
-      <form method="post" action="/samelabs/admins/{{$u.ID}}/force-logout" data-confirm="End all sessions of this admin?">{{template "csrf" .CSRF}}<button class="sl-btn" type="submit">Sign out everywhere</button></form>
+      {{if $sessions}}<form method="post" action="/samelabs/admins/{{$u.ID}}/force-logout" data-confirm="End all sessions of this admin?">{{template "csrf" .CSRF}}<button class="sl-btn" type="submit">Sign out everywhere</button></form>{{end}}
       {{if eq $u.Status "active"}}
       {{if not .Data.Self}}<form method="post" action="/samelabs/admins/{{$u.ID}}/disable" data-confirm="Disable this admin?">{{template "csrf" .CSRF}}<button class="sl-btn danger" type="submit">Disable admin</button></form>{{end}}
       {{else}}

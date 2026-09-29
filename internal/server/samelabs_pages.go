@@ -265,8 +265,12 @@ type slList[T any] struct {
 func (s *Server) slMemories(r *http.Request, p *admin.Principal) (interface{}, error) {
 	q := r.URL.Query()
 	page := slPage(q)
+	botID, err := slInt64Query(q, "bot_id")
+	if err != nil {
+		return nil, err
+	}
 	items, total, err := admin.ListMemories(r.Context(), s.Pool, p, repository.AdminMemoryFilter{
-		Visibility: q.Get("visibility"), Status: q.Get("status"), Q: q.Get("q"), BotID: slInt64(q.Get("bot_id")),
+		Visibility: q.Get("visibility"), Status: q.Get("status"), Q: q.Get("q"), BotID: botID,
 		Page: page, PageSize: slPageSize,
 	})
 	return slList[repository.AdminMemoryRow]{Items: items, Total: total, Page: page, Size: slPageSize}, err
@@ -434,6 +438,10 @@ type slFinanceData struct {
 func (s *Server) slFinance(r *http.Request, p *admin.Principal) (interface{}, error) {
 	ctx, q := r.Context(), r.URL.Query()
 	page := slPage(q)
+	botID, err := slInt64Query(q, "bot_id")
+	if err != nil {
+		return nil, err
+	}
 	sum, err := admin.GetFinanceSummary(ctx, s.Pool, p)
 	if err != nil {
 		return nil, err
@@ -442,14 +450,14 @@ func (s *Server) slFinance(r *http.Request, p *admin.Principal) (interface{}, er
 	switch d.Tab {
 	case "adjustments":
 		items, total, err := admin.ListFinanceAdjustments(ctx, s.Pool, p, admin.FinanceAdjustmentFilter{
-			Kind: q.Get("kind"), PaymentCode: strings.TrimSpace(q.Get("payment")), BotID: slInt64(q.Get("bot_id")), Page: page, PageSize: slPageSize})
+			Kind: q.Get("kind"), PaymentCode: strings.TrimSpace(q.Get("payment")), BotID: botID, Page: page, PageSize: slPageSize})
 		if err != nil {
 			return nil, err
 		}
 		d.Adjustments = slList[admin.FinanceAdjustment]{items, total, page, slPageSize}
 	case "ledger":
 		items, total, err := admin.ListFinanceLedger(ctx, s.Pool, p, admin.FinanceLedgerFilter{
-			BotID: slInt64(q.Get("bot_id")), Type: strings.TrimSpace(q.Get("type")), Page: page, PageSize: slPageSize})
+			BotID: botID, Type: strings.TrimSpace(q.Get("type")), Page: page, PageSize: slPageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -457,7 +465,7 @@ func (s *Server) slFinance(r *http.Request, p *admin.Principal) (interface{}, er
 	default:
 		d.Tab = "payments"
 		items, total, err := admin.ListFinancePayments(ctx, s.Pool, p, admin.FinancePaymentFilter{
-			Status: q.Get("status"), BotID: slInt64(q.Get("bot_id")), Q: strings.TrimSpace(q.Get("q")), Page: page, PageSize: slPageSize})
+			Status: q.Get("status"), BotID: botID, Q: strings.TrimSpace(q.Get("q")), Page: page, PageSize: slPageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -543,8 +551,12 @@ func (s *Server) slRedemptions(r *http.Request, p *admin.Principal) (interface{}
 	if status == "" {
 		status = "all"
 	}
+	botID, err := slInt64Query(q, "bot_id")
+	if err != nil {
+		return nil, err
+	}
 	items, total, err := admin.ListRewardsRedemptions(r.Context(), s.Pool, p, admin.RewardsRedemptionListFilter{
-		Status: status, BotID: slInt64(q.Get("bot_id")), Q: q.Get("q"), Page: page, PageSize: slPageSize})
+		Status: status, BotID: botID, Q: q.Get("q"), Page: page, PageSize: slPageSize})
 	return slList[model.Redemption]{Items: items, Total: total, Page: page, Size: slPageSize}, err
 }
 
@@ -655,6 +667,12 @@ type slAdminData struct {
 	User  *admin.AdminUserView
 	Roles []*admin.AdminRoleView
 	Self  bool
+	// CanManageRoles / CanManageSessions gate their own controls: the
+	// domain checks them (SetAdminRoles wants admin.roles.manage,
+	// ForceLogoutAdmin wants admin.sessions.manage), so the page must
+	// show each control only to principals who may actually use it.
+	CanManageRoles    bool
+	CanManageSessions bool
 }
 
 func (s *Server) slAdmin(r *http.Request, p *admin.Principal) (interface{}, error) {
@@ -666,7 +684,12 @@ func (s *Server) slAdmin(r *http.Request, p *admin.Principal) (interface{}, erro
 	if err != nil {
 		return nil, err
 	}
-	d := slAdminData{User: u, Self: id == p.Admin.ID}
+	d := slAdminData{
+		User:              u,
+		Self:              id == p.Admin.ID,
+		CanManageRoles:    p.HasPermission("admin.roles.manage"),
+		CanManageSessions: p.HasPermission("admin.sessions.manage"),
+	}
 	if p.HasPermission("admin.roles.read") {
 		if d.Roles, err = admin.ListRoles(r.Context(), s.Pool, p); err != nil {
 			return nil, err
@@ -687,7 +710,7 @@ func (s *Server) slAdminProfile(r *http.Request, p *admin.Principal) (string, st
 func (s *Server) slAdminRoles(r *http.Request, p *admin.Principal) (string, string, error) {
 	var ids []int64
 	for _, v := range r.PostForm["role"] {
-		if id := slInt64(v); id > 0 {
+		if id, ok := slInt64(v); ok && id > 0 {
 			ids = append(ids, id)
 		}
 	}

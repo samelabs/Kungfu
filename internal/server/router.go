@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -459,6 +460,21 @@ func clampInt(val, min, max int) int {
 		return max
 	}
 	return val
+}
+
+// clampPage bounds a 1-based page number so (page-1)*pageSize can
+// never overflow the int offset arithmetic downstream: the product
+// stays below math.MaxInt32 for every page size the list handlers
+// use. Every handler that pages on a client-supplied `page` must run
+// its page through this helper (C4).
+func clampPage(page, pageSize int) int {
+	if pageSize < 1 {
+		pageSize = 1
+	}
+	if max := math.MaxInt32 / pageSize; page > max {
+		return max
+	}
+	return page
 }
 
 // Placeholder stubs - will be implemented in handler files

@@ -178,11 +178,23 @@ func TestGetClientIP(t *testing.T) {
 			want:   "198.51.100.7",
 		},
 		{
-			name:   "invalid entries skipped",
+			// the invalid entry sits LEFT of the answer; the rightmost
+			// walk reaches the valid untrusted entry first
+			name:   "invalid entry left of the answer is never reached",
 			remote: "127.0.0.5:8080",
 			xff:    []string{"not-an-ip, 198.51.100.7"},
 			cidrs:  trusted,
 			want:   "198.51.100.7",
+		},
+		{
+			// the invalid entry sits RIGHT of the answer: the chain is
+			// broken where a trusted entry should be — fall back to the
+			// direct peer instead of trusting anything further left
+			name:   "invalid entry breaks the chain: direct peer returned",
+			remote: "127.0.0.5:8080",
+			xff:    []string{"198.51.100.7, not-an-ip"},
+			cidrs:  trusted,
+			want:   "127.0.0.5",
 		},
 		{
 			name:   "all entries trusted: direct peer returned",

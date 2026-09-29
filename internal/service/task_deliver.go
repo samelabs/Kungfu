@@ -61,8 +61,12 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 	// settlement run to completion on this detached context, bounded by
 	// the HTTP client's 10s total timeout (§11), not by the caller. A
 	// submission orphaned by a disconnect is picked up as delivering by
-	// the recovery worker (§5.4).
-	ctx = context.WithoutCancel(ctx)
+	// the recovery worker (§5.4). WithoutCancel also drops the caller's
+	// deadline, so a fresh 30s ceiling replaces it — the recovery
+	// worker's pass budget can never be escaped by an unbounded write.
+	var deliverCancel context.CancelFunc
+	ctx, deliverCancel = context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer deliverCancel()
 	sub, err := repository.FindSubmissionByID(ctx, pool, submissionID)
 	if goerrors.Is(err, pgx.ErrNoRows) || sub == nil {
 		return SubmissionView{}, errors.New(0, "SUBMISSION_NOT_FOUND", "Submission not found")
@@ -221,8 +225,11 @@ func writeDeliveryOutcome(ctx context.Context, pool *pg.Pool, pre *repository.Su
 	settle, release func(ctx context.Context, tx pgx.Tx) error) error {
 
 	// The delivery POST may have exhausted the caller's context (e.g. a
-	// request deadline); the outcome write still MUST complete.
-	writeCtx := context.WithoutCancel(ctx)
+	// request deadline); the outcome write still MUST complete — but
+	// bounded: WithoutCancel drops the deadline too, so a fresh 30s
+	// ceiling keeps shutdown joins and DB hangs finite.
+	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer writeCancel()
 	tx, err := pool.TxBegin(writeCtx)
 	if err != nil {
 		return errors.New(0, "INTERNAL_ERROR", "Database error")

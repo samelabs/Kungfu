@@ -313,7 +313,7 @@ func TestWebhookRefundDisputeFrozen(t *testing.T) {
 			"metadata": map[string]string{"payment_code": pc, "bot_id": fmt.Sprintf("%d", botID), "source": "kungfu_owner"},
 			"order": map[string]interface{}{
 				"id": "ord_" + pc, "status": "paid", "product": "prod_a",
-				"currency": "USD", "amount": 1000, "units": 1,
+				"currency": "USD", "amount": 1000, "sub_total": 1000, "units": 1,
 			},
 		},
 	})
@@ -466,7 +466,7 @@ func TestCreemE2EPackageFlow(t *testing.T) {
 			"metadata": map[string]string{"payment_code": pc.Code, "bot_id": fmt.Sprintf("%d", botID), "source": "kungfu_owner"},
 			"order": map[string]interface{}{
 				"id": "ord_e2e_cfp", "status": "paid", "product": "prod_b",
-				"currency": "USD", "amount": 4000, "units": 1,
+				"currency": "USD", "amount": 4000, "sub_total": 4000, "units": 1,
 			},
 		},
 	})

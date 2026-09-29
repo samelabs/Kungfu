@@ -275,12 +275,12 @@ func TestSamelabsPaymentSettingsForm(t *testing.T) {
 	if n != 0 {
 		t.Fatal("fractional credits were saved")
 	}
-	base["pkg_credits"] = []string{"1000", "", "9007199254740993"}
+	base["pkg_credits"] = []string{"1000", "", "9007199254740991"}
 	if rec := e.form(t, "/samelabs/settings/payment", base, true); rec.Code != http.StatusSeeOther {
 		t.Fatalf("save = %d", rec.Code)
 	}
 	st := e.s.creemSettings(ctx)
-	if st == nil || !st.CheckoutEnabled || len(st.Packages) != 2 || st.Packages["pro"].Credits != 9007199254740993 {
+	if st == nil || !st.CheckoutEnabled || len(st.Packages) != 2 || st.Packages["pro"].Credits != 9007199254740991 {
 		t.Fatalf("saved settings = %+v", st)
 	}
 	if strings.Contains(e.page(t, "/samelabs/settings/payment").Body.String(), "creem_form_key_1111") {

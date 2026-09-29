@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,12 @@ import (
 )
 
 const permPaymentSettings = "settings.payment.manage"
+
+// maxPackageCredits is the per-package credit ceiling: the task money
+// range 2^53−1 (task.MaxAmount; kept as a literal here because the
+// admin domain may not import the task kernel — the architecture
+// guard pins that boundary).
+const maxPackageCredits = int64(1)<<53 - 1
 
 // CreemPackage is one fixed credits package backed by one Creem product.
 type CreemPackage struct {
@@ -116,6 +123,13 @@ func ValidateCreemSettings(in *CreemSettingsInput) error {
 		}
 		if p.Credits <= 0 {
 			return bad("Package " + quote(p.Code) + " credits must be a positive whole number")
+		}
+		// A package whose credits exceed the task money range could
+		// never be granted: credits.Record fails closed on overflow and
+		// the paid webhook would retry forever with credits already
+		// charged.
+		if p.Credits > maxPackageCredits {
+			return bad("Package " + quote(p.Code) + " credits must not exceed " + strconv.FormatInt(maxPackageCredits, 10))
 		}
 		if codes[p.Code] {
 			return bad("Duplicate package code " + quote(p.Code))

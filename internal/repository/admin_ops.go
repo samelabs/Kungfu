@@ -32,7 +32,6 @@ type AdminDashboardCounts struct {
 	AccountsDisabled      int64
 	AccountsNew7d         int64
 	TasksOpen             int64
-	TasksDraft            int64
 	TasksPaused           int64
 	TasksClosed           int64
 	SubmissionsSettled7d  int64
@@ -54,7 +53,6 @@ func AdminDashboard(ctx context.Context, q pg.Querier) (*AdminDashboardCounts, e
 		  (SELECT COUNT(*) FROM tb_bots WHERE status <> 'active'),
 		  (SELECT COUNT(*) FROM tb_bots WHERE created_at >= NOW() - INTERVAL '7 days'),
 		  (SELECT COUNT(*) FROM tb_task WHERE status = 'open'),
-		  (SELECT COUNT(*) FROM tb_task WHERE status = 'draft'),
 		  (SELECT COUNT(*) FROM tb_task WHERE status = 'paused'),
 		  (SELECT COUNT(*) FROM tb_task WHERE status = 'closed'),
 		  (SELECT COUNT(*) FROM tb_task_submission WHERE state = 'settled' AND settled_at >= NOW() - INTERVAL '7 days'),
@@ -66,7 +64,7 @@ func AdminDashboard(ctx context.Context, q pg.Querier) (*AdminDashboardCounts, e
 		  (SELECT COALESCE(SUM(amount), 0) FROM tb_transactions WHERE type = 'earn_task' AND created_at >= NOW() - INTERVAL '7 days'),
 		  (SELECT COUNT(*) FROM tb_redemptions WHERE status = 'pending_review')`).Scan(
 		&c.Accounts, &c.AccountsDisabled, &c.AccountsNew7d,
-		&c.TasksOpen, &c.TasksDraft, &c.TasksPaused, &c.TasksClosed,
+		&c.TasksOpen, &c.TasksPaused, &c.TasksClosed,
 		&c.SubmissionsSettled7d, &c.SubmissionsInFlight, &c.SubmissionsRejected7d,
 		&c.Memories, &c.MemoriesPublic,
 		&c.CreditsOutstanding, &c.CreditsEarned7d, &c.RedemptionsPending)

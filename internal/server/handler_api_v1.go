@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -101,12 +102,14 @@ func (s *Server) mcpDeps() *mcpserver.Deps {
 	return &deps
 }
 
-// bearerToken extracts the Authorization: Bearer value.
+// bearerToken extracts the Authorization: Bearer value. The scheme is
+// matched case-insensitively (RFC 7235) and the token is trimmed —
+// the same acceptance the /mcp surface gives the same credential.
 func bearerToken(r *http.Request) string {
-	const prefix = "Bearer "
-	h := r.Header.Get("Authorization")
-	if len(h) > len(prefix) && h[:len(prefix)] == prefix {
-		return h[len(prefix):]
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	parts := strings.SplitN(h, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(parts[1])
 }

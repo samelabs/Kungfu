@@ -292,7 +292,7 @@ func TestSamelabsTaskPagesRenderAndGate(t *testing.T) {
 		t.Fatalf("reports page = %d", reports.Code)
 	}
 	dashboard := e.page(t, "/samelabs")
-	if dashboard.Code != 200 || !strings.Contains(dashboard.Body.String(), "Draft / paused tasks") {
+	if dashboard.Code != 200 || !strings.Contains(dashboard.Body.String(), "Paused tasks") {
 		t.Fatalf("dashboard counts = %d", dashboard.Code)
 	}
 
