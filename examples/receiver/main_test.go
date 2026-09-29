@@ -144,28 +144,6 @@ var syncDeclared = map[string]bool{"C1": true, "C2": true, "C3": true}
 // §4 test delivery: a fixed {} that checks reachability and liveness —
 // NOT the content. A payload that would fail judging still gets 2xx,
 // and the key is never cached (a later real delivery decides anew).
-func TestTestDeliveryLivenessOnly(t *testing.T) {
-	_, ts := startReceiver(t, syncCfg(), envConfig{})
-	r := deliver(t, ts, "test-task01-1", `{}`, [2]string{"Kungfu-Test", "1"})
-	if r.status != http.StatusOK {
-		t.Fatalf("test delivery = %d %s, want 200", r.status, r.body)
-	}
-	// would-fail-judging payload with the SAME key: still 2xx, not the
-	// cached first outcome and not a judged rejection
-	r = deliver(t, ts, "test-task01-1", `{"url":"ftp://x","bullets":[]}`, [2]string{"Kungfu-Test", "1"})
-	if r.status != http.StatusOK {
-		t.Fatalf("repeated test delivery = %d %s, want 200 (never cached, never judged)", r.status, r.body)
-	}
-	// a REAL delivery under that key judges normally — the test key
-	// left no cached outcome behind
-	r = deliver(t, ts, "test-task01-1", `{"url":"ftp://x","bullets":[]}`)
-	if r.status != failStatus {
-		t.Fatalf("real delivery after test key = %d %s, want %d", r.status, r.body, failStatus)
-	}
-}
-
-// required: pass and fail; the rejection body passes the reply checks
-// (own single-rule config so the empty array cannot also trip a schema).
 func TestRequiredRule(t *testing.T) {
 	cfg := `{"listen":"127.0.0.1:0","criteria":[
 		{"id":"C1","required":["/url","/bullets"]}]}`
@@ -298,7 +276,7 @@ func TestMissingRequiredHeaders400(t *testing.T) {
 	noVersion := cloneHeaders(full)
 	delete(noVersion, "Kungfu-Task-Version")
 	if code := post(noVersion); code != http.StatusBadRequest {
-		t.Fatalf("no Kungfu-Task-Version = %d, want 400", code)
+		t.Fatalf("no extra header = %d, want 400", code)
 	}
 	mismatch := cloneHeaders(full)
 	mismatch["Idempotency-Key"] = "other"

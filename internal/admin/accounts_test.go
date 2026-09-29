@@ -88,7 +88,7 @@ func TestAccountsAdminListPaginationStable(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		if _, err := db.Exec(ctx, `
 			INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance, status)
-			VALUES ($1, $2, 'aaaa', 'x', 0, 'active')`, string(rune('a'+i))+"_page", testKeyHashN(fmt.Sprintf("page%d", i))); err != nil {
+			VALUES ($1, $2, 'aaaa', 'x', 'active')`, string(rune('a'+i))+"_page", testKeyHashN(fmt.Sprintf("page%d", i))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -134,7 +134,7 @@ func TestAccountsAdminDetailAggregatesNeverMerged(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		reqKey := fmt.Sprintf("pr_sub%09d", i)
 		if _, err := db.Exec(ctx, `
-			INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
+			INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
 			VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), 1, $1, $2, '\x00', 1, 'rejected')`,
 			id, reqKey); err != nil {
 			t.Fatalf("seed submission: %v", err)
@@ -160,7 +160,7 @@ func TestAccountsAdminListUnknownStatusIsExplicit400(t *testing.T) {
 	ctx := context.Background()
 	if _, err := db.Exec(ctx, `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance, status)
-		VALUES ('fc_probe', $1, 'aaaa', 'x', 0, 'active')`, testKeyHashN("fc")); err != nil {
+		VALUES ('fc_probe', $1, 'aaaa', 'x', 'active')`, testKeyHashN("fc")); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	_, _, err := repository.AdminListAccounts(ctx, db, repository.AdminAccountFilter{

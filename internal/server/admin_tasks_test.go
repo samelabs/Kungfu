@@ -60,7 +60,7 @@ func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price
 	t.Helper()
 	contract := fmt.Sprintf(`{"title":%q,"price":%d}`, title, price)
 	if _, err := e.s.Pool.Exec(context.Background(),
-		`INSERT INTO tb_task_version (task_id, version, contract, harness) VALUES ($1, 1, $2, '[]'::jsonb)`,
+		`INSERT INTO tb_task_version (task_id, contract, harness) VALUES ($1, 1, $2, '[]'::jsonb)`,
 		taskID, contract); err != nil {
 		t.Fatalf("seed version: %v", err)
 	}

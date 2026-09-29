@@ -61,8 +61,8 @@ func TestTaskCreateOpenInOneCall(t *testing.T) {
 	code, _ := env["code"].(string)
 	// the version snapshot landed in the same call
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != "" {
-		t.Fatal("unexpected nil task")
+	if tr == nil {
+		t.Fatal("task should not be nil")
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)

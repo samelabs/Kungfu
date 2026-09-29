@@ -29,8 +29,8 @@ var (
 // specJSONFieldNames are the JSON keys of the spec's own example
 // objects — the §5.3 submission request (code, request_key, payload,
 // claim_id, revises), the §7.1 receiver request body (submission_id,
-// task_code, version, agent_ref, payload) and the §8.2 envelope (ok,
-// task_code, submission_id, state, version, paid, reply,
+// task_code, agent_ref, payload) and the §8.2 envelope (ok,
+// task_code, submission_id, state, paid, reply,
 // next_action, retry_after, failure, error).
 // task_code among them is tool-shaped but is a field, not a tool, so
 // the tool check exempts these keys before judging.

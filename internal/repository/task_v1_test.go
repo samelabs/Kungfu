@@ -402,12 +402,12 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 		t.Helper()
 		var id int64
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO tb_task (code, publisher_id, status, version, budget_locked, draft_contract)
+			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, draft_contract)
 			 VALUES ($1, 1, 'open', 1, 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
 			t.Fatalf("seed task: %v", err)
 		}
 		if _, err := pool.Exec(ctx,
-			`INSERT INTO tb_task_version (task_id, version, contract, harness)
+			`INSERT INTO tb_task_version (task_id, contract, harness)
 			 VALUES ($1, 1, '{}', '[]')`, id); err != nil {
 			t.Fatalf("seed version: %v", err)
 		}
@@ -418,7 +418,7 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 				state = "rejected"
 			}
 			if err := pool.QueryRow(ctx,
-				`INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
+				`INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
 				 VALUES ($1, 1, 2, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
 				fmt.Sprintf("%s-%d", code, i)).Scan(&sid); err != nil {
 				t.Fatalf("seed submission: %v", err)

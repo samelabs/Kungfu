@@ -490,7 +490,7 @@ func TestMigrationChainFreshDB(t *testing.T) {
 		}
 	}
 	mustFail(`INSERT INTO tb_payments (code, bot_id, provider, amount_minor, currency, credits)
-	          VALUES ('deadbeef0001', $1, 'manual', 0, 'USD', 66)`, botID)
+	          VALUES ('deadbeef0001', $1, 'manual', 'USD', 66)`, botID)
 	mustFail(`INSERT INTO tb_payments (code, bot_id, provider, amount_minor, currency, credits)
 	          VALUES ('deadbeef0002', $1, 'manual', 1999, 'USD', 0)`, botID)
 	mustFail(`INSERT INTO tb_payments (code, bot_id, provider, amount_minor, currency, credits, status)
