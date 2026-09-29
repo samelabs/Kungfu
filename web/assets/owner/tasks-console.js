@@ -588,7 +588,9 @@ function tcvStatsHTML(view) {
     const rows = [
         [tcvT('s_accept'), tcvFmtPercent(stats.accept_rate)],
         [tcvT('s_median'), tcvFmtSeconds(stats.median_reply_seconds)],
-        [tcvT('s_failure'), tcvFmtPercent(stats.failure_rate)]
+        [tcvT('s_failure'), tcvFmtPercent(stats.failure_rate)],
+        [tcvT('s_submissions'), String(Number(stats.submissions_30d ?? 0))],
+        [tcvT('s_claims'), String(Number(stats.active_claims ?? 0))]
     ];
     return `<h2>${escapeHtml(tcvT('stats_heading'))}</h2>
     <dl class="sl-kv">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')}</dl>`;

@@ -29,6 +29,7 @@ import (
 
 	apperr "kungfu.md/internal/errors"
 	"kungfu.md/internal/model"
+	"kungfu.md/internal/version"
 )
 
 // ToolResult is the typed result every registry handler returns; the
@@ -138,9 +139,9 @@ var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open, claimable work.
-Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
-Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate) and your accepted/rejected/rejections_left.
-next_action: choose a task, then work_get -> work_claim -> work_submit.`,
+	Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
+	Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left, and total (the number of rows returned).
+	next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
 		Handler:     factory(handleWorkList),
 	},
@@ -310,7 +311,7 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate).
+		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
 	While the task is draft or paused, draft is the saved contract the next open applies as a new version; draft_pending is true when a version exists and that draft differs from the live one.
 	Preconditions: the task is yours.
 	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
@@ -340,7 +341,8 @@ Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 	},
 	{
 		Name: "account_register",
-		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once — store it now; it cannot be recovered later.
+		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once — store it now.
+	Result: {bot_name, api_key, mcp_endpoint (https://kungfu.md/mcp), api_base (https://kungfu.md/api/v1/), docs (llms.txt), message, key_recovery}. If the key is lost, the owner signs in at /owner/key and resets it.
 	Preconditions: name 6-32 chars (letters/digits/_/./-), password 6-72 chars (bcrypt limit); IP registration rate limit applies.
 	Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
 		InputSchema: `{"type":"object","properties":{
@@ -454,6 +456,9 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		"error":       nil,
 		"next_action": nil,
 		"retry_after": nil,
+		// api_version rides on every response (WO-18): interface
+		// changes are announced in the repository CHANGELOG.
+		"api_version": version.Get(),
 	}
 
 	var state string
@@ -516,6 +521,7 @@ func notAcceptedEnvelope(code, message string, details map[string]any) map[strin
 		"error":       map[string]any{"code": code, "message": message, "details": details},
 		"next_action": nil,
 		"retry_after": nil,
+		"api_version": version.Get(),
 	}
 	action, retry := NextAction("", code)
 	if action != "" {

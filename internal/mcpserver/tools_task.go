@@ -60,7 +60,10 @@ func handleWorkList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	if err != nil {
 		return ToolResult{}, err
 	}
-	return data(map[string]any{"tasks": items})
+	// total = how many rows this call returned (WO-18): the listing is
+	// capped at 100, so total lets a client tell "exactly these" from
+	// "truncated at the cap" without counting array elements itself.
+	return data(map[string]any{"tasks": items, "total": len(items)})
 }
 
 func handleWorkGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {

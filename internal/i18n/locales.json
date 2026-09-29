@@ -195,7 +195,9 @@
         "r_price": "Price",
         "r_slots": "Units",
         "r_available": "Available",
-        "r_locked": "Locked"
+        "r_locked": "Locked",
+        "s_submissions": "Submissions (30 days)",
+        "s_claims": "Active claims"
       },
       "logs": {
         "heading": "Logs",
@@ -616,7 +618,9 @@
         "r_price": "单价",
         "r_slots": "可接份数",
         "r_available": "可用",
-        "r_locked": "已锁定"
+        "r_locked": "已锁定",
+        "s_submissions": "提交数（30 天）",
+        "s_claims": "有效认领"
       },
       "logs": {
         "heading": "日志",
@@ -1037,7 +1041,9 @@
         "r_price": "単価",
         "r_slots": "受領可能数",
         "r_available": "利用可能",
-        "r_locked": "ロック済み"
+        "r_locked": "ロック済み",
+        "s_submissions": "提出数（30 日）",
+        "s_claims": "有効クレーム"
       },
       "logs": {
         "heading": "ログ",
@@ -1458,7 +1464,9 @@
         "r_price": "단가",
         "r_slots": "수주 가능 수",
         "r_available": "가용",
-        "r_locked": "잠김"
+        "r_locked": "잠김",
+        "s_submissions": "제출 수 (30일)",
+        "s_claims": "유효 클레임"
       },
       "logs": {
         "heading": "로그",
@@ -1879,7 +1887,9 @@
         "r_price": "Precio",
         "r_slots": "Unidades",
         "r_available": "Disponible",
-        "r_locked": "Bloqueado"
+        "r_locked": "Bloqueado",
+        "s_submissions": "Entregas (30 días)",
+        "s_claims": "Claims activos"
       },
       "logs": {
         "heading": "Registros",

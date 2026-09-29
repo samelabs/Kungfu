@@ -84,6 +84,30 @@ func marshalContract(c task.Contract) ([]byte, error) {
 	return b, nil
 }
 
+// publisherStats extends the §6.3 block with the two publisher-only
+// counters (WO-18): terminal submissions inside the 30-day window and
+// claims valid right now.
+type publisherStats struct {
+	AcceptRate         *float64 `json:"accept_rate"`
+	MedianReplySeconds *float64 `json:"median_reply_seconds"`
+	FailureRate        *float64 `json:"failure_rate"`
+	Submissions30d     int64    `json:"submissions_30d"`
+	ActiveClaims       int64    `json:"active_claims"`
+}
+
+// publisherStatsView projects the shared §6.3 statistics plus the
+// publisher-only counters; the three rates keep work_get's exact scope.
+func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherStats {
+	base := statsView(s)
+	return publisherStats{
+		AcceptRate:         base.AcceptRate,
+		MedianReplySeconds: base.MedianReplySeconds,
+		FailureRate:        base.FailureRate,
+		Submissions30d:     s.TerminalTotal,
+		ActiveClaims:       activeClaims,
+	}
+}
+
 // taskView projects a task row plus §4 derived amounts. The effective
 // contract is the current version's snapshot once one exists, else the
 // draft. While the task is draft or paused, draft exposes the SAVED
@@ -603,7 +627,9 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 
 // GetTask returns one owned task with its effective contract, the §4
 // derived amounts, the saved draft (draft/paused) and the §6.3 30-day
-// statistics — exactly the statsView scope work_get reports.
+// statistics plus the two publisher-only counters — exactly the
+// statsView scope work_get reports, extended with submissions_30d and
+// active_claims (WO-18).
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
@@ -626,7 +652,11 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	view["stats"] = statsView(stats)
+	claims, err := repository.CountActiveClaims(ctx, pool, t.ID, time.Now())
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	view["stats"] = publisherStatsView(stats, claims)
 	return view, nil
 }
 

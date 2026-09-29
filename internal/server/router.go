@@ -137,7 +137,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/readyz", s.handleReady)
 
 	// -- MCP surface: official SDK streamable HTTP handler,
-	// stateless, protocol 2026-07-28 only. Routed under the existing
+	// stateless, protocols 2025-03-26 … 2026-07-28 (pinned legacy
+	// clients negotiate their own revision). Routed under the existing
 	// security-header / panic / deadline middleware — no second
 	// timeout or lifecycle owner. Trusted client IP flows from the
 	// existing proxy mechanism into MCP rate limiting.
