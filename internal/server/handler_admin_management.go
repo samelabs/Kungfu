@@ -557,20 +557,35 @@ func (s *Server) handleAdminSessionsList(w http.ResponseWriter, r *http.Request)
 		handleAppError(w, err)
 		return
 	}
-	sessions, err := admin.ListSessions(r.Context(), s.Pool, principal)
+	q := r.URL.Query()
+	includeEnded := q.Get("include_ended") == "1"
+	page := getQueryInt(r, "page", 1)
+	pageSize := getQueryInt(r, "page_size", 50)
+	adminIDFilter := strings.TrimSpace(q.Get("admin_id"))
+	adminID := int64(0)
+	if adminIDFilter != "" {
+		if v, err := strconv.ParseInt(adminIDFilter, 10, 64); err == nil && v > 0 {
+			adminID = v
+		}
+	}
+	sessions, err := admin.ListSessions(r.Context(), s.Pool, principal, includeEnded, int64(adminID), page, pageSize)
 	if err != nil {
 		handleAppError(w, err)
 		return
 	}
-	adminIDFilter := strings.TrimSpace(r.URL.Query().Get("admin_id"))
-	out := make([]map[string]interface{}, 0, len(sessions))
-	for _, si := range sessions {
-		if adminIDFilter != "" && strconv.FormatInt(si.AdminID, 10) != adminIDFilter {
-			continue
-		}
+	out := make([]map[string]interface{}, 0, len(sessions.Items))
+	for _, si := range sessions.Items {
 		out = append(out, adminSessionDTO(si))
 	}
-	SuccessResponse(w, map[string]interface{}{"sessions": out}, "")
+	SuccessResponse(w, map[string]interface{}{
+		"sessions": out,
+		"pagination": map[string]interface{}{
+			"page": sessions.Page, "page_size": sessions.PageSize,
+			"total":         sessions.Total,
+			"total_pages":   (sessions.Total + int64(sessions.PageSize) - 1) / int64(sessions.PageSize),
+			"include_ended": includeEnded,
+		},
+	}, "")
 }
 
 func (s *Server) handleAdminSessionRevoke(w http.ResponseWriter, r *http.Request) {

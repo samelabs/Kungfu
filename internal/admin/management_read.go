@@ -127,15 +127,35 @@ func ListPermissions(ctx context.Context, pool *pg.Pool, principal *Principal) (
 
 // ListSessions requires admin.sessions.manage and returns all
 // sessions (identity-joined, no token material).
-func ListSessions(ctx context.Context, pool *pg.Pool, principal *Principal) ([]*model.AdminSessionInfo, error) {
+// SessionPage is one page of the sessions list (WO-21).
+type SessionPage struct {
+	Items        []*model.AdminSessionInfo
+	Page         int
+	PageSize     int
+	Total        int64
+	IncludeEnded bool
+}
+
+// ListSessions returns one page of admin sessions: by default only
+// the live ones (not revoked, not expired); IncludeEnded carries the
+// whole history. Paging is normPage-bounded (<= 200 per page).
+func ListSessions(ctx context.Context, pool *pg.Pool, principal *Principal, includeEnded bool, adminID int64, page, pageSize int) (*SessionPage, error) {
 	if err := RequirePermission(ctx, pool, principal, "admin.sessions.manage"); err != nil {
 		return nil, err
 	}
-	sessions, err := repository.ListAdminSessions(ctx, pool)
+	sessions, total, err := repository.ListAdminSessions(ctx, pool, repository.AdminSessionFilter{
+		IncludeEnded: includeEnded, AdminID: adminID, Page: page, PageSize: pageSize,
+	})
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Database error")
 	}
-	return sessions, nil
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if page < 1 {
+		page = 1
+	}
+	return &SessionPage{Items: sessions, Page: page, PageSize: pageSize, Total: total, IncludeEnded: includeEnded}, nil
 }
 
 // AuditPage is one page of audit explorer results.

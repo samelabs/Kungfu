@@ -778,13 +778,25 @@ func (s *Server) slRolePermissions(r *http.Request, p *admin.Principal) (string,
 // -- sessions & audit --
 
 type slSessionsData struct {
-	Sessions []*model.AdminSessionInfo
-	Current  int64
+	Sessions     []*model.AdminSessionInfo
+	Current      int64
+	Pager        slPager
+	IncludeEnded bool
 }
 
 func (s *Server) slSessions(r *http.Request, p *admin.Principal) (interface{}, error) {
-	list, err := admin.ListSessions(r.Context(), s.Pool, p)
-	return slSessionsData{Sessions: list, Current: p.Session.ID}, err
+	q := r.URL.Query()
+	includeEnded := q.Get("include_ended") == "1"
+	page := slPage(q)
+	list, err := admin.ListSessions(r.Context(), s.Pool, p, includeEnded, 0, page, slPageSize)
+	if list != nil {
+		return slSessionsData{
+			Sessions: list.Items, Current: p.Session.ID,
+			Pager:        newSlPager(q, list.Total, list.Page, list.PageSize),
+			IncludeEnded: includeEnded,
+		}, err
+	}
+	return nil, err
 }
 
 func (s *Server) slSessionRevoke(r *http.Request, p *admin.Principal) (string, string, error) {

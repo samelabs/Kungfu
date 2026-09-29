@@ -26,6 +26,7 @@ type adminEnv struct {
 	password string
 	cookie   *http.Cookie
 	csrf     string
+	adminID  int64
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
@@ -57,7 +58,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		_, _ = s.Pool.Exec(context.Background(), `DELETE FROM tb_admins WHERE id=$1`, id)
 	})
 
-	env := &adminEnv{s: s, username: username, password: password, router: s.buildRouter()}
+	env := &adminEnv{s: s, username: username, password: password, router: s.buildRouter(), adminID: id}
 	env.login(t)
 	return env
 }
@@ -319,5 +320,87 @@ func TestAdminMgmtSelfPasswordChangeClearsCookie(t *testing.T) {
 	rec = e.do(t, "GET", "/api/samelabs/session", "", false)
 	if rec.Code != 401 {
 		t.Fatalf("old session must be revoked: %d", rec.Code)
+	}
+}
+
+// TestAdminMgmtSessionsLiveByDefaultPaged (WO-21): the sessions list
+// shows only unrevoked, unexpired sessions by default; include_ended=1
+// adds the history; paging is normPage-bounded with a page-independent
+// total.
+func TestAdminMgmtSessionsLiveByDefaultPaged(t *testing.T) {
+	e := newAdminEnv(t)
+	ctx := context.Background()
+
+	// ended fixtures: one revoked, one expired — both invisible by default
+	var revokedID, expiredID int64
+	if err := e.s.Pool.QueryRow(ctx, `
+		INSERT INTO tb_admin_sessions (admin_id, token_hash, auth_version, ip_address, user_agent, created_at, last_seen_at, expires_at, revoked_at)
+		VALUES ($1, 'revokedhash0000000000000000000000000', 1, '127.0.0.1', 'test', NOW(), NOW(), NOW() + interval '1 day', NOW())
+		RETURNING id`, e.adminID).Scan(&revokedID); err != nil {
+		t.Fatalf("seed revoked: %v", err)
+	}
+	if err := e.s.Pool.QueryRow(ctx, `
+		INSERT INTO tb_admin_sessions (admin_id, token_hash, auth_version, ip_address, user_agent, created_at, last_seen_at, expires_at)
+		VALUES ($1, 'expiredhash0000000000000000000000000', 1, '127.0.0.1', 'test', NOW() - interval '2 day', NOW() - interval '2 day', NOW() - interval '1 day')
+		RETURNING id`, e.adminID).Scan(&expiredID); err != nil {
+		t.Fatalf("seed expired: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.s.Pool.Exec(ctx, `DELETE FROM tb_admin_sessions WHERE id IN ($1, $2)`, revokedID, expiredID)
+	})
+
+	// default: live only — the revoked and expired ids never appear
+	rec := e.do(t, "GET", "/api/samelabs/sessions", "", false)
+	if rec.Code != 200 {
+		t.Fatalf("default list: %d", rec.Code)
+	}
+	var got struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Sessions []struct {
+				ID int64 `json:"id,string"`
+			} `json:"sessions"`
+			Pagination struct {
+				Total        int64 `json:"total"`
+				IncludeEnded bool  `json:"include_ended"`
+			} `json:"pagination"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got.Data.Sessions {
+		if s.ID == revokedID || s.ID == expiredID {
+			t.Fatal("default list included an ended session")
+		}
+	}
+	if got.Data.Pagination.IncludeEnded {
+		t.Fatal("include_ended flag echoed wrong")
+	}
+	liveTotal := got.Data.Pagination.Total
+
+	// include_ended=1: both fixtures appear
+	rec = e.do(t, "GET", "/api/samelabs/sessions?include_ended=1", "", false)
+	if rec.Code != 200 {
+		t.Fatalf("include_ended list: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, fmt.Sprintf(`"id":"%d"`, revokedID)) || !strings.Contains(body, fmt.Sprintf(`"id":"%d"`, expiredID)) {
+		t.Fatal("include_ended=1 missing ended sessions")
+	}
+
+	// paging: page 2 of size 1 keeps the full total (>= live sessions)
+	rec = e.do(t, "GET", fmt.Sprintf("/api/samelabs/sessions?page=2&page_size=1"), "", false)
+	if rec.Code != 200 {
+		t.Fatalf("paged list: %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Data.Sessions) > 1 {
+		t.Fatalf("page_size=1 returned %d rows", len(got.Data.Sessions))
+	}
+	if got.Data.Pagination.Total != liveTotal {
+		t.Fatalf("paged total = %d, want the live total %d", got.Data.Pagination.Total, liveTotal)
 	}
 }

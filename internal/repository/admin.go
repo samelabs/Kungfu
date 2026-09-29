@@ -635,15 +635,46 @@ func ListAdminUserRoleIDs(ctx context.Context, q pg.Querier, adminID int64) ([]i
 
 // ListAdminSessions returns all sessions joined with admin identity,
 // newest first. NO token material is selected.
-func ListAdminSessions(ctx context.Context, q pg.Querier) ([]*model.AdminSessionInfo, error) {
+// AdminSessionFilter narrows ListAdminSessions (WO-21): by default
+// only sessions that are neither revoked nor expired are listed;
+// IncludeEnded adds the full history. AdminID > 0 scopes to one admin.
+type AdminSessionFilter struct {
+	IncludeEnded bool
+	AdminID      int64
+	Page         int
+	PageSize     int
+}
+
+// ListAdminSessions returns ONE page of admin sessions (newest
+// first) with the total number of matching rows. Paging runs through
+// normPage (page >= 1, size <= 200, default 50); the total is its own
+// COUNT over the same filters, so an out-of-range page keeps it.
+func ListAdminSessions(ctx context.Context, q pg.Querier, f AdminSessionFilter) ([]*model.AdminSessionInfo, int64, error) {
+	page, size := normPage(f.Page, f.PageSize)
+	where := ` WHERE 1=1`
+	args := []any{}
+	if !f.IncludeEnded {
+		where += ` AND s.revoked_at IS NULL AND s.expires_at > NOW()`
+	}
+	if f.AdminID > 0 {
+		args = append(args, f.AdminID)
+		where += fmt.Sprintf(` AND s.admin_id = $%d`, len(args))
+	}
+	var total int64
+	if err := q.QueryRow(ctx, `SELECT COUNT(*) FROM tb_admin_sessions s`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, size, (page-1)*size)
 	rows, err := q.Query(ctx, `
 		SELECT s.id, s.admin_id, a.username, a.display_name,
 			s.ip_address, s.user_agent, s.created_at, s.last_seen_at, s.expires_at, s.revoked_at
 		FROM tb_admin_sessions s
-		JOIN tb_admins a ON a.id = s.admin_id
-		ORDER BY s.id DESC`)
+		JOIN tb_admins a ON a.id = s.admin_id`+
+		where+`
+		ORDER BY s.id DESC
+		LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []*model.AdminSessionInfo
@@ -652,11 +683,11 @@ func ListAdminSessions(ctx context.Context, q pg.Querier) ([]*model.AdminSession
 		if err := rows.Scan(&si.ID, &si.AdminID, &si.Username, &si.DisplayName,
 			&si.IPAddress, &si.UserAgent, &si.CreatedAt, &si.LastSeenAt, &si.ExpiresAt,
 			&si.RevokedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, si)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // FindAdminSessionByID loads one session (no tokens) by id.
