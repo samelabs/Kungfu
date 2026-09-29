@@ -414,7 +414,7 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 			}
 			if err := pool.QueryRow(ctx,
 				`INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
-				 VALUES ($1, 1, 2, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
+				 VALUES ($1, 1, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
 				fmt.Sprintf("%s-%d", code, i)).Scan(&sid); err != nil {
 				t.Fatalf("seed submission: %v", err)
 			}

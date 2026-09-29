@@ -160,7 +160,7 @@ func TestAccountsAdminListUnknownStatusIsExplicit400(t *testing.T) {
 	ctx := context.Background()
 	if _, err := db.Exec(ctx, `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance, status)
-		VALUES ('fc_probe', $1, 'aaaa', 'x', 'active')`, testKeyHashN("fc")); err != nil {
+		VALUES ('fc_probe', $1, 'aaaa', 'x', 0, 'active')`, testKeyHashN("fc")); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	_, _, err := repository.AdminListAccounts(ctx, db, repository.AdminAccountFilter{

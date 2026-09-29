@@ -53,23 +53,6 @@ func govTask(t *testing.T, e *adminEnv, publisher int64, code, status string, bu
 	return id
 }
 
-// govTaskVersion seeds the version snapshot behind an open task and
-// points the task's version column at it (OpenTask does both; the
-// board and detail queries join on tb_task.version).
-func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price int64) {
-	t.Helper()
-	contract := fmt.Sprintf(`{"title":%q,"price":%d}`, title, price)
-	if _, err := e.s.Pool.Exec(context.Background(),
-		`INSERT INTO tb_task_version (task_id, contract, harness) VALUES ($1, 1, $2, '[]'::jsonb)`,
-		taskID, contract); err != nil {
-		t.Fatalf("seed version: %v", err)
-	}
-	if _, err := e.s.Pool.Exec(context.Background(),
-		`UPDATE tb_task SET version = 1 WHERE id = $1`, taskID); err != nil {
-		t.Fatalf("set version: %v", err)
-	}
-}
-
 // govReport seeds one open report.
 func govReport(t *testing.T, e *adminEnv, taskID, reporter int64, reason string) int64 {
 	t.Helper()
@@ -125,6 +108,14 @@ func govAuditCount(t *testing.T, e *adminEnv, action, targetID string) int64 {
 		t.Fatalf("audit count: %v", err)
 	}
 	return n
+}
+
+// govTaskVersion is a no-op: version snapshots no longer exist.
+func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price int64) {
+	t.Helper()
+	_ = taskID
+	_ = title
+	_ = price
 }
 
 func TestAdminTasksAPIPermissionGate(t *testing.T) {

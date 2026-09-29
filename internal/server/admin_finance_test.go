@@ -51,7 +51,7 @@ func newFinanceFixture(t *testing.T, e *adminEnv) *financeFixture {
 	keyHash := sha256.Sum256([]byte(f.botName))
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO tb_bots (bot_name, api_key_hash, api_key_last4, password_hash, balance, status)
-		VALUES ($1, $2, '9999', 'x', 'active') RETURNING id`,
+		VALUES ($1, $2, '9999', 'x', 0, 'active') RETURNING id`,
 		f.botName, keyHash[:]).Scan(&f.botID); err != nil {
 		t.Fatalf("seed bot: %v", err)
 	}
