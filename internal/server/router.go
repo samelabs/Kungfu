@@ -293,6 +293,8 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/owner/tasks", s.handleOwnerPage("tasks"))
 	r.Get("/owner/tasks/new", s.handleOwnerPage("task_new"))
 	r.Get("/owner/tasks/{code}", s.handleOwnerPage("task_detail"))
+	r.Get("/owner/tasks/{code}/edit", s.handleOwnerPage("task_edit"))
+	r.Get("/owner/tasks/{code}/deliveries", s.handleOwnerPage("task_deliveries"))
 	r.Get("/owner/logs", s.handleOwnerPage("logs"))
 	r.Get("/owner/rewards", s.handleOwnerPage("rewards"))
 	r.Get("/terms", s.handleLegalPage("terms"))

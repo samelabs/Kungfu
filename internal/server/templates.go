@@ -627,7 +627,7 @@ func ownerNavHTML(data *tmplData) string {
     <a class="btn` + isActive("overview") + `" href="` + i18n.LocaleURL(data.Locale, "/owner") + `">` + data.T("owner.nav.overview") + `</a>
     <a class="btn` + isActive("account") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/account") + `">` + data.T("owner.nav.account") + `</a>
     <a class="btn` + isActive("key") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/key") + `">` + data.T("owner.nav.key") + `</a>
-    <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
+    <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail", "task_edit", "task_deliveries") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
     <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("rewards") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/rewards") + `">` + data.T("owner.nav.rewards") + `</a>
@@ -645,7 +645,10 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerKeyHTML(data)
 	case "tasks":
 		return ownerTasksConsoleHTML(data)
-	case "task_new", "task_detail":
+	case "task_new", "task_detail", "task_edit", "task_deliveries":
+		// one shell for the whole task workspace; the JS layer splits
+		// it per section (WO-20). The unified owner head (noindex)
+		// covers every section.
 		return ownerTaskEditorHTML(data)
 	case "logs":
 		return ownerLogsHTML(data)
