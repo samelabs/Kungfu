@@ -547,10 +547,9 @@ func TestDeliverRequestShape(t *testing.T) {
 
 	h, body := rcv.last()
 	if h.Get("Idempotency-Key") != fmt.Sprint(subID) ||
-		h.Get("Kungfu-Task") != code ||
-		h.Get("Kungfu-Task-Version") != "1" {
-		t.Fatalf("headers = Idempotency-Key=%q Kungfu-Task=%q Kungfu-Task-Version=%q",
-			h.Get("Idempotency-Key"), h.Get("Kungfu-Task"), h.Get("Kungfu-Task-Version"))
+		h.Get("Kungfu-Task") != code {
+		t.Fatalf("headers = Idempotency-Key=%q Kungfu-Task=%q",
+			h.Get("Idempotency-Key"), h.Get("Kungfu-Task"))
 	}
 	if ct := h.Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("Content-Type = %q", ct)

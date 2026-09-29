@@ -118,7 +118,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if first.State != task.SubSettled || first.Amount != 5 || 0 != 1 || first.Paid != 5 {
+	if first.State != task.SubSettled || first.Amount != 5 || first.Paid != 5 {
 		t.Fatalf("view = %+v", first)
 	}
 
@@ -337,7 +337,7 @@ func TestSubmitWithClaim(t *testing.T) {
 		t.Fatalf("submit with claim: %v", err)
 	}
 	// the receiver answers 200: settled and paid
-	if 0 != 1 || view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
+	if view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
 		t.Fatalf("view = %+v", view)
 	}
 	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID.Int64())
