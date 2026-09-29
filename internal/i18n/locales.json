@@ -231,7 +231,8 @@
         "revision_never": "Not opened yet — no contract revision is live.",
         "revision_current": "Live: revision {{n}} · opened {{time}}",
         "revision_pending_next": "Saved changes become revision {{n}} on the next open.",
-        "view_effective": "View the currently live revision ({{n}})"
+        "view_effective": "View the currently live revision ({{n}})",
+        "fix_marked": "Please fix the highlighted fields."
       },
       "logs": {
         "heading": "Logs",
@@ -714,7 +715,8 @@
         "revision_never": "尚未开放——还没有生效的契约版本。",
         "revision_current": "当前生效：第 {{n}} 版 · 开放于 {{time}}",
         "revision_pending_next": "已保存的修改将在下次开放时成为第 {{n}} 版。",
-        "view_effective": "查看当前生效版本（第 {{n}} 版）"
+        "view_effective": "查看当前生效版本（第 {{n}} 版）",
+        "fix_marked": "请修正标出的字段。"
       },
       "logs": {
         "heading": "日志",
@@ -1197,7 +1199,8 @@
         "revision_never": "まだ公開されていません——有効な契約バージョンはありません。",
         "revision_current": "現在有効：第 {{n}} 版 · 公開 {{time}}",
         "revision_pending_next": "保存済みの変更は次回の公開で第 {{n}} 版になります。",
-        "view_effective": "現在有効なバージョンを表示（第 {{n}} 版）"
+        "view_effective": "現在有効なバージョンを表示（第 {{n}} 版）",
+        "fix_marked": "マークされたフィールドを修正してください。"
       },
       "logs": {
         "heading": "ログ",
@@ -1680,7 +1683,8 @@
         "revision_never": "아직 열리지 않았습니다 — 유효한 계약 버전이 없습니다.",
         "revision_current": "현재 유효: 제 {{n}}판 · 열림 {{time}}",
         "revision_pending_next": "저장된 수정은 다음 오픈 때 제 {{n}}판이 됩니다.",
-        "view_effective": "현재 유효 버전 보기(제 {{n}}판)"
+        "view_effective": "현재 유효 버전 보기(제 {{n}}판)",
+        "fix_marked": "표시된 필드를 수정해 주세요."
       },
       "logs": {
         "heading": "로그",
@@ -2163,7 +2167,8 @@
         "revision_never": "Todavía sin abrir: no hay ninguna revisión del contrato vigente.",
         "revision_current": "Vigente: revisión {{n}} · abierta {{time}}",
         "revision_pending_next": "Los cambios guardados serán la revisión {{n}} en la próxima apertura.",
-        "view_effective": "Ver la revisión vigente ({{n}})"
+        "view_effective": "Ver la revisión vigente ({{n}})",
+        "fix_marked": "Corrige los campos marcados."
       },
       "logs": {
         "heading": "Registros",

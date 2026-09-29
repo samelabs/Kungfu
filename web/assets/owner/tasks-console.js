@@ -146,6 +146,18 @@ function tcvApplyFieldErrors(errors) {
     return unmapped;
 }
 
+// tcvClientInvalid reports a read() failure: the structured fields go
+// through the same marking as server errors (red, message, scroll +
+// focus), the status area shows only the one-line summary.
+function tcvClientInvalid(r) {
+    if (r && Array.isArray(r.fields) && r.fields.length) {
+        tcvApplyFieldErrors(r.fields);
+        tcvOpText(r.error || tcvT('fix_marked'), false);
+        return;
+    }
+    tcvOpText((r && r.error) || tcvT('fix_marked'), false);
+}
+
 // tcvOpFailure reports a failed operation: field errors go to the
 // form, everything else to the status area.
 function tcvOpFailure(env) {
@@ -313,20 +325,23 @@ function tcvContractForm(mount, opts) {
     // JSON mode; strict=true reports them for the caller to display.
     function collect(strict) {
         const c = tcvClone(src) || {};
-        const bad = (msg) => ({ok: false, error: msg});
+        // WO-20c: client-side checks reuse the server field-error
+        // marking (red input, message under the field) — the status
+        // area only carries the one-line summary
+        const bad = (field, msg) => ({ok: false, fields: [{field, message: msg}], error: tcvT('fix_marked')});
         const title = qs('#tcvFTitle').value.trim();
         if (title) c.title = title;
-        else if (strict) return bad(tcvT('need_title'));
+        else if (strict) return bad('title', tcvT('need_title'));
         else if (src.title !== undefined) c.title = src.title;
         const requirements = qs('#tcvFRequirements').value.trim();
         if (requirements) c.requirements = requirements;
-        else if (strict) return bad(tcvT('need_requirements'));
+        else if (strict) return bad('requirements', tcvT('need_requirements'));
         else if (src.requirements !== undefined) c.requirements = src.requirements;
         if (harness.length) c.harness_refs = harness.slice();
         else delete c.harness_refs;
         const url = qs('#tcvSReceiver').value.trim();
         if (url) c.receiver = Object.assign({}, c.receiver, {url});
-        else if (strict) return bad(tcvT('need_receiver'));
+        else if (strict) return bad('receiver.url', tcvT('need_receiver'));
         else if (c.receiver) c.receiver.url = (src.receiver && src.receiver.url) || '';
         const schemaRaw = qs('#tcvFSchema').value.trim();
         if (schemaRaw) {
@@ -334,9 +349,9 @@ function tcvContractForm(mount, opts) {
                 const schema = JSON.parse(schemaRaw);
                 if (schema && typeof schema === 'object' && !Array.isArray(schema)) {
                     c.output = Object.assign({}, c.output, {schema});
-                } else if (strict) return bad(tcvT('need_schema'));
+                } else if (strict) return bad('output.schema', tcvT('need_schema'));
             } catch (e) {
-                if (strict) return bad(tcvT('need_schema'));
+                if (strict) return bad('output.schema', tcvT('need_schema'));
             }
         } else if (c.output) {
             delete c.output.schema;
@@ -367,7 +382,7 @@ function tcvContractForm(mount, opts) {
         if (!Object.keys(c.claim).length) delete c.claim;
         const price = Number(qs('#tcvFPrice').value || 0);
         if (Number.isInteger(price) && price >= 1) c.price = price;
-        else if (strict) return bad(tcvT('need_price'));
+        else if (strict) return bad('price', tcvT('need_price'));
         else if (src.price !== undefined) c.price = src.price;
         return {ok: true, contract: c};
     }
@@ -634,7 +649,7 @@ function tcvRenderSimpleForm() {
     qs('#tcvSPublish').addEventListener('click', () => {
         const r = form.read();
         tcvClearFieldErrors();
-        if (!r.ok) { tcvOpText(r.error, false); return; }
+        if (!r.ok) { tcvClientInvalid(r); return; }
         const price = r.contract.price;
         const units = Math.max(1, Math.trunc(Number(qs('#tcvSUnits').value || 1)) || 1);
         const budget = price * units;
@@ -836,7 +851,7 @@ function tcvRenderOverview(code, view) {
         </div>
         <div class="panel">
             ${tcvHeaderHTML(code, view)}
-            ${pending ? `<div class="keybox tcv-note">${escapeHtml(tcvT('draft_pending_note'))} <a href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a></div>` : ''}
+            ${pending ? `<div class="keybox tcv-note">${escapeHtml(tcvT('draft_pending_note'))}</div>` : ''}
             <div class="actions">
                 ${editable ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>` : ''}
                 ${status === 'open' ? `<span class="muted">${escapeHtml(tcvT('open_readonly_note'))}</span>` : ''}
@@ -909,7 +924,7 @@ function tcvRenderEditPage(code) {
         qs('#tcvSave').addEventListener('click', () => {
             const r = form.read();
             tcvClearFieldErrors();
-            if (!r.ok) { tcvOpText(r.error, false); return; }
+            if (!r.ok) { tcvClientInvalid(r); return; }
             tcvCall('task_update', {code, contract: r.contract}).then((saveEnv) => {
                 if (!saveEnv.ok) { tcvOpFailure(saveEnv); return; }
                 // back to the overview with the saved notice
