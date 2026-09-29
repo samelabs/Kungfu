@@ -619,11 +619,11 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
 		       tb_task.paused_reason, tb_task.closed_reason, tb_task.contract,
 		       tb_task.created_at, tb_task.updated_at,
-		       v.contract
+		       tb_task.contract AS work_contract
 		FROM tb_task
 		` +
 		where + `
-		ORDER BY v.created_at DESC NULLS LAST, tb_task.id DESC
+		ORDER BY tb_task.created_at DESC, tb_task.id DESC
 		LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
