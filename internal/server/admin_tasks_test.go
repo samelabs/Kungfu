@@ -42,7 +42,8 @@ func govTask(t *testing.T, e *adminEnv, publisher int64, code, status string, bu
 	t.Helper()
 	var id int64
 	if err := e.s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_task (code, publisher_id, status, budget_locked) VALUES ($1, $2, $3, $4) RETURNING id`,
+		`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
+		VALUES ($1, $2, $3, $4, '{"title":"Seeded","price":5}') RETURNING id`,
 		code, publisher, status, budget).Scan(&id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
@@ -51,23 +52,6 @@ func govTask(t *testing.T, e *adminEnv, publisher int64, code, status string, bu
 		_, _ = e.s.Pool.Exec(context.Background(), `DELETE FROM tb_task WHERE id = $1`, id)
 	})
 	return id
-}
-
-// govTaskVersion seeds the version snapshot behind an open task and
-// points the task's version column at it (OpenTask does both; the
-// board and detail queries join on tb_task.version).
-func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price int64) {
-	t.Helper()
-	contract := fmt.Sprintf(`{"title":%q,"price":%d}`, title, price)
-	if _, err := e.s.Pool.Exec(context.Background(),
-		`INSERT INTO tb_task_version (task_id, version, contract, harness) VALUES ($1, 1, $2, '[]'::jsonb)`,
-		taskID, contract); err != nil {
-		t.Fatalf("seed version: %v", err)
-	}
-	if _, err := e.s.Pool.Exec(context.Background(),
-		`UPDATE tb_task SET version = 1 WHERE id = $1`, taskID); err != nil {
-		t.Fatalf("set version: %v", err)
-	}
 }
 
 // govReport seeds one open report.
@@ -125,6 +109,17 @@ func govAuditCount(t *testing.T, e *adminEnv, action, targetID string) int64 {
 		t.Fatalf("audit count: %v", err)
 	}
 	return n
+}
+
+// govTaskVersion sets the task's contract fields (title, price) —
+// the old version-snapshot seeding collapsed into the one contract.
+func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price int64) {
+	t.Helper()
+	contract := fmt.Sprintf(`{"title":%q,"price":%d}`, title, price)
+	if _, err := e.s.Pool.Exec(context.Background(),
+		`UPDATE tb_task SET contract = $2::jsonb WHERE id = $1`, taskID, contract); err != nil {
+		t.Fatalf("set contract: %v", err)
+	}
 }
 
 func TestAdminTasksAPIPermissionGate(t *testing.T) {
@@ -297,7 +292,7 @@ func TestSamelabsTaskPagesRenderAndGate(t *testing.T) {
 		t.Fatalf("reports page = %d", reports.Code)
 	}
 	dashboard := e.page(t, "/samelabs")
-	if dashboard.Code != 200 || !strings.Contains(dashboard.Body.String(), "Draft / paused tasks") {
+	if dashboard.Code != 200 || !strings.Contains(dashboard.Body.String(), "Paused tasks") {
 		t.Fatalf("dashboard counts = %d", dashboard.Code)
 	}
 
@@ -349,12 +344,12 @@ func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
 	}
 	shown := fmt.Sprintf("gb%d", time.Now().UnixNano()%1_000_000_000)
 	noSlots := fmt.Sprintf("gz%d", time.Now().UnixNano()%1_000_000_000)
-	draft := fmt.Sprintf("gd%d", time.Now().UnixNano()%1_000_000_000)
+	pausedTask := fmt.Sprintf("gd%d", time.Now().UnixNano()%1_000_000_000)
 	closed := fmt.Sprintf("gx%d", time.Now().UnixNano()%1_000_000_000)
 	withBoard(shown, "Alpha board task", 5, 1000, "open")         // slots 200 → on the board
 	withBoard(noSlots, "Exhausted board task", 1000, 500, "open") // available 500 < price → no slot
 	withBoard(closed, "Closed board task", 5, 1000, "closed")     // not open
-	withBoard(draft, "Draft board task", 5, 1000, "draft")        // no version row, not open
+	withBoard(pausedTask, "Draft board task", 5, 1000, "paused")  // paused, not open
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
@@ -366,7 +361,7 @@ func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
 	if !strings.Contains(body, "Alpha board task") || !strings.Contains(body, shown) {
 		t.Fatal("open task missing from the board")
 	}
-	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", draft} {
+	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", pausedTask} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("%s must not be on the board", banned)
 		}

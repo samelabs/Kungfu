@@ -89,7 +89,6 @@ func TestHTTPStatusTable(t *testing.T) {
 		{"INVALID_REVISES", 422},
 		{"INVALID_REQUEST_KEY", 422},
 		{"VALIDATION_FAILED", 422},
-		{"TEST_DELIVERY_FAILED", 422},
 		{"INTERNAL_ERROR", 500},
 		{"SOMETHING_UNLISTED", 500}, // everything unlisted collapses to 500
 	}

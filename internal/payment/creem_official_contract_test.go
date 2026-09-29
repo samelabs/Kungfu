@@ -165,7 +165,7 @@ func TestOfficialCheckoutCompletedFixture(t *testing.T) {
 		"object":{"id":"ch_official_1","object_type":"checkout","status":"completed",
 		"request_id":"` + res.Payment.Code + `","mode":"test",
 		"metadata":{"payment_code":"` + res.Payment.Code + `","bot_id":"` + fmtInt(botID) + `","source":"kungfu_owner"},
-		"order":{"id":"ord_official_1","status":"paid","product":"prod_a","currency":"USD","amount":1000,"units":1}}}`
+		"order":{"id":"ord_official_1","status":"paid","product":"prod_a","currency":"USD","amount":1000,"sub_total":1000,"units":1}}}`
 	var ev CreemWebhookEvent
 	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
 		t.Fatal(err)

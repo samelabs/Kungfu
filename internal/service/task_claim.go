@@ -43,7 +43,6 @@ func taskNotOpen(t *repository.TaskRow) *errors.AppError {
 type claimView struct {
 	ClaimID   WireID    `json:"claim_id"`
 	TaskCode  string    `json:"task_code"`
-	Version   int32     `json:"version"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Deadline  time.Time `json:"deadline"`
 	Amount    int64     `json:"amount"`
@@ -52,9 +51,9 @@ type claimView struct {
 
 func newClaimView(c *repository.ClaimRow, code string) claimView {
 	return claimView{
-		ClaimID:   WireID(c.ClaimID),
-		TaskCode:  code,
-		Version:   c.Version,
+		ClaimID:  WireID(c.ClaimID),
+		TaskCode: code,
+
 		ExpiresAt: c.ExpiresAt,
 		Deadline:  c.Deadline,
 		Amount:    c.Amount,
@@ -65,18 +64,11 @@ func newClaimView(c *repository.ClaimRow, code string) claimView {
 // effectiveContract loads the contract of the task's current version
 // (open tasks always have one).
 func effectiveContract(ctx context.Context, q pg.Querier, t *repository.TaskRow) (task.Contract, error) {
-	v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version)
-	if err != nil {
+	var contract task.Contract
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
 		return task.Contract{}, err
 	}
-	if v == nil {
-		return task.Contract{}, pgx.ErrNoRows
-	}
-	var c task.Contract
-	if err := json.Unmarshal(v.Contract, &c); err != nil {
-		return task.Contract{}, fmt.Errorf("version contract: %w", err)
-	}
-	return c, nil
+	return contract, nil
 }
 
 // ClaimTask is the §5.2 work_claim operation: reserve one price under
@@ -95,11 +87,6 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	}
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	if t.Status == task.TaskDraft {
-		// draft is invisible to executors (§5.1) — TASK_NOT_FOUND,
-		// same as work_get
-		return claimView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if t.Status != task.TaskOpen {
 		return claimView{}, taskNotOpen(t)
@@ -167,9 +154,9 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	}
 
 	claimID, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
-		TaskID:    t.ID,
-		AgentID:   agentID,
-		Version:   t.Version,
+		TaskID:  t.ID,
+		AgentID: agentID,
+
 		ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
 		Deadline:  now.Add(time.Duration(maxDur) * time.Second),
 		Amount:    contract.Price,
@@ -235,9 +222,9 @@ func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now 
 
 	// TTL comes from the CLAIM's version (§5.2), not the task's current
 	// version — a paused+reopened task may have changed its claim rules.
-	contract, err := versionContract(ctx, tx, t.ID, claim.Version)
-	if err != nil {
-		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+	var contract task.Contract
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 	ttl := int64(task.DefaultClaimTTLSeconds)
 	if contract.Claim.TTL != nil {

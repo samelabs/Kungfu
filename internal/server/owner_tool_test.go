@@ -160,7 +160,7 @@ func TestOwnerToolLifecycleAndParity(t *testing.T) {
 		t.Fatalf("create: route %d vs direct %d", routeRec.Code, directStatus)
 	}
 	// codes differ (random); compare the shared shape
-	if routeEnv["ok"] != directEnv["ok"] || routeEnv["status"] != "draft" ||
+	if routeEnv["ok"] != directEnv["ok"] || routeEnv["status"] != "paused" ||
 		routeEnv["budget_locked"].(float64) != 2000 || routeEnv["next_action"] != nil {
 		t.Fatalf("create envelope: %v vs %v", routeEnv, directEnv)
 	}

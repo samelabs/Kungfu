@@ -118,7 +118,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if first.State != task.SubSettled || first.Amount != 5 || first.Version != 1 || first.Paid != 5 {
+	if first.State != task.SubSettled || first.Amount != 5 || first.Paid != 5 {
 		t.Fatalf("view = %+v", first)
 	}
 
@@ -192,23 +192,6 @@ func TestSubmitTaskNotOpen(t *testing.T) {
 	}
 	_, err := submitOnce(t, pool, agent, closed, nil)
 	submitState(t, pool, closed, err, "TASK_NOT_OPEN")
-}
-
-// TestSubmitDraftTaskNotFound: a draft task is invisible to executors
-// (§5.1) — work_submit answers TASK_NOT_FOUND, never TASK_NOT_OPEN
-// with a status detail that would leak the draft's existence.
-func TestSubmitDraftTaskNotFound(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-
-	draft := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
-	_, err := submitOnce(t, pool, agent, draft, nil)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "TASK_NOT_FOUND" {
-		t.Fatalf("draft: %v, want TASK_NOT_FOUND", err)
-	}
-	submitState(t, pool, draft, err, "TASK_NOT_FOUND")
 }
 
 func TestSubmitSlotsExhausted(t *testing.T) {
@@ -354,7 +337,7 @@ func TestSubmitWithClaim(t *testing.T) {
 		t.Fatalf("submit with claim: %v", err)
 	}
 	// the receiver answers 200: settled and paid
-	if view.Version != 1 || view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
+	if view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
 		t.Fatalf("view = %+v", view)
 	}
 	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID.Int64())
@@ -401,56 +384,6 @@ func TestSubmitWithClaimOnPausedAndClosedTasks(t *testing.T) {
 }
 
 // -- version pinning --
-
-func TestSubmitClaimVersionPinned(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	ctx := context.Background()
-	now := time.Now()
-
-	code := claimOpenedTask(t, pool, publisher, 1000, nil)
-	claim := claimOnTask(t, pool, agent, code, now)
-
-	// v2 tightens the schema (requires an extra field); the v1 claim
-	// keeps the submission on the v1 schema.
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	updated := claimContract()
-	updated.Output.Schema = []byte(`{
-		"type": "object",
-		"properties": {
-			"url": {"type": "string"},
-			"lang": {"type": "string"},
-			"bullets": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3}
-		},
-		"required": ["url", "lang", "bullets"]
-	}`)
-	updated.Claim = task.ClaimConfig{} // v2 does not require a claim
-	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-
-	// the v1 payload has no "lang": valid for v1, invalid for v2
-	view, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.ClaimID = &claim.ClaimID })
-	if err != nil {
-		t.Fatalf("submit pinned to v1: %v", err)
-	}
-	if view.Version != 1 {
-		t.Fatalf("submission version = %d, want 1 (claim's version)", view.Version)
-	}
-	claimTaskReserved(t, pool, code)
-
-	// without the claim the same payload now fails the v2 schema
-	_, err = submitOnce(t, pool, agent, code, nil)
-	if appErrOf(t, err).Code != "SCHEMA_MISMATCH" {
-		t.Fatalf("current-version submit: %v, want SCHEMA_MISMATCH", err)
-	}
-}
 
 // -- (g) revises --
 
@@ -514,7 +447,7 @@ func seedSubmissionReturningID(t *testing.T, pool *pg.Pool, code string, agent i
 	defer func() { _ = pg.Rollback(tx) }()
 	key := fmt.Sprintf("rev-%s-%d-%d", code, agent, time.Now().UnixNano())
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent, RequestKey: key,
+		TaskID: tr.ID, AgentID: agent, RequestKey: key,
 		Payload: []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)),
 		Amount: 5,
 	})

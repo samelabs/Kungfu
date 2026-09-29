@@ -624,8 +624,7 @@ function tcvRenderSimpleForm() {
         <dl class="sl-kv">
             <dt>${escapeHtml(tcvT('f_balance'))}</dt><dd id="tcvSBalance">…</dd>
         </dl>
-        <label class="tcv-criterion"><input type="checkbox" id="tcvSOpen" checked> ${escapeHtml(tcvT('open_now'))}</label>
-        <p class="tcv-hint muted">${escapeHtml(tcvT('open_note'))}</p>
+        <label class="tcv-criterion"><input type="checkbox" id="tcvSOpen" > ${escapeHtml(tcvT('open_now'))}</label>
         <div class="actions tcv-actionbar">
             <button class="btn primary" id="tcvSPublish" type="button">${escapeHtml(tcvT('publish'))}</button>
             ${tcvStatusAreaHTML()}
@@ -795,22 +794,6 @@ function tcvAskConfirm(message, fn) {
 // EFFECTIVE contract: the first 280 runes of requirements, the
 // receiver endpoint, the price, the harness size and the execution
 // rules — plus the full contract as an expandable read-only JSON.
-// tcvRevisionHTML is the summary's revision line (C3): which contract
-// revision is live and when it opened; a never-opened draft says so;
-// saved-but-not-live changes name the next revision.
-function tcvRevisionHTML(view) {
-    const version = Number(view.version ?? 0);
-    if (version < 1) {
-        return `<p class="tcv-revision muted">${escapeHtml(tcvT('revision_never'))}</p>`;
-    }
-    const line = tcvT('revision_current', {n: version, time: tcvFmtDate(view.version_opened_at)});
-    let html = `<p class="tcv-revision">${escapeHtml(line)}</p>`;
-    if (view.draft_pending === true) {
-        html += `<p class="tcv-revision tcv-revision-next">${escapeHtml(tcvT('revision_pending_next', {n: version + 1}))}</p>`;
-    }
-    return html;
-}
-
 function tcvContractSummaryHTML(view) {
     const c = view.contract || {};
     const excerpt = String(c.requirements || '');
@@ -827,8 +810,7 @@ function tcvContractSummaryHTML(view) {
         <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${Number((c.harness_refs || []).length)}</dd>
         <dt>${escapeHtml(tcvT('f_rules'))}</dt><dd>${escapeHtml(rules || '—')}</dd>
     </dl>
-    <details class="tcv-picker"><summary>${escapeHtml(view.draft_pending === true ? tcvT('view_effective', {n: Number(view.version ?? 0)}) : tcvT('view_contract'))}</summary>
-        <pre class="mono tcv-pre">${tcvEscapeHtml(tcvPretty(c))}</pre></details>`;
+`;
 }
 
 // tcvRenderOverview is /owner/tasks/{code}: ONLY task_get. Header,
@@ -839,8 +821,7 @@ function tcvRenderOverview(code, view) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
     const status = view.status || 'draft';
-    const editable = status === 'draft' || status === 'paused';
-    const pending = view.draft_pending === true;
+    const editable = status === 'paused';
     const submissions30d = Number((view.stats || {}).submissions_30d ?? 0);
 
     root.innerHTML = `
@@ -851,9 +832,9 @@ function tcvRenderOverview(code, view) {
         </div>
         <div class="panel">
             ${tcvHeaderHTML(code, view)}
-            ${pending ? `<div class="keybox tcv-note">${escapeHtml(tcvT('draft_pending_note'))}</div>` : ''}
+            
             <div class="actions">
-                ${editable ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>` : ''}
+                ${status === 'paused' ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>` : ''}
                 ${status === 'open' ? `<span class="muted">${escapeHtml(tcvT('open_readonly_note'))}</span>` : ''}
                 <a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}/deliveries">${escapeHtml(tcvT('deliveries'))} (${submissions30d})</a>
             </div>
@@ -876,14 +857,6 @@ function tcvRenderOverview(code, view) {
         tcvLifecycle(code, 'task_fund', {code, amount});
     });
 
-    // a save on the edit page bounces back here with ?saved=1
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('saved') === '1') {
-        tcvOpText(tcvT('saved_notice'), true);
-        params.delete('saved');
-        const query = params.toString();
-        history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
-    }
 }
 
 // tcvRenderEditPage is /owner/tasks/{code}/edit: ONLY task_get, then
@@ -896,8 +869,8 @@ function tcvRenderEditPage(code) {
     tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { root.innerHTML = back + tcvStatusLine(env); return; }
         const status = env.status || 'draft';
-        if (status !== 'draft' && status !== 'paused') {
-            const why = status === 'closed' ? tcvT('edit_blocked_closed') : tcvT('edit_blocked_open');
+        if (status !== 'paused') {
+            const why = status === 'closed' ? tcvT('status_closed') : tcvT('status_open');
             root.innerHTML = `
             <div class="panel">
                 <h2>${escapeHtml(tcvT('edit_contract'))}</h2>

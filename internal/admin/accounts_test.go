@@ -134,8 +134,8 @@ func TestAccountsAdminDetailAggregatesNeverMerged(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		reqKey := fmt.Sprintf("pr_sub%09d", i)
 		if _, err := db.Exec(ctx, `
-			INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
-			VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), 1, $1, $2, '\x00', 1, 'rejected')`,
+			INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
+			VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), $1, md5(random()::text), $2, 1, 'rejected')`,
 			id, reqKey); err != nil {
 			t.Fatalf("seed submission: %v", err)
 		}

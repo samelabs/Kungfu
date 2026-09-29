@@ -62,10 +62,6 @@ func taskV1SeededTask(t *testing.T, pool *pg.Pool, publisherID int64, lock int64
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	if err := InsertTaskVersion(ctx, pool, taskID, 1,
-		[]byte(`{"title":"wo1","price":5}`), []byte(`[]`)); err != nil {
-		t.Fatalf("insert task version: %v", err)
-	}
 	if lock > 0 {
 		tx, err := pool.TxBegin(ctx)
 		if err != nil {
@@ -99,7 +95,7 @@ func TestTaskV1LockReserveSettleInvariants(t *testing.T) {
 	agent := taskV1SeedBot(t, pool, 0)
 	tr := taskV1SeededTask(t, pool, publisher, 1000)
 
-	if err := ApplyTaskStatus(ctx, pool, tr.ID, task.TaskDraft, task.EventOpen, nil); err != nil {
+	if err := ApplyTaskStatus(ctx, pool, tr.ID, task.TaskPaused, task.EventOpen, nil); err != nil {
 		t.Fatalf("open task: %v", err)
 	}
 
@@ -111,7 +107,7 @@ func TestTaskV1LockReserveSettleInvariants(t *testing.T) {
 	defer func() { _ = pg.Rollback(tx) }()
 	payload := []byte(`{"result":"ok"}`)
 	subID, err := InsertSubmission(ctx, tx, NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent,
+		TaskID: tr.ID, AgentID: agent,
 		RequestKey: "a-key", Payload: payload,
 		PayloadHash: taskV1Hash(payload), Amount: 5,
 	})
@@ -188,7 +184,7 @@ func TestTaskV1ReserveReleaseInvariants(t *testing.T) {
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 	claimID, err := InsertClaim(ctx, tx, NewClaimRow{
-		TaskID: tr.ID, AgentID: agent, Version: 1,
+		TaskID: tr.ID, AgentID: agent,
 		ExpiresAt: now.Add(30 * time.Minute), Deadline: now.Add(2 * time.Hour), Amount: 5,
 	})
 	if err != nil {
@@ -246,7 +242,7 @@ func TestTaskV1SubmissionUniqueIdentity(t *testing.T) {
 	tr := taskV1SeededTask(t, pool, publisher, 1000)
 
 	in := NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent, RequestKey: "dup-key",
+		TaskID: tr.ID, AgentID: agent, RequestKey: "dup-key",
 		Payload: []byte(`{"n":1}`), Amount: 5,
 	}
 	in.PayloadHash = taskV1Hash(in.Payload)
@@ -294,7 +290,7 @@ func TestTaskV1SubmissionEventAppendOnly(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	subID, err := InsertSubmission(ctx, tx, NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent, RequestKey: "ev-key",
+		TaskID: tr.ID, AgentID: agent, RequestKey: "ev-key",
 		Payload: payload, PayloadHash: taskV1Hash(payload), Amount: 5,
 	})
 	if err != nil {
@@ -406,14 +402,9 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 		t.Helper()
 		var id int64
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO tb_task (code, publisher_id, status, version, budget_locked, draft_contract)
-			 VALUES ($1, 1, 'open', 1, 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
+			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
+			 VALUES ($1, 1, 'open', 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
 			t.Fatalf("seed task: %v", err)
-		}
-		if _, err := pool.Exec(ctx,
-			`INSERT INTO tb_task_version (task_id, version, contract, harness)
-			 VALUES ($1, 1, '{}', '[]')`, id); err != nil {
-			t.Fatalf("seed version: %v", err)
 		}
 		for i := 0; i < n; i++ {
 			var sid int64
@@ -422,8 +413,8 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 				state = "rejected"
 			}
 			if err := pool.QueryRow(ctx,
-				`INSERT INTO tb_task_submission (task_id, version, agent_id, request_key, payload_hash, amount, state)
-				 VALUES ($1, 1, 2, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
+				`INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
+				 VALUES ($1, 1, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
 				fmt.Sprintf("%s-%d", code, i)).Scan(&sid); err != nil {
 				t.Fatalf("seed submission: %v", err)
 			}

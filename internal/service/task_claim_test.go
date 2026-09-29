@@ -64,7 +64,7 @@ func TestClaimTaskSuccessAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if first.Amount != 5 || first.Status != task.ClaimActive || first.Version != 1 {
+	if first.Amount != 5 || first.Status != task.ClaimActive {
 		t.Fatalf("claim view = %+v", first)
 	}
 	if got := claimTaskReserved(t, pool, code); got != 5 {
@@ -116,22 +116,6 @@ func TestClaimTaskNotOpen(t *testing.T) {
 	}
 }
 
-// TestClaimDraftTaskNotFound: a draft task is invisible to executors
-// (§5.1) — work_claim answers TASK_NOT_FOUND like work_get, never
-// TASK_NOT_OPEN with a status detail that would leak the draft.
-func TestClaimDraftTaskNotFound(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-
-	draft := pubCreateForTest(t, pool, publisher, claimContract(), 1000)
-	_, err := ClaimTask(context.Background(), pool, agent, draft, time.Now())
-	if appErrOf(t, err).Code != "TASK_NOT_FOUND" {
-		t.Fatalf("draft claim: %v, want TASK_NOT_FOUND", err)
-	}
-	claimTaskReserved(t, pool, draft)
-}
-
 func TestClaimTaskOwnTask(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)
@@ -180,7 +164,7 @@ func seedSubmission(t *testing.T, pool *pg.Pool, code string, agent int64, state
 	defer func() { _ = pg.Rollback(tx) }()
 	key := fmt.Sprintf("lim-%s-%d-%d", code, agent, time.Now().UnixNano())
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent, RequestKey: key,
+		TaskID: tr.ID, AgentID: agent, RequestKey: key,
 		Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		PayloadHash: strings.Repeat("a", 64), Amount: tr2price(t, pool, code),
 	})
@@ -212,7 +196,7 @@ func seedSubmission(t *testing.T, pool *pg.Pool, code string, agent int64, state
 func tr2price(t *testing.T, pool *pg.Pool, code string) int64 {
 	t.Helper()
 	tr, _ := repository.FindTaskByCode(context.Background(), pool, code)
-	v, err := repository.FindTaskVersion(context.Background(), pool, tr.ID, tr.Version)
+	v, err := repository.FindTaskByID(context.Background(), pool, tr.ID)
 	if err != nil || v == nil {
 		t.Fatalf("version: %v", err)
 	}
@@ -458,7 +442,7 @@ func TestExpireClaims(t *testing.T) {
 			t.Fatalf("use claim: %v", err)
 		}
 		if _, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-			TaskID: mustTaskID(t, pool, tUsed), Version: 1, AgentID: user,
+			TaskID: mustTaskID(t, pool, tUsed), AgentID: user,
 			RequestKey:  fmt.Sprintf("used-%d", cUsed.ClaimID.Int64()),
 			Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 			PayloadHash: strings.Repeat("b", 64), Amount: cUsed.Amount, ClaimID: cUsed.ClaimID.Int64Ptr(),

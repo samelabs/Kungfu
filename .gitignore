@@ -27,3 +27,4 @@ logs/
 # Internal dev docs (not public)
 AGENT.md
 devlog/
+/receiver

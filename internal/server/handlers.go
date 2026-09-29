@@ -227,6 +227,7 @@ func (s *Server) handleOwnerLogs(w http.ResponseWriter, r *http.Request) {
 		pageSize = 20
 	}
 	pageSize = clampInt(pageSize, 1, 100)
+	page = clampPage(page, pageSize)
 	taskCode := r.URL.Query().Get("task_code")
 
 	result, err := service.GetOwnerLogs(r.Context(), s.Pool, bot.ID, logType, page, pageSize, taskCode)

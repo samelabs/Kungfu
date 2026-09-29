@@ -128,7 +128,6 @@ type TaskRow struct {
 	PublisherID   int64
 	PublisherName string
 	Status        string
-	Version       int32
 	BudgetLocked  int64
 	Settled       int64
 	Reserved      int64
@@ -157,7 +156,6 @@ type TaskStats struct {
 // payload bodies cross into the console).
 type SubmissionFact struct {
 	SubmissionID int64
-	Version      int32
 	AgentID      int64
 	Amount       int64
 	State        string
@@ -197,7 +195,7 @@ type ReportRow struct {
 func adminTaskView(t *repository.AdminTaskRow) *TaskRow {
 	return &TaskRow{
 		ID: t.ID, Code: t.Code, PublisherID: t.PublisherID, PublisherName: t.PublisherName,
-		Status: t.Status, Version: t.Version,
+		Status:       t.Status,
 		BudgetLocked: t.BudgetLocked, Settled: t.Settled, Reserved: t.Reserved, Refunded: t.Refunded,
 		Available: t.Available, Slots: t.Slots,
 		PausedReason: t.PausedReason, ClosedReason: t.ClosedReason,
@@ -224,7 +222,7 @@ func adminReportView(r *repository.AdminReportRow) *ReportRow {
 
 // TaskFilter carries the admin task list parameters.
 type TaskFilter struct {
-	Status string // "" (all) | draft | open | paused | closed
+	Status string // "" (all) | open | paused | closed
 	Page   int
 	Size   int
 }
@@ -286,8 +284,7 @@ func GetPlatformTask(ctx context.Context, pool *pg.Pool, principal *Principal, c
 	d.Submissions = make([]SubmissionFact, 0, len(subs))
 	for i := range subs {
 		d.Submissions = append(d.Submissions, SubmissionFact{
-			SubmissionID: subs[i].SubmissionID, Version: subs[i].Version,
-			AgentID: subs[i].AgentID, Amount: subs[i].Amount,
+			SubmissionID: subs[i].SubmissionID, AgentID: subs[i].AgentID, Amount: subs[i].Amount,
 			State: subs[i].State, Failure: subs[i].Failure, CreatedAt: subs[i].CreatedAt,
 		})
 	}

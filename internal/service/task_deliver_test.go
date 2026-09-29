@@ -374,8 +374,8 @@ func TestDeliverTLSFailureUnreachable(t *testing.T) {
 	code := deliverSyncTask(t, pool, publisher, rcvTrusted, 1000)
 	taskID := deliverTaskID(t, pool, code)
 	if _, err := pool.Exec(ctx,
-		`UPDATE tb_task_version SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
-		 WHERE task_id = $1 AND version = 1`, taskID, `"`+srv.URL+`"`); err != nil {
+		`UPDATE tb_task SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
+		 WHERE id = $1`, taskID, `"`+srv.URL+`"`); err != nil {
 		t.Fatal(err)
 	}
 	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
@@ -415,9 +415,9 @@ func TestDeliverConnectionRefused(t *testing.T) {
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	if _, err := pool.Exec(ctx, `
-		UPDATE tb_task_version
+		UPDATE tb_task
 		SET contract = replace(contract::text, $2, $3)::jsonb
-		WHERE task_id = $1 AND version = 1`,
+		WHERE id = $1`,
 		tr.ID, rcv.url, fmt.Sprintf("https://127.0.0.1:%d/hook", deadPort)); err != nil {
 		t.Fatalf("repoint receiver: %v", err)
 	}
@@ -547,10 +547,9 @@ func TestDeliverRequestShape(t *testing.T) {
 
 	h, body := rcv.last()
 	if h.Get("Idempotency-Key") != fmt.Sprint(subID) ||
-		h.Get("Kungfu-Task") != code ||
-		h.Get("Kungfu-Task-Version") != "1" {
-		t.Fatalf("headers = Idempotency-Key=%q Kungfu-Task=%q Kungfu-Task-Version=%q",
-			h.Get("Idempotency-Key"), h.Get("Kungfu-Task"), h.Get("Kungfu-Task-Version"))
+		h.Get("Kungfu-Task") != code {
+		t.Fatalf("headers = Idempotency-Key=%q Kungfu-Task=%q",
+			h.Get("Idempotency-Key"), h.Get("Kungfu-Task"))
 	}
 	if ct := h.Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("Content-Type = %q", ct)
@@ -558,14 +557,13 @@ func TestDeliverRequestShape(t *testing.T) {
 	var got struct {
 		SubmissionID string          `json:"submission_id"`
 		TaskCode     string          `json:"task_code"`
-		Version      int             `json:"version"`
 		AgentRef     string          `json:"agent_ref"`
 		Payload      json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("body: %v (%s)", err, body)
 	}
-	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code || got.Version != 1 {
+	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code {
 		t.Fatalf("body identity = %+v", got)
 	}
 	var wantPayload interface{}

@@ -227,45 +227,7 @@ func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, pag
 	return out, total, nil
 }
 
-// agentVersion resolves the version the agent sees: their active
-// claim's version if any, else the task's current version (§10.7).
-func agentVersion(ctx context.Context, pool *pg.Pool, agentID int64, t *repository.TaskRow) (int32, error) {
-	if claim, err := repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err == nil && claim != nil {
-		return claim.Version, nil
-	} else if err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
-		return 0, err
-	}
-	return t.Version, nil
-}
-
-// harnessEntry is one item of the version snapshot.
-type harnessEntry struct {
-	RefID   string `json:"ref_id"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
-}
-
-func loadVersion(ctx context.Context, pool *pg.Pool, taskID int64, version int32) (*repository.TaskVersionRow, task.Contract, []harnessEntry, error) {
-	v, err := repository.FindTaskVersion(ctx, pool, taskID, version)
-	if goerrors.Is(err, pgx.ErrNoRows) || v == nil {
-		return nil, task.Contract{}, nil, errors.New(0, "INTERNAL_ERROR", "Version snapshot missing")
-	}
-	if err != nil {
-		return nil, task.Contract{}, nil, err
-	}
-	var contract task.Contract
-	if err := json.Unmarshal(v.Contract, &contract); err != nil {
-		return nil, task.Contract{}, nil, err
-	}
-	var harness []harnessEntry
-	if err := json.Unmarshal(v.Harness, &harness); err != nil {
-		return nil, task.Contract{}, nil, err
-	}
-	return v, contract, harness, nil
-}
-
-// visibleTask loads a task with executor visibility: draft is
-// TASK_NOT_FOUND (§5.1 amendment).
+// visibleTask loads a task with executor visibility.
 func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
@@ -274,36 +236,30 @@ func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.T
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if t.Status == task.TaskDraft {
-		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
-	}
 	return t, nil
 }
 
-// GetWork is §5.1 work_get: the full contract (receiver removed —
-// §10.8) of the version the agent is bound to, its harness directory,
-// stats and personal tally.
+// GetWork is §5.1 work_get: the task's full contract (minus
+// receiver), the live harness directory, the 30-day stats and the
+// caller's tallies.
 func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (map[string]any, error) {
 	t, err := visibleTask(ctx, pool, code)
 	if err != nil {
 		return nil, err
 	}
-	version, err := agentVersion(ctx, pool, agentID, t)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	_, contract, harness, err := loadVersion(ctx, pool, t.ID, version)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	var contract task.Contract
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 
 	// §10.8: never expose the receiver — strip the key from the
 	// contract projection entirely
 	var contractProjection map[string]any
-	if err := json.Unmarshal(contractJSONOf(contract), &contractProjection); err != nil {
+	if err := json.Unmarshal(t.Contract, &contractProjection); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	delete(contractProjection, "receiver")
+
 	stats, err := repository.GetTaskStats(ctx, pool, t.ID, now.Add(-statsWindow))
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -313,26 +269,21 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
-	directory := make([]map[string]any, 0, len(harness))
-	for _, h := range harness {
-		directory = append(directory, map[string]any{
-			"ref_id": h.RefID,
-			"title":  h.Title,
-			"bytes":  len(h.Content),
-		})
+	// M3: the harness directory is queried LIVE from the publisher's
+	// current memories, in the contract's harness_refs order
+	directory, dirErr := liveHarnessDirectory(ctx, pool, t.PublisherID, contract.HarnessRefs)
+	if dirErr != nil {
+		return nil, dirErr
 	}
+
 	view := map[string]any{
 		"code":     t.Code,
 		"status":   t.Status,
-		"version":  version,
 		"contract": contractProjection,
 		"harness":  directory,
 		"stats":    statsView(stats),
 		"my":       my,
 	}
-	// T3: the platform-set reason is visible to executors wherever the
-	// status is — work_get, and the TASK_NOT_OPEN details of
-	// work_claim / work_claim_renew / work_submit (taskNotOpen).
 	if t.PausedReason != nil {
 		view["paused_reason"] = *t.PausedReason
 	}
@@ -340,6 +291,31 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 		view["closed_reason"] = *t.ClosedReason
 	}
 	return view, nil
+}
+
+// liveHarnessDirectory queries the publisher's memories NOW (M3) and
+// projects them in the contract's harness_refs order.
+func liveHarnessDirectory(ctx context.Context, pool *pg.Pool, publisherID int64, refs []string) ([]map[string]any, error) {
+	directory := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, publisherID, ref)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if k == nil {
+			continue // deleted memories are absent from the directory
+		}
+		entry := map[string]any{
+			"ref_id": k.Code,
+			"title":  k.Title,
+			"bytes":  len(k.Content),
+		}
+		if k.Description != nil {
+			entry["description"] = *k.Description
+		}
+		directory = append(directory, entry)
+	}
+	return directory, nil
 }
 
 // contractJSONOf marshals a contract for projection.
@@ -351,31 +327,44 @@ func contractJSONOf(c task.Contract) []byte {
 	return b
 }
 
-// GetHarness is §5.1 work_harness: one snapshot entry's content.
+// GetHarness is §5.1 work_harness: one memory's CURRENT content (M3).
+// The ref must be in the contract's harness_refs and the memory must
+// still exist; anything else is HARNESS_REF_NOT_FOUND.
 func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID string) (map[string]any, error) {
 	t, err := visibleTask(ctx, pool, code)
 	if err != nil {
 		return nil, err
 	}
-	version, err := agentVersion(ctx, pool, agentID, t)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	var contract task.Contract
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
-	_, _, harness, err := loadVersion(ctx, pool, t.ID, version)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	for _, h := range harness {
-		if h.RefID == refID {
-			return map[string]any{
-				"ref_id":  h.RefID,
-				"title":   h.Title,
-				"content": h.Content,
-			}, nil
+	// the ref must be part of this task's harness_refs
+	found := false
+	for _, ref := range contract.HarnessRefs {
+		if ref == refID {
+			found = true
+			break
 		}
 	}
-	return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
-		fmt.Sprintf("ref %q is not part of this task version", refID))
+	if !found {
+		return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
+			fmt.Sprintf("ref %q is not part of this task", refID))
+	}
+	// read the publisher's CURRENT memory content
+	k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, t.PublisherID, refID)
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if k == nil {
+		return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
+			fmt.Sprintf("ref %q is not part of this task", refID))
+	}
+	return map[string]any{
+		"ref_id":  k.Code,
+		"title":   k.Title,
+		"content": k.Content,
+	}, nil
 }
 
 // eventView is one SubmissionEvent in the executor's status output.

@@ -86,13 +86,18 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 //  5. verify the response facts, return checkout_url
 //
 // Failure handling:
-//   - definitive Creem rejection (400/401/403/404): FailPayment, provider error
-//   - ambiguous failure (network/429/5xx): payment stays pending, 502
-//     returned. If Creem actually created the checkout, the later
-//     webhook still finds the local payment by request_id and completes
-//     it. If it did not, the row remains pending — a known runtime gap
-//     (no recovery job). A new checkout call creates a NEW payment; the
-//     same code is never resubmitted.
+//   - definitive Creem rejection (400/401/403/404): the checkout was
+//     never created upstream and no webhook can follow — FailPayment,
+//     provider error;
+//   - ambiguous failure (network/429/5xx): the payment stays pending,
+//     502 returned. If Creem actually created the checkout, the later
+//     webhook still finds the local payment by request_id and
+//     completes it; marking it failed on our own uncertain read would
+//     poison that late webhook (money taken, credits never granted).
+//     If it was never created, the row remains pending — a known
+//     runtime gap (no recovery job); the owner UI says nothing was
+//     charged and a new purchase may be started. A new checkout call
+//     creates a NEW payment; the same code is never resubmitted.
 func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, botID int64, packageCode string) (*CheckoutResult, error) {
 	pkg, ok := rt.Packages[packageCode]
 	if !ok {
@@ -132,6 +137,8 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 	})
 	if err != nil {
 		if _, isDefinitive := err.(*ErrCreemDefinitive); isDefinitive {
+			// The checkout was never created upstream (400/401/403/404):
+			// no webhook can follow, so the row is terminally failed.
 			_, _ = FailPayment(ctx, pool, p.Code)
 			return nil, errors.New(502, "PAYMENT_PROVIDER_REJECTED", "Payment provider rejected the checkout")
 		}
@@ -197,12 +204,17 @@ type CreemCheckoutObject struct {
 }
 
 // CreemOrder is the paid order fact inside the checkout object.
+// Amount is the CHARGED total; SubTotal is the pre-tax subtotal Creem
+// documents on the Order entity ("The subtotal of the order in cents",
+// https://docs.creem.io/api-reference/endpoint/get-checkout) — the
+// only amount comparable to the snapshotted product price.
 type CreemOrder struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	Product  string `json:"product"`
 	Currency string `json:"currency"`
 	Amount   int64  `json:"amount"`
+	SubTotal *int64 `json:"sub_total"`
 	Units    int64  `json:"units"`
 }
 
@@ -251,8 +263,17 @@ func ReconcileCreemCompletion(ctx context.Context, pool *pg.Pool, rt *CreemRunti
 	if co.Order.Currency != p.Currency {
 		return fmt.Errorf("order.currency %q, want %q", co.Order.Currency, p.Currency)
 	}
-	if co.Order.Amount != p.AmountMinor {
-		return fmt.Errorf("order.amount %d, want %d", co.Order.Amount, p.AmountMinor)
+	// Amount is the charged total and may include tax or a discount;
+	// the reconciliation base is the PRE-TAX subtotal Creem documents
+	// on the Order entity (sub_total,
+	// https://docs.creem.io/api-reference/endpoint/get-checkout). An
+	// absent sub_total fails closed, exactly like any other missing
+	// mandatory fact.
+	if co.Order.SubTotal == nil {
+		return fmt.Errorf("order.sub_total absent")
+	}
+	if *co.Order.SubTotal != p.AmountMinor {
+		return fmt.Errorf("order.sub_total %d, want %d", *co.Order.SubTotal, p.AmountMinor)
 	}
 	if co.Mode != rt.Mode {
 		return fmt.Errorf("checkout.mode %q, want %q", co.Mode, rt.Mode)

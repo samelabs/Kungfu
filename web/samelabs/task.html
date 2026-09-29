@@ -7,7 +7,6 @@
       <dt>Code</dt><dd class="mono">{{$t.Code}}</dd>
       <dt>Publisher</dt><dd><a href="/samelabs/accounts/{{$t.PublisherID}}">{{$t.PublisherName}}</a> <span class="sl-muted">#{{$t.PublisherID}}</span></dd>
       <dt>Status</dt><dd>{{template "badge" $t.Status}}</dd>
-      <dt>Version</dt><dd>{{$t.Version}}</dd>
       <dt>Unit price</dt><dd>{{num $t.Price}} credits</dd>
       <dt>Budget</dt><dd>{{num $t.BudgetLocked}} locked · {{num $t.Settled}} settled · {{num $t.Reserved}} reserved · {{num $t.Refunded}} refunded</dd>
       <dt>Available</dt><dd>{{num $t.Available}} credits ({{$t.Slots}} slots)</dd>
@@ -44,7 +43,6 @@
     <td class="mono">{{.SubmissionID}}</td>
     <td>{{template "badge" .State}}</td>
     <td><a href="/samelabs/accounts/{{.AgentID}}">#{{.AgentID}}</a></td>
-    <td class="r">{{.Version}}</td>
     <td class="r">{{num .Amount}}</td>
     <td class="mono">{{with .Failure}}{{.}}{{end}}</td>
     <td>{{time .CreatedAt}}</td>

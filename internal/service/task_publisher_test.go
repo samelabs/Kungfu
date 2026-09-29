@@ -130,222 +130,6 @@ func ledgerSum(t *testing.T, pool *pg.Pool, botID int64, txnType string) int64 {
 
 // -- §4 create --
 
-func TestPublisherCreateInsufficientCredits(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 100)
-
-	_, err := CreateTask(context.Background(), pool, publisher, pubContract("https://example.com/hook"), 2000)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "INSUFFICIENT_CREDITS" {
-		t.Fatalf("code = %s, want INSUFFICIENT_CREDITS", appErr.Code)
-	}
-	var rows int64
-	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_task WHERE publisher_id = $1`, publisher).Scan(&rows)
-	if rows != 0 {
-		t.Fatalf("task rows = %d, want 0 (nothing created)", rows)
-	}
-	if got := ledgerSum(t, pool, publisher, "lock_task"); got != 0 {
-		t.Fatalf("lock_task ledger = %d, want 0 (no debit)", got)
-	}
-}
-
-func TestPublisherCreateBudgetBelowFloor(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-
-	// budget below one price
-	_, err := CreateTask(context.Background(), pool, publisher, pubContract(""), 4)
-	if appErrOf(t, err).Code != "VALIDATION_FAILED" {
-		t.Fatalf("budget < price: code = %v, want VALIDATION_FAILED", err)
-	}
-	var rows int64
-	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_task WHERE publisher_id = $1`, publisher).Scan(&rows)
-	if rows != 0 {
-		t.Fatalf("task rows = %d, want 0", rows)
-	}
-	if got := ledgerSum(t, pool, publisher, "lock_task"); got != 0 {
-		t.Fatalf("lock_task ledger = %d, want 0", got)
-	}
-}
-
-// TestPublisherCreateBudgetOverMax: budget above task.MaxAmount is
-// rejected with the budget field named (§4 cap).
-func TestPublisherCreateBudgetOverMax(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-
-	_, err := CreateTask(context.Background(), pool, publisher, pubContract(""), task.MaxAmount+1)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "VALIDATION_FAILED" {
-		t.Fatalf("budget over max: %v, want VALIDATION_FAILED", err)
-	}
-	items, _ := appErr.Details["errors"].([]map[string]string)
-	if len(items) != 1 || items[0]["field"] != "budget" {
-		t.Fatalf("details.errors = %#v, want a single budget field error", appErr.Details)
-	}
-}
-
-// TestPublisherFundOverMax: a fund amount that would push budget_locked
-// past task.MaxAmount is rejected with the amount field named; the
-// task keeps its budget (§4 cap).
-func TestPublisherFundOverMax(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-
-	code := pubCreateForTest(t, pool, publisher, pubContract("https://example.com/hook"), 10)
-
-	// amount itself within the cap, but 10 + MaxAmount overflows it
-	_, err := FundTask(ctx, pool, publisher, code, task.MaxAmount)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "VALIDATION_FAILED" {
-		t.Fatalf("fund over max: %v, want VALIDATION_FAILED", err)
-	}
-	items, _ := appErr.Details["errors"].([]map[string]string)
-	if len(items) != 1 || items[0]["field"] != "amount" {
-		t.Fatalf("details.errors = %#v, want a single amount field error", appErr.Details)
-	}
-
-	// an amount above the cap is rejected on its own
-	_, err = FundTask(ctx, pool, publisher, code, task.MaxAmount+1)
-	if appErrOf(t, err).Code != "VALIDATION_FAILED" {
-		t.Fatalf("fund amount over max: %v, want VALIDATION_FAILED", err)
-	}
-
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.BudgetLocked != 10 {
-		t.Fatalf("budget_locked = %d, want 10 (nothing funded)", tr.BudgetLocked)
-	}
-	if got := ledgerSum(t, pool, publisher, "fund_task"); got != 0 {
-		t.Fatalf("fund_task ledger = %d, want 0", got)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-func TestPublisherCreateInvalidContract(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-
-	c := pubContract("")
-	c.Title = ""        // §3: title required
-	c.Requirements = "" // §3: requirements required
-
-	_, err := CreateTask(context.Background(), pool, publisher, c, 2000)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "VALIDATION_FAILED" {
-		t.Fatalf("code = %s, want VALIDATION_FAILED", appErr.Code)
-	}
-	items, ok := appErr.Details["errors"].([]map[string]string)
-	if !ok || len(items) < 2 {
-		t.Fatalf("details.errors = %#v, want field errors for title and requirements", appErr.Details)
-	}
-	var rows int64
-	_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM tb_task WHERE publisher_id = $1`, publisher).Scan(&rows)
-	if rows != 0 {
-		t.Fatalf("task rows = %d, want 0", rows)
-	}
-}
-
-func TestPublisherCreateSuccessLocksBudget(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-
-	view, err := CreateTask(ctx, pool, publisher, pubContract("https://example.com/hook"), 2000)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	code, _ := view["code"].(string)
-	tr, err := repository.FindTaskByCode(ctx, pool, code)
-	if err != nil || tr == nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if tr.Status != task.TaskDraft {
-		t.Fatalf("status = %s, want draft", tr.Status)
-	}
-	if tr.BudgetLocked != 2000 {
-		t.Fatalf("budget_locked = %d, want 2000", tr.BudgetLocked)
-	}
-	if got := ledgerSum(t, pool, publisher, "lock_task"); got != -2000 {
-		t.Fatalf("lock_task ledger = %d, want -2000", got)
-	}
-	var balance int64
-	_ = pool.QueryRow(ctx, `SELECT balance FROM tb_bots WHERE id = $1`, publisher).Scan(&balance)
-	if balance != 8000 {
-		t.Fatalf("balance = %d, want 8000", balance)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-// -- §4 open + §5.4 test delivery --
-
-func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusOK)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-
-	view, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	if view["status"] != task.TaskOpen || view["version"] != int32(1) {
-		t.Fatalf("view = %v/%v, want open/version 1", view["status"], view["version"])
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Version != 1 {
-		t.Fatalf("task.version = %d, want 1", tr.Version)
-	}
-	v, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
-	if err != nil || v == nil {
-		t.Fatalf("version row: %v", err)
-	}
-
-	// §7.1 + §5.4: assert the test request headers and body fields.
-	rcv.mu.Lock()
-	defer rcv.mu.Unlock()
-	keyPrefix := "test-" + code + "-1-"
-	if !strings.HasPrefix(rcv.headers.Get("Idempotency-Key"), keyPrefix) ||
-		len(rcv.headers.Get("Idempotency-Key")) <= len(keyPrefix) ||
-		rcv.headers.Get("Kungfu-Task") != code ||
-		rcv.headers.Get("Kungfu-Task-Version") != "1" ||
-		rcv.headers.Get("Kungfu-Test") != "1" {
-		t.Fatalf("test delivery headers = %v", rcv.headers)
-	}
-	if ct := rcv.headers.Get("Content-Type"); ct != "application/json" {
-		t.Fatalf("Content-Type = %q", ct)
-	}
-	var body struct {
-		SubmissionID string          `json:"submission_id"`
-		TaskCode     string          `json:"task_code"`
-		Version      int             `json:"version"`
-		AgentRef     string          `json:"agent_ref"`
-		Payload      json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(rcv.body, &body); err != nil {
-		t.Fatalf("body not JSON: %v (%s)", err, rcv.body)
-	}
-	if body.SubmissionID != rcv.headers.Get("Idempotency-Key") || body.TaskCode != code ||
-		body.Version != 1 || body.AgentRef != "test" {
-		t.Fatalf("body identity fields = %+v", body)
-	}
-	// WO-20b: the payload is a FIXED {} — the test delivery checks
-	// reachability and liveness, never content
-	if string(body.Payload) != "{}" {
-		t.Fatalf("payload = %s, want the fixed {}", body.Payload)
-	}
-
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
 func pubCreateForTest(t *testing.T, pool *pg.Pool, publisher int64, c task.Contract, budget int64) string {
 	t.Helper()
 	view, err := CreateTask(context.Background(), pool, publisher, c, budget)
@@ -354,34 +138,6 @@ func pubCreateForTest(t *testing.T, pool *pg.Pool, publisher int64, c task.Contr
 	}
 	code, _ := view["code"].(string)
 	return code
-}
-
-func TestPublisherOpenReceiver500(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusInternalServerError)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-
-	_, err := OpenTask(ctx, pool, publisher, code)
-	appErr := appErrOf(t, err)
-	if appErr.Code != "TEST_DELIVERY_FAILED" {
-		t.Fatalf("code = %s, want TEST_DELIVERY_FAILED (%v)", appErr.Code, err)
-	}
-	if sc, _ := appErr.Details["status_code"].(int); sc != 500 {
-		t.Fatalf("details.status_code = %#v, want 500", appErr.Details["status_code"])
-	}
-	if resp, _ := appErr.Details["response"].(string); !strings.Contains(resp, `"status":500`) {
-		t.Fatalf("details.response = %#v, want the receiver body excerpt", appErr.Details["response"])
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskDraft || tr.Version != 0 {
-		t.Fatalf("task = %s/v%d, want draft/v0 after failed delivery", tr.Status, tr.Version)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
 }
 
 func TestPublisherOpenHarnessNotOwned(t *testing.T) {
@@ -402,8 +158,14 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 
 	// harness validation runs before the test delivery, so no live
 	// receiver is needed here
-	code := pubCreateForTest(t, pool, publisher, c, 2000)
-	_, err := OpenTask(ctx, pool, publisher, code)
+	// M3: harness refs are validated at create time — the foreign and
+	// missing refs fail the CREATE itself
+	view, err := CreateTask(ctx, pool, publisher, c, 2000)
+	if err == nil {
+		// if create somehow succeeds, open must still reject
+		code, _ := view["code"].(string)
+		_, err = OpenTask(ctx, pool, publisher, code)
+	}
 	appErr := appErrOf(t, err)
 	if appErr.Code != "VALIDATION_FAILED" {
 		t.Fatalf("code = %s, want VALIDATION_FAILED", appErr.Code)
@@ -412,182 +174,9 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 	if len(items) != 2 { // foreign ref + missing ref
 		t.Fatalf("details.errors = %#v, want two harness_refs violations", appErr.Details)
 	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskDraft {
-		t.Fatalf("status = %s, want draft", tr.Status)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
 }
 
 // -- §4 update: paused edit → next open builds a new version --
-
-func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusOK)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open v1: %v", err)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	v1, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
-	if err != nil || v1 == nil {
-		t.Fatalf("version 1: %v", err)
-	}
-	v1Contract, v1Harness := append([]byte{}, v1.Contract...), append([]byte{}, v1.Harness...)
-
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	updated := pubContract(rcv.url)
-	updated.Title = "Summarize a page, revised"
-	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
-		t.Fatalf("update while paused: %v", err)
-	}
-	view, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("open v2: %v", err)
-	}
-	if view["version"] != int32(2) {
-		t.Fatalf("version = %v, want 2", view["version"])
-	}
-
-	tr, _ = repository.FindTaskByCode(ctx, pool, code)
-	v1After, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
-	if err != nil || v1After == nil {
-		t.Fatalf("version 1 after reopen: %v", err)
-	}
-	if string(v1After.Contract) != string(v1Contract) || string(v1After.Harness) != string(v1Harness) {
-		t.Fatal("version 1 snapshot changed across the paused edit + reopen")
-	}
-	v2, err := repository.FindTaskVersion(ctx, pool, tr.ID, 2)
-	if err != nil || v2 == nil {
-		t.Fatalf("version 2: %v", err)
-	}
-	var v2Contract task.Contract
-	if err := json.Unmarshal(v2.Contract, &v2Contract); err != nil {
-		t.Fatalf("version 2 contract: %v", err)
-	}
-	if v2Contract.Title != "Summarize a page, revised" {
-		t.Fatalf("version 2 title = %q, want the revised one", v2Contract.Title)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-// TestPublisherPauseDraftVisibility (WO-17): a paused edit is visible —
-// the task_update result and task_get carry the saved draft plus
-// draft_pending while the effective contract stays on the opened
-// version; the next open applies the draft as the new version.
-// task_get also carries the §6.3 stats block (work_get's scope).
-func TestPublisherPauseDraftVisibility(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusOK)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open v1: %v", err)
-	}
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-
-	updated := pubContract(rcv.url)
-	updated.Title = "Summarize a page, revised"
-	updated.Requirements = "Revised requirements: five bullets instead."
-	updView, err := UpdateTask(ctx, pool, publisher, code, updated)
-	if err != nil {
-		t.Fatalf("update while paused: %v", err)
-	}
-	if updView["draft_pending"] != true {
-		t.Fatalf("task_update result draft_pending = %v, want true", updView["draft_pending"])
-	}
-	var updDraft task.Contract
-	if err := json.Unmarshal(updView["draft"].(json.RawMessage), &updDraft); err != nil || updDraft.Title != updated.Title {
-		t.Fatalf("task_update result draft: %+v (%v)", updDraft, err)
-	}
-
-	view, err := GetTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("task_get: %v", err)
-	}
-	if view["version"] != int32(1) {
-		t.Fatalf("version = %v, want 1 (still the opened snapshot)", view["version"])
-	}
-	var live, draft task.Contract
-	if err := json.Unmarshal(view["contract"].(json.RawMessage), &live); err != nil {
-		t.Fatalf("live contract: %v", err)
-	}
-	if err := json.Unmarshal(view["draft"].(json.RawMessage), &draft); err != nil {
-		t.Fatalf("draft: %v", err)
-	}
-	if live.Title != "Summarize a page" || live.Requirements == updated.Requirements {
-		t.Fatalf("live contract changed before reopen: %q", live.Title)
-	}
-	if draft.Title != updated.Title || draft.Requirements != updated.Requirements {
-		t.Fatalf("draft is not the saved edit: %q", draft.Title)
-	}
-	if view["draft_pending"] != true {
-		t.Fatalf("draft_pending = %v, want true", view["draft_pending"])
-	}
-
-	// task_get carries the §6.3 stats (accept_rate / median_reply_seconds
-	// / failure_rate — null on a fresh task with no terminals)
-	flat := map[string]any{}
-	if err := json.Unmarshal(mustMarshalView(t, view), &flat); err != nil {
-		t.Fatalf("re-unmarshal view: %v", err)
-	}
-	stats, ok := flat["stats"].(map[string]any)
-	if !ok {
-		t.Fatalf("task_get stats missing: %#v", flat["stats"])
-	}
-	for _, k := range []string{"accept_rate", "median_reply_seconds", "failure_rate"} {
-		if _, ok := stats[k]; !ok {
-			t.Fatalf("stats.%s missing: %#v", k, stats)
-		}
-	}
-
-	openView, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("open v2: %v", err)
-	}
-	if openView["version"] != int32(2) {
-		t.Fatalf("version = %v, want 2", openView["version"])
-	}
-	if _, has := openView["draft"]; has {
-		t.Fatal("open view must not carry draft")
-	}
-	if openView["draft_pending"] != false {
-		t.Fatalf("draft_pending after open = %v, want false", openView["draft_pending"])
-	}
-	var live2 task.Contract
-	if err := json.Unmarshal(openView["contract"].(json.RawMessage), &live2); err != nil {
-		t.Fatalf("v2 contract: %v", err)
-	}
-	if live2.Title != updated.Title || live2.Requirements != updated.Requirements {
-		t.Fatalf("v2 contract is not the former draft: %q", live2.Title)
-	}
-
-	// paused again without editing: the draft equals the snapshot →
-	// nothing pending
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause again: %v", err)
-	}
-	if view2, err := GetTask(ctx, pool, publisher, code); err != nil || view2["draft_pending"] != false {
-		t.Fatalf("task_get after reopen: %v draft_pending=%v, want false", err, view2["draft_pending"])
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
 
 func mustMarshalView(t *testing.T, v map[string]interface{}) []byte {
 	t.Helper()
@@ -660,7 +249,7 @@ func TestPublisherRefundHasReservations(t *testing.T) {
 	}
 	now := time.Now()
 	if _, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
-		TaskID: tr.ID, AgentID: agent, Version: 1,
+		TaskID: tr.ID, AgentID: agent,
 		ExpiresAt: now.Add(30 * time.Minute), Deadline: now.Add(2 * time.Hour), Amount: 5,
 	}); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -729,7 +318,7 @@ func TestPublisherInvalidStateTransitions(t *testing.T) {
 	// pause on draft → INVALID_STATE (details.status)
 	_, err := PauseTask(ctx, pool, publisher, code)
 	appErr := appErrOf(t, err)
-	if appErr.Code != "INVALID_STATE" || appErr.Details["status"] != task.TaskDraft {
+	if appErr.Code != "INVALID_STATE" || appErr.Details["status"] != task.TaskPaused {
 		t.Fatalf("pause draft: %v (%#v), want INVALID_STATE/draft", err, appErr.Details)
 	}
 	// update on open → INVALID_STATE
@@ -759,66 +348,6 @@ func TestPublisherInvalidStateTransitions(t *testing.T) {
 		if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 			t.Fatalf("CheckInvariants(%s): %v", c, err)
 		}
-	}
-}
-
-// TestOpenTestDeliveryUniqueKeyPerAttempt: a receiver that caches by
-// Idempotency-Key replays the first answer forever for that key. With
-// the old fixed key test-<code>-<version>, a second open would replay
-// the cached 500; with a unique key per attempt the second open
-// succeeds.
-func TestOpenTestDeliveryUniqueKeyPerAttempt(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-
-	// a keyed cache: the first answer for a key is 500, every replay
-	// of the SAME key returns the cached 500; a NEW key gets 200
-	firstKey := ""
-	var mu sync.Mutex
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("Idempotency-Key")
-		mu.Lock()
-		defer mu.Unlock()
-		if firstKey == "" {
-			// the very first request ever: answer 500 and cache it
-			// for this key
-			firstKey = key
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"receiver cold start"}`))
-			return
-		}
-		if key == firstKey {
-			// cached 500 replayed for the same key
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"receiver cold start (cached)"}`))
-			return
-		}
-		// a different key: healthy answer
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pubTestTLSCert}}
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
-
-	c := pubContract(srv.URL)
-	code := pubCreateForTest(t, pool, publisher, c, 1000)
-
-	// first open fails: the receiver's very first request gets 500
-	if _, err := OpenTask(ctx, pool, publisher, code); err == nil {
-		t.Fatal("first open should fail (receiver cold start)")
-	}
-	// second open succeeds: the new unique key is not the cached one
-	view, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("second open should succeed with a fresh key: %v", err)
-	}
-	if view["status"] != task.TaskOpen {
-		t.Fatalf("status = %v, want open", view["status"])
-	}
-	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
 

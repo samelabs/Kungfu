@@ -56,7 +56,7 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		Budget   int64           `json:"budget"`
 		Open     bool            `json:"open"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	contract, err := decodeContract(in.Contract)
@@ -69,7 +69,7 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	}
 	if in.Open {
 		// §8.1: open in the same call; a failed open leaves the task a
-		// draft with the budget locked (task_close + task_refund
+		// paused with the budget locked (task_close + task_refund
 		// recover it) and returns that error.
 		code, _ := view["code"].(string)
 		view, err = service.OpenTask(ctx, deps.Pool, agent.ID, code)
@@ -85,7 +85,7 @@ func handleTaskUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		Code     string          `json:"code"`
 		Contract json.RawMessage `json:"contract"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code and contract are required")
 	}
 	contract, err := decodeContract(in.Contract)
@@ -140,7 +140,7 @@ func handleTaskFund(ctx context.Context, deps *Deps, agent *model.Bot, args json
 		Code   string `json:"code"`
 		Amount int64  `json:"amount"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" || in.Amount == 0 {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.Amount == 0 {
 		return ToolResult{}, argError("code and amount are required")
 	}
 	view, err := service.FundTask(ctx, deps.Pool, agent.ID, in.Code, in.Amount)
@@ -185,7 +185,7 @@ func handleTaskList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`) // a tools/call with no arguments at all
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	filter := service.TaskListFilter{Status: in.Status, Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize}
@@ -204,7 +204,7 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 		Page     int    `json:"page"`
 		PageSize int    `json:"page_size"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	if in.Page < 1 {
@@ -232,7 +232,7 @@ func codeOnly(args json.RawMessage) (string, error) {
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return "", argError("code is required")
 	}
 	return in.Code, nil

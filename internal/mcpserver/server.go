@@ -27,13 +27,13 @@ import (
 	"kungfu.md/internal/version"
 )
 
-// ProtocolVersion is the NEWEST supported MCP protocol revision (the
+// ProtocolVersion is the NEWEST supported MCP protocol version (the
 // 2026-07-28 server/discover handshake).
 const ProtocolVersion = "2026-07-28"
 
-// SupportedProtocolVersions are the MCP revisions this endpoint
+// SupportedProtocolVersions are the MCP versions this endpoint
 // negotiates, newest first (WO-18): clients pinned to 2025-03-26,
-// 2025-06-18 or 2025-11-25 negotiate their own revision — the SDK's
+// 2025-06-18 or 2025-11-25 negotiate their own version — the SDK's
 // negotiatedVersion answers initialize with the client's version
 // whenever it is listed, and in stateless mode every POST carries its
 // own Mcp-Protocol-Version header, so no session state is needed.
@@ -291,7 +291,7 @@ func newServer(deps Deps) *mcp.Server {
 		Name:    "kungfu.md",
 		Version: version.Get(),
 	}, &mcp.ServerOptions{
-		// negotiate every revision in SupportedProtocolVersions — a
+		// negotiate every version in SupportedProtocolVersions — a
 		// 2025-03-26 client hears 2025-03-26 back on initialize
 		SupportedProtocolVersions: append([]string(nil), SupportedProtocolVersions...),
 		Logger:                    slog.Default(),

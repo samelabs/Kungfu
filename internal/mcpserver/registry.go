@@ -119,12 +119,12 @@ func normalizeToolError(err error) *ToolError {
 // field with its type, bounds, default and meaning, so a publisher
 // agent needs nothing else to write one.
 const contractInputSchema = `{"type":"object","description":"The task contract (spec section 3). Unknown fields are rejected.","properties":{
-				"title":{"type":"string","maxLength":128,"description":"Task name."},
-				"requirements":{"type":"string","maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
-				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Snapshotted when the task opens; executors read them with work_harness."},
+				"title":{"type":"string","minLength":1,"maxLength":128,"description":"Task name."},
+				"requirements":{"type":"string","minLength":1,"maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
+				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Executors read them live with work_harness."},
 				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB). Every payload is checked against it before delivery; mismatches never reach your receiver."}},"additionalProperties":false},
 				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing. Your response body reaches the executor verbatim (first 4 000 bytes)."}},"required":["url"],"additionalProperties":false},
-								"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
+								"price":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits paid per accepted submission."},
 				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this task."}},"additionalProperties":false},
 				"claim":{"type":"object","properties":{
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
@@ -136,7 +136,7 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
 // executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs (snapshotted when the task opens) are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor, in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
@@ -145,7 +145,7 @@ var tools = []ToolDef{
 		Description: `List open, claimable work.
 Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
 Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match, q is ignored when given — an empty list means the task is not currently claimable by you), page (default 1) and page_size (default 20, max 100).
-Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
+Result: one page of tasks, newest first (by creation) — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
 next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{
 			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
@@ -158,16 +158,16 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 	{
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
-	Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status, with paused_reason / closed_reason when the platform set one. Your active claim pins the version you see.
-	Result: {code, status, version, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
+	Preconditions: the task exists; every status is readable and reported as status, with paused_reason / closed_reason when the platform set one.
+	Result: {code, status, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
 	next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
 	},
 	{
 		Name: "work_harness",
-		Description: `Read one harness snapshot entry of a task version.
-Preconditions: same visibility as work_get; ref_id must be in the version snapshot (else HARNESS_REF_NOT_FOUND).
+		Description: `Read one harness memory's current content.
+Preconditions: same visibility as work_get; ref_id must be one of the contract's harness_refs and the memory must still exist (else HARNESS_REF_NOT_FOUND — a deleted memory drops out of the directory).
 Result: {ref_id, title, content}.
 next_action: execute per the contract, then work_claim -> work_submit.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"}},"required":["code","ref_id"],"additionalProperties":false}`,
@@ -177,7 +177,7 @@ next_action: execute per the contract, then work_claim -> work_submit.`,
 		Name: "work_claim",
 		Description: `Claim one unit of work: reserves the task price for you.
 Preconditions: task open with slots >= 1; not your own task; caps not exhausted; you hold no other active claim on it (an existing one is returned as-is).
-Result: {claim_id, task_code, version, expires_at, deadline, amount, status:"active"}.
+Result: {claim_id, task_code, expires_at, deadline, amount, status:"active"}.
 next_action: submit before expires_at, or work_claim_renew.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkClaim),
@@ -243,7 +243,7 @@ next_action: work_status on any row for its events.`,
 	{
 		Name: "work_report",
 		Description: `Report a task to the platform (boundary violations, malicious rejection).
-Preconditions: the task exists and is not draft; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
+Preconditions: the task exists; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
 Result: {report_id, status:"open"}.
 next_action: the platform triages; continue other work.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string"}},"required":["code","reason"],"additionalProperties":false}`,
@@ -252,23 +252,23 @@ next_action: the platform triages; continue other work.`,
 	{
 		Name: "task_create",
 		Description: contractVisibilityNote + `
-Create a draft task and lock its budget (lock_task ledger row).
-Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected — including the removed sample); budget >= price (at least one unit); your balance covers the budget.
-Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (an empty test delivery {} with Kungfu-Test: 1 to your receiver, which must answer 2xx without side effects); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
-Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
+Create a paused task and lock its budget (lock_task ledger row).
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); budget >= price (at least one unit); your balance covers the budget.
+Result: the task view - status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 			"contract":` + contractInputSchema + `,
 			"budget":{"type":"integer","minimum":1,"description":"Credits locked from your balance now; at least one price. slots = available / price."},
-			"open":{"type":"boolean","default":false,"description":"Open the task in the same call (runs the test delivery)."}
+			"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call."}
 		},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},
 	{
 		Name: "task_update",
 		Description: contractVisibilityNote + `
-Edit the draft contract of a draft or paused task.
-Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
-Result: the task view with the saved draft contract (applied as a NEW version on the next open) — while draft or paused it is also exposed as draft, and draft_pending is true when it differs from the live version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Edit the contract of a paused task.
+Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
+Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Every later submission (including under existing claims) is checked against the current schema and delivered to the current receiver.url; a claim keeps the amount it reserved.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -278,10 +278,10 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 	},
 	{
 		Name: "task_open",
-		Description: `Validate the draft contract, run the test delivery and open the task on a new contract revision.
-Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds: a fixed {} payload is POSTed to receiver.url (header Kungfu-Test: 1) and your receiver answers 2xx without side effects. It checks that the receiver is reachable and live, not the content.
-Result: status "open", version incremented.
-Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, TEST_DELIVERY_FAILED (details.status_code, details.response).`,
+		Description: `Open a paused task.
+Preconditions: status paused; contract valid; harness refs are your own active memories.
+Result: status "open".
+Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskOpen),
 	},
@@ -323,8 +323,7 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	},
 	{
 		Name: "task_get",
-		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
-	While the task is draft or paused, draft is the saved contract the next open applies as a new version; draft_pending is true when a version exists and that draft differs from the live one.
+		Description: `Read one of your tasks: status, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
 	Preconditions: the task is yours.
 	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -334,10 +333,10 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 		Name: "task_list",
 		Description: `List your tasks, newest first.
 Preconditions: valid Agent key.
-Parameters (all optional): status (draft / open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
+Parameters (all optional): status (open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
 Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.`,
 		InputSchema: `{"type":"object","properties":{
-			"status":{"type":"string","enum":["draft","open","paused","closed"],"description":"Filter by task status."},
+			"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by task status."},
 			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
 			"code":{"type":"string","description":"Exact task code."},
 			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},

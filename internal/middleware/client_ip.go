@@ -16,7 +16,10 @@ import (
 // leftmost entry is fully client-controlled and must not be trusted.
 // The list is walked from the right, skipping entries inside trusted
 // CIDRs; the first valid entry outside every trusted range is the
-// client. Entries are normalized via net.ParseIP(...).String() first
+// client. An INVALID entry stops the walk and falls back to the
+// direct peer — the chain is provably broken there, and skipping it
+// would keep moving the walk toward the client-controlled left end.
+// Entries are normalized via net.ParseIP(...).String() first
 // (IPv4-mapped "::ffff:1.2.3.4" collapses to "1.2.3.4") so equivalent
 // spellings cannot split rate-limit buckets. When no untrusted entry
 // is found, the direct peer's address is returned.
@@ -46,13 +49,15 @@ func GetClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 
 	// Connection is from a trusted proxy — walk every X-Forwarded-For
 	// entry (all header lines, wire order) from the right, skipping
-	// further trusted hops and invalid entries; the first valid
-	// untrusted address is the client.
+	// further trusted hops; the first valid untrusted address is the
+	// client. An entry that does not parse as an IP breaks the chain
+	// exactly there: fall back to the direct peer instead of trusting
+	// anything further left (client-controlled territory).
 	entries := xffEntries(r)
 	for i := len(entries) - 1; i >= 0; i-- {
 		ip := net.ParseIP(entries[i])
 		if ip == nil {
-			continue
+			return remoteIP
 		}
 		normalized := ip.String()
 		if isTrustedProxy(normalized, trustedCIDRs) {

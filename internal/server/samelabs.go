@@ -201,15 +201,34 @@ func slPage(q url.Values) int {
 	if err != nil || n < 1 {
 		return 1
 	}
-	return n
+	return clampPage(n, slPageSize)
 }
 
-func slInt64(s string) int64 {
-	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-	if err != nil || n < 0 {
-		return 0
+// slInt64 parses an optional non-negative integer filter value. An
+// ABSENT or empty value is "no filter" (0, true); a present value that
+// is not a valid non-negative integer is an error the caller must
+// answer with 400 — it must never silently degrade into "no filter"
+// (an unfiltered list), matching the API plane's fail-closed contract.
+func slInt64(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, true
 	}
-	return n
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// slInt64Query is slInt64 over one query parameter, reporting a 400
+// AppError naming the parameter when its value is present but invalid.
+func slInt64Query(q url.Values, name string) (int64, error) {
+	n, ok := slInt64(q.Get(name))
+	if !ok {
+		return 0, apperrors.New(400, "INVALID_PARAMETER", "invalid "+name)
+	}
+	return n, nil
 }
 
 func (s *Server) slSession(r *http.Request) (*admin.Principal, string) {

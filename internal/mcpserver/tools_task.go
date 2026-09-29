@@ -4,8 +4,10 @@ package mcpserver
 // the Task 1.0 service layer (WO-3..WO-6). No SQL, no business rules.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"kungfu.md/internal/model"
@@ -15,6 +17,29 @@ import (
 
 func argError(message string) error {
 	return &ToolError{Code: "VALIDATION_FAILED", Message: message}
+}
+
+// decodeArgs strictly decodes tool arguments into in: an unknown
+// argument is VALIDATION_FAILED naming the field, never silently
+// dropped — every InputSchema promises additionalProperties:false and
+// this is the decode that keeps that promise on both surfaces (/mcp
+// and /api/v1 run these same handlers).
+func decodeArgs(args json.RawMessage, in any) error {
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(in); err != nil {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "json: unknown field ") {
+			field := strings.Trim(strings.TrimPrefix(msg, "json: unknown field "), `"`)
+			return &ToolError{Code: "VALIDATION_FAILED",
+				Message: "Unknown argument " + field,
+				Details: map[string]any{"errors": []map[string]string{
+					{"field": field, "message": "unknown argument (see the tool input schema)"},
+				}}}
+		}
+		return argError("arguments must match the tool schema")
+	}
+	return nil
 }
 
 // data builds a ToolResult with just its payload fields.
@@ -65,7 +90,7 @@ func handleWorkList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`) // a tools/call with no arguments at all
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	filter := service.WorkListFilter{Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize}
@@ -83,7 +108,7 @@ func handleWorkGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	m, err := service.GetWork(ctx, deps.Pool, agent.ID, in.Code, time.Now())
@@ -98,7 +123,7 @@ func handleWorkHarness(ctx context.Context, deps *Deps, agent *model.Bot, args j
 		Code  string `json:"code"`
 		RefID string `json:"ref_id"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" || in.RefID == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.RefID == "" {
 		return ToolResult{}, argError("code and ref_id are required")
 	}
 	m, err := service.GetHarness(ctx, deps.Pool, agent.ID, in.Code, in.RefID)
@@ -114,7 +139,7 @@ func handleWorkClaim(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	var in struct {
 		Code string `json:"code"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	view, err := service.ClaimTask(ctx, deps.Pool, agent.ID, in.Code, time.Now())
@@ -133,7 +158,7 @@ func handleWorkClaimRenew(ctx context.Context, deps *Deps, agent *model.Bot, arg
 	var in struct {
 		ClaimID service.WireID `json:"claim_id"` // string or integer on the wire
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("claim_id must be an integer or a numeric string")
 	}
 	if in.ClaimID == 0 {
@@ -155,7 +180,7 @@ func handleWorkRelease(ctx context.Context, deps *Deps, agent *model.Bot, args j
 	var in struct {
 		ClaimID service.WireID `json:"claim_id"` // string or integer on the wire
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("claim_id must be an integer or a numeric string")
 	}
 	if in.ClaimID == 0 {
@@ -184,7 +209,7 @@ func handleWorkSubmit(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	}
 
 	var in service.SubmitInput
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	view, err := service.SubmitWork(ctx, deps.Pool, agent.ID, in, deps.AgentRefKey, time.Now())
@@ -204,7 +229,7 @@ func handleWorkStatus(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		Code         string          `json:"code"`
 		RequestKey   string          `json:"request_key"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("submission_id must be an integer or a numeric string")
 	}
 	if in.SubmissionID == nil && (in.Code == "" || in.RequestKey == "") {
@@ -222,7 +247,7 @@ func handleWorkHistory(ctx context.Context, deps *Deps, agent *model.Bot, args j
 		Code string `json:"code"`
 		Page int    `json:"page"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	if in.Page < 1 {
@@ -248,7 +273,7 @@ func handleWorkReport(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		Code   string `json:"code"`
 		Reason string `json:"reason"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil || in.Code == "" || in.Reason == "" {
+	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.Reason == "" {
 		return ToolResult{}, argError("code and reason are required")
 	}
 	m, err := service.ReportTask(ctx, deps.Pool, agent.ID, in.Code, in.Reason)

@@ -18,6 +18,7 @@ package consumption
 
 import (
 	"context"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 
@@ -90,6 +91,11 @@ func Apply(ctx context.Context, pool *pg.Pool, tx pgx.Tx, botID int64,
 		if ae, isApp := errors.IsAppError(err); isApp && ae.HTTPCode == 402 {
 			return errors.New(402, p.errCode, p.errMsg)
 		}
+		// The caller sees the generic 500; the server log keeps the
+		// underlying failure (constraint, connectivity, overflow) so
+		// the real cause is not lost.
+		log.Printf("consumption apply failed: action=%s bot_id=%d ref=%s/%s err=%v",
+			action, botID, refType, refID, err)
 		return errors.New(500, "INTERNAL_ERROR", "Could not apply consumption")
 	}
 	return nil

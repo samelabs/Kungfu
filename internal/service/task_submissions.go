@@ -22,7 +22,6 @@ import (
 type publisherSubmissionRow struct {
 	SubmissionID WireID     `json:"submission_id"`
 	AgentRef     string     `json:"agent_ref"`
-	Version      int32      `json:"version"`
 	State        string     `json:"state"`
 	Amount       int64      `json:"amount"`
 	Reply        *ReplyView `json:"reply"`
@@ -78,7 +77,6 @@ func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID
 		row := publisherSubmissionRow{
 			SubmissionID: WireID(s.SubmissionID),
 			AgentRef:     AgentRef(agentRefKey, t.Code, s.AgentID),
-			Version:      s.Version,
 			State:        s.State,
 			Amount:       s.Amount,
 			Failure:      s.Failure,

@@ -195,6 +195,7 @@ func (s *Server) handleOwnerRewardsRedemptionsList(w http.ResponseWriter, r *htt
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	page = clampPage(page, pageSize)
 	rows, total, err := rewards.ListRedemptionsForBot(r.Context(), s.Pool, bot.ID, page, pageSize)
 	if err != nil {
 		handleAppError(w, err)

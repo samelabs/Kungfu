@@ -9,14 +9,13 @@ package task
 
 // Task statuses — spec §4.
 const (
-	TaskDraft  = "draft"
 	TaskOpen   = "open"
 	TaskPaused = "paused"
 	TaskClosed = "closed"
 )
 
 // TaskStatuses is the complete §4 enum, for validation and tests.
-var TaskStatuses = []string{TaskDraft, TaskOpen, TaskPaused, TaskClosed}
+var TaskStatuses = []string{TaskOpen, TaskPaused, TaskClosed}
 
 // Claim statuses — spec §5.2.
 const (
