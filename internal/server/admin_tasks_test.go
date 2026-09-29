@@ -111,12 +111,15 @@ func govAuditCount(t *testing.T, e *adminEnv, action, targetID string) int64 {
 	return n
 }
 
-// govTaskVersion is a no-op: version snapshots no longer exist.
+// govTaskVersion sets the task's contract fields (title, price) —
+// the old version-snapshot seeding collapsed into the one contract.
 func govTaskVersion(t *testing.T, e *adminEnv, taskID int64, title string, price int64) {
 	t.Helper()
-	_ = taskID
-	_ = title
-	_ = price
+	contract := fmt.Sprintf(`{"title":%q,"price":%d}`, title, price)
+	if _, err := e.s.Pool.Exec(context.Background(),
+		`UPDATE tb_task SET contract = $2::jsonb WHERE id = $1`, taskID, contract); err != nil {
+		t.Fatalf("set contract: %v", err)
+	}
 }
 
 func TestAdminTasksAPIPermissionGate(t *testing.T) {
