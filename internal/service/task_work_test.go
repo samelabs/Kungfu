@@ -675,10 +675,10 @@ func TestHarnessVisibility(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	pubSeedKungfu(t, pool, publisher, "harvisi0001", "First material")
-	pubSeedKungfu(t, pool, publisher, "harvisi0002", "Second material")
+	pubSeedKungfu(t, pool, publisher, "harvisi00001", "First material")
+	pubSeedKungfu(t, pool, publisher, "harvisi00002", "Second material")
 	c := pubContract("")
-	c.HarnessRefs = []string{"harvisi0002", "harvisi0001"} // publisher's order
+	c.HarnessRefs = []string{"harvisi00002", "harvisi00001"} // publisher's order
 	code := pubCreateForTest(t, pool, publisher, c, 1000)
 	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("open: %v", err)
@@ -707,7 +707,7 @@ func TestHarnessVisibility(t *testing.T) {
 		t.Fatalf("task_get harness: %#v", view["harness"])
 	}
 	// publisher's order: harvisi0002 first
-	if dir[0]["ref_id"] != "harvisi0002" || dir[1]["ref_id"] != "harvisi0001" {
+	if dir[0]["ref_id"] != "harvisi00002" || dir[1]["ref_id"] != "harvisi00001" {
 		t.Fatalf("directory order: %v", dir)
 	}
 	for _, e := range dir {

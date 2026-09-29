@@ -358,7 +358,7 @@ func TestAdminMgmtSessionsLiveByDefaultPaged(t *testing.T) {
 		Success bool `json:"success"`
 		Data    struct {
 			Sessions []struct {
-				ID int64 `json:"id,string"`
+				ID int64 `json:"id"`
 			} `json:"sessions"`
 			Pagination struct {
 				Total        int64 `json:"total"`
@@ -385,7 +385,7 @@ func TestAdminMgmtSessionsLiveByDefaultPaged(t *testing.T) {
 		t.Fatalf("include_ended list: %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, fmt.Sprintf(`"id":"%d"`, revokedID)) || !strings.Contains(body, fmt.Sprintf(`"id":"%d"`, expiredID)) {
+	if !strings.Contains(body, fmt.Sprintf(`"id":%d`, revokedID)) || !strings.Contains(body, fmt.Sprintf(`"id":%d`, expiredID)) {
 		t.Fatal("include_ended=1 missing ended sessions")
 	}
 

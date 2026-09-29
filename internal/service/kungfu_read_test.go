@@ -21,9 +21,9 @@ func TestListKungfusForBotSearch(t *testing.T) {
 			t.Fatalf("seed %s: %v", code, err)
 		}
 	}
-	seed("w21alpha001", "Alpha workflow", `["searching"]`, "summarizes pages")
-	seed("w21beta0002", "Beta skill", `["other"]`, "contains keyword ALPHA in the description")
-	seed("w21gamma003", "Gamma script", `["matched-tag"]`, "unrelated")
+	seed("w21alpha0001", "Alpha workflow", `["searching"]`, "summarizes pages")
+	seed("w21beta00002", "Beta skill", `["other"]`, "contains keyword ALPHA in the description")
+	seed("w21gamma0003", "Gamma script", `["matched-tag"]`, "unrelated")
 
 	res, err := ListKungfusForBot(ctx, pool, bot, "alpha", "", 20, 0)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestListKungfusForBotSearch(t *testing.T) {
 	}
 
 	// LIKE wildcards match literally: % and _ are not operators
-	seed("w21wild004", "100% done", `[]`, "wildcard title")
+	seed("w21wild00004", "100% done", `[]`, "wildcard title")
 	res, err = ListKungfusForBot(ctx, pool, bot, "100%", "", 20, 0)
 	if err != nil {
 		t.Fatalf("q wildcard: %v", err)
@@ -54,12 +54,12 @@ func TestListKungfusForBotSearch(t *testing.T) {
 	}
 
 	// exact code: 12-hex style
-	res, err = ListKungfusForBot(ctx, pool, bot, "", "w21gamma003", 20, 0)
+	res, err = ListKungfusForBot(ctx, pool, bot, "", "w21gamma0003", 20, 0)
 	if err != nil {
 		t.Fatalf("code: %v", err)
 	}
 	items := res["kungfus"].([]map[string]interface{})
-	if len(items) != 1 || items[0]["code"] != "w21gamma003" {
+	if len(items) != 1 || items[0]["code"] != "w21gamma0003" {
 		t.Fatalf("code exact: %v", items)
 	}
 
