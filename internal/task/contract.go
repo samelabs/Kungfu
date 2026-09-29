@@ -3,8 +3,7 @@ package task
 // Contract — spec §3. The task contract is what a publisher hands to
 // Kungfu: what to do (title, requirements), the execution material
 // (harness_refs), what to hand in (optional output.schema), where the
-// result goes (receiver.url, probed by an empty test delivery before
-// opening), and the money (price). Field names are the verbatim JSON
+// result goes (receiver.url), and the money (price). Field names are the verbatim JSON
 // names of the spec table. output.schema stays raw JSON; optional
 // numeric fields are pointers so an explicit invalid value stays
 // distinguishable from "absent"; WithDefaults materializes the spec
@@ -100,7 +99,7 @@ type ClaimConfig struct {
 }
 
 // Receiver is the §3 receiver section (必填; 公网可达性 is proven by
-// the open-time test delivery, not by a format check).
+// the platform, not by a format check).
 type Receiver struct {
 	URL string `json:"url"`
 }

@@ -51,8 +51,8 @@ var ErrInsufficientReservation = errors.New("release exceeds task reservation")
 // tb_task
 // ---------------------------------------------------------------------------
 
-// TaskRow is a row of tb_task. DraftContract is the raw current
-// contract JSON (016) — authoritative while draft or paused.
+// TaskRow is a row of tb_task. Contract is the raw current
+// contract JSON — the one contract (WO-22).
 type TaskRow struct {
 	ID           int64
 	Code         string
@@ -69,14 +69,14 @@ type TaskRow struct {
 	UpdatedAt    time.Time
 }
 
-// NewTaskRow is the insert input for a draft task.
+// NewTaskRow is the insert input for a new (paused) task.
 type NewTaskRow struct {
 	Code        string
 	PublisherID int64
 	Contract    []byte
 }
 
-// InsertTask creates a draft task with zeroed counters. Budget
+// InsertTask creates a paused task with zeroed counters. Budget
 // locking is a separate primitive (LockTaskBudget).
 func InsertTask(ctx context.Context, q pg.Querier, in NewTaskRow) (int64, error) {
 	var id int64
@@ -90,8 +90,8 @@ func InsertTask(ctx context.Context, q pg.Querier, in NewTaskRow) (int64, error)
 	return id, nil
 }
 
-// UpdateDraftContract replaces the draft contract JSON (draft/paused
-// editing). The caller owns the status precondition.
+// UpdateTaskContract replaces the contract JSON (paused editing).
+// The caller owns the status precondition.
 func UpdateTaskContract(ctx context.Context, q pg.Querier, taskID int64, contract []byte) error {
 	tag, err := q.Exec(ctx, `
 		UPDATE tb_task SET contract = $2, updated_at = NOW()
@@ -116,7 +116,7 @@ func TaskCodeExists(ctx context.Context, q pg.Querier, code string) (bool, error
 // FindTasksByPublisherPage returns ONE page of one publisher's tasks,
 // newest first, with the total number of matching rows (WO-19 Q2).
 // status (exact), code (exact) and keyword (case-insensitive over the
-// effective title — the live version's, else the saved draft's) are
+// effective title) are
 // all optional; the WHERE building mirrors the page the caller sees,
 // so total and paging stay exact.
 func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int64, status, keyword, code string, limit, offset int) ([]TaskRow, int64, error) {
@@ -553,7 +553,7 @@ type WorkFilter struct {
 }
 
 // WorkCandidate is one listable task with its current-version
-// contract snapshot (the title/requirements/price source for the
+// contract (the title/requirements/price source for the
 // caller's projection).
 type WorkCandidate struct {
 	Task     TaskRow
@@ -571,7 +571,7 @@ func EscapeLike(s string) string {
 // agent (agentID 0 = anonymous: no own-task exclusion, no rejection
 // cap), newest open first, with the total number of matching rows
 // (WO-19 Q1). All §5.1 filtering runs in SQL: status open, a current
-// version snapshot, slots >= 1 (available >= price), not the agent's
+// contract, slots >= 1 (available >= price), not the agent's
 // own task, and the agent's rejection cap not exhausted. The keyword
 // matches title and requirements case-insensitively (wildcards
 // escaped by the caller); code is an exact match — a code that is

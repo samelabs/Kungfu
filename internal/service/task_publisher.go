@@ -161,7 +161,7 @@ func validateHarnessRefs(ctx context.Context, pool *pg.Pool, publisherID int64, 
 	return nil
 }
 
-// CreateTask is the §4 create transition: a validated draft plus the
+// CreateTask is the §4 create transition: a validated contract
 // budget lock (lock_task) in one transaction. budget must cover at
 // least one unit of the price (§4/§11, WO-11: no numeric minimum) and
 // the publisher's balance.
@@ -279,7 +279,7 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 }
 
 // OpenTask is the §4 open transition: paused → open, one transaction.
-// M4: no test delivery, no harness snapshot, no version write.
+// M4: no outbound requests; a single transaction.
 func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
@@ -554,7 +554,7 @@ func ListTasks(ctx context.Context, pool *pg.Pool, publisherID int64, filter Tas
 			return nil, 0, errors.NewWithDetails(400, "VALIDATION_FAILED",
 				"Unknown task status",
 				map[string]interface{}{"errors": []map[string]string{
-					{"field": "status", "message": "must be one of draft, open, paused, closed"}}})
+					{"field": "status", "message": "must be one of open, paused, closed"}}})
 		}
 	}
 	filter.Normalize()

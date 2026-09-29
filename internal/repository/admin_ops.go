@@ -80,15 +80,14 @@ func AdminDashboard(ctx context.Context, q pg.Querier) (*AdminDashboardCounts, e
 
 // AdminTaskFilter carries the admin task list parameters.
 type AdminTaskFilter struct {
-	Status string // "" (all) | draft | open | paused | closed
+	Status string // "" (all) | open | paused | closed
 	Page   int
 	Size   int
 }
 
 // AdminTaskRow is the admin projection of a task: the §2 identity and
 // economic columns plus the title and unit price of the effective
-// contract (the current version snapshot once one exists, else the
-// draft — the same rule as the publisher's task view).
+// contract (the one current contract).
 type AdminTaskRow struct {
 	ID            int64
 	Code          string
@@ -150,7 +149,7 @@ func AdminListTasks(ctx context.Context, q pg.Querier, f AdminTaskFilter) ([]Adm
 	page, size := normPage(f.Page, f.Size)
 	where := ""
 	args := []interface{}{}
-	if f.Status == "draft" || f.Status == "open" || f.Status == "paused" || f.Status == "closed" {
+	if f.Status == "open" || f.Status == "paused" || f.Status == "closed" {
 		where = " WHERE t.status = $1"
 		args = append(args, f.Status)
 	}
@@ -177,7 +176,7 @@ func AdminListTasks(ctx context.Context, q pg.Querier, f AdminTaskFilter) ([]Adm
 }
 
 // AdminGetTask loads one task by code with its effective contract
-// (the current version snapshot once one exists, else the draft).
+// (the one current contract).
 func AdminGetTask(ctx context.Context, q pg.Querier, code string) (*AdminTaskRow, error) {
 	var t AdminTaskRow
 	err := q.QueryRow(ctx, `SELECT `+adminTaskColumns+`,

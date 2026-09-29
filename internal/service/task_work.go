@@ -227,8 +227,7 @@ func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, pag
 	return out, total, nil
 }
 
-// visibleTask loads a task with executor visibility: draft is
-// TASK_NOT_FOUND (§5.1 amendment).
+// visibleTask loads a task with executor visibility.
 func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {

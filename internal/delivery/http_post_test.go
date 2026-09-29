@@ -71,7 +71,7 @@ func TestPostJSONBoundedReadDeterministic2xx(t *testing.T) {
 		Body:       body,
 	})
 
-	res := PostJSON(context.Background(), "http://stub.local/hook", []byte(`{}`), nil, TestTaskErrorConfig())
+	res := PostJSON(context.Background(), "http://stub.local/hook", []byte(`{}`), nil, AgentSubmitErrorConfig())
 
 	if !res.Success {
 		t.Fatalf("2xx must succeed: %v", res.ErrorCode)

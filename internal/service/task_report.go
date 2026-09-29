@@ -1,7 +1,7 @@
 package service
 
 // Executor reports (§8.1 work_report) and data retention (§9).
-// Retention clears closed tasks' snapshot material (harness)
+// Retention clears closed tasks' harness material
 // after 30 days; payloads are already cleared when a submission is
 // decided.
 
@@ -60,6 +60,6 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	return map[string]any{"report_id": WireID(id), "status": "open"}, nil
 }
 
-// retentionWindow is §9: snapshot material is kept 30 days after the
+// retentionWindow is §9: harness material is kept 30 days after the
 // task closes.
 const retentionWindow = 30 * 24 * time.Hour

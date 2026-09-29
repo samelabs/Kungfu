@@ -136,7 +136,7 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
 // executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs (snapshotted when the task opens) are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
@@ -243,7 +243,7 @@ next_action: work_status on any row for its events.`,
 	{
 		Name: "work_report",
 		Description: `Report a task to the platform (boundary violations, malicious rejection).
-Preconditions: the task exists and is not draft; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
+Preconditions: the task exists; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
 Result: {report_id, status:"open"}.
 next_action: the platform triages; continue other work.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string"}},"required":["code","reason"],"additionalProperties":false}`,
@@ -252,14 +252,14 @@ next_action: the platform triages; continue other work.`,
 	{
 		Name: "task_create",
 		Description: contractVisibilityNote + `
-Create a draft task and lock its budget (lock_task ledger row).
+Create a paused task and lock its budget (lock_task ledger row).
 Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected — including the removed sample); budget >= price (at least one unit); your balance covers the budget.
 Result: the task view - status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 			"contract":` + contractInputSchema + `,
 			"budget":{"type":"integer","minimum":1,"description":"Credits locked from your balance now; at least one price. slots = available / price."},
-			"open":{"type":"boolean","default":false,"description":"Open the task in the same call (runs the test delivery)."}
+			"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call."}
 		},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},
@@ -268,7 +268,7 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RAT
 		Description: contractVisibilityNote + `
 Edit the contract of a paused task.
 Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
-Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Edits apply to new claims and submissions; existing ones keep the contract they were accepted under.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -280,6 +280,7 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		Name: "task_open",
 		Description: `Open a paused task.
 Preconditions: status paused; contract valid; harness refs are your own active memories.
+Result: status "open".
 Result: status "open".
 Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -324,7 +325,6 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	{
 		Name: "task_get",
 		Description: `Read one of your tasks: status, version, the full contract (receiver included), counters, derived amounts (available, slots) and the 30-day stats (accept_rate, median_reply_seconds, failure_rate) plus submissions_30d (terminals in the window) and active_claims (claims valid right now).
-	While the task is draft or paused, draft is the saved contract the next open applies as a new version; draft_pending is true when a version exists and that draft differs from the live one.
 	Preconditions: the task is yours.
 	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -334,10 +334,10 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 		Name: "task_list",
 		Description: `List your tasks, newest first.
 Preconditions: valid Agent key.
-Parameters (all optional): status (draft / open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
+Parameters (all optional): status (open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
 Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.`,
 		InputSchema: `{"type":"object","properties":{
-			"status":{"type":"string","enum":["draft","open","paused","closed"],"description":"Filter by task status."},
+			"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by task status."},
 			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
 			"code":{"type":"string","description":"Exact task code."},
 			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},

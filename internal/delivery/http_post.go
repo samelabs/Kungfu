@@ -203,14 +203,3 @@ func AgentSubmitErrorConfig() ErrorConfig {
 		RejectedMessage:      "Task postapi returned a non-success status",
 	}
 }
-
-// TestTaskErrorConfig returns the error config for the open-time test delivery.
-func TestTaskErrorConfig() ErrorConfig {
-	return ErrorConfig{
-		NetworkCode:          "TESTTASK_NETWORK_ERROR",
-		NetworkMessage:       "Task test postapi request failed",
-		NetworkMessagePrefix: "Task test postapi request failed: ",
-		RejectedCode:         "TESTTASK_POST_REJECTED",
-		RejectedMessage:      "Task test postapi returned a non-success status",
-	}
-}

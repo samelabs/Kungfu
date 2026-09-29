@@ -222,7 +222,7 @@ func adminReportView(r *repository.AdminReportRow) *ReportRow {
 
 // TaskFilter carries the admin task list parameters.
 type TaskFilter struct {
-	Status string // "" (all) | draft | open | paused | closed
+	Status string // "" (all) | open | paused | closed
 	Page   int
 	Size   int
 }
