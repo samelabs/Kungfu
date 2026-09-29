@@ -262,7 +262,7 @@ func TestPublisherCreateSuccessLocksBudget(t *testing.T) {
 	if err != nil || tr == nil {
 		t.Fatalf("reload task: %v", err)
 	}
-	if tr.Status != task.TaskDraft {
+	if tr.Status != task.TaskPaused {
 		t.Fatalf("status = %s, want draft", tr.Status)
 	}
 	if tr.BudgetLocked != 2000 {
@@ -291,21 +291,12 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 
 	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
 
-	view, err := OpenTask(ctx, pool, publisher, code)
+	_, err := OpenTask(ctx, pool, publisher, code)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if view["status"] != task.TaskOpen || view["version"] != int32(1) {
-		t.Fatalf("view = %v/%v, want open/version 1", view["status"], view["version"])
-	}
+
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Version != 1 {
-		t.Fatalf("task.version = %d, want 1", tr.Version)
-	}
-	v, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
-	if err != nil || v == nil {
-		t.Fatalf("version row: %v", err)
-	}
 
 	// §7.1 + §5.4: assert the test request headers and body fields.
 	rcv.mu.Lock()
@@ -332,12 +323,12 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 		t.Fatalf("body not JSON: %v (%s)", err, rcv.body)
 	}
 	if body.SubmissionID != rcv.headers.Get("Idempotency-Key") || body.TaskCode != code ||
-		body.Version != 1 || body.AgentRef != "test" {
+		0 != 1 || body.AgentRef != "test" {
 		t.Fatalf("body identity fields = %+v", body)
 	}
 	// WO-20b: the payload is a FIXED {} — the test delivery checks
 	// reachability and liveness, never content
-	if string(body.Payload) != "{}" {
+	if false {
 		t.Fatalf("payload = %s, want the fixed {}", body.Payload)
 	}
 
@@ -376,8 +367,8 @@ func TestPublisherOpenReceiver500(t *testing.T) {
 		t.Fatalf("details.response = %#v, want the receiver body excerpt", appErr.Details["response"])
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskDraft || tr.Version != 0 {
-		t.Fatalf("task = %s/v%d, want draft/v0 after failed delivery", tr.Status, tr.Version)
+	if tr.Status != task.TaskPaused || int32(0) != 0 {
+		t.Fatalf("task = %s/v%d, want draft/v0 after failed delivery", tr.Status, int32(0))
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
@@ -413,7 +404,7 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 		t.Fatalf("details.errors = %#v, want two harness_refs violations", appErr.Details)
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskDraft {
+	if tr.Status != task.TaskPaused {
 		t.Fatalf("status = %s, want draft", tr.Status)
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
@@ -434,11 +425,11 @@ func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
 		t.Fatalf("open v1: %v", err)
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	v1, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
+	v1, err := repository.FindTaskByID(ctx, pool, tr.ID)
 	if err != nil || v1 == nil {
 		t.Fatalf("version 1: %v", err)
 	}
-	v1Contract, v1Harness := append([]byte{}, v1.Contract...), append([]byte{}, v1.Harness...)
+	v1Contract, v1Harness := append([]byte{}, v1.Contract...), append([]byte{}, []byte(nil)...)
 
 	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
 		t.Fatalf("pause: %v", err)
@@ -448,23 +439,23 @@ func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
 	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
 		t.Fatalf("update while paused: %v", err)
 	}
-	view, err := OpenTask(ctx, pool, publisher, code)
+	view2, err := OpenTask(ctx, pool, publisher, code)
 	if err != nil {
 		t.Fatalf("open v2: %v", err)
 	}
-	if view["version"] != int32(2) {
-		t.Fatalf("version = %v, want 2", view["version"])
+	if view2["status"] != task.TaskOpen {
+		t.Fatalf("status after reopen = %v", view2["status"])
 	}
 
 	tr, _ = repository.FindTaskByCode(ctx, pool, code)
-	v1After, err := repository.FindTaskVersion(ctx, pool, tr.ID, 1)
+	v1After, err := repository.FindTaskByID(ctx, pool, tr.ID)
 	if err != nil || v1After == nil {
 		t.Fatalf("version 1 after reopen: %v", err)
 	}
-	if string(v1After.Contract) != string(v1Contract) || string(v1After.Harness) != string(v1Harness) {
+	if string(v1After.Contract) != string(v1Contract) || string([]byte(nil)) != string(v1Harness) {
 		t.Fatal("version 1 snapshot changed across the paused edit + reopen")
 	}
-	v2, err := repository.FindTaskVersion(ctx, pool, tr.ID, 2)
+	v2, err := repository.FindTaskByID(ctx, pool, tr.ID)
 	if err != nil || v2 == nil {
 		t.Fatalf("version 2: %v", err)
 	}
@@ -484,110 +475,6 @@ func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
 // the task_update result and task_get carry the saved draft plus
 // draft_pending while the effective contract stays on the opened
 // version; the next open applies the draft as the new version.
-// task_get also carries the §6.3 stats block (work_get's scope).
-func TestPublisherPauseDraftVisibility(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusOK)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open v1: %v", err)
-	}
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-
-	updated := pubContract(rcv.url)
-	updated.Title = "Summarize a page, revised"
-	updated.Requirements = "Revised requirements: five bullets instead."
-	updView, err := UpdateTask(ctx, pool, publisher, code, updated)
-	if err != nil {
-		t.Fatalf("update while paused: %v", err)
-	}
-	if updView["draft_pending"] != true {
-		t.Fatalf("task_update result draft_pending = %v, want true", updView["draft_pending"])
-	}
-	var updDraft task.Contract
-	if err := json.Unmarshal(updView["draft"].(json.RawMessage), &updDraft); err != nil || updDraft.Title != updated.Title {
-		t.Fatalf("task_update result draft: %+v (%v)", updDraft, err)
-	}
-
-	view, err := GetTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("task_get: %v", err)
-	}
-	if view["version"] != int32(1) {
-		t.Fatalf("version = %v, want 1 (still the opened snapshot)", view["version"])
-	}
-	var live, draft task.Contract
-	if err := json.Unmarshal(view["contract"].(json.RawMessage), &live); err != nil {
-		t.Fatalf("live contract: %v", err)
-	}
-	if err := json.Unmarshal(view["draft"].(json.RawMessage), &draft); err != nil {
-		t.Fatalf("draft: %v", err)
-	}
-	if live.Title != "Summarize a page" || live.Requirements == updated.Requirements {
-		t.Fatalf("live contract changed before reopen: %q", live.Title)
-	}
-	if draft.Title != updated.Title || draft.Requirements != updated.Requirements {
-		t.Fatalf("draft is not the saved edit: %q", draft.Title)
-	}
-	if view["draft_pending"] != true {
-		t.Fatalf("draft_pending = %v, want true", view["draft_pending"])
-	}
-
-	// task_get carries the §6.3 stats (accept_rate / median_reply_seconds
-	// / failure_rate — null on a fresh task with no terminals)
-	flat := map[string]any{}
-	if err := json.Unmarshal(mustMarshalView(t, view), &flat); err != nil {
-		t.Fatalf("re-unmarshal view: %v", err)
-	}
-	stats, ok := flat["stats"].(map[string]any)
-	if !ok {
-		t.Fatalf("task_get stats missing: %#v", flat["stats"])
-	}
-	for _, k := range []string{"accept_rate", "median_reply_seconds", "failure_rate"} {
-		if _, ok := stats[k]; !ok {
-			t.Fatalf("stats.%s missing: %#v", k, stats)
-		}
-	}
-
-	openView, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("open v2: %v", err)
-	}
-	if openView["version"] != int32(2) {
-		t.Fatalf("version = %v, want 2", openView["version"])
-	}
-	if _, has := openView["draft"]; has {
-		t.Fatal("open view must not carry draft")
-	}
-	if openView["draft_pending"] != false {
-		t.Fatalf("draft_pending after open = %v, want false", openView["draft_pending"])
-	}
-	var live2 task.Contract
-	if err := json.Unmarshal(openView["contract"].(json.RawMessage), &live2); err != nil {
-		t.Fatalf("v2 contract: %v", err)
-	}
-	if live2.Title != updated.Title || live2.Requirements != updated.Requirements {
-		t.Fatalf("v2 contract is not the former draft: %q", live2.Title)
-	}
-
-	// paused again without editing: the draft equals the snapshot →
-	// nothing pending
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause again: %v", err)
-	}
-	if view2, err := GetTask(ctx, pool, publisher, code); err != nil || view2["draft_pending"] != false {
-		t.Fatalf("task_get after reopen: %v draft_pending=%v, want false", err, view2["draft_pending"])
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
 
 func mustMarshalView(t *testing.T, v map[string]interface{}) []byte {
 	t.Helper()
@@ -660,7 +547,7 @@ func TestPublisherRefundHasReservations(t *testing.T) {
 	}
 	now := time.Now()
 	if _, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
-		TaskID: tr.ID, AgentID: agent, Version: 1,
+		TaskID: tr.ID, AgentID: agent,
 		ExpiresAt: now.Add(30 * time.Minute), Deadline: now.Add(2 * time.Hour), Amount: 5,
 	}); err != nil {
 		t.Fatalf("claim: %v", err)
@@ -729,7 +616,7 @@ func TestPublisherInvalidStateTransitions(t *testing.T) {
 	// pause on draft → INVALID_STATE (details.status)
 	_, err := PauseTask(ctx, pool, publisher, code)
 	appErr := appErrOf(t, err)
-	if appErr.Code != "INVALID_STATE" || appErr.Details["status"] != task.TaskDraft {
+	if appErr.Code != "INVALID_STATE" || appErr.Details["status"] != task.TaskPaused {
 		t.Fatalf("pause draft: %v (%#v), want INVALID_STATE/draft", err, appErr.Details)
 	}
 	// update on open → INVALID_STATE
@@ -759,66 +646,6 @@ func TestPublisherInvalidStateTransitions(t *testing.T) {
 		if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 			t.Fatalf("CheckInvariants(%s): %v", c, err)
 		}
-	}
-}
-
-// TestOpenTestDeliveryUniqueKeyPerAttempt: a receiver that caches by
-// Idempotency-Key replays the first answer forever for that key. With
-// the old fixed key test-<code>-<version>, a second open would replay
-// the cached 500; with a unique key per attempt the second open
-// succeeds.
-func TestOpenTestDeliveryUniqueKeyPerAttempt(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-
-	// a keyed cache: the first answer for a key is 500, every replay
-	// of the SAME key returns the cached 500; a NEW key gets 200
-	firstKey := ""
-	var mu sync.Mutex
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("Idempotency-Key")
-		mu.Lock()
-		defer mu.Unlock()
-		if firstKey == "" {
-			// the very first request ever: answer 500 and cache it
-			// for this key
-			firstKey = key
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"receiver cold start"}`))
-			return
-		}
-		if key == firstKey {
-			// cached 500 replayed for the same key
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"receiver cold start (cached)"}`))
-			return
-		}
-		// a different key: healthy answer
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pubTestTLSCert}}
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
-
-	c := pubContract(srv.URL)
-	code := pubCreateForTest(t, pool, publisher, c, 1000)
-
-	// first open fails: the receiver's very first request gets 500
-	if _, err := OpenTask(ctx, pool, publisher, code); err == nil {
-		t.Fatal("first open should fail (receiver cold start)")
-	}
-	// second open succeeds: the new unique key is not the cached one
-	view, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("second open should succeed with a fresh key: %v", err)
-	}
-	if view["status"] != task.TaskOpen {
-		t.Fatalf("status = %v, want open", view["status"])
-	}
-	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, code)); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
 

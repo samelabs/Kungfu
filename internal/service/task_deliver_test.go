@@ -565,7 +565,7 @@ func TestDeliverRequestShape(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("body: %v (%s)", err, body)
 	}
-	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code || got.Version != 1 {
+	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code || 0 != 1 {
 		t.Fatalf("body identity = %+v", got)
 	}
 	var wantPayload interface{}

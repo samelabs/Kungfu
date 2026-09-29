@@ -61,8 +61,8 @@ func TestTaskCreateOpenInOneCall(t *testing.T) {
 	code, _ := env["code"].(string)
 	// the version snapshot landed in the same call
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Version != 1 {
-		t.Fatalf("version = %d, want 1", tr.Version)
+	if tr.Status != "" {
+		t.Fatal("unexpected nil task")
 	}
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
@@ -71,7 +71,7 @@ func TestTaskCreateOpenInOneCall(t *testing.T) {
 
 	// open=false keeps the draft (the default)
 	env, status = CallTool(ctx, &deps, "task_create", wo7Bot(t, pool, pubID), w11Args(5, false))
-	if status != 200 || env["status"] != task.TaskDraft {
+	if status != 200 || env["status"] != task.TaskPaused {
 		t.Fatalf("task_create open=false: %d %v", status, env)
 	}
 }

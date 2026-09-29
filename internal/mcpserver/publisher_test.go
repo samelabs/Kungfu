@@ -84,7 +84,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	// task_create on twins
 	e1m, i1 := mcpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
 	e1h, s1 := httpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
-	if i1 || s1 != 200 || e1m["status"] != task.TaskDraft || e1m["next_action"] != nil {
+	if i1 || s1 != 200 || e1m["status"] != task.TaskPaused || e1m["next_action"] != nil {
 		t.Fatalf("task_create: %+v isError=%v http=%d", e1m, i1, s1)
 	}
 	assertCodes("task_create", e1m, e1h, e1m["code"].(string), e1h["code"].(string))
@@ -93,7 +93,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	// task_get (draft twins)
 	e2m, i2 := mcpP("task_get", map[string]any{"code": codeA})
 	e2h, s2 := httpP("task_get", map[string]any{"code": codeB})
-	if i2 || s2 != 200 || e2m["status"] != task.TaskDraft {
+	if i2 || s2 != 200 || e2m["status"] != task.TaskPaused {
 		t.Fatalf("task_get: %v %d", i2, s2)
 	}
 	assertCodes("task_get", e2m, e2h, codeA, codeB)
@@ -104,7 +104,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	updated["title"] = "Pub task v2"
 	e3m, i3 := mcpP("task_update", map[string]any{"code": codeA, "contract": updated})
 	e3h, s3 := httpP("task_update", map[string]any{"code": codeB, "contract": updated})
-	if i3 || s3 != 200 || e3m["status"] != task.TaskDraft {
+	if i3 || s3 != 200 || e3m["status"] != task.TaskPaused {
 		t.Fatalf("task_update: %v %d %+v", i3, s3, e3m)
 	}
 	assertCodes("task_update", e3m, e3h, codeA, codeB)
@@ -474,7 +474,7 @@ func seedRejectedSub(t *testing.T, pool *pg.Pool, code string, agent int64) {
 		t.Fatal(err)
 	}
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent,
+		TaskID: tr.ID, AgentID: agent,
 		RequestKey:  fmt.Sprintf("rej-%d", time.Now().UnixNano()),
 		Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		PayloadHash: task.PayloadHash([]byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`)),
@@ -549,7 +549,7 @@ func TestPublisherLifecycle(t *testing.T) {
 	contract := wo7Contract()
 	contract.Receiver = task.Receiver{URL: rcv.URL}
 	env, status := call(pubBot, "task_create", map[string]any{"contract": asContractMap(t, contract), "budget": 2000})
-	if status != 200 || env["status"] != task.TaskDraft {
+	if status != 200 || env["status"] != task.TaskPaused {
 		t.Fatalf("create: %d %v", status, env)
 	}
 	code := env["code"].(string)

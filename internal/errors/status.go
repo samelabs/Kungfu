@@ -34,7 +34,6 @@ var statusByCode = map[string]int{
 	"INVALID_REVISES":       http.StatusUnprocessableEntity,
 	"INVALID_REQUEST_KEY":   http.StatusUnprocessableEntity,
 	"VALIDATION_FAILED":     http.StatusUnprocessableEntity,
-	"TEST_DELIVERY_FAILED":  http.StatusUnprocessableEntity,
 
 	// account and storage tools (§8.4「账户与存储工具错误」)
 	"NAME_TAKEN":           http.StatusConflict,

@@ -15,7 +15,7 @@ function tcvEscapeHtml(s) {
 // re-triggers tcvLoadList on changes. ----
 
 function tcvFilterRow(active) {
-    const items = [['all', 'filter_all'], ['draft', 'status_draft'], ['open', 'status_open'],
+    const items = [['all', 'filter_all'], ['open', 'status_open'],
         ['paused', 'status_paused'], ['closed', 'status_closed']];
     return `<div class="actions tcv-filter" id="tcvFilter">` + items.map(([value, key]) =>
         `<button class="btn${value === active ? ' primary' : ''}" type="button" data-tcv-filter="${value}">${escapeHtml(tcvT(key))}</button>`
@@ -143,7 +143,7 @@ function tcvSubmissionRow(r, showVersion) {
         <div class="task-facts">
             <span class="badge">${escapeHtml(tcvStateText(state))}</span>
             <span class="mono">${tcvEscapeHtml(r.agent_ref || '')}</span>
-            ${showVersion ? `<span>${escapeHtml(tcvT('revision_col'))} ${Number(r.version ?? 0)}</span>` : ''}
+            
             ${tcvFact(tcvT('r_price'), String(Number(r.amount ?? 0)))}
             <span class="mono">${replyStatus}</span>
             <span class="muted">${tcvEscapeHtml(tcvFmtDate(r.created_at))}</span>

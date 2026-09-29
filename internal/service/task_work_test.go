@@ -282,7 +282,7 @@ func TestListWorkStatsPrecision(t *testing.T) {
 	// one failed submission
 	tx, _ := pool.TxBegin(ctx)
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: mustTaskID(t, pool, codeA), Version: 1, AgentID: agent,
+		TaskID: mustTaskID(t, pool, codeA), AgentID: agent,
 		RequestKey: fmt.Sprintf("f-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)), Amount: 5,
 	})

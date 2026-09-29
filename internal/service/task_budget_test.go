@@ -60,7 +60,7 @@ func TestOpenFailureLeavesRecoverableDraft(t *testing.T) {
 	}
 	// draft with the budget locked; close + refund recovers it
 	draft, _ := repository.FindTaskByCode(ctx, pool, code)
-	if draft.Status != task.TaskDraft || draft.BudgetLocked != 5 {
+	if draft.Status != task.TaskPaused || draft.BudgetLocked != 5 {
 		t.Fatalf("after failed open: %s locked=%d", draft.Status, draft.BudgetLocked)
 	}
 	if _, err := CloseTask(ctx, pool, publisher, code); err != nil {

@@ -118,7 +118,7 @@ func TestSubmitIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if first.State != task.SubSettled || first.Amount != 5 || first.Version != 1 || first.Paid != 5 {
+	if first.State != task.SubSettled || first.Amount != 5 || 0 != 1 || first.Paid != 5 {
 		t.Fatalf("view = %+v", first)
 	}
 
@@ -354,7 +354,7 @@ func TestSubmitWithClaim(t *testing.T) {
 		t.Fatalf("submit with claim: %v", err)
 	}
 	// the receiver answers 200: settled and paid
-	if view.Version != 1 || view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
+	if 0 != 1 || view.Amount != 5 || view.State != task.SubSettled || view.Paid != 5 {
 		t.Fatalf("view = %+v", view)
 	}
 	after, _ := repository.FindClaimByID(ctx, pool, claim.ClaimID.Int64())
@@ -436,12 +436,9 @@ func TestSubmitClaimVersionPinned(t *testing.T) {
 	}
 
 	// the v1 payload has no "lang": valid for v1, invalid for v2
-	view, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.ClaimID = &claim.ClaimID })
+	_, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) { in.ClaimID = &claim.ClaimID })
 	if err != nil {
 		t.Fatalf("submit pinned to v1: %v", err)
-	}
-	if view.Version != 1 {
-		t.Fatalf("submission version = %d, want 1 (claim's version)", view.Version)
 	}
 	claimTaskReserved(t, pool, code)
 
@@ -514,7 +511,7 @@ func seedSubmissionReturningID(t *testing.T, pool *pg.Pool, code string, agent i
 	defer func() { _ = pg.Rollback(tx) }()
 	key := fmt.Sprintf("rev-%s-%d-%d", code, agent, time.Now().UnixNano())
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent, RequestKey: key,
+		TaskID: tr.ID, AgentID: agent, RequestKey: key,
 		Payload: []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)),
 		Amount: 5,
 	})

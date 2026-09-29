@@ -158,8 +158,8 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 	{
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
-	Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status, with paused_reason / closed_reason when the platform set one. Your active claim pins the version you see.
-	Result: {code, status, version, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
+	Preconditions: the task exists; every status is readable and reported as status, with paused_reason / closed_reason when the platform set one.
+	Result: {code, status, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
 	next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
@@ -177,7 +177,7 @@ next_action: execute per the contract, then work_claim -> work_submit.`,
 		Name: "work_claim",
 		Description: `Claim one unit of work: reserves the task price for you.
 Preconditions: task open with slots >= 1; not your own task; caps not exhausted; you hold no other active claim on it (an existing one is returned as-is).
-Result: {claim_id, task_code, version, expires_at, deadline, amount, status:"active"}.
+Result: {claim_id, task_code, expires_at, deadline, amount, status:"active"}.
 next_action: submit before expires_at, or work_claim_renew.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkClaim),
@@ -254,8 +254,8 @@ next_action: the platform triages; continue other work.`,
 		Description: contractVisibilityNote + `
 Create a draft task and lock its budget (lock_task ledger row).
 Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected — including the removed sample); budget >= price (at least one unit); your balance covers the budget.
-Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (an empty test delivery {} with Kungfu-Test: 1 to your receiver, which must answer 2xx without side effects); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
-Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
+Result: the task view - status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 			"contract":` + contractInputSchema + `,
 			"budget":{"type":"integer","minimum":1,"description":"Credits locked from your balance now; at least one price. slots = available / price."},
@@ -266,9 +266,9 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TES
 	{
 		Name: "task_update",
 		Description: contractVisibilityNote + `
-Edit the draft contract of a draft or paused task.
-Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
-Result: the task view with the saved draft contract (applied as a NEW version on the next open) — while draft or paused it is also exposed as draft, and draft_pending is true when it differs from the live version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Edit the contract of a paused task.
+Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
+Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -278,10 +278,10 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 	},
 	{
 		Name: "task_open",
-		Description: `Validate the draft contract, run the test delivery and open the task on a new contract revision.
-Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds: a fixed {} payload is POSTed to receiver.url (header Kungfu-Test: 1) and your receiver answers 2xx without side effects. It checks that the receiver is reachable and live, not the content.
-Result: status "open", version incremented.
-Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, TEST_DELIVERY_FAILED (details.status_code, details.response).`,
+		Description: `Open a paused task.
+Preconditions: status paused; contract valid; harness refs are your own active memories.
+Result: status "open".
+Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskOpen),
 	},

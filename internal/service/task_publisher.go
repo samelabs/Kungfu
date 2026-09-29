@@ -6,9 +6,8 @@ package service
 //
 // Error codes are the publisher-side §8.4 catalogue, verbatim:
 // NOT_OWNER, INVALID_STATE (details.status), INSUFFICIENT_CREDITS,
-// VALIDATION_FAILED (details.errors[]), TEST_DELIVERY_FAILED,
-// HAS_RESERVATIONS. A missing task is 404 TASK_NOT_FOUND (§8.4
-// publisher list).
+// VALIDATION_FAILED (details.errors[]),
+// HAS_RESERVATIONS.
 
 import (
 	"context"
@@ -27,10 +26,6 @@ import (
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
 )
-
-// testDeliveryResponsePreviewBytes caps the receiver response excerpt
-// carried in TEST_DELIVERY_FAILED details.
-const testDeliveryResponsePreviewBytes = 500
 
 // -- helpers --
 

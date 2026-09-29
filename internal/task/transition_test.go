@@ -14,16 +14,16 @@ func TestTaskTransitionLegal(t *testing.T) {
 		from, event, want string
 	}{
 		// §4 diagram: draft ──open──▶ open ──pause──▶ paused ──open──▶ open
-		{TaskDraft, EventOpen, TaskOpen},
+		{TaskPaused, EventOpen, TaskOpen},
 		{TaskOpen, EventPause, TaskPaused},
 		{TaskPaused, EventOpen, TaskOpen},
 		// close from every non-terminal status → closed
-		{TaskDraft, EventClose, TaskClosed},
+		{TaskPaused, EventClose, TaskClosed},
 		{TaskOpen, EventClose, TaskClosed},
 		{TaskPaused, EventClose, TaskClosed},
 		// §4 table platform rows
 		{TaskOpen, EventPlatformPause, TaskPaused},
-		{TaskDraft, EventPlatformClose, TaskClosed},
+		{TaskPaused, EventPlatformClose, TaskClosed},
 		{TaskOpen, EventPlatformClose, TaskClosed},
 		{TaskPaused, EventPlatformClose, TaskClosed},
 	}
@@ -41,15 +41,15 @@ func TestTaskTransitionLegal(t *testing.T) {
 
 func TestTaskTransitionIllegal(t *testing.T) {
 	cases := []struct{ from, event string }{
-		{TaskDraft, EventPause},          // draft cannot pause (§4)
-		{TaskDraft, EventPlatformPause},  // platform pause hits open tasks
+		{TaskPaused, EventPause},         // draft cannot pause (§4)
+		{TaskPaused, EventPlatformPause}, // platform pause hits open tasks
 		{TaskOpen, EventOpen},            // already open
 		{TaskPaused, EventPause},         // already paused
 		{TaskClosed, EventOpen},          // closed is terminal
 		{TaskClosed, EventPause},         // closed is terminal
 		{TaskClosed, EventClose},         // closed is terminal
 		{TaskClosed, EventPlatformClose}, // closed is terminal
-		{TaskDraft, "fund"},              // fund never changes status
+		{TaskPaused, "fund"},             // fund never changes status
 		{"bogus", EventOpen},             // unknown status
 		{TaskOpen, "bogus"},              // unknown event
 	}

@@ -176,7 +176,7 @@ func TestRecoverStuckDelivering(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID: tr.ID, Version: 1, AgentID: agent,
+		TaskID: tr.ID, AgentID: agent,
 		RequestKey: fmt.Sprintf("stuck-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)),
 		Amount: 5,
