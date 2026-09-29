@@ -121,7 +121,7 @@ func normalizeToolError(err error) *ToolError {
 const contractInputSchema = `{"type":"object","description":"The task contract (spec section 3). Unknown fields are rejected.","properties":{
 				"title":{"type":"string","maxLength":128,"description":"Task name."},
 				"requirements":{"type":"string","maxLength":20000,"description":"Everything the executor works from: what to do, what to hand in, the meaning of every payload field, and what your receiver rejects."},
-				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Snapshotted when the task opens; executors read them with work_harness."},
+				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Executors read them live with work_harness."},
 				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB). Every payload is checked against it before delivery; mismatches never reach your receiver."}},"additionalProperties":false},
 				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing. Your response body reaches the executor verbatim (first 4 000 bytes)."}},"required":["url"],"additionalProperties":false},
 								"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
