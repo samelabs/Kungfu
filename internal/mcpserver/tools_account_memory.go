@@ -11,6 +11,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/service"
@@ -76,8 +77,10 @@ func handleAccountStatus(ctx context.Context, deps *Deps, agent *model.Bot, args
 
 func handleMemoryList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Limit  int `json:"limit"`
-		Offset int `json:"offset"`
+		Q      string `json:"q"`
+		Code   string `json:"code"`
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
@@ -91,7 +94,8 @@ func handleMemoryList(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	}
 	limit = clampInt(limit, 1, 100)
 	offset := clampInt(in.Offset, 0, 10000)
-	result, err := service.ListKungfusForBot(ctx, deps.Pool, agent.ID, limit, offset)
+	result, err := service.ListKungfusForBot(ctx, deps.Pool, agent.ID,
+		strings.TrimSpace(in.Q), strings.TrimSpace(in.Code), limit, offset)
 	if err != nil {
 		return ToolResult{}, err
 	}

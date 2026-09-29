@@ -381,10 +381,13 @@ Possible errors: UNAUTHORIZED, INTERNAL_ERROR.`,
 	},
 	{
 		Name: "memory_list",
-		Description: `List your stored Kungfu memories.
+		Description: `List your own stored Kungfu memories, newest first.
 Preconditions: valid Agent key; agent rate limit (list) applies.
-Result: {memories[], total, returned}.`,
+Arguments (all optional): q (case-insensitive keyword over title, tags and description; LIKE wildcards match literally), code (exact match), limit, offset.
+Result: {kungfus[], total (all matching rows), returned, offset, has_more}.`,
 		InputSchema: `{"type":"object","properties":{
+			"q":{"type":"string","description":"Case-insensitive keyword over title, tags and description; LIKE wildcards match literally."},
+			"code":{"type":"string","description":"Exact memory code."},
 			"limit":{"type":"integer"},
 			"offset":{"type":"integer"}
 		},"additionalProperties":false}`,

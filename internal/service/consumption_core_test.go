@@ -123,7 +123,7 @@ func TestUpdateListOwnerGetNoRegressions(t *testing.T) {
 		t.Fatalf("update: %v action=%s", err, updated.Action)
 	}
 
-	list, err := ListKungfusForBot(context.Background(), pool, botID, 10, 0)
+	list, err := ListKungfusForBot(context.Background(), pool, botID, "", "", 10, 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

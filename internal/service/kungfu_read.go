@@ -17,12 +17,16 @@ import (
 // storage projection: it carries no balance — balance belongs to the
 // Credits/Account contract.
 // Accepts pg.Querier (satisfied by *pg.Pool).
-func ListKungfusForBot(ctx context.Context, q pg.Querier, botID int64, limit, offset int) (map[string]interface{}, error) {
-	total, err := repository.CountActiveKungfusByBotID(ctx, q, botID)
-	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing kungfus")
+// ListKungfusForBot lists a bot's kungfu entries, optionally narrowed
+// by a case-insensitive keyword over title/tags/description (LIKE
+// wildcards escaped) or an exact code (WO-21). The list is a pure
+// read: no operation log is written.
+func ListKungfusForBot(ctx context.Context, q pg.Querier, botID int64, keyword, code string, limit, offset int) (map[string]interface{}, error) {
+	if keyword != "" {
+		keyword = repository.EscapeLike(keyword)
 	}
-	rows, err := repository.ListActiveKungfusByBotID(ctx, q, botID, limit, offset)
+	rows, total, err := repository.ListActiveKungfusByBot(ctx, q, botID,
+		repository.KungfuListFilter{Q: keyword, Code: code}, limit, offset)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error listing kungfus")
 	}
@@ -31,9 +35,6 @@ func ListKungfusForBot(ctx context.Context, q pg.Querier, botID int64, limit, of
 	for _, row := range rows {
 		items = append(items, kungfuListItemFromRepo(&row))
 	}
-
-	logOperation(ctx, q, &botID, "kungfus_list", nil, nil,
-		map[string]interface{}{"returned": len(items)}, true)
 
 	return map[string]interface{}{
 		"kungfus": items,

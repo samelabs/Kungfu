@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"fmt"
+
 	"context"
 	"errors"
 	"time"
@@ -17,13 +19,12 @@ import (
 
 // -- 1. countActiveByBotId --
 // CountActiveKungfusByBotID returns the number of active kungfus owned by a bot.
-func CountActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64) (int64, error) {
-	var count int64
-	err := q.QueryRow(ctx, `
-		SELECT COUNT(*) AS total
-		FROM tb_kungfus
-		WHERE bot_id = $1 AND status = 'active'`, botID).Scan(&count)
-	return count, err
+// KungfuListFilter narrows ListActiveKungfusByBot (WO-21): Q matches
+// title, description and tags case-insensitively (LIKE wildcards are
+// escaped by the caller); Code is an exact match. Both optional.
+type KungfuListFilter struct {
+	Q    string
+	Code string
 }
 
 // KungfuListItem holds the public projection returned by ListActiveKungfusByBotID.
@@ -37,16 +38,37 @@ type KungfuListItem struct {
 	UpdatedAt   string
 }
 
-// -- 2. listActiveByBotId --
-func ListActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64, limit, offset int) ([]KungfuListItem, error) {
+// ListActiveKungfusByBot returns ONE page of the bot's active
+// memories with the TOTAL number of matching rows (WO-21): the count
+// runs as its own query over the same filters, so paging stays exact.
+func ListActiveKungfusByBot(ctx context.Context, q pg.Querier, botID int64, f KungfuListFilter, limit, offset int) ([]KungfuListItem, int64, error) {
+	where := ` WHERE bot_id = $1 AND status = 'active'`
+	args := []any{botID}
+	if f.Code != "" {
+		args = append(args, f.Code)
+		where += fmt.Sprintf(` AND code = $%d`, len(args))
+	}
+	if f.Q != "" {
+		args = append(args, "%"+f.Q+"%")
+		n := len(args)
+		where += fmt.Sprintf(`
+		  AND (title ILIKE $%d ESCAPE '\'
+		        OR COALESCE(description, '') ILIKE $%d ESCAPE '\'
+		        OR tags_json::text ILIKE $%d ESCAPE '\')`, n, n, n)
+	}
+	var total int64
+	if err := q.QueryRow(ctx, `SELECT COUNT(*) FROM tb_kungfus`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
 	rows, err := q.Query(ctx, `
 		SELECT code, title, tags_json::text, description, visibility, created_at, updated_at
-		FROM tb_kungfus
-		WHERE bot_id = $1 AND status = 'active'
+		FROM tb_kungfus`+
+		where+`
 		ORDER BY updated_at DESC, id DESC
-		LIMIT $2 OFFSET $3`, botID, limit, offset)
+		LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -56,16 +78,16 @@ func ListActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64, li
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&it.Code, &it.Title, &it.TagsJSON, &it.Description,
 			&it.Visibility, &createdAt, &updatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		it.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 		it.UpdatedAt = updatedAt.Format("2006-01-02 15:04:05")
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return items, nil
+	return items, total, nil
 }
 
 // -- 3. findActiveByCode --

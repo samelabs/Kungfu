@@ -173,7 +173,7 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 		t.Fatalf("balance = %v, want 5 (create is free)", balance)
 	}
 
-	list, err := ListKungfusForBot(context.Background(), pool, botID, 10, 0)
+	list, err := ListKungfusForBot(context.Background(), pool, botID, "", "", 10, 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestKungfuListAndGetCarryNoBalance(t *testing.T) {
 
 	// List survives a total balance-read failure (credits outage does not
 	// take storage down).
-	if _, err := ListKungfusForBot(context.Background(), failBalanceQuerier{Querier: pool}, botID, 10, 0); err != nil {
+	if _, err := ListKungfusForBot(context.Background(), failBalanceQuerier{Querier: pool}, botID, "", "", 10, 0); err != nil {
 		t.Fatalf("list must not depend on credits: %v", err)
 	}
 }
