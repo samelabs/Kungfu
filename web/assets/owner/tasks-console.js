@@ -705,7 +705,6 @@ function tcvHeaderHTML(code, view) {
     <p class="task-facts">
         <span class="mono">${tcvEscapeHtml(code)}</span>
         ${tcvStatusBadge(status)}
-        <span>${escapeHtml(tcvT('f_version'))} <span class="mono">v${Number(view.version ?? 0)}</span></span>
         <span class="muted">${escapeHtml(tcvFmtDate(view.created_at))}</span>
     </p>
     ${reason ? `<p class="tcv-err">${escapeHtml(reason)}</p>` : ''}`;
@@ -781,6 +780,22 @@ function tcvAskConfirm(message, fn) {
 // EFFECTIVE contract: the first 280 runes of requirements, the
 // receiver endpoint, the price, the harness size and the execution
 // rules — plus the full contract as an expandable read-only JSON.
+// tcvRevisionHTML is the summary's revision line (C3): which contract
+// revision is live and when it opened; a never-opened draft says so;
+// saved-but-not-live changes name the next revision.
+function tcvRevisionHTML(view) {
+    const version = Number(view.version ?? 0);
+    if (version < 1) {
+        return `<p class="tcv-revision muted">${escapeHtml(tcvT('revision_never'))}</p>`;
+    }
+    const line = tcvT('revision_current', {n: version, time: tcvFmtDate(view.version_opened_at)});
+    let html = `<p class="tcv-revision">${escapeHtml(line)}</p>`;
+    if (view.draft_pending === true) {
+        html += `<p class="tcv-revision tcv-revision-next">${escapeHtml(tcvT('revision_pending_next', {n: version + 1}))}</p>`;
+    }
+    return html;
+}
+
 function tcvContractSummaryHTML(view) {
     const c = view.contract || {};
     const excerpt = String(c.requirements || '');
@@ -790,14 +805,14 @@ function tcvContractSummaryHTML(view) {
         c.claim && c.claim.max_duration ? tcvT('sum_claim_max', {n: c.claim.max_duration}) : '',
         c.limits && c.limits.max_rejected_per_agent ? tcvT('sum_max_rejected', {n: c.limits.max_rejected_per_agent}) : ''
     ].filter(Boolean).join(' · ');
-    return `<dl class="sl-kv">
+    return `${tcvRevisionHTML(view)}<dl class="sl-kv">
         <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerpt.length > 280 ? excerpt.slice(0, 280) + '…' : excerpt)}</dd>
         <dt>${escapeHtml(tcvT('f_receiver'))}</dt><dd class="mono">${tcvEscapeHtml(c.receiver && c.receiver.url ? c.receiver.url : '')}</dd>
         <dt>${escapeHtml(tcvT('f_price'))}</dt><dd>${Number(c.price ?? 0)}</dd>
         <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${Number((c.harness_refs || []).length)}</dd>
         <dt>${escapeHtml(tcvT('f_rules'))}</dt><dd>${escapeHtml(rules || '—')}</dd>
     </dl>
-    <details class="tcv-picker"><summary>${escapeHtml(tcvT('view_contract'))}</summary>
+    <details class="tcv-picker"><summary>${escapeHtml(view.draft_pending === true ? tcvT('view_effective', {n: Number(view.version ?? 0)}) : tcvT('view_contract'))}</summary>
         <pre class="mono tcv-pre">${tcvEscapeHtml(tcvPretty(c))}</pre></details>`;
 }
 
@@ -983,7 +998,11 @@ function tcvLoadSubmissions(code, state, page) {
         const rows = env.submissions || [];
         const total = Number(env.total ?? rows.length);
         const pages = Math.max(1, Math.ceil(total / 20));
-        box.innerHTML = rows.length ? rows.map(tcvSubmissionRow).join('')
+        // C4: the contract-revision column appears only when THIS page
+        // spans two or more revisions
+        const versions = new Set(rows.map((r) => Number(r.version ?? 0)));
+        const showVersion = versions.size > 1;
+        box.innerHTML = rows.length ? rows.map((r) => tcvSubmissionRow(r, showVersion)).join('')
             : `<p class="muted">${escapeHtml(tcvT('empty_deliveries'))}</p>`;
         const info = qs('#tcvSubPageInfo');
         if (info) info.textContent = tcvT('page_info', {page, pages, total});

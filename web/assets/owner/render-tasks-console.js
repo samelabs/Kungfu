@@ -52,7 +52,6 @@ function tcvTaskRow(task) {
         <div class="task-facts">
             <span class="mono">${code}</span>
             ${badge}
-            <span>v${Number(task.version ?? 0)}</span>
             ${tcvFact(tcvT('r_price'), String(Number(task.price ?? 0)))}
             ${tcvFact(tcvT('r_slots'), String(Number(task.slots ?? 0)))}
             ${tcvFact(tcvT('r_available'), String(Number(task.available ?? 0)))}
@@ -130,7 +129,7 @@ function tcvRenderTaskList(env) {
 // ---- the delivery record rows (F3): time, state, agent_ref, version,
 // amount, reply status; the full reply body expands ----
 
-function tcvSubmissionRow(r) {
+function tcvSubmissionRow(r, showVersion) {
     const state = String(r.state || '');
     const reply = r.reply || null;
     const replyStatus = reply ? `HTTP ${tcvEscapeHtml(String(reply.status))}` : '—';
@@ -144,7 +143,7 @@ function tcvSubmissionRow(r) {
         <div class="task-facts">
             <span class="badge">${escapeHtml(tcvStateText(state))}</span>
             <span class="mono">${tcvEscapeHtml(r.agent_ref || '')}</span>
-            <span>v${Number(r.version ?? 0)}</span>
+            ${showVersion ? `<span>${escapeHtml(tcvT('revision_col'))} ${Number(r.version ?? 0)}</span>` : ''}
             ${tcvFact(tcvT('r_price'), String(Number(r.amount ?? 0)))}
             <span class="mono">${replyStatus}</span>
             <span class="muted">${tcvEscapeHtml(tcvFmtDate(r.created_at))}</span>

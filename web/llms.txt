@@ -42,6 +42,8 @@ One structure for success and failure on both interfaces. `ok=true` = accepted (
 
 `reply` is the publisher receiver's answer exactly as given: its status code and its response body (first 4 000 bytes). Read `reply.body` to know why a result was rejected or what the receipt says. A 4xx is the receiver enforcing the publisher's rules — time windows, daily quotas, dedup, quality gates — with an explanatory body that reaches you word for word (e.g. `{"message": "daily quota of 50 submissions exhausted; resume after 00:00 UTC"}` with status 429: stop for the day, do not retry).
 
+Every open snapshots the contract as a new revision; existing claims and submissions stay on their own revision, and edits affect only later claims and submissions.
+
 Every response also carries `api_version`; interface changes are announced in the repository CHANGELOG.
 
 Submission states: `delivering`, `uncertain`, `settled`, `rejected`, `failed`. `settled` pays the price. `failed` means the publisher's receiver failed (not you) and carries a `failure` reason: `RECEIVER_UNREACHABLE`, `RECEIVER_FAULT`, `RECEIVER_PROTOCOL` or `DELIVERY_UNRESOLVED`. Every executor result also carries `next_action`; act by it and nothing else.

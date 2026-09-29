@@ -163,7 +163,6 @@
         "json_invalid": "The JSON cannot be parsed; staying in JSON mode.",
         "need_schema": "The structure check must be a JSON object, or empty.",
         "open_note": "Opening sends {} with the header Kungfu-Test: 1 to your receiver; answer 2xx without side effects. It checks that the receiver is reachable and live, not the content. The budget locks when the task is created.",
-        "f_version": "Version",
         "draft_pending_note": "There are saved changes that are not live yet; they take effect the next time the task opens.",
         "open_readonly_note": "Read-only while open: pause the task to edit; changes take effect as a new version when it reopens.",
         "f_contract": "Contract",
@@ -227,7 +226,12 @@
         "op_done": "Done.",
         "sum_enabled": "enabled",
         "sum_disabled": "not enabled",
-        "sum_all_defaults": "all defaults"
+        "sum_all_defaults": "all defaults",
+        "revision_col": "Revision",
+        "revision_never": "Not opened yet — no contract revision is live.",
+        "revision_current": "Live: revision {{n}} · opened {{time}}",
+        "revision_pending_next": "Saved changes become revision {{n}} on the next open.",
+        "view_effective": "View the currently live revision ({{n}})"
       },
       "logs": {
         "heading": "Logs",
@@ -642,7 +646,6 @@
         "json_invalid": "JSON 无法解析，停留在 JSON 模式。",
         "need_schema": "结构检查必须是一个 JSON 对象，或留空。",
         "open_note": "开放时会向接收端发送带 Kungfu-Test: 1 的 {}；请无副作用地返回 2xx。它检查接收端是否可达、是否可用，不检查内容。预算在创建时即锁定。",
-        "f_version": "版本",
         "draft_pending_note": "有已保存但未生效的修改，重新开放任务后生效。",
         "open_readonly_note": "开放中为只读：暂停后才能修改；修改在重新开放时生效为新版本。",
         "f_contract": "契约",
@@ -706,7 +709,12 @@
         "op_done": "已完成。",
         "sum_enabled": "已启用",
         "sum_disabled": "未启用",
-        "sum_all_defaults": "全部默认"
+        "sum_all_defaults": "全部默认",
+        "revision_col": "契约版本",
+        "revision_never": "尚未开放——还没有生效的契约版本。",
+        "revision_current": "当前生效：第 {{n}} 版 · 开放于 {{time}}",
+        "revision_pending_next": "已保存的修改将在下次开放时成为第 {{n}} 版。",
+        "view_effective": "查看当前生效版本（第 {{n}} 版）"
       },
       "logs": {
         "heading": "日志",
@@ -1121,7 +1129,6 @@
         "json_invalid": "JSON を解析できません。JSON モードのまま修正してください。",
         "need_schema": "構造チェックは JSON オブジェクト、または空欄にしてください。",
         "open_note": "公開時に Kungfu-Test: 1 付きの {} をレシーバーへ送ります。副作用なく 2xx で応答してください。これはレシーバーが到達可能か稼働中かを確認するもので、内容は検査しません。予算は作成時にロックされます。",
-        "f_version": "バージョン",
         "draft_pending_note": "保存済みだが未適用の変更があります。次回公開時に有効になります。",
         "open_readonly_note": "公開中は読み取り専用です。編集するには一時停止してください。変更は再公開時に新バージョンとして適用されます。",
         "f_contract": "契約",
@@ -1185,7 +1192,12 @@
         "op_done": "完了しました。",
         "sum_enabled": "有効",
         "sum_disabled": "未設定",
-        "sum_all_defaults": "すべて既定"
+        "sum_all_defaults": "すべて既定",
+        "revision_col": "契約バージョン",
+        "revision_never": "まだ公開されていません——有効な契約バージョンはありません。",
+        "revision_current": "現在有効：第 {{n}} 版 · 公開 {{time}}",
+        "revision_pending_next": "保存済みの変更は次回の公開で第 {{n}} 版になります。",
+        "view_effective": "現在有効なバージョンを表示（第 {{n}} 版）"
       },
       "logs": {
         "heading": "ログ",
@@ -1600,7 +1612,6 @@
         "json_invalid": "JSON을 해석할 수 없어 JSON 모드에 머무릅니다.",
         "need_schema": "구조 검사는 JSON 객체이거나 비워 두세요.",
         "open_note": "작업을 열면 Kungfu-Test: 1 헤더와 함께 {}를 리시버로 보냅니다. 부작용 없이 2xx로 응답하세요. 리시버가 접근 가능하고 살아 있는지 확인하는 것이며 내용은 검사하지 않습니다. 예산은 생성 시 즉시 잠깁니다.",
-        "f_version": "버전",
         "draft_pending_note": "저장되었지만 아직 적용되지 않은 수정이 있습니다. 다음에 작업을 열 때 적용됩니다.",
         "open_readonly_note": "열려 있는 동안 읽기 전용입니다. 수정하려면 일시중지해야 하며, 수정은 다시 열 때 새 버전으로 적용됩니다.",
         "f_contract": "계약",
@@ -1664,7 +1675,12 @@
         "op_done": "완료되었습니다.",
         "sum_enabled": "사용 중",
         "sum_disabled": "미사용",
-        "sum_all_defaults": "모두 기본값"
+        "sum_all_defaults": "모두 기본값",
+        "revision_col": "계약 버전",
+        "revision_never": "아직 열리지 않았습니다 — 유효한 계약 버전이 없습니다.",
+        "revision_current": "현재 유효: 제 {{n}}판 · 열림 {{time}}",
+        "revision_pending_next": "저장된 수정은 다음 오픈 때 제 {{n}}판이 됩니다.",
+        "view_effective": "현재 유효 버전 보기(제 {{n}}판)"
       },
       "logs": {
         "heading": "로그",
@@ -2079,7 +2095,6 @@
         "json_invalid": "No se puede analizar el JSON; se permanece en modo JSON.",
         "need_schema": "La comprobación de estructura debe ser un objeto JSON, o estar vacía.",
         "open_note": "Al abrir se envía {} a tu receptor con la cabecera Kungfu-Test: 1; responde 2xx sin efectos secundarios. Comprueba que el receptor está accesible y vivo, no el contenido. El presupuesto se bloquea al crear la tarea.",
-        "f_version": "Versión",
         "draft_pending_note": "Hay cambios guardados que aún no están vigentes; se aplican la próxima vez que se abra la tarea.",
         "open_readonly_note": "Solo lectura mientras está abierta: pausa la tarea para editar; los cambios se aplican como nueva versión al reabrirla.",
         "f_contract": "Contrato",
@@ -2143,7 +2158,12 @@
         "op_done": "Hecho.",
         "sum_enabled": "activado",
         "sum_disabled": "sin activar",
-        "sum_all_defaults": "todo por defecto"
+        "sum_all_defaults": "todo por defecto",
+        "revision_col": "Revisión",
+        "revision_never": "Todavía sin abrir: no hay ninguna revisión del contrato vigente.",
+        "revision_current": "Vigente: revisión {{n}} · abierta {{time}}",
+        "revision_pending_next": "Los cambios guardados serán la revisión {{n}} en la próxima apertura.",
+        "view_effective": "Ver la revisión vigente ({{n}})"
       },
       "logs": {
         "heading": "Registros",

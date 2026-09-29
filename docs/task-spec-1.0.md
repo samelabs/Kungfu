@@ -88,6 +88,8 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 **测试投递**（open 时）：以 §7.1 的请求形状投递固定的空对象 `{}`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。开放向接收端发送带 `Kungfu-Test: 1` 的 `{}`；接收端无副作用地应答 2xx。它检查接收端是否可达、是否可用，不检查内容。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。带 `Kungfu-Test: 1` 的请求必须只做校验并应答，不得产生任何副作用（不发布、不入库、不计数）。
 
+版本：每次开放都会把契约快照为一个新版本；已有的认领和提交停留在各自的版本上，修改只影响之后的认领和提交。
+
 派生量：
 - `available = budget_locked − settled − reserved − refunded`（`reserved` 为全部未终结预留金额之和）
 - `slots = ⌊available / price⌋`

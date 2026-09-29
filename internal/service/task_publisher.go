@@ -119,9 +119,12 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 // never expose draft.
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	contractJSON := t.DraftContract
+	var versionOpenedAt *time.Time
 	if t.Version >= 1 {
 		if v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version); err == nil && v != nil {
 			contractJSON = v.Contract
+			opened := v.CreatedAt
+			versionOpenedAt = &opened
 		} else if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
@@ -147,6 +150,10 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	view["code"] = t.Code
 	view["status"] = t.Status
 	view["version"] = t.Version
+	if versionOpenedAt != nil {
+		// when the current contract revision was opened (WO-20b C3)
+		view["version_opened_at"] = versionOpenedAt.UTC().Format(time.RFC3339)
+	}
 	view["budget_locked"] = t.BudgetLocked
 	view["settled"] = t.Settled
 	view["reserved"] = t.Reserved
