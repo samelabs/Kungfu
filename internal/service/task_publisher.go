@@ -2,10 +2,7 @@ package service
 
 // Task publisher lifecycle — spec §4 transition table, one transaction
 // per operation, every status change validated by the internal/task
-// kernel (TaskTransition) and applied as a compare-and-swap. The open
-// transition additionally runs the §5.4 test delivery OUTSIDE the
-// write transaction and re-locks + re-confirms the status before
-// writing (§7.1 request shape).
+// kernel (TaskTransition) and applied as a compare-and-swap.
 //
 // Error codes are the publisher-side §8.4 catalogue, verbatim:
 // NOT_OWNER, INVALID_STATE (details.status), INSUFFICIENT_CREDITS,
@@ -15,7 +12,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
@@ -25,7 +21,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"kungfu.md/internal/credits"
-	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/publiccode"
@@ -109,39 +104,16 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 	}
 }
 
-// taskView projects a task row plus §4 derived amounts. The effective
-// contract is the current version's snapshot once one exists, else the
-// draft. While the task is draft or paused, draft exposes the SAVED
-// draft — the contract the next open applies — and draft_pending is
-// true once a version exists and that draft differs from the live
-// snapshot (jsonEqual), so a paused edit is visible in task_get and in
-// the task_update result instead of looking lost. open and closed
-// never expose draft.
+// taskView projects a task row plus §4 derived amounts. The contract
+// IS the task's one contract column (M1).
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
-	contractJSON := t.DraftContract
-	var versionOpenedAt *time.Time
-	if t.Version >= 1 {
-		if v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version); err == nil && v != nil {
-			contractJSON = v.Contract
-			opened := v.CreatedAt
-			versionOpenedAt = &opened
-		} else if err != nil {
-			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-		}
-	}
 	var contract task.Contract
 	view := map[string]interface{}{}
-	if err := json.Unmarshal(contractJSON, &contract); err == nil {
-		// The publisher sees the whole effective contract (its own
-		// receiver included) — task_update replaces it as a whole.
+	if err := json.Unmarshal(t.Contract, &contract); err == nil {
 		view["title"] = contract.Title
 		view["price"] = contract.Price
-		view["contract"] = json.RawMessage(contractJSON)
+		view["contract"] = json.RawMessage(t.Contract)
 	}
-	if t.Status == task.TaskDraft || t.Status == task.TaskPaused {
-		view["draft"] = json.RawMessage(t.DraftContract)
-	}
-	view["draft_pending"] = t.Version >= 1 && !jsonEqual(t.DraftContract, contractJSON)
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	slots := int64(0)
 	if contract.Price > 0 {
@@ -149,11 +121,6 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	}
 	view["code"] = t.Code
 	view["status"] = t.Status
-	view["version"] = t.Version
-	if versionOpenedAt != nil {
-		// when the current contract revision was opened (WO-20b C3)
-		view["version_opened_at"] = versionOpenedAt.UTC().Format(time.RFC3339)
-	}
 	view["budget_locked"] = t.BudgetLocked
 	view["settled"] = t.Settled
 	view["reserved"] = t.Reserved
@@ -168,18 +135,6 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	}
 	view["created_at"] = t.CreatedAt.UTC().Format(time.RFC3339)
 	return view, nil
-}
-
-// jsonEqual compares two JSON documents by semantics (key order and
-// whitespace irrelevant).
-func jsonEqual(a, b []byte) bool {
-	var va, vb any
-	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
-		return string(a) == string(b)
-	}
-	na, _ := json.Marshal(va)
-	nb, _ := json.Marshal(vb)
-	return string(na) == string(nb)
 }
 
 // -- §4 transitions --
@@ -256,7 +211,7 @@ func isInsufficientCreditsErr(err error) bool {
 }
 
 // UpdateTask is the §4 update transition: edit the Contract while the
-// task is draft or paused. A paused edit takes effect as a NEW
+// task is paused. A paused edit takes effect as a NEW
 // version on the next open; existing claims and submissions keep
 // their version.
 func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string, contract task.Contract) (map[string]interface{}, error) {
@@ -278,10 +233,10 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	if err != nil {
 		return nil, err
 	}
-	if t.Status != task.TaskDraft && t.Status != task.TaskPaused {
+	if t.Status != task.TaskPaused {
 		return nil, invalidTaskState(t.Status)
 	}
-	if err := repository.UpdateDraftContract(ctx, tx, t.ID, contractJSON); err != nil {
+	if err := repository.UpdateTaskContract(ctx, tx, t.ID, contractJSON); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -295,174 +250,37 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	return taskView(ctx, pool, after)
 }
 
-// OpenTask is the §4 open transition with the §5.4 test delivery:
-//
-//	phase 1 (tx): lock, confirm draft/paused, read the draft contract
-//	phase 2 (no tx): validate contract, snapshot owned harness, deliver
-//	                 the test payload to the receiver
-//	phase 3 (tx): re-lock, confirm the status did not change, write
-//	              the version snapshot and open
+// OpenTask is the §4 open transition: paused → open, one transaction.
+// M4: no test delivery, no harness snapshot, no version write.
 func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
+	defer func() { _ = pg.Rollback(tx) }()
 	t, err := lockOwnedTask(ctx, tx, publisherID, code)
 	if err != nil {
-		_ = pg.Rollback(tx)
 		return nil, err
 	}
-	status := t.Status
-	taskID := t.ID
-	draftJSON := t.DraftContract
-	currentVersion := t.Version
-	_ = pg.Rollback(tx) // phase 1 is read-only under the lock
-
-	if _, err := task.TaskTransition(status, task.EventOpen); err != nil {
-		return nil, invalidTaskState(status)
-	}
-
 	var contract task.Contract
-	if err := json.Unmarshal(draftJSON, &contract); err != nil {
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
-
-	// Harness snapshot: every ref must be an ACTIVE memory of THIS
-	// publisher (§3 harness_refs) — all violations reported at once.
-	harness := make([]map[string]interface{}, 0, len(defaults.HarnessRefs))
-	var harnessErrs []task.FieldError
-	for i, ref := range defaults.HarnessRefs {
-		k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, publisherID, ref)
-		if err != nil {
-			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-		}
-		if k == nil {
-			harnessErrs = append(harnessErrs, task.FieldError{
-				Field:   fmt.Sprintf("harness_refs[%d]", i),
-				Message: fmt.Sprintf("%q is not one of your active memories", ref),
-			})
-			continue
-		}
-		harness = append(harness, map[string]interface{}{
-			"ref_id":      k.Code,
-			"title":       k.Title,
-			"description": k.Description,
-			"content":     k.Content,
-		})
-	}
-	if len(harnessErrs) > 0 {
-		return nil, validationFailed(harnessErrs)
-	}
-	harnessJSON, err := json.Marshal(harness)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
-	}
-	contractJSON, err := marshalContract(defaults)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
-	}
-
-	newVersion := currentVersion + 1
-	if err := runTestDelivery(ctx, defaults, code, newVersion); err != nil {
-		return nil, err
-	}
-
-	// Phase 3: write under a fresh lock; a concurrent status change —
-	// or a draft edited between the phases — aborts with INVALID_STATE
-	// instead of double-opening (§7c: the draft is compared by JSON
-	// semantics, details.reason=DRAFT_CHANGED).
-	tx, err = pool.TxBegin(ctx)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	defer func() { _ = pg.Rollback(tx) }()
-	t, err = lockOwnedTask(ctx, tx, publisherID, code)
-	if err != nil {
-		return nil, err
-	}
-	if t.Status != status || t.Version != currentVersion {
+	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, task.EventOpen, nil); err != nil {
 		return nil, invalidTaskState(t.Status)
-	}
-	if !jsonEqual(t.DraftContract, draftJSON) {
-		return nil, errors.NewWithDetails(0, "INVALID_STATE",
-			"The draft changed while the task was opening",
-			map[string]interface{}{"status": t.Status, "reason": "DRAFT_CHANGED"})
-	}
-	if err := repository.InsertTaskVersion(ctx, tx, taskID, newVersion, contractJSON, harnessJSON); err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	if err := repository.ApplyTaskStatus(ctx, tx, taskID, status, task.EventOpen, nil); err != nil {
-		return nil, invalidTaskState(status)
-	}
-	if err := repository.SetTaskVersion(ctx, tx, taskID, newVersion); err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-
-	after, err := repository.FindTaskByID(ctx, pool, taskID)
+	after, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || after == nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return taskView(ctx, pool, after)
-}
-
-// runTestDelivery performs the §4 open-time test delivery: the §7.1
-// request shape with agent_ref "test", an EMPTY payload {} and the
-// header Kungfu-Test: 1. It checks that the receiver is reachable and
-// live — not the content: the payload is fixed, so nothing about the
-// task reaches the receiver here. The idempotency key is
-// test-<code>-<version>-<random hex>, unique per open attempt, so a
-// receiver that caches by key never replays a stale 500 from a
-// previous attempt. The receiver must answer 2xx; any other outcome
-// is TEST_DELIVERY_FAILED with the status code and the first 500
-// bytes of the response (cut on a rune boundary). No reservation, no
-// settlement, no submission.
-func runTestDelivery(ctx context.Context, contract task.Contract, code string, version int32) error {
-	var randBytes [4]byte
-	if _, err := rand.Read(randBytes[:]); err != nil {
-		return errors.New(0, "INTERNAL_ERROR", "Internal error")
-	}
-	testKey := fmt.Sprintf("test-%s-%d-%x", code, version, randBytes)
-	body, err := json.Marshal(map[string]json.RawMessage{
-		"submission_id": json.RawMessage(`"` + testKey + `"`),
-		"task_code":     json.RawMessage(`"` + code + `"`),
-		"version":       json.RawMessage(fmt.Sprintf(`%d`, version)),
-		"agent_ref":     json.RawMessage(`"test"`),
-		"payload":       json.RawMessage(`{}`),
-	})
-	if err != nil {
-		return errors.New(0, "INTERNAL_ERROR", "Internal error")
-	}
-
-	res := delivery.PostJSON(ctx, contract.Receiver.URL, body, map[string]string{
-		"Idempotency-Key":     testKey,
-		"Kungfu-Task":         code,
-		"Kungfu-Task-Version": fmt.Sprintf("%d", version),
-		"Kungfu-Test":         "1",
-	}, delivery.TestTaskErrorConfig())
-
-	if res.Success {
-		return nil
-	}
-
-	details := map[string]interface{}{"status_code": 0, "response": ""}
-	if res.ResponseCode != nil {
-		details["status_code"] = *res.ResponseCode
-	}
-	if res.ResponseBody != nil {
-		details["response"] = truncateRunes(*res.ResponseBody, testDeliveryResponsePreviewBytes)
-	}
-	message := "Test delivery to the receiver failed"
-	if res.ErrorMessage != "" {
-		message += ": " + res.ErrorMessage
-	}
-	return errors.NewWithDetails(502, "TEST_DELIVERY_FAILED", message, details)
 }
 
 // PauseTask is the §4 pause transition (open → paused). Existing
@@ -634,11 +452,8 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	return taskView(ctx, pool, after)
 }
 
-// GetTask returns one owned task with its effective contract, the §4
-// derived amounts, the saved draft (draft/paused) and the §6.3 30-day
-// statistics plus the two publisher-only counters — exactly the
-// statsView scope work_get reports, extended with submissions_30d and
-// active_claims (WO-18).
+// GetTask returns one owned task with its contract, the §4 derived
+// amounts, and the §6.3 30-day statistics.
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {

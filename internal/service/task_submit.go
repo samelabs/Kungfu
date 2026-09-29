@@ -52,7 +52,6 @@ type ReplyView struct {
 type SubmissionView struct {
 	SubmissionID WireID     `json:"submission_id"`
 	TaskCode     string     `json:"task_code"`
-	Version      int32      `json:"version"`
 	State        string     `json:"state"`
 	Amount       int64      `json:"amount"`
 	Paid         int64      `json:"paid"`
@@ -65,7 +64,6 @@ func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView 
 	v := SubmissionView{
 		SubmissionID: WireID(s.SubmissionID),
 		TaskCode:     code,
-		Version:      s.Version,
 		State:        s.State,
 		Amount:       s.Amount,
 		Failure:      s.Failure,
@@ -132,28 +130,16 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if t.PublisherID == agentID {
 		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}
-	var version int32
 	var contract task.Contract
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
+	}
 	if in.ClaimID == nil {
-		// draft is invisible to executors (§5.1) — same TASK_NOT_FOUND
-		// as work_get, never TASK_NOT_OPEN
-		if t.Status == task.TaskDraft {
-			return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
-		}
 		if t.Status != task.TaskOpen {
 			return SubmissionView{}, taskNotOpen(t)
 		}
-		version, contract, err = resolveSubmissionVersion(ctx, pool, t, nil)
-		if err != nil {
-			return SubmissionView{}, err
-		}
 		if slotsFor(t, contract) < 1 {
 			return SubmissionView{}, errors.New(0, "SLOTS_EXHAUSTED", "No claimable budget left")
-		}
-	} else {
-		version, contract, err = resolveSubmissionVersion(ctx, pool, t, in.ClaimID.Int64Ptr())
-		if err != nil {
-			return SubmissionView{}, err
 		}
 	}
 
@@ -195,11 +181,11 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			Pointer: "", Message: "payload must be a JSON object",
 		}})
 	}
-	schema, err := versionSchema(ctx, pool, t.ID, version)
+	schema, err := taskSchema(ctx, pool, t.ID)
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if errs := payloadSchemaErrors(t.ID, version, schema, in.Payload); len(errs) > 0 {
+	if errs := payloadSchemaErrors(t.ID, 0, schema, in.Payload); len(errs) > 0 {
 		return SubmissionView{}, schemaMismatch(errs)
 	}
 	if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
@@ -238,40 +224,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		if locked.Status != task.TaskOpen {
 			return SubmissionView{}, taskNotOpen(locked)
 		}
-		// The version may have moved under us (a concurrent pause→
-		// update→open). Bind the submission to the LOCKED row's current
-		// version and redo the payload checks against it (§10.7).
-		if locked.Version != version {
-			nv, nc, rerr := resolveSubmissionVersion(ctx, tx, locked, nil)
-			if rerr != nil {
-				return SubmissionView{}, rerr
-			}
-			version, contract = nv, nc
-			// The rebound contract governs admission exactly like
-			// step (f): a no-claim submission must not bind to a
-			// claim.required version (P2-3).
-			if contract.Claim.Required {
-				return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
-			}
-			if errs := payloadSchemaErrors(locked.ID, version, contract.Output.Schema, in.Payload); len(errs) > 0 {
-				return SubmissionView{}, schemaMismatch(errs)
-			}
-			if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
-				return SubmissionView{}, errors.NewWithDetails(400, "CREDENTIAL_IN_PAYLOAD",
-					"payload contains credential-shaped strings",
-					map[string]interface{}{"pointer": ptrs[0]})
-			}
-			recount, cerr := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
-			if cerr != nil {
-				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-			}
-			if recount.Rejected >= rejectedCapFor(contract) {
-				return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-					fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
-					map[string]interface{}{"limit": "rejected"})
-			}
-			amount = contract.Price
-		}
 		if err := repository.ReserveTaskAmount(ctx, tx, locked.ID, amount); err != nil {
 			if goerrors.Is(err, repository.ErrNoAvailableBudget) {
 				return SubmissionView{}, errors.New(0, "SLOTS_EXHAUSTED", "No claimable budget left")
@@ -292,8 +244,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	}
 
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
-		TaskID:      locked.ID,
-		Version:     version,
+		TaskID: locked.ID,
+
 		AgentID:     agentID,
 		RequestKey:  in.RequestKey,
 		Payload:     in.Payload,
@@ -325,39 +277,6 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	return DeliverSubmission(ctx, pool, subID, agentRefKey, now)
 }
 
-// resolveSubmissionVersion determines the submission's version and
-// its contract: the claim's version when a claim is carried, otherwise
-// the task's current version (spec §5.3 — a carried claim pins the
-// version the payload is validated against).
-func resolveSubmissionVersion(ctx context.Context, q pg.Querier, t *repository.TaskRow, claimID *int64) (int32, task.Contract, error) {
-	version := t.Version
-	if claimID != nil {
-		claim, err := repository.FindClaimByID(ctx, q, *claimID)
-		if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
-			return 0, task.Contract{}, errors.New(0, "CLAIM_INVALID", "Claim not found")
-		}
-		if err != nil {
-			return 0, task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-		}
-		version = claim.Version
-	}
-	if version < 1 {
-		return 0, task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Task without an effective version")
-	}
-	v, err := repository.FindTaskVersion(ctx, q, t.ID, version)
-	if goerrors.Is(err, pgx.ErrNoRows) || v == nil {
-		return 0, task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Version snapshot missing")
-	}
-	if err != nil {
-		return 0, task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	var contract task.Contract
-	if err := json.Unmarshal(v.Contract, &contract); err != nil {
-		return 0, task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-	return version, contract, nil
-}
-
 // checkClaim is §5.3 step 6 for a carried claim: this agent's ACTIVE
 // claim on this task, unexpired.
 func checkClaim(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int64, now time.Time) error {
@@ -383,14 +302,14 @@ func rejectedCapFor(contract task.Contract) int64 {
 	return task.DefaultMaxRejectedPerAgent
 }
 
-// versionSchema returns the output.schema of a task version.
-func versionSchema(ctx context.Context, pool *pg.Pool, taskID int64, version int32) ([]byte, error) {
-	v, err := repository.FindTaskVersion(ctx, pool, taskID, version)
-	if err != nil || v == nil {
+// taskSchema returns the output.schema of a task's contract.
+func taskSchema(ctx context.Context, pool *pg.Pool, taskID int64) ([]byte, error) {
+	t, err := repository.FindTaskByID(ctx, pool, taskID)
+	if err != nil || t == nil {
 		return nil, err
 	}
 	var contract task.Contract
-	if err := json.Unmarshal(v.Contract, &contract); err != nil {
+	if err := json.Unmarshal(t.Contract, &contract); err != nil {
 		return nil, err
 	}
 	return contract.Output.Schema, nil

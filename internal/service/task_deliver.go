@@ -78,7 +78,13 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 	if err != nil || t == nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	contract, err := versionContract(ctx, pool, t.ID, sub.Version)
+	contract, err := func() (task.Contract, error) {
+		var c task.Contract
+		if err := json.Unmarshal(t.Contract, &c); err != nil {
+			return c, err
+		}
+		return c, nil
+	}()
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
@@ -90,17 +96,16 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(fmt.Sprintf(`"%d"`, sub.SubmissionID)),
 		"task_code":     json.RawMessage(`"` + t.Code + `"`),
-		"version":       json.RawMessage(fmt.Sprintf(`%d`, sub.Version)),
-		"agent_ref":     json.RawMessage(`"` + AgentRef(agentRefKey, t.Code, sub.AgentID) + `"`),
-		"payload":       sub.Payload,
+
+		"agent_ref": json.RawMessage(`"` + AgentRef(agentRefKey, t.Code, sub.AgentID) + `"`),
+		"payload":   sub.Payload,
 	})
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	res := delivery.PostJSON(ctx, contract.Receiver.URL, body, map[string]string{
-		"Idempotency-Key":     fmt.Sprintf("%d", sub.SubmissionID),
-		"Kungfu-Task":         t.Code,
-		"Kungfu-Task-Version": fmt.Sprintf("%d", sub.Version),
+		"Idempotency-Key": fmt.Sprintf("%d", sub.SubmissionID),
+		"Kungfu-Task":     t.Code,
 	}, delivery.AgentSubmitErrorConfig())
 
 	outcome := mapReply(res)
@@ -302,17 +307,4 @@ func maybePauseForReceiverFault(ctx context.Context, pool *pg.Pool, taskID int64
 		return errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	return nil
-}
-
-// versionContract loads a task version's contract (pool or tx).
-func versionContract(ctx context.Context, q pg.Querier, taskID int64, version int32) (task.Contract, error) {
-	v, err := repository.FindTaskVersion(ctx, q, taskID, version)
-	if err != nil || v == nil {
-		return task.Contract{}, err
-	}
-	var contract task.Contract
-	if err := json.Unmarshal(v.Contract, &contract); err != nil {
-		return task.Contract{}, err
-	}
-	return contract, nil
 }

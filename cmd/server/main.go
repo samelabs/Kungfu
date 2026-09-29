@@ -82,18 +82,6 @@ func main() {
 		}
 	})
 
-	// Data retention (§9): 30 days after a task closes its snapshot
-	// material goes (the rest of the contract, hashes and events stay).
-	retentionStop := make(chan struct{})
-	retentionDone := runPeriodic("retention", retentionStop, backgroundErrors, 6*time.Hour, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		snapshots, err := service.PurgeExpired(ctx, pool, time.Now(), 500)
-		if err != nil {
-			log.Printf("[kungfu.md] retention pass failed (snapshots=%d): %v", snapshots, err)
-		}
-	})
-
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
 		Handler:      srv,
@@ -119,10 +107,10 @@ func main() {
 		httpServer:      httpServer,
 		shutdownBudget:  10 * time.Second,
 		signals:         signals,
-		backgroundStops: []chan struct{}{gcStop, claimExpiryStop, recoveryStop, retentionStop},
+		backgroundStops: []chan struct{}{gcStop, claimExpiryStop, recoveryStop},
 		// Join every worker's in-flight pass before the closers run —
 		// the done channels come straight from runPeriodic/runRateLimiterGC.
-		backgroundJoins:  []<-chan struct{}{gcDone, claimExpiryDone, recoveryDone, retentionDone},
+		backgroundJoins:  []<-chan struct{}{gcDone, claimExpiryDone, recoveryDone},
 		closers:          []io.Closer{poolCloser{pool}},
 		backgroundErrors: backgroundErrors,
 	})

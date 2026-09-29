@@ -286,8 +286,7 @@ func GetPlatformTask(ctx context.Context, pool *pg.Pool, principal *Principal, c
 	d.Submissions = make([]SubmissionFact, 0, len(subs))
 	for i := range subs {
 		d.Submissions = append(d.Submissions, SubmissionFact{
-			SubmissionID: subs[i].SubmissionID, Version: subs[i].Version,
-			AgentID: subs[i].AgentID, Amount: subs[i].Amount,
+			SubmissionID: subs[i].SubmissionID, AgentID: subs[i].AgentID, Amount: subs[i].Amount,
 			State: subs[i].State, Failure: subs[i].Failure, CreatedAt: subs[i].CreatedAt,
 		})
 	}

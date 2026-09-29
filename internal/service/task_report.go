@@ -44,7 +44,7 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if t.Status == task.TaskDraft {
+	if t.Status == task.TaskPaused {
 		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 
@@ -63,28 +63,3 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 // retentionWindow is §9: snapshot material is kept 30 days after the
 // task closes.
 const retentionWindow = 30 * 24 * time.Hour
-
-// PurgeExpired runs one §9 retention pass: tasks closed ≥ 30 days
-// (measured by the task's updated_at — closed is terminal and the only
-// possible later write is a refund, making updated_at a conservative
-// close marker) have every version snapshot emptied: harness → []
-// (the contract itself carries no sample since WO-20b; the rest of
-// the contract stays for audit).
-// Submission payloads need no pass: they are cleared the moment the
-// submission is terminal.
-//
-// Returns the number of tasks whose snapshots were purged.
-func PurgeExpired(ctx context.Context, pool *pg.Pool, now time.Time, batch int) (int, error) {
-	ids, err := repository.ListClosedTasksWithSnapshots(ctx, pool, now.Add(-retentionWindow), batch)
-	if err != nil {
-		return 0, err
-	}
-	snapshots := 0
-	for _, id := range ids {
-		if err := repository.PurgeTaskVersionSnapshots(ctx, pool, id); err != nil {
-			return snapshots, err
-		}
-		snapshots++
-	}
-	return snapshots, nil
-}

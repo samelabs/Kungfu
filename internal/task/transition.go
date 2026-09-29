@@ -58,21 +58,18 @@ const (
 
 // taskTransitions is the §4 edge set:
 //
-//	draft ──open──▶ open ──pause──▶ paused ──open──▶ open
-//	  │               │                │
-//	  └─────close─────┴─────close──────┴──▶ closed (terminal)
+//	paused ──open──▶ open ──pause──▶ paused ──open──▶ open
+//	  │                │                │
+//	  └────close───────┴────close───────┴──▶ closed (terminal)
 //
 // platform_pause applies to an open task; platform_close may close
 // any non-closed task (platform governance).
 var taskTransitions = map[[2]string]string{
-	{TaskDraft, EventOpen}:           TaskOpen,
 	{TaskPaused, EventOpen}:          TaskOpen,
 	{TaskOpen, EventPause}:           TaskPaused,
 	{TaskOpen, EventPlatformPause}:   TaskPaused,
-	{TaskDraft, EventClose}:          TaskClosed,
 	{TaskOpen, EventClose}:           TaskClosed,
 	{TaskPaused, EventClose}:         TaskClosed,
-	{TaskDraft, EventPlatformClose}:  TaskClosed,
 	{TaskOpen, EventPlatformClose}:   TaskClosed,
 	{TaskPaused, EventPlatformClose}: TaskClosed,
 }
