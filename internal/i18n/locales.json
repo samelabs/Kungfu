@@ -56,7 +56,9 @@
       "credits_soon": "Coming soon",
       "credits_unit": "credit",
       "credits_terms": "Terms",
-      "credits_privacy": "Privacy"
+      "credits_privacy": "Privacy",
+      "task_page_empty": "This page has no tasks.",
+      "task_first_page": "Go to page 1"
     },
     "owner": {
       "nav": {
@@ -523,7 +525,9 @@
       "credits_soon": "即将开放",
       "credits_unit": "积分",
       "credits_terms": "条款",
-      "credits_privacy": "隐私"
+      "credits_privacy": "隐私",
+      "task_page_empty": "这一页没有任务。",
+      "task_first_page": "回到第 1 页"
     },
     "owner": {
       "nav": {
@@ -990,7 +994,9 @@
       "credits_soon": "近日公開",
       "credits_unit": "クレジット",
       "credits_terms": "利用規約",
-      "credits_privacy": "プライバシー"
+      "credits_privacy": "プライバシー",
+      "task_page_empty": "このページにタスクはありません。",
+      "task_first_page": "1 ページへ戻る"
     },
     "owner": {
       "nav": {
@@ -1457,7 +1463,9 @@
       "credits_soon": "곧 공개",
       "credits_unit": "크레딧",
       "credits_terms": "약관",
-      "credits_privacy": "개인정보"
+      "credits_privacy": "개인정보",
+      "task_page_empty": "이 페이지에는 작업이 없습니다.",
+      "task_first_page": "1 페이지로 돌아가기"
     },
     "owner": {
       "nav": {
@@ -1924,7 +1932,9 @@
       "credits_soon": "Próximamente",
       "credits_unit": "créditos",
       "credits_terms": "Términos",
-      "credits_privacy": "Privacidad"
+      "credits_privacy": "Privacidad",
+      "task_page_empty": "Esta página no tiene tareas.",
+      "task_first_page": "Ir a la página 1"
     },
     "owner": {
       "nav": {

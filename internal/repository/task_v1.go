@@ -153,13 +153,22 @@ func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int
 		  AND COALESCE(v.contract->>'title', tb_task.draft_contract->>'title', '')
 		      ILIKE $%d ESCAPE '\'`, n)
 	}
+	// total runs as its own COUNT over the SAME filters: a window
+	// COUNT(*) OVER() only exists while the page has rows, so an
+	// out-of-range page would report total 0 (WO-19b).
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM tb_task
+		LEFT JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` + where
+	if err := q.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	args = append(args, limit, offset)
 	query := `
 		SELECT tb_task.id, tb_task.code, tb_task.publisher_id, tb_task.status, tb_task.version,
 		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
 		       tb_task.paused_reason, tb_task.closed_reason, tb_task.draft_contract,
-		       tb_task.created_at, tb_task.updated_at,
-		       COUNT(*) OVER() AS total
+		       tb_task.created_at, tb_task.updated_at
 		FROM tb_task
 		LEFT JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` +
 		where + `
@@ -171,13 +180,12 @@ func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int
 	}
 	defer rows.Close()
 	var out []TaskRow
-	var total int64
 	for rows.Next() {
 		var t TaskRow
 		if err := rows.Scan(&t.ID, &t.Code, &t.PublisherID, &t.Status, &t.Version,
 			&t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
 			&t.PausedReason, &t.ClosedReason, &t.DraftContract,
-			&t.CreatedAt, &t.UpdatedAt, &total); err != nil {
+			&t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, t)
@@ -656,13 +664,23 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 		  AND (COALESCE(v.contract->>'title', '') ILIKE $%d ESCAPE '\'
 		        OR COALESCE(v.contract->>'requirements', '') ILIKE $%d ESCAPE '\')`, n, n)
 	}
+	// total runs as its own COUNT over the SAME filters: a window
+	// COUNT(*) OVER() only exists while the page has rows, so an
+	// out-of-range page would report total 0 (WO-19b).
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM tb_task
+		JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` + where
+	if err := q.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	args = append(args, limit, offset)
 	query := `
 		SELECT tb_task.id, tb_task.code, tb_task.publisher_id, tb_task.status, tb_task.version,
 		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
 		       tb_task.paused_reason, tb_task.closed_reason, tb_task.draft_contract,
 		       tb_task.created_at, tb_task.updated_at,
-		       v.contract, COUNT(*) OVER() AS total
+		       v.contract
 		FROM tb_task
 		JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` +
 		where + `
@@ -674,13 +692,12 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 	}
 	defer rows.Close()
 	var out []WorkCandidate
-	var total int64
 	for rows.Next() {
 		var c WorkCandidate
 		if err := rows.Scan(&c.Task.ID, &c.Task.Code, &c.Task.PublisherID, &c.Task.Status, &c.Task.Version,
 			&c.Task.BudgetLocked, &c.Task.Settled, &c.Task.Reserved, &c.Task.Refunded,
 			&c.Task.PausedReason, &c.Task.ClosedReason, &c.Task.DraftContract,
-			&c.Task.CreatedAt, &c.Task.UpdatedAt, &c.Contract, &total); err != nil {
+			&c.Task.CreatedAt, &c.Task.UpdatedAt, &c.Contract); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, c)

@@ -127,13 +127,13 @@ func TestMCPProtocolNegotiatesExactly20260728(t *testing.T) {
 	}
 }
 
-// The actual contract: legacy initialize is NOT a public/anonymous
-// MCP operation on this surface. The 2026-07-28 handshake is
-// server/discover; an ANONYMOUS legacy initialize attempt cannot
-// negotiate (the request is auth-rejected first). An AUTHENTICATED
-// legacy client negotiates its own revision — proven by
-// TestMCPLegacyProtocolPinnedClient below.
-func TestMCPLegacyInitializeIsNotPublic(t *testing.T) {
+// The 2026-07-28 handshake is server/discover. A LEGACY initialize
+// is a protocol handshake too: anonymous (it returns server
+// capabilities and carries no data) so a key-less client pinned to an
+// older revision can bootstrap — proven end to end by
+// TestMCPLegacyAnonymousHandshakeAndRegister. Protected tools stay
+// Bearer-gated regardless.
+func TestMCPLegacyInitializeIsPublicHandshake(t *testing.T) {
 	pool := m1TestPool(t)
 	h := m1Handler(t, pool, nil)
 	srv := httptest.NewServer(h)
@@ -148,14 +148,20 @@ func TestMCPLegacyInitializeIsNotPublic(t *testing.T) {
 		},
 	}, map[string]string{"Mcp-Method": "initialize"})
 
-	// Anonymous legacy initialize must NOT negotiate: HTTP-level
-	// rejection (401 — not a public operation) or a JSON-RPC error.
-	// A SUCCESS result with serverInfo must never appear.
-	if strings.Contains(body, "serverInfo") {
-		t.Fatalf("legacy initialize negotiated: %d %s", sc, body)
+	// WO-18b: the legacy initialize IS an anonymous protocol handshake
+	// now — it negotiates and answers capabilities (serverInfo) with no
+	// key, exposing nothing but server capabilities.
+	if sc != 200 || !strings.Contains(body, "serverInfo") {
+		t.Fatalf("anonymous legacy initialize: %d %s", sc, body)
 	}
-	if sc == 200 && !strings.Contains(body, "error") {
-		t.Fatalf("legacy initialize accepted anonymously: %d %s", sc, body)
+
+	// a PROTECTED tool on the same anonymous connection stays 401
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+		"params": map[string]interface{}{"name": "work_list", "arguments": map[string]interface{}{}},
+	}, map[string]string{"Mcp-Method": "tools/call", "Mcp-Name": "work_list"})
+	if sc != http.StatusUnauthorized {
+		t.Fatalf("anonymous work_list: %d %q, want 401", sc, body)
 	}
 }
 
@@ -897,5 +903,89 @@ func TestMCPLegacyProtocolPinnedClient(t *testing.T) {
 	}, hdr)
 	if sc != 200 || !strings.Contains(body, `"ok":true`) {
 		t.Fatalf("work_list: %d %s", sc, body)
+	}
+}
+
+// TestMCPLegacyAnonymousHandshakeAndRegister (WO-18b): a key-less
+// client pinned to 2025-03-26 completes the whole bootstrap —
+// initialize → notifications/initialized → ping → tools/list →
+// tools/call(account_register) — and receives its Agent key. A
+// protected tool on the same anonymous connection stays 401.
+func TestMCPLegacyAnonymousHandshakeAndRegister(t *testing.T) {
+	pool := m1TestPool(t)
+	h := m1Handler(t, pool, nil)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	const legacy = "2025-03-26"
+	hdr := map[string]string{"Mcp-Protocol-Version": legacy}
+
+	// initialize — anonymous, negotiates its own revision
+	hdr["Mcp-Method"] = "initialize"
+	sc, body := m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": legacy,
+			"capabilities":    map[string]interface{}{},
+			"clientInfo":      map[string]string{"name": "anon18b", "version": "1"},
+		},
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, `"protocolVersion":"`+legacy+`"`) {
+		t.Fatalf("anonymous initialize: %d %s", sc, body)
+	}
+
+	// notifications/initialized — anonymous notification (202, no body)
+	hdr["Mcp-Method"] = "notifications/initialized"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "method": "notifications/initialized",
+	}, hdr)
+	if sc != 200 && sc != 202 {
+		t.Fatalf("anonymous initialized notification: %d %s", sc, body)
+	}
+
+	// ping — anonymous call
+	hdr["Mcp-Method"] = "ping"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 2, "method": "ping",
+	}, hdr)
+	if sc != 200 {
+		t.Fatalf("anonymous ping: %d %s", sc, body)
+	}
+
+	// tools/list — anonymous
+	hdr["Mcp-Method"] = "tools/list"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/list",
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, "account_register") {
+		t.Fatalf("anonymous tools/list: %d %s", sc, body)
+	}
+
+	// tools/call(account_register) — anonymous, returns the key once
+	name := fmt.Sprintf("anon18b_%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tb_bots WHERE bot_name = $1`, name)
+	})
+	hdr["Mcp-Method"] = "tools/call"
+	hdr["Mcp-Name"] = "account_register"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+		"params": map[string]interface{}{
+			"name":      "account_register",
+			"arguments": map[string]interface{}{"name": name, "password": "passpass123"},
+		},
+	}, hdr)
+	if sc != 200 || !strings.Contains(body, "kf_live_") {
+		t.Fatalf("anonymous account_register: %d %s", sc, body)
+	}
+
+	// the SAME anonymous client cannot call a protected tool
+	hdr["Mcp-Name"] = "work_list"
+	sc, body = m1RawRequest(t, srv, map[string]interface{}{
+		"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+		"params": map[string]interface{}{"name": "work_list", "arguments": map[string]interface{}{}},
+	}, hdr)
+	if sc != http.StatusUnauthorized {
+		t.Fatalf("anonymous work_list: %d %q, want 401", sc, body)
 	}
 }

@@ -253,6 +253,16 @@ func TestListWorkSearchAndPaging(t *testing.T) {
 	if strings.Join(paged, ",") != strings.Join(full, ",") {
 		t.Fatalf("paged order %v != full order %v", paged, full)
 	}
+
+	// WO-19b: an out-of-range page keeps the FULL total — a window
+	// COUNT would collapse to 0 as soon as the page has no rows
+	items, total, err = ListWork(ctx, pool, agent, time.Now(), WorkListFilter{Q: pagingMarker, Page: 4, PageSize: 2})
+	if err != nil {
+		t.Fatalf("out-of-range page: %v", err)
+	}
+	if len(items) != 0 || total != 5 {
+		t.Fatalf("out-of-range page: %d items, total=%d, want 0/5", len(items), total)
+	}
 }
 
 // -- statistics precision --

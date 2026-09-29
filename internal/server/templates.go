@@ -278,6 +278,13 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page 
 		`<button class="btn primary" type="submit">` + t("home.search_submit") + `</button></form>`)
 
 	if len(rows) == 0 {
+		// WO-19b: tasks exist but this page is beyond the end — say so
+		// and link back to page 1, never "no tasks yet".
+		if total > 0 {
+			b.WriteString(`<p class="task-board-empty">` + t("home.task_page_empty") + `</p>` +
+				`<p class="task-board-empty-actions"><a class="btn" href="` + homeBoardURL(locale, q, 1) + `">` + t("home.task_first_page") + `</a></p>`)
+			return b.String()
+		}
 		emptyKey := "home.task_empty"
 		if q != "" {
 			emptyKey = "home.task_no_match"

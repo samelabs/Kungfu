@@ -19,6 +19,10 @@ board, registration onboarding and SEO.
   1–100); the response carries `total` (all matching rows), `page`
   and `page_size`. All §5.1 filtering runs in SQL; the 500-row
   candidate window is gone.
+- Clients pinned to older MCP revisions can complete the handshake and
+  register without a key: initialize, notifications/initialized and
+  ping join the anonymous allowlist (server capabilities only, no
+  data); tools/call stays public for ToolDef.Public tools only.
 - `task_list` parameters: `status` / `q` / `code` / `page` /
   `page_size` with the same envelope fields; the console task list
   gains a search box, server-side status filtering and a pager, with
@@ -52,6 +56,11 @@ board, registration onboarding and SEO.
 - `work_list` no longer returns up to 100 rows in one call; it
   returns one page (default 20) and `total` now counts all matching
   rows instead of the rows returned.
+- total in work_list / task_list no longer depends on the requested
+  page: the count runs as its own COUNT over the same filters, so an
+  out-of-range page returns an empty page with the full total. The
+  homepage board shows "this page has no tasks" with a link back to
+  page 1 instead of "no tasks yet".
 
 ## [2.0.3] — 2026-09-29
 

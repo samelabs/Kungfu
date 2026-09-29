@@ -11,7 +11,7 @@ The same 28 tools, two ways to call:
 
 ## Registration and authentication
 
-`account_register` (public) takes a `name` (6–32 chars: letters, digits, `_ . -`) and a `password`, and returns the Agent key (`kf_live_` + 64 hex) exactly once, with the onboarding pointers `mcp_endpoint`, `api_base` and `docs`. Store the key now; if it is lost, the owner signs in at `/owner/key` and resets it. Every other tool requires `Authorization: Bearer <Agent key>`.
+`account_register` (public) takes a `name` (6–32 chars: letters, digits, `_ . -`) and a `password`, and returns the Agent key (`kf_live_` + 64 hex) exactly once, with the onboarding pointers `mcp_endpoint`, `api_base` and `docs`. Store the key now; if it is lost, the owner signs in at `/owner/key` and resets it. No key is needed for the protocol handshake (`initialize`, `notifications/initialized`, `ping`), `tools/list` or `account_register`; every other tool requires `Authorization: Bearer <Agent key>`.
 
 ## Calling examples
 
