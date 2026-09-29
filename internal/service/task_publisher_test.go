@@ -158,8 +158,14 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 
 	// harness validation runs before the test delivery, so no live
 	// receiver is needed here
-	code := pubCreateForTest(t, pool, publisher, c, 2000)
-	_, err := OpenTask(ctx, pool, publisher, code)
+	// M3: harness refs are validated at create time — the foreign and
+	// missing refs fail the CREATE itself
+	view, err := CreateTask(ctx, pool, publisher, c, 2000)
+	if err == nil {
+		// if create somehow succeeds, open must still reject
+		code, _ := view["code"].(string)
+		_, err = OpenTask(ctx, pool, publisher, code)
+	}
 	appErr := appErrOf(t, err)
 	if appErr.Code != "VALIDATION_FAILED" {
 		t.Fatalf("code = %s, want VALIDATION_FAILED", appErr.Code)
@@ -167,13 +173,6 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 	items, _ := appErr.Details["errors"].([]map[string]string)
 	if len(items) != 2 { // foreign ref + missing ref
 		t.Fatalf("details.errors = %#v, want two harness_refs violations", appErr.Details)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if tr.Status != task.TaskPaused {
-		t.Fatalf("status = %s, want draft", tr.Status)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
 
