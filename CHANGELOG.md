@@ -5,6 +5,37 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] — 2026-09-29
+
+The task console separates overview, contract editing and deliveries
+into their own pages; each page loads only what it shows. No schema
+changes.
+
+### Added
+
+- `/owner/tasks/{code}/edit` and `/owner/tasks/{code}/deliveries`
+  join the overview page behind the owner login (unified noindex
+  head, Tasks nav highlight).
+- The overview shows a read-only contract summary (requirements
+  excerpt, receiver, price, harness size, execution rules) with the
+  full contract as an expandable JSON, and links to the editor
+  (draft/paused only; open tasks say "pause first") and to the
+  deliveries page (labelled with the 30-day submission count).
+- The edit page renders the contract form alone, saves the draft and
+  returns to the overview with a saved notice; open/closed tasks get
+  an explanation instead of the form.
+- The deliveries page carries its state filter and page in the URL
+  (`?state=&page=`).
+- The harness picker loads the memory list on first expand (edit and
+  create pages); selected memories show by code until the titles
+  arrive.
+
+### Changed
+
+- The overview page no longer renders the contract form and requests
+  neither memory_list nor task_submissions; the deliveries page
+  requests only task_submissions. tcvRenderDetail is gone.
+
 ## [2.0.4] — 2026-09-29
 
 Privacy hints, discovery (search and paging), the homepage task
