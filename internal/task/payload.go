@@ -106,16 +106,15 @@ func (e PointerError) Error() string {
 	return e.Pointer + ": " + e.Message
 }
 
-// compiledSchemaCache caches compiled output.schemas by task version —
-// the hot SubmitWork path never recompiles. Entries are immutable;
-// a version number is never reused with different content (versions
-// are append-only snapshots).
-var compiledSchemaCache sync.Map // "taskID:version" -> *jsonschema.Schema
+// compiledSchemaCache caches compiled output.schemas by the hex
+// sha256 of the schema bytes — the hot SubmitWork path never
+// recompiles, and an edited schema naturally gets a new key.
+var compiledSchemaCache sync.Map // hex(sha256(schema)) -> *jsonschema.Schema
 
 // ValidatePayloadForTask validates payload against schema (draft
-// 2020-12), caching the compiled schema under (taskID, version).
-func ValidatePayloadForTask(taskID int64, version int32, schema, payload []byte) []PointerError {
-	key := fmt.Sprintf("%d:%d", taskID, version)
+// 2020-12), caching the compiled schema by its content hash.
+func ValidatePayloadForTask(schema, payload []byte) []PointerError {
+	key := fmt.Sprintf("%x", sha256.Sum256(schema))
 	cached, ok := compiledSchemaCache.Load(key)
 	var sch *jsonschema.Schema
 	if ok {

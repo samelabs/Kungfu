@@ -18,7 +18,6 @@ import (
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
-	"kungfu.md/internal/task"
 )
 
 // reportReasonMaxRunes is the §-derived bound (tb_task_report.reason
@@ -44,10 +43,6 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if t.Status == task.TaskPaused {
-		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
-	}
-
 	if id, ok, err := repository.FindOpenReportByReporterTask(ctx, pool, t.ID, agentID); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if ok {

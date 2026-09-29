@@ -10,6 +10,7 @@ package service
 // change. Delivery is WO-5.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	goerrors "errors"
@@ -185,7 +186,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if errs := payloadSchemaErrors(t.ID, 0, schema, in.Payload); len(errs) > 0 {
+	if errs := payloadSchemaErrors(schema, in.Payload); len(errs) > 0 {
 		return SubmissionView{}, schemaMismatch(errs)
 	}
 	if ptrs := task.ScanCredentials(in.Payload); len(ptrs) > 0 {
@@ -210,16 +211,33 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if locked.PublisherID == agentID {
 		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}
+	// The contract may have changed between the pre-check and the
+	// lock (a paused edit commits in between). Re-verify the
+	// contract-dependent checks against the locked row's contract.
+	var lockedContract task.Contract
+	if err := json.Unmarshal(locked.Contract, &lockedContract); err != nil {
+		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
+	}
+	if !bytes.Equal(locked.Contract, t.Contract) {
+		if in.ClaimID == nil {
+			if lockedContract.Claim.Required {
+				return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
+			}
+		}
+		if errs := payloadSchemaErrors(lockedContract.Output.Schema, in.Payload); len(errs) > 0 {
+			return SubmissionView{}, schemaMismatch(errs)
+		}
+	}
 	lockedCounts, err := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if lockedCounts.Rejected >= rejectedCapFor(contract) {
+	if lockedCounts.Rejected >= rejectedCapFor(lockedContract) {
 		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
+			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(lockedContract)),
 			map[string]interface{}{"limit": "rejected"})
 	}
-	amount := contract.Price
+	amount := lockedContract.Price
 	if in.ClaimID == nil {
 		if locked.Status != task.TaskOpen {
 			return SubmissionView{}, taskNotOpen(locked)
@@ -341,14 +359,14 @@ func checkRevises(ctx context.Context, pool *pg.Pool, revises, agentID, taskID i
 	return nil
 }
 
-// payloadSchemaErrors checks the payload against the version's
+// payloadSchemaErrors checks the payload against the contract's
 // output.schema; a contract without one (§3: optional) has no
 // structure check beyond "a JSON object".
-func payloadSchemaErrors(taskID int64, version int32, schema, payload []byte) []task.PointerError {
+func payloadSchemaErrors(schema, payload []byte) []task.PointerError {
 	if len(schema) == 0 || string(schema) == "null" {
 		return nil
 	}
-	return task.ValidatePayloadForTask(taskID, version, schema, payload)
+	return task.ValidatePayloadForTask(schema, payload)
 }
 
 func schemaMismatch(errs []task.PointerError) *errors.AppError {
