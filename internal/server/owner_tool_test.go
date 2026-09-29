@@ -345,7 +345,6 @@ func ocContract() map[string]any {
 			},
 		},
 		"receiver": map[string]any{"url": okReceiverURL},
-		"sample":   map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
 		"price":    5,
 	}
 }

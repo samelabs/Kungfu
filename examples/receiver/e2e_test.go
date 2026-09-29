@@ -242,7 +242,6 @@ func e2eContract(receiverURL string, mutate func(map[string]any)) map[string]any
 			},
 		},
 		"receiver": map[string]any{"url": receiverURL},
-		"sample":   json.RawMessage(e2eGoodPayload),
 		"price":    5,
 	}
 	if mutate != nil {
@@ -685,7 +684,6 @@ func TestE2EJourney7RejectionCap(t *testing.T) {
 		{"id":"C1","pattern":{"pointer":"/url","regex":"^https://never\\.matches$"}}]}`, envConfig{})
 	code := e.publishTask(t, e2eContract(e.rcv.URL, func(c map[string]any) {
 		c["limits"] = map[string]any{"max_rejected_per_agent": 1}
-		c["sample"] = json.RawMessage(`{"url":"https://never.matches","bullets":["s1","s2","s3"]}`)
 	}))
 
 	payload := map[string]any{"url": "ftp://nope", "bullets": []string{"s1", "s2", "s3"}}

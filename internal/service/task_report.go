@@ -1,7 +1,7 @@
 package service
 
 // Executor reports (§8.1 work_report) and data retention (§9).
-// Retention clears closed tasks' snapshot material (harness, sample)
+// Retention clears closed tasks' snapshot material (harness)
 // after 30 days; payloads are already cleared when a submission is
 // decided.
 
@@ -67,8 +67,9 @@ const retentionWindow = 30 * 24 * time.Hour
 // PurgeExpired runs one §9 retention pass: tasks closed ≥ 30 days
 // (measured by the task's updated_at — closed is terminal and the only
 // possible later write is a refund, making updated_at a conservative
-// close marker) have every version snapshot emptied: harness → [],
-// contract.sample → {} (the rest of the contract stays for audit).
+// close marker) have every version snapshot emptied: harness → []
+// (the contract itself carries no sample since WO-20b; the rest of
+// the contract stays for audit).
 // Submission payloads need no pass: they are cleared the moment the
 // submission is terminal.
 //

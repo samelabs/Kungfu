@@ -406,8 +406,10 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 }
 
 // runTestDelivery performs the §4 open-time test delivery: the §7.1
-// request shape with agent_ref "test", the contract's sample as the
-// payload, and the header Kungfu-Test: 1. The idempotency key is
+// request shape with agent_ref "test", an EMPTY payload {} and the
+// header Kungfu-Test: 1. It checks that the receiver is reachable and
+// live — not the content: the payload is fixed, so nothing about the
+// task reaches the receiver here. The idempotency key is
 // test-<code>-<version>-<random hex>, unique per open attempt, so a
 // receiver that caches by key never replays a stale 500 from a
 // previous attempt. The receiver must answer 2xx; any other outcome
@@ -420,13 +422,12 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 		return errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	testKey := fmt.Sprintf("test-%s-%d-%x", code, version, randBytes)
-	payload := contract.Sample
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(`"` + testKey + `"`),
 		"task_code":     json.RawMessage(`"` + code + `"`),
 		"version":       json.RawMessage(fmt.Sprintf(`%d`, version)),
 		"agent_ref":     json.RawMessage(`"test"`),
-		"payload":       payload,
+		"payload":       json.RawMessage(`{}`),
 	})
 	if err != nil {
 		return errors.New(0, "INTERNAL_ERROR", "Internal error")

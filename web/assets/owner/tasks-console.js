@@ -127,11 +127,6 @@ function tcvContractForm(mount, opts) {
         <input id="tcvSReceiver" type="url" placeholder="https://"${disabled}>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_receiver_hint'))}</p>
 
-        <label for="tcvSSample">${escapeHtml(tcvT('f_sample'))}</label>
-        <textarea id="tcvSSample" class="mono" rows="4" spellcheck="false"${disabled}></textarea>
-        <p class="tcv-err" id="tcvSampleError" hidden></p>
-        <p class="tcv-hint muted">${escapeHtml(tcvT('f_sample_hint'))}</p>
-
         <details id="tcvSchemaWrap" class="tcv-picker">
             <summary>${escapeHtml(tcvT('f_schema'))}</summary>
             <label for="tcvFSchema">${escapeHtml(tcvT('f_schema'))}</label>
@@ -187,7 +182,6 @@ function tcvContractForm(mount, opts) {
         harness = Array.isArray(src.harness_refs) ? src.harness_refs.slice(0, 10) : [];
         renderChips();
         qs('#tcvSReceiver').value = (src.receiver && src.receiver.url) || '';
-        qs('#tcvSSample').value = src.sample === undefined ? '' : tcvPretty(src.sample);
         const schema = src.output && src.output.schema;
         qs('#tcvFSchema').value = schema === undefined ? '' : tcvPretty(schema);
         qs('#tcvFMaxRejected').value = (src.limits && src.limits.max_rejected_per_agent) || '';
@@ -220,16 +214,6 @@ function tcvContractForm(mount, opts) {
         if (url) c.receiver = Object.assign({}, c.receiver, {url});
         else if (strict) return bad(tcvT('need_receiver'));
         else if (c.receiver) c.receiver.url = (src.receiver && src.receiver.url) || '';
-        const sampleRaw = qs('#tcvSSample').value.trim();
-        if (sampleRaw) {
-            try {
-                const sample = JSON.parse(sampleRaw);
-                if (sample && typeof sample === 'object' && !Array.isArray(sample)) c.sample = sample;
-                else if (strict) return bad(tcvT('need_sample'));
-            } catch (e) {
-                if (strict) return bad(tcvT('need_sample'));
-            }
-        } else if (strict) return bad(tcvT('need_sample'));
         const schemaRaw = qs('#tcvFSchema').value.trim();
         if (schemaRaw) {
             try {
@@ -379,23 +363,7 @@ function tcvContractForm(mount, opts) {
         if (opts.onChange) opts.onChange();
     });
 
-    // sample must be a JSON object — checked as the field loses focus
-    on('#tcvSSample', 'blur', () => {
-        const raw = qs('#tcvSSample').value.trim();
-        const err = qs('#tcvSampleError');
-        if (!err) return;
-        if (!raw) { err.hidden = true; return; }
-        let v = null;
-        try { v = JSON.parse(raw); } catch (e) { v = null; }
-        if (!v || typeof v !== 'object' || Array.isArray(v)) {
-            err.hidden = false;
-            err.textContent = tcvT('need_sample');
-        } else {
-            err.hidden = true;
-        }
-    });
-
-    ['#tcvFTitle', '#tcvFRequirements', '#tcvSReceiver', '#tcvSSample', '#tcvFSchema',
+    ['#tcvFTitle', '#tcvFRequirements', '#tcvSReceiver', '#tcvFSchema',
         '#tcvFMaxRejected', '#tcvFClaimRequired', '#tcvFClaimTtl', '#tcvFClaimMaxDur', '#tcvFPrice'
     ].forEach((sel) => on(sel, 'input', changed));
     on('#tcvAdvancedBtn', 'click', toJSONMode);

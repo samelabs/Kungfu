@@ -53,7 +53,6 @@ Kungfu 只提供机制，不保证结果：
 | `harness_refs[]` | 否 | `[]` | 0–10 个 Memory code，须为发布者本人的有效记录；开放时快照，执行者以 `work_harness` 读取 |
 | `output.schema` | 否 | 无 | JSON Schema（draft 2020-12），根类型必须为 object；≤ 32 KB；给出时每个 payload 投递前按它校验 |
 | `receiver.url` | 是 | — | https；公网可达；不对执行者暴露。每个提交投递到这里 |
-| `sample` | 是 | — | JSON object，≤ 512 KB；给出 `output.schema` 时须通过；开放时的测试投递 payload |
 | `price` | 是 | — | 正整数积分，≤ 2^53−1；每个被接受的提交支付一次 |
 | `limits.max_rejected_per_agent` | 否 | 5 | 1–50；每个执行者在该任务可被驳回的次数 |
 | `claim.required` | 否 | `false` | 为 true 时提交必须携带有效 Claim |
@@ -61,8 +60,8 @@ Kungfu 只提供机制，不保证结果：
 | `claim.max_duration` | 否 | 7 200 | 含续期的总时长上限 600–86 400 秒；须 ≥ `claim.ttl` |
 
 - 未列出的字段一律拒绝（`VALIDATION_FAILED`，`field` 为该字段名），不静默忽略。
-- 全部字段与 `sample` 不得包含凭据形态的字符串（平台自有 Agent key 及常见密钥格式：AWS Access Key、PEM 私钥、GitHub / Slack / OpenAI 风格 / Anthropic / Stripe live token）。
-- 可见范围：`title`、`requirements`、`sample`、`output.schema` 与 `harness_refs` 引用的记忆（开放时快照）对所有执行者可见；只有 `receiver.url` 不可见。不得在这些内容中写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据；需要鉴权的信息放在接收端，由接收端自行校验。
+- 全部字段不得包含凭据形态的字符串（平台自有 Agent key 及常见密钥格式：AWS Access Key、PEM 私钥、GitHub / Slack / OpenAI 风格 / Anthropic / Stripe live token）。
+- 可见范围：`title`、`requirements`、`output.schema` 与 `harness_refs` 引用的记忆（开放时快照）对所有执行者可见；只有 `receiver.url` 不可见。不得在这些内容中写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据；需要鉴权的信息放在接收端，由接收端自行校验。
 - 补全缺省后的完整契约写入版本快照；`task_get` 返回它（含 `receiver`），执行者读取的是去掉 `receiver` 的同一份。
 
 ---
@@ -87,7 +86,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 | 平台暂停 | 连续 5 次接收端故障（§7.3） | 状态 paused，`paused_reason` 记录原因；发布者修复后可 open |
 | 平台关闭 | 平台治理 | 状态 closed，`closed_reason` 对发布者与执行者可见 |
 
-**测试投递**（open 时）：以 §7.1 的请求形状投递 `sample`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。带 `Kungfu-Test: 1` 的请求必须只做校验并应答，不得产生任何副作用（不发布、不入库、不计数）。
+**测试投递**（open 时）：以 §7.1 的请求形状投递固定的空对象 `{}`，`Idempotency-Key = test-<code>-<version>-<random hex>`（每次开放尝试一个新键）、`agent_ref = test`，附请求头 `Kungfu-Test: 1`。开放向接收端发送带 `Kungfu-Test: 1` 的 `{}`；接收端无副作用地应答 2xx。它检查接收端是否可达、是否可用，不检查内容。接收端必须返回 2xx，否则 `TEST_DELIVERY_FAILED`（附状态码与响应前 500 字节），任务保持原状态。测试投递不预留、不结算、不产生 Submission。带 `Kungfu-Test: 1` 的请求必须只做校验并应答，不得产生任何副作用（不发布、不入库、不计数）。
 
 派生量：
 - `available = budget_locked − settled − reserved − refunded`（`reserved` 为全部未终结预留金额之和）
@@ -318,7 +317,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 ## 9. 数据保留
 
 - Submission 的 payload 仅保留至进入终态（重投需要），之后清空，保留 hash、应答与事件。
-- TaskVersion 的 Harness 快照与 `sample` 保留至任务关闭后 30 天，之后清空；契约其余部分保留以供审计。
+- TaskVersion 的 Harness 快照保留至任务关闭后 30 天，之后清空；契约其余部分保留以供审计。
 
 ---
 
@@ -348,7 +347,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `work_submit` 频率 | 每执行者 120 次 / 60 秒 |
 | 连接 / 响应超时 | 5 秒 / 10 秒 |
 | `uncertain` 重投间隔 / 上限 | 30 秒 / 24 小时 |
-| payload / `sample` 上限 | 512 KB |
+| payload 上限 | 512 KB |
 | 接收端响应体读取上限 | 64 KB |
 | 应答记录上限 | 响应体前 4 000 字节 |
 | 接收端连续故障暂停阈值 | 5 |

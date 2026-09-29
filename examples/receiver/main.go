@@ -268,15 +268,11 @@ func (r *receiver) handler() http.Handler {
 		r.mu.Unlock()
 
 		if req.Header.Get("Kungfu-Test") == "1" {
-			// open-time test delivery (§4): the sample must pass
-			// judging exactly like a real submission would.
-			v := r.judge(d.Payload)
-			out, _ := json.Marshal(v)
-			status := http.StatusOK
-			if !v.Accepted {
-				status = failStatus
-			}
-			writeResult(w, cachedResult{status: status, body: out})
+			// open-time test delivery (§4): a fixed {} payload that
+			// checks reachability and liveness — not the content. Answer
+			// 2xx with no side effects and never cache the key.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accepted":true,"test":true}`))
 			return
 		}
 

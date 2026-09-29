@@ -57,14 +57,14 @@ func TestOwnerTaskNewPageSimpleMode(t *testing.T) {
 	}
 
 	// the console asset carries the simple-mode form (title/
-	// requirements/receiver/sample/price/units + open now) and falls
+	// requirements/receiver/price/units + open now) and falls
 	// back to the JSON editor
 	asset := simpleGet(t, s, assetURL(t, s, "/owner/tasks/new", "owner/tasks-console.js", cookie), cookie)
 	if asset.Code != 200 {
 		t.Fatalf("tasks-console.js = %d", asset.Code)
 	}
 	js := asset.Body.String()
-	for _, marker := range []string{"tcvRenderSimpleForm", "tcvSPublish", "tcvSUnits", "tcvSOpen", "tcvSReceiver", "tcvSSample", "tasks.advanced"} {
+	for _, marker := range []string{"tcvRenderSimpleForm", "tcvSPublish", "tcvSUnits", "tcvSOpen", "tcvSReceiver", "tcvFRequirements", "tasks.advanced"} {
 		if !strings.Contains(js, marker) {
 			t.Fatalf("tasks-console.js missing simple-mode marker %s", marker)
 		}
@@ -80,7 +80,6 @@ func TestOwnerToolTaskCreateOpen(t *testing.T) {
 			"title":        "Console minimal",
 			"requirements": "Three bullets.",
 			"receiver":     map[string]any{"url": okReceiverURL},
-			"sample":       map[string]any{"result": "three bullets"},
 			"price":        5,
 		},
 		"budget": 10,

@@ -351,6 +351,10 @@ func TestGetWorkVisibility(t *testing.T) {
 	if view["status"] != task.TaskClosed {
 		t.Fatalf("status = %v, want closed", view["status"])
 	}
+	// WO-20b: the executor-side contract projection carries no sample
+	if _, has := view["contract"].(map[string]any)["sample"]; has {
+		t.Fatal("work_get contract projection still carries sample")
+	}
 	if err := task.CheckInvariants(ctx, pool, closed.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
 	}

@@ -17,7 +17,6 @@ func minimalContract() task.Contract {
 		Title:        "Summarize a page",
 		Requirements: "Three bullets of the page.",
 		Receiver:     task.Receiver{URL: okReceiverURL},
-		Sample:       []byte(`{"result":"three bullets"}`),
 		Price:        5,
 	}
 }

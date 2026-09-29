@@ -427,7 +427,6 @@ func TestSubmitClaimVersionPinned(t *testing.T) {
 		},
 		"required": ["url", "lang", "bullets"]
 	}`)
-	updated.Sample = []byte(`{"url":"https://example.com/a","lang":"en","bullets":["s1","s2","s3"]}`)
 	updated.Claim = task.ClaimConfig{} // v2 does not require a claim
 	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
 		t.Fatalf("update: %v", err)
@@ -647,8 +646,7 @@ func TestSubmitWithoutSchema(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 
 	code := submitOpenedTask(t, pool, publisher, 1000, func(c *task.Contract) {
-		c.Output = task.Output{}
-		c.Sample = []byte(`{"anything":"goes"}`)
+		c.Output = task.Output{} // no schema: free-form payloads settle
 	})
 	view, err := submitOnce(t, pool, agent, code, func(in *SubmitInput) {
 		in.Payload = []byte(`{"free":"form"}`)

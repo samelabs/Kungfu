@@ -367,7 +367,6 @@ func wo7Contract() task.Contract {
 				"bullets":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
 			},"required":["url","bullets"]}`)},
 		Receiver: task.Receiver{URL: okReceiverURL},
-		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		Price:    5,
 	}
 }

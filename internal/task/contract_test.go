@@ -28,7 +28,6 @@ func validContract() Contract {
 			}`),
 		},
 		Receiver: Receiver{URL: "https://example.com/hook"},
-		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		Price:    5,
 		Limits:   Limits{MaxRejectedPerAgent: i64(5)},
 		Claim:    ClaimConfig{Required: true, TTL: i64(1800), MaxDuration: i64(7200)},
@@ -47,7 +46,6 @@ func TestValidateContractValidMinimal(t *testing.T) {
 		Title:        "t",
 		Requirements: "r",
 		Receiver:     Receiver{URL: "https://example.com/hook"},
-		Sample:       []byte(`{}`),
 		Price:        1,
 	}
 	if errs := ValidateContract(c.WithDefaults()); len(errs) != 0 {
@@ -124,11 +122,6 @@ func TestValidateContractViolations(t *testing.T) {
 		{"receiver.url https only", func(c *Contract) { c.Receiver.URL = "http://example.com/hook" }, "receiver.url"},
 		{"receiver.url has host", func(c *Contract) { c.Receiver.URL = "https:///hook" }, "receiver.url"},
 
-		// -- sample --
-		{"sample required", func(c *Contract) { c.Sample = nil }, "sample"},
-		{"sample is an object", func(c *Contract) { c.Sample = []byte(`["x"]`) }, "sample"},
-		{"sample satisfies schema", func(c *Contract) { c.Sample = []byte(`{"url":"https://example.com/a"}`) }, "sample"},
-
 		// -- harness_refs --
 		{"harness_refs max 10", func(c *Contract) { c.HarnessRefs = make([]string, maxHarnessRefs+1) }, "harness_refs"},
 
@@ -163,12 +156,8 @@ func TestValidateContractViolations(t *testing.T) {
 		{"credential in requirements", func(c *Contract) {
 			c.Requirements = "do not leak " + fakeCredential()
 		}, "requirements"},
-		{"credential in sample (nested)", func(c *Contract) {
-			c.Sample = []byte(`{"url":"https://example.com/a","bullets":["s1","s2","` + fakeCredential() + `"]}`)
-		}, "sample"},
 		{"credential in schema string", func(c *Contract) {
 			c.Output.Schema = []byte(`{"type":"object","properties":{"url":{"type":"string","description":"never ` + fakeCredential() + `"}},"required":["url"]}`)
-			c.Sample = []byte(`{"url":"u"}`)
 		}, "output.schema"},
 	}
 

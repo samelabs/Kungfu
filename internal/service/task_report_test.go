@@ -107,7 +107,7 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 	}
 	open := workOpenTask(t, pool, publisher, 1000, withHarness)
 
-	snapshot := func(taskID int64) (harness string, sample string, requirements string, schemaPresent bool) {
+	snapshot := func(taskID int64) (harness string, requirements string, schemaPresent bool) {
 		v, err := repository.FindTaskVersion(ctx, pool, taskID, 1)
 		if err != nil || v == nil {
 			t.Fatalf("version: %v", err)
@@ -116,10 +116,9 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 		if err := json.Unmarshal(v.Contract, &contract); err != nil {
 			t.Fatalf("contract: %v", err)
 		}
-		smp, _ := json.Marshal(contract["sample"])
 		req, _ := contract["requirements"].(string)
 		_, schemaPresent = contract["output"].(map[string]any)["schema"]
-		return string(v.Harness), string(smp), req, schemaPresent
+		return string(v.Harness), req, schemaPresent
 	}
 
 	// 29 days: nothing
@@ -133,12 +132,9 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 	if err != nil || snapshots < 1 {
 		t.Fatalf("31d purge (snapshots=%d err=%v)", snapshots, err)
 	}
-	harness, sample, requirements, schemaPresent := snapshot(closed.ID)
+	harness, requirements, schemaPresent := snapshot(closed.ID)
 	if harness != "[]" {
 		t.Fatalf("closed harness = %s, want []", harness)
-	}
-	if sample != "{}" {
-		t.Fatalf("closed sample = %s, want {}", sample)
 	}
 	if requirements == "" { // the rest of the contract stays for audit
 		t.Fatal("requirements dropped")
@@ -146,8 +142,8 @@ func TestPurgeExpiredSnapshots(t *testing.T) {
 	if !schemaPresent {
 		t.Fatal("schema dropped")
 	}
-	openHarness, openSample, _, _ := snapshot(open.ID)
-	if openHarness == "[]" || openSample == "{}" {
+	openHarness, _, _ := snapshot(open.ID)
+	if openHarness == "[]" {
 		t.Fatal("open task snapshot was purged")
 	}
 	// idempotent second pass
