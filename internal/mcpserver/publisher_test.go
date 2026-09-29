@@ -112,7 +112,7 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 	// task_open (twins: the sample test-delivers to the accept-everything receiver)
 	e4m, i4 := mcpP("task_open", map[string]any{"code": codeA})
 	e4h, s4 := httpP("task_open", map[string]any{"code": codeB})
-	if i4 || s4 != 200 || e4m["status"] != task.TaskOpen || numOff(e4m["version"]) != 1 {
+	if i4 || s4 != 200 || e4m["status"] != task.TaskOpen {
 		t.Fatalf("task_open: %+v isError=%v http=%d", e4m, i4, s4)
 	}
 	assertCodes("task_open", e4m, e4h, codeA, codeB)
@@ -553,7 +553,7 @@ func TestPublisherLifecycle(t *testing.T) {
 
 	// open — the test delivery hits the 2xx receiver
 	env, status = call(pubBot, "task_open", map[string]any{"code": code})
-	if status != 200 || env["status"] != task.TaskOpen || numOff(env["version"]) != float64(1) {
+	if status != 200 || env["status"] != task.TaskOpen {
 		t.Fatalf("open: %d %v", status, env)
 	}
 

@@ -402,7 +402,7 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 		t.Helper()
 		var id int64
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, draft_contract)
+			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
 			 VALUES ($1, 1, 'open', 1, 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
 			t.Fatalf("seed task: %v", err)
 		}

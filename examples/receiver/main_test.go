@@ -266,22 +266,22 @@ func TestMissingRequiredHeaders400(t *testing.T) {
 	noKey := cloneHeaders(full)
 	delete(noKey, "Idempotency-Key")
 	if code := post(noKey); code != http.StatusBadRequest {
-		t.Fatalf("no Idempotency-Key = %d, want 400", code)
+		t.Fatalf("no Idempotency-Key = %d, want 422", code)
 	}
 	noTask := cloneHeaders(full)
 	delete(noTask, "Kungfu-Task")
 	if code := post(noTask); code != http.StatusBadRequest {
-		t.Fatalf("no Kungfu-Task = %d, want 400", code)
+		t.Fatalf("no Kungfu-Task = %d, want 422", code)
 	}
 	noVersion := cloneHeaders(full)
 	delete(noVersion, "Kungfu-Task-Version")
 	if code := post(noVersion); code != http.StatusBadRequest {
-		t.Fatalf("no extra header = %d, want 400", code)
+		t.Fatalf("no extra header = %d, want 422", code)
 	}
 	mismatch := cloneHeaders(full)
 	mismatch["Idempotency-Key"] = "other"
 	if code := post(mismatch); code != http.StatusBadRequest {
-		t.Fatalf("key mismatch = %d, want 400", code)
+		t.Fatalf("key mismatch = %d, want 422", code)
 	}
 }
 
