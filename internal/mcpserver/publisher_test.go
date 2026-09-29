@@ -658,7 +658,7 @@ func TestTaskCreateRejectsSampleByName(t *testing.T) {
 		t.Fatalf("code: %v", errObj["code"])
 	}
 	fields := fmt.Sprint(errObj["details"])
-	if !strings.Contains(fields, `"field":"sample"`) {
+	if !strings.Contains(fields, "field:sample") {
 		t.Fatalf("sample not named: %v", fields)
 	}
 }
