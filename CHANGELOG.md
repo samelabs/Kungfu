@@ -5,6 +5,36 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] — 2026-09-29
+
+Harness chain details and bounded lists. No schema changes.
+
+### Added
+
+- `memory_list` search: `q` (case-insensitive over title, tags and
+  description; LIKE wildcards match literally) and exact `code`, with
+  `total` counting all matching rows. The list writes no operation
+  log. Entries carry their byte size.
+- The console harness picker (create + edit pages) searches with a
+  300 ms debounce, pages 20 at a time with Load more, treats a
+  12-hex query as an exact-code lookup, and shows each candidate's
+  title, visibility and size; selected entries stay pinned as chips.
+- `work_get`'s harness entries carry `description` and keep the
+  publisher's order — spec, llms.txt and the skill file all say to
+  read the material in that order.
+- `task_get` returns the live revision's harness directory
+  (`harness`: ref_id, title, description, bytes — never the content);
+  the console overview lists it (title + size, in order) instead of a
+  bare count. `work_list` rows carry `harness_count`.
+
+### Changed
+
+- The admin sessions list shows only live sessions (not revoked, not
+  expired) by default; `?include_ended=1` adds the history. The list
+  is paged (normPage, at most 200 per page) with a page-independent
+  total, an optional `admin_id` scope, a pagination block on the API,
+  and pager + live/history toggle on the admin page.
+
 ## [2.0.5] — 2026-09-29
 
 The task console separates overview, contract editing and deliveries
