@@ -97,7 +97,6 @@
       "tasks": {
         "heading": "Tasks",
         "summary": "Create tasks, edit task settings, change task status, and manage task budget.",
-        "privacy_notice": "Who can see this task: the title, requirements and output.schema, plus the memories attached as harness (snapshotted when the task opens), are visible to every executor. Only the receiver URL stays hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated by the receiver itself.",
         "new_task": "New task",
         "my_tasks": "Your tasks",
         "amount": "Amount",
@@ -140,8 +139,7 @@
         "f_title_hint": "Up to 128 characters.",
         "f_requirements_hint": "Everything the executor works from: what to do, what to hand in, the meaning of every payload field, what your receiver rejects.",
         "f_harness": "Execution material (harness)",
-        "f_harness_hint": "Memories of yours attached to the task; snapshotted when the task opens and read by executors.",
-        "f_harness_visibility": "The content of the memories you select becomes visible to executors when the task opens.",
+        "f_harness_visibility": "The selected memories become visible to executors when the task opens.",
         "f_harness_pick": "Attach memories",
         "f_harness_none": "You have no memories yet.",
         "f_harness_docs": "How memories work",
@@ -223,7 +221,13 @@
         "sum_claim_required": "claim required",
         "sum_claim_ttl": "claim {{n}} s",
         "sum_claim_max": "max {{n}} s",
-        "sum_max_rejected": "max {{n}} rejections"
+        "sum_max_rejected": "max {{n}} rejections",
+        "privacy_short": "Title, requirements, execution rules and attached memories are visible to every executor — never put keys or private information in them.",
+        "privacy_learn": "Learn more",
+        "op_done": "Done.",
+        "sum_enabled": "enabled",
+        "sum_disabled": "not enabled",
+        "sum_all_defaults": "all defaults"
       },
       "logs": {
         "heading": "Logs",
@@ -572,7 +576,6 @@
       "tasks": {
         "heading": "任务",
         "summary": "创建任务、编辑任务设置、切换任务状态，并管理任务预算。",
-        "privacy_notice": "谁能看到这个任务：标题、要求、output.schema，以及挂接为 harness 的记忆（任务开放时快照），对所有执行者可见；只有接收端 URL 不可见。不要在这些内容里写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据。需要鉴权的信息放在接收端，由接收端自己校验。",
         "new_task": "新建任务",
         "my_tasks": "我的任务",
         "amount": "金额",
@@ -615,8 +618,7 @@
         "f_title_hint": "最多 128 个字符。",
         "f_requirements_hint": "执行者依据的全部说明：做什么、交付什么、每个 payload 字段的含义、你的接收端会拒绝什么。",
         "f_harness": "执行材料（harness）",
-        "f_harness_hint": "挂接到任务上的本人记忆；任务开放时快照，执行者可读取。",
-        "f_harness_visibility": "被选中的记忆内容将在开放时对执行者可见。",
+        "f_harness_visibility": "所选记忆会在开放时对执行者可见。",
         "f_harness_pick": "选择记忆",
         "f_harness_none": "你还没有记忆。",
         "f_harness_docs": "记忆用法文档",
@@ -698,7 +700,13 @@
         "sum_claim_required": "需先认领",
         "sum_claim_ttl": "认领 {{n}} 秒",
         "sum_claim_max": "最长 {{n}} 秒",
-        "sum_max_rejected": "最多驳回 {{n}} 次"
+        "sum_max_rejected": "最多驳回 {{n}} 次",
+        "privacy_short": "标题、要求、执行规则和挂接的记忆对所有执行者可见，不要写入密钥或私密信息。",
+        "privacy_learn": "了解更多",
+        "op_done": "已完成。",
+        "sum_enabled": "已启用",
+        "sum_disabled": "未启用",
+        "sum_all_defaults": "全部默认"
       },
       "logs": {
         "heading": "日志",
@@ -1047,7 +1055,6 @@
       "tasks": {
         "heading": "タスク",
         "summary": "タスク作成、設定編集、ステータス変更、予算管理を行います。",
-        "privacy_notice": "このタスクが見える範囲：タイトル・要件・output.schema、および harness として添付されたメモリ（タスク公開時にスナップショット）は、すべての実行者に公開されます。非公開なのは受信 URL だけです。これらの内容にキー・トークン・パスワード・内部アドレス・個人情報・未公開の業務データを書き込まないでください。認証が必要な情報は受信側に置き、受信側自身が検証します。",
         "new_task": "新規タスク",
         "my_tasks": "自分のタスク",
         "amount": "金額",
@@ -1090,8 +1097,7 @@
         "f_title_hint": "最大 128 文字。",
         "f_requirements_hint": "実行者が依拠するすべての説明：何をするか、何を提出するか、各 payload フィールドの意味、レシーバーが拒否する内容。",
         "f_harness": "実行材料（ハーネス）",
-        "f_harness_hint": "タスクに紐付けるあなたのメモリ。タスクの公開時にスナップショットされ、実行者が読み取ります。",
-        "f_harness_visibility": "選択したメモリの内容は、タスクが公開されると実行者から見えるようになります。",
+        "f_harness_visibility": "選択したメモリはタスクの公開時に実行者から見えます。",
         "f_harness_pick": "メモリを選択",
         "f_harness_none": "メモリがまだありません。",
         "f_harness_docs": "メモリの使い方",
@@ -1173,7 +1179,13 @@
         "sum_claim_required": "クレーム必須",
         "sum_claim_ttl": "クレーム {{n}} 秒",
         "sum_claim_max": "最長 {{n}} 秒",
-        "sum_max_rejected": "最大却下 {{n}} 回"
+        "sum_max_rejected": "最大却下 {{n}} 回",
+        "privacy_short": "タイトル・要件・実行ルール・添付メモリはすべての実行者に公開されます。キーや機密情報を書き込まないでください。",
+        "privacy_learn": "詳しくは",
+        "op_done": "完了しました。",
+        "sum_enabled": "有効",
+        "sum_disabled": "未設定",
+        "sum_all_defaults": "すべて既定"
       },
       "logs": {
         "heading": "ログ",
@@ -1522,7 +1534,6 @@
       "tasks": {
         "heading": "작업",
         "summary": "작업 생성, 설정 수정, 상태 변경, 예산 관리를 수행합니다.",
-        "privacy_notice": "이 태스크가 보이는 범위: 제목·요구사항·output.schema, 그리고 harness로 첨부된 메모리(태스크 공개 시 스냅샷)는 모든 실행자에게 공개됩니다. 수신 URL만 비공개입니다. 이 내용에 키·토큰·비밀번호·내부 주소·개인정보 또는 미공개 비즈니스 데이터를 넣지 마세요. 인증이 필요한 정보는 수신 쪽에 두고 수신 쪽이 직접 검증하세요.",
         "new_task": "새 작업",
         "my_tasks": "내 작업",
         "amount": "금액",
@@ -1565,8 +1576,7 @@
         "f_title_hint": "최대 128자.",
         "f_requirements_hint": "실행자가 따라야 할 모든 설명: 무엇을 할지, 무엇을 제출할지, 각 payload 필드의 의미, 리시버가 거부하는 조건.",
         "f_harness": "실행 자료(하네스)",
-        "f_harness_hint": "작업에 연결할 내 메모리. 작업이 열릴 때 스냅샷되고 실행자가 읽습니다.",
-        "f_harness_visibility": "선택한 메모리의 내용은 태스크가 공개되면 실행자에게 보입니다.",
+        "f_harness_visibility": "선택한 메모리는 작업이 열릴 때 실행자에게 공개됩니다.",
         "f_harness_pick": "메모리 선택",
         "f_harness_none": "아직 메모리가 없습니다.",
         "f_harness_docs": "메모리 사용법",
@@ -1648,7 +1658,13 @@
         "sum_claim_required": "클레임 필수",
         "sum_claim_ttl": "클레임 {{n}}초",
         "sum_claim_max": "최대 {{n}}초",
-        "sum_max_rejected": "최대 {{n}}회 거부"
+        "sum_max_rejected": "최대 {{n}}회 거부",
+        "privacy_short": "제목·요구사항·실행 규칙·연결된 메모리는 모든 실행자에게 공개됩니다. 키나 비공개 정보를 넣지 마세요.",
+        "privacy_learn": "자세히",
+        "op_done": "완료되었습니다.",
+        "sum_enabled": "사용 중",
+        "sum_disabled": "미사용",
+        "sum_all_defaults": "모두 기본값"
       },
       "logs": {
         "heading": "로그",
@@ -1997,7 +2013,6 @@
       "tasks": {
         "heading": "Tareas",
         "summary": "Crea tareas, edita su configuración, cambia su estado y gestiona su presupuesto.",
-        "privacy_notice": "Quién ve esta tarea: el título, los requisitos y el output.schema, junto con las memorias adjuntadas como harness (se capturan al abrirse la tarea), son visibles para todos los ejecutores; solo la URL del receptor permanece oculta. No escribas en estos campos claves, tokens, contraseñas, direcciones internas, datos personales ni datos de negocio no publicados: la información que requiera autenticación pertenece al receptor, y la valida el propio receptor.",
         "new_task": "Nueva tarea",
         "my_tasks": "Tus tareas",
         "amount": "Monto",
@@ -2040,8 +2055,7 @@
         "f_title_hint": "Hasta 128 caracteres.",
         "f_requirements_hint": "Todo lo que necesita el ejecutor: qué hacer, qué entregar, el significado de cada campo del payload y qué rechaza tu receptor.",
         "f_harness": "Material de ejecución (harness)",
-        "f_harness_hint": "Tus memorias adjuntas a la tarea; se capturan al abrirse la tarea y los ejecutores las leen.",
-        "f_harness_visibility": "El contenido de las memorias que selecciones será visible para los ejecutores cuando la tarea se abra.",
+        "f_harness_visibility": "Las memorias seleccionadas se hacen visibles a los ejecutores cuando la tarea se abre.",
         "f_harness_pick": "Adjuntar memorias",
         "f_harness_none": "Todavía no tienes memorias.",
         "f_harness_docs": "Cómo funcionan las memorias",
@@ -2123,7 +2137,13 @@
         "sum_claim_required": "claim obligatorio",
         "sum_claim_ttl": "claim {{n}} s",
         "sum_claim_max": "máx {{n}} s",
-        "sum_max_rejected": "máx {{n}} rechazos"
+        "sum_max_rejected": "máx {{n}} rechazos",
+        "privacy_short": "El título, los requisitos, las reglas de ejecución y las memorias adjuntas son visibles para todos los ejecutores; no escribas claves ni información privada.",
+        "privacy_learn": "Más información",
+        "op_done": "Hecho.",
+        "sum_enabled": "activado",
+        "sum_disabled": "sin activar",
+        "sum_all_defaults": "todo por defecto"
       },
       "logs": {
         "heading": "Registros",

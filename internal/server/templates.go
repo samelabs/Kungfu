@@ -864,7 +864,6 @@ func ownerTaskEditorHTML(d *tmplData) string {
             <p>` + d.T("owner.tasks.summary") + `</p>
         </div>
     </div>
-    <div id="taskEditorStatus" class="keybox" hidden></div>
     <div id="taskEditorRoot"><p class="muted">` + d.T("owner.tasks.loading") + `</p></div>
 </section>`
 }
