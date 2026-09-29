@@ -8,8 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.5] — 2026-09-29
 
 The task console separates overview, contract editing and deliveries
-into their own pages; each page loads only what it shows. No schema
-changes.
+into their own pages; each page loads only what it shows. The contract
+loses its sample field. Requires --apply-migrations (migration 021
+strips the stored sample keys).
+
+### Breaking
+
+- The contract no longer has a sample; the open-time test delivery
+  sends {}. Contracts that still send sample are rejected by name.
+  The reference receiver answers Kungfu-Test deliveries with a plain
+  2xx (reachability and liveness only) instead of judging them.
 
 ### Added
 
@@ -35,6 +43,17 @@ changes.
 - The overview page no longer renders the contract form and requests
   neither memory_list nor task_submissions; the deliveries page
   requests only task_submissions. tcvRenderDetail is gone.
+- Form interaction: operation results show next to the buttons in a
+  viewport-sticky action bar (3-second success, persisting failures);
+  VALIDATION_FAILED fields map onto their inputs (red, message under
+  the field, first error focused); the privacy notice is one line
+  with a Learn-more link; required fields are marked and the
+  collapsible groups carry live summaries.
+- Version expression: one term (contract revision); no per-row vN on
+  the list; the overview names the live revision and when it opened
+  (task_get gains version_opened_at) and, with saved-but-not-live
+  changes, the revision the next open creates; the deliveries page
+  shows the revision column only when the page spans revisions.
 
 ## [2.0.4] — 2026-09-29
 
