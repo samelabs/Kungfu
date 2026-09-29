@@ -63,12 +63,113 @@ function tcvFmtDate(iso) {
     }
 }
 
-function tcvShowStatus(env) {
-    const box = qs('#taskEditorStatus');
+// ---- operation feedback (WO-20b B1): one status area inside the
+// page's action bar. Success shows a short line that clears after 3
+// seconds; failures persist until the next operation. ----
+
+let tcvOpTimer = null;
+
+// tcvStatusAreaHTML is embedded in every action bar.
+function tcvStatusAreaHTML() {
+    return `<span class="tcv-status" id="tcvOpStatus" role="status" aria-live="polite"></span>`;
+}
+
+// tcvOpText shows one line; ok=true auto-clears after 3 seconds.
+function tcvOpText(text, ok) {
+    const box = qs('#tcvOpStatus');
     if (!box) return;
-    box.hidden = false;
-    box.innerHTML = tcvStatusLine(env);
-    if (env && env.ok) setTimeout(() => { box.hidden = true; }, 2500);
+    if (tcvOpTimer) { clearTimeout(tcvOpTimer); tcvOpTimer = null; }
+    box.textContent = text || '';
+    box.className = 'tcv-status ' + (ok ? 'tcv-status-ok' : 'tcv-status-err');
+    if (ok) tcvOpTimer = setTimeout(() => { box.textContent = ''; box.className = 'tcv-status'; }, 3000);
+}
+
+// tcvOpResult reports one operation envelope: failures persist (field
+// errors are mapped onto the form separately by tcvApplyFieldErrors).
+function tcvOpResult(env) {
+    if (!env) return;
+    if (env.ok) { tcvOpText(tcvT('op_done'), true); return; }
+    const err = env.error || {};
+    let text = `${err.code || 'ERROR'}`;
+    if (err.message) text += `: ${err.message}`;
+    tcvOpText(text, false);
+}
+
+// ---- field-level errors (WO-20b B2): VALIDATION_FAILED details map
+// onto the form inputs; unmapped ones stay in the status area. ----
+
+const TCV_FIELD_INPUT = {
+    'title': '#tcvFTitle',
+    'requirements': '#tcvFRequirements',
+    'receiver.url': '#tcvSReceiver',
+    'receiver': '#tcvSReceiver',
+    'price': '#tcvFPrice',
+    'harness_refs': '#tcvHarnessChips',
+    'limits.max_rejected_per_agent': '#tcvFMaxRejected',
+    'claim.ttl': '#tcvFClaimTtl',
+    'claim.max_duration': '#tcvFClaimMaxDur',
+    'claim': '#tcvFClaimRequired',
+    'output.schema': '#tcvFSchema',
+    'output': '#tcvFSchema'
+};
+
+function tcvClearFieldErrors() {
+    qsa('.tcv-invalid').forEach((el) => el.classList.remove('tcv-invalid'));
+    qsa('.tcv-field-err').forEach((el) => el.remove());
+}
+
+// tcvApplyFieldErrors maps details.errors[] onto the inputs (red
+// border, message under the field, scroll + focus the first), opens
+// the collapsible group holding the field, and returns the unmapped
+// remainder for the status area.
+function tcvApplyFieldErrors(errors) {
+    tcvClearFieldErrors();
+    const unmapped = [];
+    let firstInput = null;
+    (errors || []).forEach((e) => {
+        const field = String(e.field || '');
+        const input = qs(TCV_FIELD_INPUT[field] || '');
+        if (!input || qs('#tcvFormArea').hidden) { unmapped.push(e); return; }
+        input.classList.add('tcv-invalid');
+        const wrap = input.closest('details');
+        if (wrap) wrap.open = true;
+        const msg = document.createElement('p');
+        msg.className = 'tcv-err tcv-field-err';
+        msg.textContent = `${field}: ${e.message || ''}`;
+        (input.closest('.tcv-pair') || input).after(msg);
+        if (!firstInput) firstInput = input;
+    });
+    if (firstInput) {
+        firstInput.scrollIntoView({behavior: 'smooth', block: 'center'});
+        firstInput.focus({preventScroll: true});
+    }
+    return unmapped;
+}
+
+// tcvClientInvalid reports a read() failure: the structured fields go
+// through the same marking as server errors (red, message, scroll +
+// focus), the status area shows only the one-line summary.
+function tcvClientInvalid(r) {
+    if (r && Array.isArray(r.fields) && r.fields.length) {
+        tcvApplyFieldErrors(r.fields);
+        tcvOpText(r.error || tcvT('fix_marked'), false);
+        return;
+    }
+    tcvOpText((r && r.error) || tcvT('fix_marked'), false);
+}
+
+// tcvOpFailure reports a failed operation: field errors go to the
+// form, everything else to the status area.
+function tcvOpFailure(env) {
+    const err = (env && env.error) || {};
+    const details = err.details || {};
+    let unmapped = null;
+    if (err.code === 'VALIDATION_FAILED' && Array.isArray(details.errors)) {
+        unmapped = tcvApplyFieldErrors(details.errors);
+    }
+    tcvOpResult(unmapped && unmapped.length
+        ? {ok: false, error: {code: err.code, message: unmapped.map((e) => `${e.field || ''}: ${e.message || ''}`).join(' · ')}}
+        : env);
 }
 
 // ---- the unified contract form (F1) ----
@@ -92,6 +193,7 @@ function tcvContractForm(mount, opts) {
     if (typeof src !== 'object' || Array.isArray(src)) src = {};
     let harness = Array.isArray(src.harness_refs) ? src.harness_refs.slice(0, 10) : [];
     let jsonMode = false;
+    let memoriesRequested = false;
     const disabled = editable ? '' : ' disabled';
     const memTitles = {}; // code → title, from memory_list
 
@@ -100,21 +202,20 @@ function tcvContractForm(mount, opts) {
         <button class="btn" id="tcvAdvancedBtn" type="button" hidden>${escapeHtml(t('tasks.advanced'))}</button>
         <button class="btn" id="tcvFormModeBtn" type="button" hidden>${escapeHtml(tcvT('form_mode'))}</button>
     </div>
-    <div id="tcvFormArea">
-        <p class="tcv-privacy" role="note">${escapeHtml(tcvT('privacy_notice'))}</p>
-        <label for="tcvFTitle">${escapeHtml(tcvT('f_title'))}</label>
+    <div id="tcvFormArea" class="tcv-form">
+        <p class="tcv-privacy" role="note">${escapeHtml(tcvT('privacy_short'))} <a href="/task-guide.md" target="_blank" rel="noopener">${escapeHtml(tcvT('privacy_learn'))}</a></p>
+        <label for="tcvFTitle">${escapeHtml(tcvT('f_title'))} <span class="tcv-req" aria-hidden="true">*</span></label>
         <input id="tcvFTitle" maxlength="128"${disabled}>
         <div class="tcv-counter muted" id="tcvTitleCount"></div>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_title_hint'))}</p>
 
-        <label for="tcvFRequirements">${escapeHtml(tcvT('f_requirements'))}</label>
+        <label for="tcvFRequirements">${escapeHtml(tcvT('f_requirements'))} <span class="tcv-req" aria-hidden="true">*</span></label>
         <textarea id="tcvFRequirements" rows="5" maxlength="20000"${disabled}></textarea>
         <div class="tcv-counter muted" id="tcvRequirementsCount"></div>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_requirements_hint'))}</p>
 
         <label>${escapeHtml(tcvT('f_harness'))}</label>
         <p class="tcv-hint tcv-harness-visible">${escapeHtml(tcvT('f_harness_visibility'))}</p>
-        <p class="tcv-hint muted">${escapeHtml(tcvT('f_harness_hint'))}</p>
         <div id="tcvHarnessChips" class="tcv-chips"></div>
         <p class="tcv-hint muted" id="tcvHarnessMsg"></p>
         <details id="tcvHarnessPick" class="tcv-picker">
@@ -122,24 +223,19 @@ function tcvContractForm(mount, opts) {
             <div id="tcvHarnessOptions"><p class="muted">${escapeHtml(tcvT('f_harness_loading'))}</p></div>
         </details>
 
-        <label for="tcvSReceiver">${escapeHtml(tcvT('f_receiver'))}</label>
+        <label for="tcvSReceiver">${escapeHtml(tcvT('f_receiver'))} <span class="tcv-req" aria-hidden="true">*</span></label>
         <input id="tcvSReceiver" type="url" placeholder="https://"${disabled}>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_receiver_hint'))}</p>
 
-        <label for="tcvSSample">${escapeHtml(tcvT('f_sample'))}</label>
-        <textarea id="tcvSSample" class="mono" rows="4" spellcheck="false"${disabled}></textarea>
-        <p class="tcv-err" id="tcvSampleError" hidden></p>
-        <p class="tcv-hint muted">${escapeHtml(tcvT('f_sample_hint'))}</p>
-
         <details id="tcvSchemaWrap" class="tcv-picker">
-            <summary>${escapeHtml(tcvT('f_schema'))}</summary>
+            <summary>${escapeHtml(tcvT('f_schema'))} <span class="tcv-summary muted" id="tcvSchemaSummary"></span></summary>
             <label for="tcvFSchema">${escapeHtml(tcvT('f_schema'))}</label>
             <textarea id="tcvFSchema" class="mono" rows="6" spellcheck="false"${disabled}></textarea>
             <p class="tcv-hint muted">${escapeHtml(tcvT('f_schema_hint'))}</p>
         </details>
 
         <details id="tcvRulesWrap" class="tcv-picker">
-            <summary>${escapeHtml(tcvT('f_rules'))}</summary>
+            <summary>${escapeHtml(tcvT('f_rules'))} <span class="tcv-summary muted" id="tcvRulesSummary"></span></summary>
             <label for="tcvFMaxRejected">${escapeHtml(tcvT('f_max_rejected'))} <span class="muted">${escapeHtml(tcvT('default_value', {n: 5}))}</span></label>
             <input id="tcvFMaxRejected" type="number" min="1" max="50" placeholder="5"${disabled}>
             <p class="tcv-hint muted">${escapeHtml(tcvT('f_max_rejected_hint'))}</p>
@@ -159,7 +255,7 @@ function tcvContractForm(mount, opts) {
             </div>
         </details>
 
-        <label for="tcvFPrice">${escapeHtml(tcvT('f_price'))}</label>
+        <label for="tcvFPrice">${escapeHtml(tcvT('f_price'))} <span class="tcv-req" aria-hidden="true">*</span></label>
         <input id="tcvFPrice" type="number" min="1" step="1"${disabled}>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_price_hint'))}</p>
     </div>
@@ -176,7 +272,32 @@ function tcvContractForm(mount, opts) {
         if (title) qs('#tcvTitleCount').textContent = `${title.value.length} / 128`;
         if (req) qs('#tcvRequirementsCount').textContent = `${req.value.length} / 20000`;
     };
-    const changed = () => { counters(); if (opts.onChange) opts.onChange(); };
+    const changed = () => {
+        counters();
+        summaries();
+        if (opts.onChange) opts.onChange();
+    };
+
+    // B4: live one-line summaries on the collapsible groups
+    function summaries() {
+        const schema = qs('#tcvSchemaSummary');
+        if (schema) {
+            const on = qs('#tcvFSchema').value.trim() !== '';
+            schema.textContent = on ? tcvT('sum_enabled') : tcvT('sum_disabled');
+        }
+        const rules = qs('#tcvRulesSummary');
+        if (rules) {
+            const parts = [];
+            const maxRej = String(qs('#tcvFMaxRejected').value).trim();
+            if (maxRej !== '' && Number(maxRej) !== 5) parts.push(tcvT('sum_max_rejected', {n: Number(maxRej)}));
+            if (qs('#tcvFClaimRequired').checked) parts.push(tcvT('sum_claim_required'));
+            const ttl = String(qs('#tcvFClaimTtl').value).trim();
+            if (ttl !== '' && Number(ttl) !== 1800) parts.push(tcvT('sum_claim_ttl', {n: Number(ttl)}));
+            const maxDur = String(qs('#tcvFClaimMaxDur').value).trim();
+            if (maxDur !== '' && Number(maxDur) !== 7200) parts.push(tcvT('sum_claim_max', {n: Number(maxDur)}));
+            rules.textContent = parts.length ? parts.join(' · ') : tcvT('sum_all_defaults');
+        }
+    }
 
     // -- field ↔ object --
 
@@ -186,7 +307,6 @@ function tcvContractForm(mount, opts) {
         harness = Array.isArray(src.harness_refs) ? src.harness_refs.slice(0, 10) : [];
         renderChips();
         qs('#tcvSReceiver').value = (src.receiver && src.receiver.url) || '';
-        qs('#tcvSSample').value = src.sample === undefined ? '' : tcvPretty(src.sample);
         const schema = src.output && src.output.schema;
         qs('#tcvFSchema').value = schema === undefined ? '' : tcvPretty(schema);
         qs('#tcvFMaxRejected').value = (src.limits && src.limits.max_rejected_per_agent) || '';
@@ -196,6 +316,7 @@ function tcvContractForm(mount, opts) {
         qs('#tcvFPrice').value = src.price !== undefined ? src.price : 5;
         syncPicker();
         counters();
+        summaries();
     }
 
     // collect(strict) merges the form fields into a deep clone of src
@@ -204,40 +325,33 @@ function tcvContractForm(mount, opts) {
     // JSON mode; strict=true reports them for the caller to display.
     function collect(strict) {
         const c = tcvClone(src) || {};
-        const bad = (msg) => ({ok: false, error: msg});
+        // WO-20c: client-side checks reuse the server field-error
+        // marking (red input, message under the field) — the status
+        // area only carries the one-line summary
+        const bad = (field, msg) => ({ok: false, fields: [{field, message: msg}], error: tcvT('fix_marked')});
         const title = qs('#tcvFTitle').value.trim();
         if (title) c.title = title;
-        else if (strict) return bad(tcvT('need_title'));
+        else if (strict) return bad('title', tcvT('need_title'));
         else if (src.title !== undefined) c.title = src.title;
         const requirements = qs('#tcvFRequirements').value.trim();
         if (requirements) c.requirements = requirements;
-        else if (strict) return bad(tcvT('need_requirements'));
+        else if (strict) return bad('requirements', tcvT('need_requirements'));
         else if (src.requirements !== undefined) c.requirements = src.requirements;
         if (harness.length) c.harness_refs = harness.slice();
         else delete c.harness_refs;
         const url = qs('#tcvSReceiver').value.trim();
         if (url) c.receiver = Object.assign({}, c.receiver, {url});
-        else if (strict) return bad(tcvT('need_receiver'));
+        else if (strict) return bad('receiver.url', tcvT('need_receiver'));
         else if (c.receiver) c.receiver.url = (src.receiver && src.receiver.url) || '';
-        const sampleRaw = qs('#tcvSSample').value.trim();
-        if (sampleRaw) {
-            try {
-                const sample = JSON.parse(sampleRaw);
-                if (sample && typeof sample === 'object' && !Array.isArray(sample)) c.sample = sample;
-                else if (strict) return bad(tcvT('need_sample'));
-            } catch (e) {
-                if (strict) return bad(tcvT('need_sample'));
-            }
-        } else if (strict) return bad(tcvT('need_sample'));
         const schemaRaw = qs('#tcvFSchema').value.trim();
         if (schemaRaw) {
             try {
                 const schema = JSON.parse(schemaRaw);
                 if (schema && typeof schema === 'object' && !Array.isArray(schema)) {
                     c.output = Object.assign({}, c.output, {schema});
-                } else if (strict) return bad(tcvT('need_schema'));
+                } else if (strict) return bad('output.schema', tcvT('need_schema'));
             } catch (e) {
-                if (strict) return bad(tcvT('need_schema'));
+                if (strict) return bad('output.schema', tcvT('need_schema'));
             }
         } else if (c.output) {
             delete c.output.schema;
@@ -268,7 +382,7 @@ function tcvContractForm(mount, opts) {
         if (!Object.keys(c.claim).length) delete c.claim;
         const price = Number(qs('#tcvFPrice').value || 0);
         if (Number.isInteger(price) && price >= 1) c.price = price;
-        else if (strict) return bad(tcvT('need_price'));
+        else if (strict) return bad('price', tcvT('need_price'));
         else if (src.price !== undefined) c.price = src.price;
         return {ok: true, contract: c};
     }
@@ -326,8 +440,10 @@ function tcvContractForm(mount, opts) {
     }
 
     function loadMemories() {
+        if (memoriesRequested) return;
+        memoriesRequested = true;
         const box = qs('#tcvHarnessOptions');
-        if (!editable) { box.innerHTML = `<p class="muted">${escapeHtml(tcvT('f_harness_hint'))}</p>`; return; }
+        if (!editable) { box.innerHTML = `<p class="muted">${escapeHtml(tcvT('f_harness_visibility'))}</p>`; return; }
         tcvCall('memory_list', {limit: 100}).then((env) => {
             if (!env.ok) { box.innerHTML = tcvStatusLine(env); return; }
             const items = env.kungfus || [];
@@ -376,30 +492,27 @@ function tcvContractForm(mount, opts) {
         if (opts.onChange) opts.onChange();
     });
 
-    // sample must be a JSON object — checked as the field loses focus
-    on('#tcvSSample', 'blur', () => {
-        const raw = qs('#tcvSSample').value.trim();
-        const err = qs('#tcvSampleError');
-        if (!err) return;
-        if (!raw) { err.hidden = true; return; }
-        let v = null;
-        try { v = JSON.parse(raw); } catch (e) { v = null; }
-        if (!v || typeof v !== 'object' || Array.isArray(v)) {
-            err.hidden = false;
-            err.textContent = tcvT('need_sample');
-        } else {
-            err.hidden = true;
-        }
-    });
-
-    ['#tcvFTitle', '#tcvFRequirements', '#tcvSReceiver', '#tcvSSample', '#tcvFSchema',
+    ['#tcvFTitle', '#tcvFRequirements', '#tcvSReceiver', '#tcvFSchema',
         '#tcvFMaxRejected', '#tcvFClaimRequired', '#tcvFClaimTtl', '#tcvFClaimMaxDur', '#tcvFPrice'
-    ].forEach((sel) => on(sel, 'input', changed));
+    ].forEach((sel) => on(sel, 'input', (ev) => {
+        if (ev.target.classList) ev.target.classList.remove('tcv-invalid');
+        const msg = ev.target.parentElement && ev.target.parentElement.querySelector('.tcv-field-err');
+        if (msg) msg.remove();
+        changed();
+    }));
     on('#tcvAdvancedBtn', 'click', toJSONMode);
     on('#tcvFormModeBtn', 'click', toFormMode);
 
     fillForm();
-    loadMemories();
+    // the memory list loads lazily (WO-20): the picker fetches it on
+    // first expand — the create/edit pages then make zero tool calls
+    // beyond their own until the picker is actually opened
+    const pick = qs('#tcvHarnessPick');
+    if (pick) {
+        pick.addEventListener('toggle', () => {
+            if (pick.open && !memoriesRequested) loadMemories();
+        });
+    }
     showMode();
 
     // read() returns the contract as it should be sent: the JSON text
@@ -471,7 +584,6 @@ function tcvLoadList() {
         page: tcvListState.page,
         page_size: tcvListState.pageSize
     }).then((env) => {
-        tcvShowStatus(env);
         if (!env.ok) {
             // a failed listing shows the tool error where the list
             // would be — never an empty "no tasks yet" list
@@ -514,8 +626,9 @@ function tcvRenderSimpleForm() {
         </dl>
         <label class="tcv-criterion"><input type="checkbox" id="tcvSOpen" checked> ${escapeHtml(tcvT('open_now'))}</label>
         <p class="tcv-hint muted">${escapeHtml(tcvT('open_note'))}</p>
-        <div class="actions">
+        <div class="actions tcv-actionbar">
             <button class="btn primary" id="tcvSPublish" type="button">${escapeHtml(tcvT('publish'))}</button>
+            ${tcvStatusAreaHTML()}
         </div>
     </div>`;
 
@@ -535,26 +648,37 @@ function tcvRenderSimpleForm() {
 
     qs('#tcvSPublish').addEventListener('click', () => {
         const r = form.read();
-        if (!r.ok) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: r.error}}); return; }
+        tcvClearFieldErrors();
+        if (!r.ok) { tcvClientInvalid(r); return; }
         const price = r.contract.price;
         const units = Math.max(1, Math.trunc(Number(qs('#tcvSUnits').value || 1)) || 1);
         const budget = price * units;
         // budget = price × units must stay a safe integer: task money
         // is capped at 2^53-1 server-side (task.MaxAmount); anything
         // larger is silently corrupted by JS Number, so refuse it here.
-        if (!Number.isSafeInteger(budget)) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: tcvT('total_too_large')}}); return; }
+        if (!Number.isSafeInteger(budget)) { tcvOpText(tcvT('total_too_large'), false); return; }
         tcvCall('task_create', {
             contract: r.contract,
             budget,
             open: qs('#tcvSOpen').checked
         }).then((env) => {
-            tcvShowStatus(env);
-            if (env.ok && env.code) window.location.href = `/owner/tasks/${env.code}`;
-        }).catch((error) => tcvShowStatus({ok: false, error: {code: 'NETWORK', message: noticeText(error)}}));
+            if (env.ok && env.code) { window.location.href = `/owner/tasks/${env.code}`; return; }
+            tcvOpFailure(env);
+        }).catch((error) => tcvOpText(noticeText(error), false));
     });
 }
 
-// ---- /owner/tasks/{code}: the detail page (F3 + G4) ----
+// ---- the task workspace pages (WO-20): one section per page. The
+// overview (/) and edit (/edit) pages load task_get only; the
+// deliveries page (/deliveries) loads task_submissions only; nothing
+// else is requested on any of them. ----
+
+// tcvTaskCodeFromPath reads {code} out of /owner/tasks/{code}[/edit |
+// /deliveries].
+function tcvTaskCodeFromPath() {
+    const parts = window.location.pathname.split('/').filter(Boolean);
+    return parts.length >= 3 ? parts[2] : '';
+}
 
 function tcvEditorInit() {
     const root = qs('#taskEditorRoot');
@@ -563,10 +687,19 @@ function tcvEditorInit() {
         tcvRenderSimpleForm();
         return;
     }
-    const code = window.location.pathname.split('/').pop();
+    const code = tcvTaskCodeFromPath();
+    if (SECTION === 'task_deliveries') {
+        tcvRenderDeliveriesPage(code);
+        return;
+    }
+    if (SECTION === 'task_edit') {
+        tcvRenderEditPage(code);
+        return;
+    }
+    // task_detail — the overview
     tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { tcvRenderEditorError(env); return; }
-        tcvRenderDetail(code, env);
+        tcvRenderOverview(code, env);
     }).catch((error) => {
         root.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
     });
@@ -587,7 +720,6 @@ function tcvHeaderHTML(code, view) {
     <p class="task-facts">
         <span class="mono">${tcvEscapeHtml(code)}</span>
         ${tcvStatusBadge(status)}
-        <span>${escapeHtml(tcvT('f_version'))} <span class="mono">v${Number(view.version ?? 0)}</span></span>
         <span class="muted">${escapeHtml(tcvFmtDate(view.created_at))}</span>
     </p>
     ${reason ? `<p class="tcv-err">${escapeHtml(reason)}</p>` : ''}`;
@@ -659,16 +791,57 @@ function tcvAskConfirm(message, fn) {
     qs('#tcvConfirmNo').addEventListener('click', () => { box.hidden = true; box.innerHTML = ''; });
 }
 
-function tcvRenderDetail(code, view) {
+// tcvContractSummaryHTML is the overview's read-only digest of the
+// EFFECTIVE contract: the first 280 runes of requirements, the
+// receiver endpoint, the price, the harness size and the execution
+// rules — plus the full contract as an expandable read-only JSON.
+// tcvRevisionHTML is the summary's revision line (C3): which contract
+// revision is live and when it opened; a never-opened draft says so;
+// saved-but-not-live changes name the next revision.
+function tcvRevisionHTML(view) {
+    const version = Number(view.version ?? 0);
+    if (version < 1) {
+        return `<p class="tcv-revision muted">${escapeHtml(tcvT('revision_never'))}</p>`;
+    }
+    const line = tcvT('revision_current', {n: version, time: tcvFmtDate(view.version_opened_at)});
+    let html = `<p class="tcv-revision">${escapeHtml(line)}</p>`;
+    if (view.draft_pending === true) {
+        html += `<p class="tcv-revision tcv-revision-next">${escapeHtml(tcvT('revision_pending_next', {n: version + 1}))}</p>`;
+    }
+    return html;
+}
+
+function tcvContractSummaryHTML(view) {
+    const c = view.contract || {};
+    const excerpt = String(c.requirements || '');
+    const rules = [
+        c.claim && c.claim.required ? tcvT('sum_claim_required') : '',
+        c.claim && c.claim.ttl ? tcvT('sum_claim_ttl', {n: c.claim.ttl}) : '',
+        c.claim && c.claim.max_duration ? tcvT('sum_claim_max', {n: c.claim.max_duration}) : '',
+        c.limits && c.limits.max_rejected_per_agent ? tcvT('sum_max_rejected', {n: c.limits.max_rejected_per_agent}) : ''
+    ].filter(Boolean).join(' · ');
+    return `${tcvRevisionHTML(view)}<dl class="sl-kv">
+        <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerpt.length > 280 ? excerpt.slice(0, 280) + '…' : excerpt)}</dd>
+        <dt>${escapeHtml(tcvT('f_receiver'))}</dt><dd class="mono">${tcvEscapeHtml(c.receiver && c.receiver.url ? c.receiver.url : '')}</dd>
+        <dt>${escapeHtml(tcvT('f_price'))}</dt><dd>${Number(c.price ?? 0)}</dd>
+        <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${Number((c.harness_refs || []).length)}</dd>
+        <dt>${escapeHtml(tcvT('f_rules'))}</dt><dd>${escapeHtml(rules || '—')}</dd>
+    </dl>
+    <details class="tcv-picker"><summary>${escapeHtml(view.draft_pending === true ? tcvT('view_effective', {n: Number(view.version ?? 0)}) : tcvT('view_contract'))}</summary>
+        <pre class="mono tcv-pre">${tcvEscapeHtml(tcvPretty(c))}</pre></details>`;
+}
+
+// tcvRenderOverview is /owner/tasks/{code}: ONLY task_get. Header,
+// funds and stats, the read-only contract summary with the two entry
+// buttons, and the lifecycle actions with their confirmations. No
+// contract form, no memory_list, no task_submissions.
+function tcvRenderOverview(code, view) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
     const status = view.status || 'draft';
     const editable = status === 'draft' || status === 'paused';
-    // G4: with a saved draft (draft/paused) the form edits the draft —
-    // the contract that the next open applies; otherwise the live one.
-    const binding = view.draft || view.contract || {};
     const pending = view.draft_pending === true;
-    const effectiveJSON = view.contract ? tcvPretty(view.contract) : '';
+    const submissions30d = Number((view.stats || {}).submissions_30d ?? 0);
 
     root.innerHTML = `
     <div class="task-layout">
@@ -679,52 +852,20 @@ function tcvRenderDetail(code, view) {
         <div class="panel">
             ${tcvHeaderHTML(code, view)}
             ${pending ? `<div class="keybox tcv-note">${escapeHtml(tcvT('draft_pending_note'))}</div>` : ''}
-            ${pending ? `<details class="tcv-picker"><summary>${escapeHtml(tcvT('view_effective', {n: Number(view.version ?? 0)}))}</summary>
-                <pre class="mono tcv-pre">${tcvEscapeHtml(effectiveJSON)}</pre></details>` : ''}
-            ${status === 'open' ? `<p class="tcv-hint muted">${escapeHtml(tcvT('open_readonly_note'))}</p>` : ''}
-            <h3>${escapeHtml(tcvT('f_contract'))}</h3>
-            <div id="tcvFormMount"></div>
             <div class="actions">
-                ${editable ? `<button class="btn primary" id="tcvSave" type="button">${escapeHtml(tcvT('save_basics'))}</button>` : ''}
-                ${tcvLifecycleButtons(view)}
+                ${editable ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>` : ''}
+                ${status === 'open' ? `<span class="muted">${escapeHtml(tcvT('open_readonly_note'))}</span>` : ''}
+                <a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}/deliveries">${escapeHtml(tcvT('deliveries'))} (${submissions30d})</a>
             </div>
+            <h3>${escapeHtml(tcvT('f_contract'))}</h3>
+            ${tcvContractSummaryHTML(view)}
+            <div class="actions tcv-actionbar">${tcvLifecycleButtons(view)}${tcvStatusAreaHTML()}</div>
             <div id="tcvConfirm" hidden></div>
         </div>
-    </div>
-    <section class="panel" id="tcvSubmissionsPanel">
-        <h2>${escapeHtml(tcvT('deliveries'))}</h2>
-        <div class="actions">
-            <select id="tcvSubState" aria-label="${escapeHtml(tcvT('all_states'))}">
-                <option value="">${escapeHtml(tcvT('all_states'))}</option>
-                <option value="delivering">${escapeHtml(tcvT('state_delivering'))}</option>
-                <option value="uncertain">${escapeHtml(tcvT('state_uncertain'))}</option>
-                <option value="settled">${escapeHtml(tcvT('state_settled'))}</option>
-                <option value="rejected">${escapeHtml(tcvT('state_rejected'))}</option>
-                <option value="failed">${escapeHtml(tcvT('state_failed'))}</option>
-            </select>
-        </div>
-        <div id="tcvSubmissions"><p class="muted">${escapeHtml(tcvT('sub_loading'))}</p></div>
-        <div class="actions" id="tcvSubPager">
-            <button class="btn" id="tcvSubPrev" type="button">${escapeHtml(tcvT('page_prev'))}</button>
-            <div class="mono" id="tcvSubPageInfo"></div>
-            <button class="btn" id="tcvSubNext" type="button">${escapeHtml(tcvT('page_next'))}</button>
-        </div>
-    </section>`;
-
-    const form = tcvContractForm(qs('#tcvFormMount'), {contract: binding, editable});
+    </div>`;
 
     const on = (id, fn) => { const el = qs(id); if (el) el.addEventListener('click', fn); };
-    if (editable) {
-        on('#tcvSave', () => {
-            const r = form.read();
-            if (!r.ok) { tcvShowStatus({ok: false, error: {code: 'VALIDATION_FAILED', message: r.error}}); return; }
-            tcvCall('task_update', {code, contract: r.contract}).then((env) => {
-                tcvShowStatus(env);
-                if (env.ok) tcvEditorInit();
-            }).catch((error) => tcvShowStatus({ok: false, error: {code: 'NETWORK', message: noticeText(error)}}));
-        });
-        on('#tcvOpen', () => tcvAskConfirm(tcvT('confirm_open'), () => tcvLifecycle(code, 'task_open')));
-    }
+    on('#tcvOpen', () => tcvAskConfirm(tcvT('confirm_open'), () => tcvLifecycle(code, 'task_open')));
     on('#tcvPause', () => tcvAskConfirm(tcvT('confirm_pause'), () => tcvLifecycle(code, 'task_pause')));
     on('#tcvClose', () => tcvAskConfirm(tcvT('confirm_close'), () => tcvLifecycle(code, 'task_close')));
     on('#tcvRefund', () => tcvAskConfirm(
@@ -735,17 +876,119 @@ function tcvRenderDetail(code, view) {
         tcvLifecycle(code, 'task_fund', {code, amount});
     });
 
+    // a save on the edit page bounces back here with ?saved=1
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('saved') === '1') {
+        tcvOpText(tcvT('saved_notice'), true);
+        params.delete('saved');
+        const query = params.toString();
+        history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+    }
+}
+
+// tcvRenderEditPage is /owner/tasks/{code}/edit: ONLY task_get, then
+// the contract form when the task is draft or paused. Anything else
+// explains why editing is unavailable.
+function tcvRenderEditPage(code) {
+    const root = qs('#taskEditorRoot');
+    if (!root) return;
+    const back = `<p><a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}">${escapeHtml(tcvT('back_to_overview'))}</a></p>`;
+    tcvCall('task_get', {code}).then((env) => {
+        if (!env.ok) { root.innerHTML = back + tcvStatusLine(env); return; }
+        const status = env.status || 'draft';
+        if (status !== 'draft' && status !== 'paused') {
+            const why = status === 'closed' ? tcvT('edit_blocked_closed') : tcvT('edit_blocked_open');
+            root.innerHTML = `
+            <div class="panel">
+                <h2>${escapeHtml(tcvT('edit_contract'))}</h2>
+                <p class="tcv-err">${escapeHtml(why)}</p>
+                ${back}
+            </div>`;
+            return;
+        }
+        root.innerHTML = `
+        <div class="panel">
+            <div class="section-head">
+                <div class="section-head-copy"><h2>${escapeHtml(tcvT('edit_contract'))}</h2></div>
+                <div class="section-head-actions"><a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}">${escapeHtml(tcvT('back_to_overview'))}</a></div>
+            </div>
+            <div id="tcvFormMount"></div>
+            <div class="actions tcv-actionbar">
+                <button class="btn primary" id="tcvSave" type="button">${escapeHtml(tcvT('save_basics'))}</button>
+                ${tcvStatusAreaHTML()}
+            </div>
+        </div>`;
+        // with a saved draft (draft/paused) the form edits the draft —
+        // the contract the next open applies
+        const form = tcvContractForm(qs('#tcvFormMount'), {contract: env.draft || env.contract || {}, editable: true});
+        qs('#tcvSave').addEventListener('click', () => {
+            const r = form.read();
+            tcvClearFieldErrors();
+            if (!r.ok) { tcvClientInvalid(r); return; }
+            tcvCall('task_update', {code, contract: r.contract}).then((saveEnv) => {
+                if (!saveEnv.ok) { tcvOpFailure(saveEnv); return; }
+                // back to the overview with the saved notice
+                window.location.href = `/owner/tasks/${code}?saved=1`;
+            }).catch((error) => tcvOpText(noticeText(error), false));
+        });
+    }).catch((error) => {
+        root.innerHTML = back + `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
+    });
+}
+
+// tcvRenderDeliveriesPage is /owner/tasks/{code}/deliveries: ONLY
+// task_submissions, with the state filter and page carried in the URL
+// (?state=&page=). The API returns no title, so the code heads the
+// page.
+function tcvRenderDeliveriesPage(code) {
+    const root = qs('#taskEditorRoot');
+    if (!root) return;
+    const params = new URLSearchParams(window.location.search);
+    const state = params.get('state') || '';
+    const page = Math.max(1, Number(params.get('page')) || 1);
+
+    root.innerHTML = `
+    <section class="panel">
+        <div class="section-head">
+            <div class="section-head-copy"><h2 class="mono">${tcvEscapeHtml(code)}</h2></div>
+            <div class="section-head-actions"><a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}">${escapeHtml(tcvT('back_to_overview'))}</a></div>
+        </div>
+        <div class="actions">
+            <select id="tcvSubState" aria-label="${escapeHtml(tcvT('all_states'))}">
+                <option value="">${escapeHtml(tcvT('all_states'))}</option>
+                <option value="delivering"${state === 'delivering' ? ' selected' : ''}>${escapeHtml(tcvT('state_delivering'))}</option>
+                <option value="uncertain"${state === 'uncertain' ? ' selected' : ''}>${escapeHtml(tcvT('state_uncertain'))}</option>
+                <option value="settled"${state === 'settled' ? ' selected' : ''}>${escapeHtml(tcvT('state_settled'))}</option>
+                <option value="rejected"${state === 'rejected' ? ' selected' : ''}>${escapeHtml(tcvT('state_rejected'))}</option>
+                <option value="failed"${state === 'failed' ? ' selected' : ''}>${escapeHtml(tcvT('state_failed'))}</option>
+            </select>
+        </div>
+        <div id="tcvSubmissions"><p class="muted">${escapeHtml(tcvT('sub_loading'))}</p></div>
+        <div class="actions" id="tcvSubPager">
+            <button class="btn" id="tcvSubPrev" type="button">${escapeHtml(tcvT('page_prev'))}</button>
+            <div class="mono" id="tcvSubPageInfo"></div>
+            <button class="btn" id="tcvSubNext" type="button">${escapeHtml(tcvT('page_next'))}</button>
+        </div>
+    </section>`;
+
     const stateSel = qs('#tcvSubState');
     if (stateSel) stateSel.addEventListener('change', () => tcvLoadSubmissions(code, stateSel.value, 1));
-    tcvLoadSubmissions(code, '', 1);
+    tcvLoadSubmissions(code, state, page);
 }
 
 function tcvLifecycle(code, tool, extra) {
     if (!code) return;
+    tcvOpText('', true);
     tcvCall(tool, extra || {code}).then((env) => {
-        tcvShowStatus(env);
-        if (env.ok) tcvEditorInit();
-    }).catch((error) => tcvShowStatus({ok: false, error: {code: 'NETWORK', message: noticeText(error)}}));
+        if (!env.ok) { tcvOpFailure(env); return; }
+        // refresh, then show the short success line in the re-rendered
+        // action bar (B1: 3-second auto-clear)
+        tcvEditorInit();
+        const wait = setInterval(() => {
+            if (qs('#tcvOpStatus')) { clearInterval(wait); tcvOpText(tcvT('op_done'), true); }
+        }, 50);
+        setTimeout(() => clearInterval(wait), 2000);
+    }).catch((error) => tcvOpText(noticeText(error), false));
 }
 
 // ---- submissions: the delivery record (state + the receiver's reply) ----
@@ -753,6 +996,16 @@ function tcvLifecycle(code, tool, extra) {
 function tcvLoadSubmissions(code, state, page) {
     const box = qs('#tcvSubmissions');
     if (!box) return;
+    if (page < 1) page = 1;
+    // the filter and page live in the URL (?state=&page=) so a reload
+    // or a shared link reproduces the same view
+    const url = new URLSearchParams();
+    if (state) url.set('state', state);
+    if (page > 1) url.set('page', String(page));
+    const lang = new URLSearchParams(window.location.search).get('lang');
+    if (lang) url.set('lang', lang);
+    const query = url.toString();
+    history.replaceState(null, '', `/owner/tasks/${code}/deliveries` + (query ? `?${query}` : ''));
     const args = {code, page, page_size: 20};
     if (state) args.state = state;
     tcvCall('task_submissions', args).then((env) => {
@@ -760,7 +1013,11 @@ function tcvLoadSubmissions(code, state, page) {
         const rows = env.submissions || [];
         const total = Number(env.total ?? rows.length);
         const pages = Math.max(1, Math.ceil(total / 20));
-        box.innerHTML = rows.length ? rows.map(tcvSubmissionRow).join('')
+        // C4: the contract-revision column appears only when THIS page
+        // spans two or more revisions
+        const versions = new Set(rows.map((r) => Number(r.version ?? 0)));
+        const showVersion = versions.size > 1;
+        box.innerHTML = rows.length ? rows.map((r) => tcvSubmissionRow(r, showVersion)).join('')
             : `<p class="muted">${escapeHtml(tcvT('empty_deliveries'))}</p>`;
         const info = qs('#tcvSubPageInfo');
         if (info) info.textContent = tcvT('page_info', {page, pages, total});
@@ -790,7 +1047,7 @@ function tcvDecorateRenderPage() {
     const tcvOrigRenderPage = renderPage;
     renderPage = async function () {
         if (SECTION === 'tasks') { tcvLoadList(); return; }
-        if (SECTION === 'task_new' || SECTION === 'task_detail') { tcvEditorInit(); return; }
+        if (SECTION === 'task_new' || SECTION === 'task_detail' || SECTION === 'task_edit' || SECTION === 'task_deliveries') { tcvEditorInit(); return; }
         return tcvOrigRenderPage();
     };
 }

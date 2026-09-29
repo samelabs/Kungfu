@@ -40,7 +40,6 @@ func w11Args(budget int64, open bool) []byte {
 			"title":        "Summarize a page",
 			"requirements": "Three bullets of the page.",
 			"receiver":     map[string]any{"url": okReceiverURL},
-			"sample":       map[string]any{"result": "three bullets"},
 			"price":        5,
 		},
 		"budget": budget,

@@ -37,7 +37,6 @@ func pubContractArg() map[string]any {
 			},
 		},
 		"receiver": map[string]any{"url": okReceiverURL},
-		"sample":   map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
 		"price":    5,
 	}
 }
@@ -636,5 +635,30 @@ func TestRateLimitProtocol(t *testing.T) {
 	ra := env["retry_after"]
 	if numOff(ra) <= 0 {
 		t.Fatalf("retry_after = %v, want a positive integer", ra)
+	}
+}
+
+// TestTaskCreateRejectsSampleByName (WO-20b): the contract has no
+// sample field anymore; a contract that still sends one is
+// VALIDATION_FAILED naming sample, on both channels.
+func TestTaskCreateRejectsSampleByName(t *testing.T) {
+	pool := m1TestPool(t)
+	deps := m1Deps(t, pool, nil)
+	_, _, pubID := w11Register(t, pool)
+	pub := wo7Bot(t, pool, pubID)
+	arg := pubContractArg()
+	arg["sample"] = map[string]any{"url": "https://example.com/a"}
+	raw, _ := json.Marshal(map[string]any{"contract": arg, "budget": 10})
+	env, status := CallTool(context.Background(), &deps, "task_create", pub, raw)
+	if status != http.StatusUnprocessableEntity || env["ok"] != false {
+		t.Fatalf("sample contract: %d %v", status, env)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "VALIDATION_FAILED" {
+		t.Fatalf("code: %v", errObj["code"])
+	}
+	fields := fmt.Sprint(errObj["details"])
+	if !strings.Contains(fields, "field:sample") {
+		t.Fatalf("sample not named: %v", fields)
 	}
 }

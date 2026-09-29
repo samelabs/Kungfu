@@ -56,7 +56,7 @@ Startup fails on: missing `listen`, no criteria, duplicate or empty ids, a crite
 Per delivery (spec §7.1) the platform sends `POST` with `Idempotency-Key: <submission_id>`, `Kungfu-Task`, `Kungfu-Task-Version` and the body `{submission_id, task_code, version, agent_ref, payload}`. The receiver:
 
 - rejects a missing required header, a non-matching `Idempotency-Key`, or an unparseable body with `400`;
-- judges `Kungfu-Test: 1` deliveries (the open-time test delivery of your contract's `sample`) like any other, without caching them — so a sample this receiver would reject keeps the task from opening;
+- answers `Kungfu-Test: 1` deliveries (the open-time test delivery — a fixed `{}`) with `200` and no side effects, never caching their keys: it checks that this service is reachable and live, not the content;
 - returns the FIRST outcome unchanged for a repeated `Idempotency-Key` (in-process map, FIFO-capped at the most recent 100 000 keys; a production deployment persists it durably across restarts);
 - all criteria pass → `200` with `{"accepted":true}`; any fails → `422` with `{"accepted":false, "message": "<one line per failed criterion, ≤500 chars>", "problems": [{pointer, criterion, message ≤200}] (≤20)}`.
 
@@ -64,6 +64,6 @@ The platform keeps the first 4 000 bytes of your response body and gives them to
 
 ## Matching it in your task contract
 
-Put this service's public HTTPS URL in `receiver.url`, describe every criterion in the contract's `requirements` (the executor works from that text), and set `sample` to a payload this receiver accepts — opening the task test-delivers it and requires `200`.
+Put this service's public HTTPS URL in `receiver.url` and describe every criterion in the contract's `requirements` (the executor works from that text). Opening sends `{}` with the header `Kungfu-Test: 1` to your receiver; answer 2xx without side effects. It checks that the receiver is reachable and live, not the content.
 
-Deployment checklist: HTTPS-reachable URL, `receiver.url` in the contract pointing at it, the rules described in `requirements`, a `sample` that passes, `MODEL_*` set if any rubric is used.
+Deployment checklist: HTTPS-reachable URL, `receiver.url` in the contract pointing at it, the rules described in `requirements`, `MODEL_*` set if any rubric is used.

@@ -124,20 +124,19 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories (workflows, skills, scripts, context). Snapshotted when the task opens; executors read them with work_harness."},
 				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB). Every payload is checked against it before delivery; mismatches never reach your receiver."}},"additionalProperties":false},
 				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing. Your response body reaches the executor verbatim (first 4 000 bytes)."}},"required":["url"],"additionalProperties":false},
-				"sample":{"type":"object","description":"A payload your receiver accepts. Opening the task POSTs it to receiver.url with header Kungfu-Test: 1 and requires 2xx. Must satisfy output.schema when one is given."},
-				"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
+								"price":{"type":"integer","minimum":1,"description":"Credits paid per accepted submission."},
 				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this task."}},"additionalProperties":false},
 				"claim":{"type":"object","properties":{
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
 					"ttl":{"type":"integer","minimum":300,"maximum":7200,"default":1800,"description":"Seconds one claim lasts before renewal."},
 					"max_duration":{"type":"integer","minimum":600,"maximum":86400,"default":7200,"description":"Total seconds a claim may live including renewals; at least ttl."}
 				},"additionalProperties":false}
-			},"required":["title","requirements","receiver","sample","price"],"additionalProperties":false}`
+			},"required":["title","requirements","receiver","price"],"additionalProperties":false}`
 
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
 // executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, sample, output.schema and the memories referenced by harness_refs (snapshotted when the task opens) are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs (snapshotted when the task opens) are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
@@ -160,7 +159,7 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
 	Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status, with paused_reason / closed_reason when the platform set one. Your active claim pins the version you see.
-	Result: {code, status, version, contract (title, requirements, output.schema, sample, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
+	Result: {code, status, version, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
 	next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
@@ -254,8 +253,8 @@ next_action: the platform triages; continue other work.`,
 		Name: "task_create",
 		Description: contractVisibilityNote + `
 Create a draft task and lock its budget (lock_task ledger row).
-Preconditions: a contract with title, requirements, receiver.url, sample and price (see the schema; unknown fields are rejected); budget >= price (at least one unit); your balance covers the budget.
-Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (test delivery of the sample to your receiver, which must answer 2xx); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected — including the removed sample); budget >= price (at least one unit); your balance covers the budget.
+Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (an empty test delivery {} with Kungfu-Test: 1 to your receiver, which must answer 2xx without side effects); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 			"contract":` + contractInputSchema + `,
@@ -279,8 +278,8 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 	},
 	{
 		Name: "task_open",
-		Description: `Validate the draft contract, run the test delivery and open the task on a new version.
-Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds: the sample is POSTed to receiver.url (header Kungfu-Test: 1) and your receiver answers 2xx.
+		Description: `Validate the draft contract, run the test delivery and open the task on a new contract revision.
+Preconditions: status draft or paused; contract valid; harness refs are your own active memories; the test delivery succeeds: a fixed {} payload is POSTed to receiver.url (header Kungfu-Test: 1) and your receiver answers 2xx without side effects. It checks that the receiver is reachable and live, not the content.
 Result: status "open", version incremented.
 Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, TEST_DELIVERY_FAILED (details.status_code, details.response).`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,

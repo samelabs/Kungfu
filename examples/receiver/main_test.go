@@ -141,17 +141,26 @@ func syncCfg() string {
 
 var syncDeclared = map[string]bool{"C1": true, "C2": true, "C3": true}
 
-// §4 test delivery: the sample is judged like a real submission (so a
-// broken sample or receiver cannot open a task) and never cached.
-func TestTestDeliveryJudged(t *testing.T) {
+// §4 test delivery: a fixed {} that checks reachability and liveness —
+// NOT the content. A payload that would fail judging still gets 2xx,
+// and the key is never cached (a later real delivery decides anew).
+func TestTestDeliveryLivenessOnly(t *testing.T) {
 	_, ts := startReceiver(t, syncCfg(), envConfig{})
-	r := deliver(t, ts, "test-task01-1", goodPayload, [2]string{"Kungfu-Test", "1"})
+	r := deliver(t, ts, "test-task01-1", `{}`, [2]string{"Kungfu-Test", "1"})
 	if r.status != http.StatusOK {
-		t.Fatalf("good sample = %d %s, want 200", r.status, r.body)
+		t.Fatalf("test delivery = %d %s, want 200", r.status, r.body)
 	}
+	// would-fail-judging payload with the SAME key: still 2xx, not the
+	// cached first outcome and not a judged rejection
 	r = deliver(t, ts, "test-task01-1", `{"url":"ftp://x","bullets":[]}`, [2]string{"Kungfu-Test", "1"})
+	if r.status != http.StatusOK {
+		t.Fatalf("repeated test delivery = %d %s, want 200 (never cached, never judged)", r.status, r.body)
+	}
+	// a REAL delivery under that key judges normally — the test key
+	// left no cached outcome behind
+	r = deliver(t, ts, "test-task01-1", `{"url":"ftp://x","bullets":[]}`)
 	if r.status != failStatus {
-		t.Fatalf("bad sample (same key, not cached) = %d %s, want %d", r.status, r.body, failStatus)
+		t.Fatalf("real delivery after test key = %d %s, want %d", r.status, r.body, failStatus)
 	}
 }
 

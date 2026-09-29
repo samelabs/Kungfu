@@ -3,12 +3,13 @@ package task
 // Contract — spec §3. The task contract is what a publisher hands to
 // Kungfu: what to do (title, requirements), the execution material
 // (harness_refs), what to hand in (optional output.schema), where the
-// result goes (receiver.url, tested with sample before opening), and
-// the money (price). Field names are the verbatim JSON names of the
-// spec table. output.schema and sample stay raw JSON; optional numeric
-// fields are pointers so an explicit invalid value stays
+// result goes (receiver.url, probed by an empty test delivery before
+// opening), and the money (price). Field names are the verbatim JSON
+// names of the spec table. output.schema stays raw JSON; optional
+// numeric fields are pointers so an explicit invalid value stays
 // distinguishable from "absent"; WithDefaults materializes the spec
-// defaults.
+// defaults. There is no sample field (WO-20b): a contract that still
+// sends one is rejected by the strict decoder, by name.
 //
 // ValidateContract is a pure function: no IO, no database. Ownership
 // of harness_refs (发布者本人所有) and receiver reachability are
@@ -46,7 +47,6 @@ const (
 	maxTitleLen        = 128
 	maxRequirementsLen = 20000
 	maxSchemaBytes     = 32 * 1024
-	maxSampleBytes     = 512 * 1024
 	maxHarnessRefs     = 10
 	minMaxRejected     = 1
 	maxMaxRejected     = 50
@@ -70,15 +70,14 @@ func (e FieldError) Error() string {
 
 // Contract is the §3 task contract.
 type Contract struct {
-	Title        string          `json:"title"`
-	Requirements string          `json:"requirements"`
-	HarnessRefs  []string        `json:"harness_refs,omitempty"`
-	Output       Output          `json:"output,omitempty"`
-	Receiver     Receiver        `json:"receiver"`
-	Sample       json.RawMessage `json:"sample"`
-	Price        int64           `json:"price"`
-	Limits       Limits          `json:"limits,omitempty"`
-	Claim        ClaimConfig     `json:"claim,omitempty"`
+	Title        string      `json:"title"`
+	Requirements string      `json:"requirements"`
+	HarnessRefs  []string    `json:"harness_refs,omitempty"`
+	Output       Output      `json:"output,omitempty"`
+	Receiver     Receiver    `json:"receiver"`
+	Price        int64       `json:"price"`
+	Limits       Limits      `json:"limits,omitempty"`
+	Claim        ClaimConfig `json:"claim,omitempty"`
 }
 
 // Output is the §3 output section: an optional JSON Schema the
@@ -128,8 +127,8 @@ func (c Contract) WithDefaults() Contract {
 
 // ValidateContract checks every §3 table constraint. It returns ALL
 // violations; an empty slice means the contract is valid. Field paths
-// are JSON paths into the contract; hits inside sample or
-// output.schema append an RFC 6901 JSON Pointer.
+// are JSON paths into the contract; hits inside output.schema append
+// an RFC 6901 JSON Pointer.
 func ValidateContract(c Contract) []FieldError {
 	var errs []FieldError
 	add := func(field, format string, args ...any) {
@@ -150,10 +149,10 @@ func ValidateContract(c Contract) []FieldError {
 	requireBounded("requirements", c.Requirements, maxRequirementsLen)
 
 	// -- output.schema: optional; when given, size, valid JSON, root
-	//    object, compiles under draft 2020-12 --
-	var schema *jsonschema.Schema
+	//    object, compiles under draft 2020-12 (compilation is itself
+	//    the check — payloads are validated per submission) --
 	if len(c.Output.Schema) > 0 && string(c.Output.Schema) != "null" {
-		schema = compileContractSchema(c.Output.Schema, add)
+		_ = compileContractSchema(c.Output.Schema, add)
 	}
 
 	// -- receiver.url: required, https + host --
@@ -161,26 +160,6 @@ func ValidateContract(c Contract) []FieldError {
 		add("receiver.url", "required")
 	} else if u, err := url.Parse(c.Receiver.URL); err != nil || u.Scheme != "https" || u.Host == "" {
 		add("receiver.url", "must be an https URL with a host, got %q", c.Receiver.URL)
-	}
-
-	// -- sample: required JSON object, ≤ the payload limit, satisfies
-	//    output.schema when one is given --
-	switch {
-	case len(c.Sample) == 0 || string(c.Sample) == "null":
-		add("sample", "required (the payload the open-time test delivery sends)")
-	case len(c.Sample) > maxSampleBytes:
-		add("sample", "must be at most %d bytes, got %d", maxSampleBytes, len(c.Sample))
-	default:
-		var obj map[string]any
-		if err := json.Unmarshal(c.Sample, &obj); err != nil {
-			add("sample", "must be a JSON object")
-		} else if schema != nil {
-			if instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(c.Sample)); err != nil {
-				add("sample", "must be valid JSON: %v", err)
-			} else if err := schema.Validate(instance); err != nil {
-				add("sample", "must satisfy output.schema: %v", err)
-			}
-		}
 	}
 
 	// -- harness_refs: 0–10 (ownership is a service-layer check) --
@@ -278,9 +257,9 @@ func compileContractSchema(raw json.RawMessage, add func(field, format string, a
 }
 
 // scanCredentialStrings applies the credential-shape detector to every
-// string of the contract and to every string inside sample and
-// output.schema, via the shared ScanCredentials walk; hits inside raw
-// JSON carry their RFC 6901 pointer.
+// string of the contract and to every string inside output.schema,
+// via the shared ScanCredentials walk; hits inside raw JSON carry
+// their RFC 6901 pointer.
 func scanCredentialStrings(c Contract, add func(field, format string, args ...any)) {
 	for _, s := range []struct {
 		field string
@@ -293,9 +272,6 @@ func scanCredentialStrings(c Contract, add func(field, format string, args ...an
 		if s.value != "" && security.ContainsCredential(s.value) {
 			add(s.field, "must not contain credential-shaped strings")
 		}
-	}
-	for _, ptr := range ScanCredentials(c.Sample) {
-		add("sample"+ptr, "must not contain credential-shaped strings")
 	}
 	for i, ref := range c.HarnessRefs {
 		if security.ContainsCredential(ref) {

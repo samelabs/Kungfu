@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,7 +99,6 @@ func apiV1Contract() task.Contract {
 				"bullets":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
 			},"required":["url","bullets"]}`)},
 		Receiver: task.Receiver{URL: okReceiverURL},
-		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		Price:    5,
 	}
 }
@@ -235,24 +235,22 @@ func TestAPIV1BodyTooLarge(t *testing.T) {
 	}
 }
 
-// TestAPIV1LargeTaskCreateWithinLimit: a ~600 KB body (sample ~510 KB)
-// passes through /api/v1 — the HTTP channel shares the MCP 1 MiB cap,
-// not the old 512 KB + headroom constant.
-func TestAPIV1LargeTaskCreateWithinLimit(t *testing.T) {
+// TestAPIV1LargeBodyReachesValidationNot413: a ~600 KB body passes
+// through /api/v1 within the shared 1 MiB cap — every contract field
+// is bounded (WO-20b removed the one large field, sample), so the
+// bulk rides an unknown contract field and the reply is the by-name
+// VALIDATION_FAILED, proving the body reached validation rather than
+// a 413. One byte over the cap is still 413.
+func TestAPIV1LargeBodyReachesValidationNot413(t *testing.T) {
 	s, key, _, _ := apiV1Env(t)
 
-	bigSample := map[string]any{
-		"url":     "https://example.com/a",
-		"bullets": []string{"s1", "s2", "s3"},
-		"blob":    strings.Repeat("a", 510*1024),
-	}
 	body, _ := json.Marshal(map[string]any{
 		"contract": map[string]any{
-			"title":        "Big sample",
-			"requirements": "Holds a large sample.",
+			"title":        "Big body",
+			"requirements": "Carries a large unknown field.",
 			"receiver":     map[string]any{"url": "https://example.com/x"},
-			"sample":       bigSample,
 			"price":        5,
+			"padding":      strings.Repeat("a", 510*1024),
 		},
 		"budget": 10,
 	})
@@ -264,12 +262,29 @@ func TestAPIV1LargeTaskCreateWithinLimit(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 	s.buildRouter().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("large task_create = %d %s", rec.Code, rec.Body.String()[:200])
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("large body = %d %s", rec.Code, rec.Body.String()[:200])
 	}
 	var env map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	if env["ok"] != true {
+	errObj, _ := env["error"].(map[string]any)
+	if env["ok"] != false || errObj["code"] != "VALIDATION_FAILED" {
 		t.Fatalf("envelope: %v", env["error"])
+	}
+	fields := fmt.Sprint(errObj["details"])
+	if !strings.Contains(fields, "padding") {
+		t.Fatalf("unknown field not named: %v", fields)
+	}
+
+	// one byte over the shared cap: 413 before any decoding
+	over := append([]byte(`{"contract":{"padding":"`), bytes.Repeat([]byte("a"), mcpserver.MaxRequestBodyBytes)...)
+	over = append(over, []byte(`"}}`)...)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/task_create", bytes.NewReader(over))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec = httptest.NewRecorder()
+	s.buildRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize body = %d, want 413", rec.Code)
 	}
 }

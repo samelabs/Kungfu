@@ -119,9 +119,12 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 // never expose draft.
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	contractJSON := t.DraftContract
+	var versionOpenedAt *time.Time
 	if t.Version >= 1 {
 		if v, err := repository.FindTaskVersion(ctx, q, t.ID, t.Version); err == nil && v != nil {
 			contractJSON = v.Contract
+			opened := v.CreatedAt
+			versionOpenedAt = &opened
 		} else if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
@@ -147,6 +150,10 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	view["code"] = t.Code
 	view["status"] = t.Status
 	view["version"] = t.Version
+	if versionOpenedAt != nil {
+		// when the current contract revision was opened (WO-20b C3)
+		view["version_opened_at"] = versionOpenedAt.UTC().Format(time.RFC3339)
+	}
 	view["budget_locked"] = t.BudgetLocked
 	view["settled"] = t.Settled
 	view["reserved"] = t.Reserved
@@ -406,8 +413,10 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 }
 
 // runTestDelivery performs the §4 open-time test delivery: the §7.1
-// request shape with agent_ref "test", the contract's sample as the
-// payload, and the header Kungfu-Test: 1. The idempotency key is
+// request shape with agent_ref "test", an EMPTY payload {} and the
+// header Kungfu-Test: 1. It checks that the receiver is reachable and
+// live — not the content: the payload is fixed, so nothing about the
+// task reaches the receiver here. The idempotency key is
 // test-<code>-<version>-<random hex>, unique per open attempt, so a
 // receiver that caches by key never replays a stale 500 from a
 // previous attempt. The receiver must answer 2xx; any other outcome
@@ -420,13 +429,12 @@ func runTestDelivery(ctx context.Context, contract task.Contract, code string, v
 		return errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	testKey := fmt.Sprintf("test-%s-%d-%x", code, version, randBytes)
-	payload := contract.Sample
 	body, err := json.Marshal(map[string]json.RawMessage{
 		"submission_id": json.RawMessage(`"` + testKey + `"`),
 		"task_code":     json.RawMessage(`"` + code + `"`),
 		"version":       json.RawMessage(fmt.Sprintf(`%d`, version)),
 		"agent_ref":     json.RawMessage(`"test"`),
-		"payload":       payload,
+		"payload":       json.RawMessage(`{}`),
 	})
 	if err != nil {
 		return errors.New(0, "INTERNAL_ERROR", "Internal error")

@@ -112,7 +112,6 @@ func pubContract(receiverURL string) task.Contract {
 			}`),
 		},
 		Receiver: task.Receiver{URL: receiverURL},
-		Sample:   []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		Price:    5,
 		Claim:    task.ClaimConfig{Required: true},
 	}
@@ -336,11 +335,10 @@ func TestPublisherOpenSyncReceiver2xx(t *testing.T) {
 		body.Version != 1 || body.AgentRef != "test" {
 		t.Fatalf("body identity fields = %+v", body)
 	}
-	var wantPayload, gotPayload interface{}
-	_ = json.Unmarshal([]byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`), &wantPayload)
-	_ = json.Unmarshal(body.Payload, &gotPayload)
-	if fmt.Sprint(wantPayload) != fmt.Sprint(gotPayload) {
-		t.Fatalf("payload = %v, want the contract sample", gotPayload)
+	// WO-20b: the payload is a FIXED {} — the test delivery checks
+	// reachability and liveness, never content
+	if string(body.Payload) != "{}" {
+		t.Fatalf("payload = %s, want the fixed {}", body.Payload)
 	}
 
 	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
@@ -503,7 +501,7 @@ func TestPublisherPauseDraftVisibility(t *testing.T) {
 
 	updated := pubContract(rcv.url)
 	updated.Title = "Summarize a page, revised"
-	updated.Sample = []byte(`{"url":"https://example.com/b","bullets":["x","y","z"]}`)
+	updated.Requirements = "Revised requirements: five bullets instead."
 	updView, err := UpdateTask(ctx, pool, publisher, code, updated)
 	if err != nil {
 		t.Fatalf("update while paused: %v", err)
@@ -530,11 +528,11 @@ func TestPublisherPauseDraftVisibility(t *testing.T) {
 	if err := json.Unmarshal(view["draft"].(json.RawMessage), &draft); err != nil {
 		t.Fatalf("draft: %v", err)
 	}
-	if live.Title != "Summarize a page" || !jsonEqual(live.Sample, pubContract(rcv.url).Sample) {
-		t.Fatalf("live contract changed before reopen: %q %s", live.Title, live.Sample)
+	if live.Title != "Summarize a page" || live.Requirements == updated.Requirements {
+		t.Fatalf("live contract changed before reopen: %q", live.Title)
 	}
-	if draft.Title != updated.Title || !jsonEqual(draft.Sample, updated.Sample) {
-		t.Fatalf("draft is not the saved edit: %q %s", draft.Title, draft.Sample)
+	if draft.Title != updated.Title || draft.Requirements != updated.Requirements {
+		t.Fatalf("draft is not the saved edit: %q", draft.Title)
 	}
 	if view["draft_pending"] != true {
 		t.Fatalf("draft_pending = %v, want true", view["draft_pending"])
@@ -573,8 +571,8 @@ func TestPublisherPauseDraftVisibility(t *testing.T) {
 	if err := json.Unmarshal(openView["contract"].(json.RawMessage), &live2); err != nil {
 		t.Fatalf("v2 contract: %v", err)
 	}
-	if live2.Title != updated.Title || !jsonEqual(live2.Sample, updated.Sample) {
-		t.Fatalf("v2 contract is not the former draft: %q %s", live2.Title, live2.Sample)
+	if live2.Title != updated.Title || live2.Requirements != updated.Requirements {
+		t.Fatalf("v2 contract is not the former draft: %q", live2.Title)
 	}
 
 	// paused again without editing: the draft equals the snapshot →
@@ -805,7 +803,6 @@ func TestOpenTestDeliveryUniqueKeyPerAttempt(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := pubContract(srv.URL)
-	c.Sample = []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`)
 	code := pubCreateForTest(t, pool, publisher, c, 1000)
 
 	// first open fails: the receiver's very first request gets 500

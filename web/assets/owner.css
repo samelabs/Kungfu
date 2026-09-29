@@ -979,3 +979,29 @@ details[open] > .start-summary::after { transform: rotate(-135deg); }
 }
 .tcv-note { margin: 10px 0; }
 .tcv-filter { margin-bottom: 12px; flex-wrap: wrap; }
+
+/* ---- WO-20b: form interaction norms ---- */
+.tcv-form label { display: block; margin: 16px 0 4px; font-weight: 600; font-size: 14px; }
+.tcv-form .tcv-hint { margin: 3px 0 6px; font-size: 12.5px; }
+.tcv-form .tcv-counter { margin: 2px 0 2px; }
+.tcv-form details > label { margin-top: 10px; }
+.tcv-form input, .tcv-form textarea { width: 100%; }
+.tcv-req { color: var(--danger); margin-left: 2px; }
+.tcv-summary { font-weight: 400; margin-left: 6px; font-size: 12.5px; }
+.tcv-actionbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-top: 14px;
+    padding: 10px 0;
+    background: var(--panel-bg, rgba(255, 252, 247, .97));
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(2px);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.tcv-status { font-size: 13px; flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.tcv-status-ok { color: var(--ok); }
+.tcv-status-err { color: var(--danger); white-space: pre-wrap; }
+.tcv-invalid { border-color: var(--danger) !important; box-shadow: 0 0 0 1px var(--danger) inset; }
+.tcv-field-err { margin: 2px 0 6px; font-size: 12.5px; }

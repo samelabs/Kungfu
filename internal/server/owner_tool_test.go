@@ -345,7 +345,6 @@ func ocContract() map[string]any {
 			},
 		},
 		"receiver": map[string]any{"url": okReceiverURL},
-		"sample":   map[string]any{"url": "https://example.com/a", "bullets": []string{"s1", "s2", "s3"}},
 		"price":    5,
 	}
 }
@@ -369,4 +368,52 @@ func ocRegisterAgent(t *testing.T, s *Server) (string, int64) {
 		t.Fatalf("agent lookup: %v", err)
 	}
 	return key, bot.ID
+}
+
+// TestOwnerTaskSplitRoutes (WO-20): /edit and /deliveries share the
+// task-detail shell — the guest surface carries the login form (the JS
+// layer redirects there), the signed-in surface is 200, and every
+// section sits under the unified owner head (noindex).
+func TestOwnerTaskSplitRoutes(t *testing.T) {
+	s, pool, name, _ := ownerConsoleEnv(t)
+	cookie := ocSessionCookie(t, s, pool, name)
+
+	for _, path := range []string{"/owner/tasks/abc123def456/edit", "/owner/tasks/abc123def456/deliveries"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.buildRouter().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s unauthenticated = %d", path, rec.Code)
+		}
+		body := rec.Body.String()
+		// the guest surface is the auth landing — its links carry the
+		// visitor to sign-in; the JS layer redirects there
+		if !strings.Contains(body, "auth-landing") || !strings.Contains(body, "/owner/login") {
+			t.Fatalf("%s: guest surface lacks the sign-in landing", path)
+		}
+
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(cookie)
+		rec = httptest.NewRecorder()
+		s.buildRouter().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s authenticated = %d", path, rec.Code)
+		}
+		body = rec.Body.String()
+		if !strings.Contains(body, "taskEditorRoot") || !strings.Contains(body, "tasks-console.js") {
+			t.Fatalf("%s: missing the console shell", path)
+		}
+		if !strings.Contains(body, `name="robots" content="noindex,nofollow"`) {
+			t.Fatalf("%s: missing the unified noindex head", path)
+		}
+	}
+
+	// the overview route keeps its shell too
+	req := httptest.NewRequest(http.MethodGet, "/owner/tasks/abc123def456", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	s.buildRouter().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "taskEditorRoot") {
+		t.Fatalf("overview route: %d", rec.Code)
+	}
 }

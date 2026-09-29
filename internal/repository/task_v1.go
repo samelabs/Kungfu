@@ -777,7 +777,7 @@ func ListClosedTasksWithSnapshots(ctx context.Context, q pg.Querier, cutoff time
 		WHERE t.status = 'closed'
 		  AND t.updated_at <= $1::timestamptz
 		  AND EXISTS (SELECT 1 FROM tb_task_version v
-		               WHERE v.task_id = t.id AND (v.harness <> '[]'::jsonb OR v.contract->'sample' <> '{}'::jsonb))
+		               WHERE v.task_id = t.id AND v.harness <> '[]'::jsonb)
 		ORDER BY t.id
 		LIMIT $2`, cutoff, batch)
 	if err != nil {
@@ -796,13 +796,12 @@ func ListClosedTasksWithSnapshots(ctx context.Context, q pg.Querier, cutoff time
 }
 
 // PurgeTaskVersionSnapshots empties one task's snapshot material
-// (§9): harness → [], contract.sample → {}; the rest of the contract
-// stays for audit.
+// (§9): harness → [] (the contract itself carries no sample since
+// WO-20b); the rest of the contract stays for audit.
 func PurgeTaskVersionSnapshots(ctx context.Context, q pg.Querier, taskID int64) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_task_version
-		SET harness = '[]'::jsonb,
-		    contract = jsonb_set(contract, '{sample}', '{}'::jsonb)
+		SET harness = '[]'::jsonb
 		WHERE task_id = $1`, taskID)
 	if err != nil {
 		return fmt.Errorf("purge version snapshots: %w", err)
