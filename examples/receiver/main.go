@@ -238,9 +238,9 @@ func (r *receiver) handler() http.Handler {
 		}
 		key := req.Header.Get("Idempotency-Key")
 		task := req.Header.Get("Kungfu-Task")
-		version := req.Header.Get("Kungfu-Task-Version")
+		version := req.Header.Get("")
 		if key == "" || task == "" || version == "" {
-			http.Error(w, "Idempotency-Key, Kungfu-Task and Kungfu-Task-Version headers are required", http.StatusBadRequest)
+			http.Error(w, "Idempotency-Key, Kungfu-Task and  headers are required", http.StatusBadRequest)
 			return
 		}
 		var d deliveryRequest
@@ -266,15 +266,6 @@ func (r *receiver) handler() http.Handler {
 			return
 		}
 		r.mu.Unlock()
-
-		if req.Header.Get("Kungfu-Test") == "1" {
-			// open-time test delivery (§4): a fixed {} payload that
-			// checks reachability and liveness — not the content. Answer
-			// 2xx with no side effects and never cache the key.
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"accepted":true,"test":true}`))
-			return
-		}
 
 		// judge inside the call, within the §11 response budget
 		v := r.judge(d.Payload)

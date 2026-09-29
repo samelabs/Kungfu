@@ -371,9 +371,6 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			bad["title"] = ""
 			return call(pubBot, "task_create", map[string]any{"contract": bad, "budget": 2000})
 		}},
-		{"TEST_DELIVERY_FAILED", "", 422, func() (map[string]any, int) {
-			return call(pubBot, "task_open", map[string]any{"code": syncBrokenTask(t, pool, pubID)})
-		}},
 		{"HAS_RESERVATIONS", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
 			if _, err := service.ClaimTask(ctx, pool, agentID, c, time.Now()); err != nil {

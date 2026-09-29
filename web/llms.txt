@@ -97,7 +97,7 @@ Executor:
 Publisher:
 - `task_create` — draft + locked budget
 - `task_update` — replace a draft or paused contract WHOLE: omitted fields are deleted. `task_get` first, edit the `draft` (the `contract` when there is none), submit the entire object
-- `task_open` — validate, test-deliver, open on a new version
+- `task_open` — open a paused task (contract and refs validated)
 - `task_pause` — stop new claims and claim-less submissions
 - `task_close` — permanent close
 - `task_fund` — add budget
@@ -138,7 +138,7 @@ Executor (`next_action` per the table above):
 - `INVALID_REQUEST_KEY` — key format invalid
 - `IDEMPOTENCY_CONFLICT` — same key, different payload
 - `SUBMISSION_NOT_FOUND` — queried submission does not exist
-- `HARNESS_REF_NOT_FOUND` — `ref_id` not in this version's snapshot
+- `HARNESS_REF_NOT_FOUND` — `ref_id` not in this task's harness_refs
 
 Publisher:
 
@@ -147,7 +147,6 @@ Publisher:
 - `INVALID_STATE` — not allowed in the current status
 - `INSUFFICIENT_CREDITS` — balance below the required amount
 - `VALIDATION_FAILED` — contract invalid (`details.errors[]`)
-- `TEST_DELIVERY_FAILED` — open-time test delivery failed
 - `HAS_RESERVATIONS` — refund blocked by reservations
 - `NOTHING_TO_REFUND` — nothing available to refund
 

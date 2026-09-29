@@ -55,8 +55,8 @@ func TestOpenFailureLeavesRecoverableDraft(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	code := view["code"].(string)
-	if _, err := OpenTask(ctx, pool, publisher, code); appErrOf(t, err).Code != "TEST_DELIVERY_FAILED" {
-		t.Fatalf("open: %v, want TEST_DELIVERY_FAILED", err)
+	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("open should succeed without test delivery: %v", err)
 	}
 	// draft with the budget locked; close + refund recovers it
 	draft, _ := repository.FindTaskByCode(ctx, pool, code)

@@ -300,7 +300,7 @@ func InsertClaim(ctx context.Context, q pg.Querier, in NewClaimRow) (int64, erro
 	var id int64
 	err := q.QueryRow(ctx, `
 		INSERT INTO tb_task_claim (task_id, agent_id, expires_at, deadline, amount)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING claim_id`,
 		in.TaskID, in.AgentID, in.ExpiresAt, in.Deadline, in.Amount).Scan(&id)
 	if err != nil {
@@ -811,7 +811,7 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 	err := tx.QueryRow(ctx, `
 		INSERT INTO tb_task_submission
 			(task_id, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'delivering', $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, 'delivering', $7, $8)
 		RETURNING submission_id`,
 		in.TaskID, in.AgentID, in.RequestKey,
 		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID).Scan(&id)
