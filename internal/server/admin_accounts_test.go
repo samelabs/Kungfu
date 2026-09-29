@@ -171,7 +171,7 @@ func TestAccountsAdminAccountDetailAggregatesDistinct(t *testing.T) {
 	})
 	if _, err := e.s.Pool.Exec(context.Background(), `
 		INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
-		VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), $1, $1, 'r01100000001', 1, 'rejected')`, p.id); err != nil {
+		VALUES ((SELECT id FROM tb_task WHERE publisher_id=$1 ORDER BY id DESC LIMIT 1), $1, $1 || '-' || extract(epoch from now())::bigint::text, 'r01100000001', 1, 'rejected')`, p.id); err != nil {
 		t.Fatalf("seed submission: %v", err)
 	}
 	t.Cleanup(func() {

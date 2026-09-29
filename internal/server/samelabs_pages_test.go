@@ -75,8 +75,8 @@ func seedConsoleData(t *testing.T, e *adminEnv) slSeed {
 		VALUES ($1, $2, 'open', 3000)`, sd.taskCode, sd.botID); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if _, err := e.s.Pool.Exec(ctx, `INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility, status)
-		VALUES ($1, $2, 'Console memory', '["x"]', 'body', repeat('a', 64), 'private', 'active')`, sd.memCode, sd.botID); err != nil {
+	if _, err := e.s.Pool.Exec(ctx, `INSERT INTO tb_kungfus (code, bot_id, title, tags_json, content, checksum, visibility)
+		VALUES ($1, $2, 'Console memory', '["x"]', 'body', repeat('a', 64), 'public')`, sd.memCode, sd.botID); err != nil {
 		t.Fatalf("seed memory: %v", err)
 	}
 	t.Cleanup(func() {
