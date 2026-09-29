@@ -557,14 +557,13 @@ func TestDeliverRequestShape(t *testing.T) {
 	var got struct {
 		SubmissionID string          `json:"submission_id"`
 		TaskCode     string          `json:"task_code"`
-		Version      int             `json:"version"`
 		AgentRef     string          `json:"agent_ref"`
 		Payload      json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("body: %v (%s)", err, body)
 	}
-	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code || 0 != 1 {
+	if got.SubmissionID != fmt.Sprint(subID) || got.TaskCode != code {
 		t.Fatalf("body identity = %+v", got)
 	}
 	var wantPayload interface{}

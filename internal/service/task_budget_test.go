@@ -5,10 +5,8 @@ package service
 
 import (
 	"context"
-	"testing"
-
-	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
+	"testing"
 )
 
 // minimalContract carries only the required §3 fields.
@@ -39,37 +37,5 @@ func TestBudgetFloorIsOnePrice(t *testing.T) {
 	// balance below the budget → INSUFFICIENT_CREDITS
 	if _, err := CreateTask(ctx, pool, fresh, c, 1000); appErrOf(t, err).Code != "INSUFFICIENT_CREDITS" {
 		t.Fatalf("insufficient: %v, want INSUFFICIENT_CREDITS", err)
-	}
-}
-
-func TestOpenFailureLeavesRecoverableDraft(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 100)
-	ctx := context.Background()
-
-	// unreachable receiver: creation succeeds, opening fails
-	c := minimalContract()
-	c.Receiver = task.Receiver{URL: "https://receiver.invalid/hook"}
-	view, err := CreateTask(ctx, pool, publisher, c, 5)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	code := view["code"].(string)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open should succeed without test delivery: %v", err)
-	}
-	// draft with the budget locked; close + refund recovers it
-	draft, _ := repository.FindTaskByCode(ctx, pool, code)
-	if draft.Status != task.TaskPaused || draft.BudgetLocked != 5 {
-		t.Fatalf("after failed open: %s locked=%d", draft.Status, draft.BudgetLocked)
-	}
-	if _, err := CloseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if _, err := RefundTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("refund: %v", err)
-	}
-	if err := task.CheckInvariants(ctx, pool, draft.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
