@@ -39,7 +39,6 @@ func adminTaskDTO(t *admin.TaskRow) map[string]interface{} {
 		"publisher_id":  t.PublisherID,
 		"publisher":     t.PublisherName,
 		"status":        t.Status,
-		"version":       t.Version,
 		"budget_locked": econString(t.BudgetLocked),
 		"settled":       econString(t.Settled),
 		"reserved":      econString(t.Reserved),
@@ -150,7 +149,6 @@ func recentSubmissionsDTO(rows []admin.SubmissionFact) []map[string]interface{} 
 		r := &rows[i]
 		out = append(out, map[string]interface{}{
 			"submission_id": r.SubmissionID,
-			"version":       r.Version,
 			"agent_id":      r.AgentID,
 			"amount":        econString(r.Amount),
 			"state":         r.State,

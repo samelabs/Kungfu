@@ -374,8 +374,8 @@ func TestDeliverTLSFailureUnreachable(t *testing.T) {
 	code := deliverSyncTask(t, pool, publisher, rcvTrusted, 1000)
 	taskID := deliverTaskID(t, pool, code)
 	if _, err := pool.Exec(ctx,
-		`UPDATE tb_task_version SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
-		 WHERE task_id = $1 AND version = 1`, taskID, `"`+srv.URL+`"`); err != nil {
+		`UPDATE tb_task SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
+		 WHERE id = $1`, taskID, `"`+srv.URL+`"`); err != nil {
 		t.Fatal(err)
 	}
 	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
@@ -415,9 +415,9 @@ func TestDeliverConnectionRefused(t *testing.T) {
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
 	if _, err := pool.Exec(ctx, `
-		UPDATE tb_task_version
+		UPDATE tb_task
 		SET contract = replace(contract::text, $2, $3)::jsonb
-		WHERE task_id = $1 AND version = 1`,
+		WHERE id = $1`,
 		tr.ID, rcv.url, fmt.Sprintf("https://127.0.0.1:%d/hook", deadPort)); err != nil {
 		t.Fatalf("repoint receiver: %v", err)
 	}

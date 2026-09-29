@@ -95,7 +95,6 @@ type AdminTaskRow struct {
 	PublisherID   int64
 	PublisherName string
 	Status        string
-	Version       int32
 	BudgetLocked  int64
 	Settled       int64
 	Reserved      int64

@@ -134,6 +134,33 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 
 // -- §4 transitions --
 
+// validateHarnessRefs checks that every harness_ref is one of the
+// publisher's own active memories (M3): max 10, ownership enforced,
+// all violations reported at once. Pure read; the caller runs it
+// inside or beside its transaction.
+func validateHarnessRefs(ctx context.Context, pool *pg.Pool, publisherID int64, refs []string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	var errs []task.FieldError
+	for i, ref := range refs {
+		k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, publisherID, ref)
+		if err != nil {
+			return errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if k == nil {
+			errs = append(errs, task.FieldError{
+				Field:   fmt.Sprintf("harness_refs[%d]", i),
+				Message: fmt.Sprintf("%q is not one of your active memories", ref),
+			})
+		}
+	}
+	if len(errs) > 0 {
+		return validationFailed(errs)
+	}
+	return nil
+}
+
 // CreateTask is the §4 create transition: a validated draft plus the
 // budget lock (lock_task) in one transaction. budget must cover at
 // least one unit of the price (§4/§11, WO-11: no numeric minimum) and
@@ -160,6 +187,9 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	} else if balance < budget {
 		return nil, errors.New(0, "INSUFFICIENT_CREDITS",
 			fmt.Sprintf("Insufficient credits. Need %d, have %d", budget, balance))
+	}
+	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
+		return nil, err
 	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
@@ -214,6 +244,9 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
+	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
+		return nil, err
+	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
@@ -264,6 +297,9 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
+	}
+	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
+		return nil, err
 	}
 	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, task.EventOpen, nil); err != nil {
 		return nil, invalidTaskState(t.Status)

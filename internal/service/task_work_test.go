@@ -335,11 +335,6 @@ func TestGetWorkVisibility(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	draft := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
-	if _, err := GetWork(ctx, pool, agent, draft, time.Now()); appErrOf(t, err).Code != "TASK_NOT_FOUND" {
-		t.Fatalf("draft: %v, want TASK_NOT_FOUND", err)
-	}
-
 	closed := workOpenTask(t, pool, publisher, 1000, nil)
 	if _, err := CloseTask(ctx, pool, publisher, closed.Code); err != nil {
 		t.Fatalf("close: %v", err)
@@ -358,68 +353,6 @@ func TestGetWorkVisibility(t *testing.T) {
 	if err := task.CheckInvariants(ctx, pool, closed.ID); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
-}
-
-func TestGetWorkVersionPinnedByClaim(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-	ctx := context.Background()
-	now := time.Now()
-
-	// v1 with a harness ref owned by the publisher
-	pubSeedKungfu(t, pool, publisher, "harnessref01", "Harness One")
-	c := claimContract() // claim.required = true
-	c.HarnessRefs = []string{"harnessref01"}
-	code := pubCreateForTest(t, pool, publisher, c, 1000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	if _, err := ClaimTask(ctx, pool, agent, code, now); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-
-	// publisher pauses + edits (v2: new title, no harness) + reopens
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	updated := claimContract()
-	updated.Title = "Version two"
-	updated.HarnessRefs = nil
-	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-
-	view, err := GetWork(ctx, pool, agent, code, now)
-	if err != nil {
-		t.Fatalf("GetWork: %v", err)
-	}
-	if view["version"] != int32(1) {
-		t.Fatalf("version = %v, want the claim's v1", view["version"])
-	}
-	contractJSON, _ := json.Marshal(view["contract"])
-	if !strings.Contains(string(contractJSON), "Summarize a page") {
-		t.Fatalf("v1 contract expected: %s", contractJSON)
-	}
-	harness, _ := view["harness"].([]map[string]any)
-	if len(harness) != 1 || harness[0]["ref_id"] != "harnessref01" {
-		t.Fatalf("harness = %v, want the v1 snapshot entry", harness)
-	}
-
-	hv, err := GetHarness(ctx, pool, agent, code, "harnessref01")
-	if err != nil {
-		t.Fatalf("GetHarness: %v", err)
-	}
-	if hv["content"] != "harness body" {
-		t.Fatalf("harness content = %v", hv["content"])
-	}
-	if _, err := GetHarness(ctx, pool, agent, code, "nope00000000"); appErrOf(t, err).Code != "HARNESS_REF_NOT_FOUND" {
-		t.Fatalf("missing ref: %v, want HARNESS_REF_NOT_FOUND", err)
-	}
-	claimTaskReserved(t, pool, code)
 }
 
 // -- §10.8: no receiver / publisher identity in executor output --

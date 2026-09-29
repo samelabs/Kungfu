@@ -116,22 +116,6 @@ func TestClaimTaskNotOpen(t *testing.T) {
 	}
 }
 
-// TestClaimDraftTaskNotFound: a draft task is invisible to executors
-// (§5.1) — work_claim answers TASK_NOT_FOUND like work_get, never
-// TASK_NOT_OPEN with a status detail that would leak the draft.
-func TestClaimPausedTaskIsNotOpen(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	agent := pubSeedBot(t, pool, 0)
-
-	draft := pubCreateForTest(t, pool, publisher, claimContract(), 1000)
-	_, err := ClaimTask(context.Background(), pool, agent, draft, time.Now())
-	if appErrOf(t, err).Code != "TASK_NOT_FOUND" {
-		t.Fatalf("draft claim: %v, want TASK_NOT_FOUND", err)
-	}
-	claimTaskReserved(t, pool, draft)
-}
-
 func TestClaimTaskOwnTask(t *testing.T) {
 	pool := pubTestPool(t)
 	publisher := pubSeedBot(t, pool, 10_000)

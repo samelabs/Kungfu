@@ -128,7 +128,6 @@ type TaskRow struct {
 	PublisherID   int64
 	PublisherName string
 	Status        string
-	Version       int32
 	BudgetLocked  int64
 	Settled       int64
 	Reserved      int64
@@ -157,7 +156,6 @@ type TaskStats struct {
 // payload bodies cross into the console).
 type SubmissionFact struct {
 	SubmissionID int64
-	Version      int32
 	AgentID      int64
 	Amount       int64
 	State        string

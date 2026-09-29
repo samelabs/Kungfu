@@ -179,68 +179,6 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 
 // -- §4 update: paused edit → next open builds a new version --
 
-func TestPublisherPauseUpdateOpenNewVersion(t *testing.T) {
-	pool := pubTestPool(t)
-	publisher := pubSeedBot(t, pool, 10_000)
-	ctx := context.Background()
-	rcv := startPubReceiver(t, http.StatusOK)
-
-	code := pubCreateForTest(t, pool, publisher, pubContract(rcv.url), 2000)
-	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("open v1: %v", err)
-	}
-	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	v1, err := repository.FindTaskByID(ctx, pool, tr.ID)
-	if err != nil || v1 == nil {
-		t.Fatalf("version 1: %v", err)
-	}
-	v1Contract, v1Harness := append([]byte{}, v1.Contract...), append([]byte{}, []byte(nil)...)
-
-	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
-	updated := pubContract(rcv.url)
-	updated.Title = "Summarize a page, revised"
-	if _, err := UpdateTask(ctx, pool, publisher, code, updated); err != nil {
-		t.Fatalf("update while paused: %v", err)
-	}
-	view2, err := OpenTask(ctx, pool, publisher, code)
-	if err != nil {
-		t.Fatalf("open v2: %v", err)
-	}
-	if view2["status"] != task.TaskOpen {
-		t.Fatalf("status after reopen = %v", view2["status"])
-	}
-
-	tr, _ = repository.FindTaskByCode(ctx, pool, code)
-	v1After, err := repository.FindTaskByID(ctx, pool, tr.ID)
-	if err != nil || v1After == nil {
-		t.Fatalf("version 1 after reopen: %v", err)
-	}
-	if string(v1After.Contract) != string(v1Contract) || string([]byte(nil)) != string(v1Harness) {
-		t.Fatal("version 1 snapshot changed across the paused edit + reopen")
-	}
-	v2, err := repository.FindTaskByID(ctx, pool, tr.ID)
-	if err != nil || v2 == nil {
-		t.Fatalf("version 2: %v", err)
-	}
-	var v2Contract task.Contract
-	if err := json.Unmarshal(v2.Contract, &v2Contract); err != nil {
-		t.Fatalf("version 2 contract: %v", err)
-	}
-	if v2Contract.Title != "Summarize a page, revised" {
-		t.Fatalf("version 2 title = %q, want the revised one", v2Contract.Title)
-	}
-	if err := task.CheckInvariants(ctx, pool, tr.ID); err != nil {
-		t.Fatalf("CheckInvariants: %v", err)
-	}
-}
-
-// TestPublisherPauseDraftVisibility (WO-17): a paused edit is visible —
-// the task_update result and task_get carry the saved draft plus
-// draft_pending while the effective contract stays on the opened
-// version; the next open applies the draft as the new version.
-
 func mustMarshalView(t *testing.T, v map[string]interface{}) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
