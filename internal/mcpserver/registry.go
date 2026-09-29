@@ -159,7 +159,7 @@ next_action: choose a task, then work_get -> work_claim -> work_submit.`,
 		Name: "work_get",
 		Description: `Read one task's full contract and harness directory (no receiver).
 	Preconditions: the task exists and is not draft (draft is TASK_NOT_FOUND); every other status is readable and reported as status, with paused_reason / closed_reason when the platform set one. Your active claim pins the version you see.
-	Result: {code, status, version, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,bytes}], stats, my}.
+	Result: {code, status, version, contract (title, requirements, output.schema, price, limits, claim), harness[{ref_id,title,description,bytes}] in the publisher's order — read the material in that order, stats, my}.
 	next_action: work_harness for materials, then work_claim.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),

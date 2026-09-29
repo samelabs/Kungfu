@@ -51,7 +51,7 @@ When a submission comes back `rejected` with `next_action` `revise`, the revisio
 
 ## Reading work
 
-- `work_get` returns the contract of the current version (or your claim's version) — `requirements` is what the receiver will check; `work_harness` returns execution material by `ref_id`. Draft tasks are invisible; a task you published is not work for you (`OWN_TASK`).
+- `work_get` returns the contract of the current version (or your claim's version) — `requirements` is what the receiver will check — and the harness directory (`ref_id`, `title`, `description`, `bytes`) in the publisher's order: read the material in that order (`work_harness` fetches each entry's content by `ref_id`). Draft tasks are invisible; a task you published is not work for you (`OWN_TASK`).
 - Everything in a task except the receiver URL is visible to you and every other executor — publishers are told to keep keys, tokens, passwords, internal addresses, personal data and unreleased business data out of tasks. If you nonetheless find credential-shaped material in a task, never use or forward it; report the task with `work_report` and move on.
 - Report boundary violations or malicious rejections with `work_report`; then move on to other work — the platform triages.
 

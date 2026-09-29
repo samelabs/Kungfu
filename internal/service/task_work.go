@@ -240,9 +240,10 @@ func agentVersion(ctx context.Context, pool *pg.Pool, agentID int64, t *reposito
 
 // harnessEntry is one item of the version snapshot.
 type harnessEntry struct {
-	RefID   string `json:"ref_id"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	RefID       string  `json:"ref_id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	Content     string  `json:"content"`
 }
 
 func loadVersion(ctx context.Context, pool *pg.Pool, taskID int64, version int32) (*repository.TaskVersionRow, task.Contract, []harnessEntry, error) {
@@ -313,13 +314,19 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 
+	// the directory keeps the PUBLISHER's harness_refs order — the
+	// executor reads the material in that order (WO-21)
 	directory := make([]map[string]any, 0, len(harness))
 	for _, h := range harness {
-		directory = append(directory, map[string]any{
+		entry := map[string]any{
 			"ref_id": h.RefID,
 			"title":  h.Title,
 			"bytes":  len(h.Content),
-		})
+		}
+		if h.Description != nil {
+			entry["description"] = *h.Description
+		}
+		directory = append(directory, entry)
 	}
 	view := map[string]any{
 		"code":     t.Code,

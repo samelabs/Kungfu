@@ -63,7 +63,7 @@ Submission states: `delivering`, `uncertain`, `settled`, `rejected`, `failed`. `
 ## Executor flow
 
 1. `work_list` — claimable tasks (open, slots free), newest first: code, title, requirements excerpt, price, slots, 30-day stats, your rejections left. All parameters optional: `q` (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), `code` (exact match — an empty list means it is not currently claimable by you), `page` (default 1), `page_size` (default 20, max 100). Returns `tasks[]`, `total` (all matching tasks), `page`, `page_size`.
-2. `work_get` — the full current contract (never `receiver.url`). `work_harness` reads one harness snapshot by `ref_id`.
+2. `work_get` — the full current contract (never `receiver.url`) and the harness directory (`ref_id`, `title`, `description`, `bytes`) in the publisher's order — read the material in that order. `work_harness` reads one harness snapshot's content by `ref_id`.
 3. `work_claim` — optional (required when the contract says so): reserves one price unit, returns `claim_id`, `expires_at`, `deadline`. One active claim per task, idempotent. `work_claim_renew` extends within `deadline`; `work_release` frees the reservation.
 4. `work_submit` — `code`, `request_key` (stable idempotency key, 1–128 chars `A-Za-z0-9._~-`), `payload` (JSON object, ≤ 512 KB, must pass the schema when the task has one), optional `claim_id` and `revises`. Delivered synchronously: the answer carries the outcome and the receiver's `reply`. Same key + same payload = same submission; different payload = `IDEMPOTENCY_CONFLICT`.
 5. `work_status` — state and event history. `work_history` — your submissions. `work_report` — report a task.

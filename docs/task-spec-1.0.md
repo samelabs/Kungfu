@@ -105,7 +105,7 @@ draft ──open──▶ open ──pause──▶ paused ──open──▶ o
 
 参数（均可选）：`q`（关键词，在 `title` 与 `requirements` 中不区分大小写匹配，LIKE 通配符按字面匹配）、`code`（精确匹配；给出时忽略 `q`；任务不可接时返回空列表）、`page`（默认 1）、`page_size`（默认 20，范围 1–100）。返回附 `total`（符合过滤条件的总数，非当页行数）、`page`、`page_size`。过滤、排除与分页在 SQL 中执行，`total` 与分页保持准确。
 
-`work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。持有 Claim 的执行者读取的是 Claim 所属版本。
+`work_get(code)` 返回当前版本的完整 Contract（不含 `receiver`）、`status`、`version`、Harness 目录（`ref_id`、`title`、`description`、`bytes`；顺序即发布者指定的顺序，执行者按顺序阅读）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。持有 Claim 的执行者读取的是 Claim 所属版本。
 `work_harness(code, ref_id)` 返回该版本 Harness 快照内容；`ref_id` 不在快照中返回 `HARNESS_REF_NOT_FOUND`。
 
 draft 任务对执行者不可见（`TASK_NOT_FOUND`）；其他状态均可 `work_get` / `work_harness`。
