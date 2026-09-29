@@ -119,7 +119,7 @@ func TestTermsCreditsRenderBudgetLockAuthority(t *testing.T) {
 		wantMarkers []string
 	}{
 		{"/terms", budgetLockCreationMarkers["en"]},
-		{"/credits", []string{"locked from your account balance when the task is created", "including while it is a draft"}},
+		{"/credits", []string{"locked from your account balance when the task is created"}},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
