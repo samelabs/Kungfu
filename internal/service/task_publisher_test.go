@@ -906,3 +906,28 @@ func TestPublisherStatsCounters(t *testing.T) {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 }
+
+// TestListTasksTotalIndependentOfPage (WO-19b): with 20 matching
+// tasks, page 3 at page_size 10 is beyond the end — the page is empty
+// but total stays 20 (a window COUNT would report 0).
+func TestListTasksTotalIndependentOfPage(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 500)
+	ctx := context.Background()
+	for i := 0; i < 20; i++ {
+		c := pubContract("")
+		c.Title = fmt.Sprintf("WO-19b page fixture %02d", i)
+		pubCreateForTest(t, pool, publisher, c, 5)
+	}
+	items, total, err := ListTasks(ctx, pool, publisher, TaskListFilter{Page: 3, PageSize: 10})
+	if err != nil {
+		t.Fatalf("page 3: %v", err)
+	}
+	if len(items) != 0 || total != 20 {
+		t.Fatalf("out-of-range page: %d items, total=%d, want 0/20", len(items), total)
+	}
+	items, total, err = ListTasks(ctx, pool, publisher, TaskListFilter{Page: 2, PageSize: 10})
+	if err != nil || len(items) != 10 || total != 20 {
+		t.Fatalf("page 2: err=%v %d items, total=%d, want 10/20", err, len(items), total)
+	}
+}

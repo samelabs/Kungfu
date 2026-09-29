@@ -883,7 +883,30 @@ ol.guide-flow li::before {
     .rewards-product-actions { align-items: stretch; text-align: center; }
 }
 
-/* first steps on the overview */
+/* first steps on the overview (collapsible <details>, WO-19 R3) */
+.start-summary {
+    cursor: pointer;
+    font-size: 17px;
+    font-weight: 580;
+    color: var(--heading-ink, #365750);
+    margin-bottom: 12px;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.start-summary::-webkit-details-marker { display: none; }
+.start-summary::after {
+    content: "";
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    transform: rotate(45deg);
+    transition: transform .15s ease;
+}
+details[open] > .start-summary::after { transform: rotate(-135deg); }
 .start-panel h2 { margin-bottom: 12px; }
 .start-steps { list-style: none; counter-reset: step; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
 .start-steps li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr; column-gap: 12px; row-gap: 2px; align-items: start; }
@@ -894,6 +917,21 @@ ol.guide-flow li::before {
 }
 .start-steps b { color: var(--heading-ink, #365750); }
 .start-steps span { color: var(--body-ink, #5c6762); font-size: 14px; }
+
+/* registration heads-up (WO-19 R1) and post-registration next steps (R2) */
+.register-notes {
+    margin: 0 0 14px; padding: 10px 12px; border-radius: 10px;
+    background: rgba(47, 124, 115, .07); border: 1px solid rgba(47, 124, 115, .18);
+    display: grid; gap: 4px;
+}
+.register-notes p { margin: 0; font-size: 13px; color: var(--body-ink, #5c6762); }
+.next-steps { margin: 14px 0 0; }
+.next-steps h3 { margin: 0 0 8px; font-size: 16px; color: var(--heading-ink, #365750); }
+.next-steps .start-steps { margin-bottom: 0; }
+.next-snippets { grid-column: 2; display: grid; gap: 6px; margin-top: 8px; }
+.next-snippets .muted { font-size: 12.5px; }
+.next-snippets .keybox { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.next-snippets .btn { justify-self: start; }
 
 /* one-time key after registration */
 .key-warning { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: #fffaeb; border: 1px solid #fedf89; color: #93370d; font-weight: 600; }
@@ -913,6 +951,11 @@ ol.guide-flow li::before {
 .badge.paused { background: #fef3c7; color: #92400e; }
 .tcv-ok { color: var(--ok); }
 .tcv-err { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tcv-privacy { margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-md); background: #fffaeb; border: 1px solid #fedf89; color: #93370d; font-size: 13px; }
+.tcv-harness-visible { color: #93370d; }
+.tcv-search { display: flex; gap: 8px; margin-bottom: 10px; }
+.tcv-search input { flex: 1; min-width: 0; }
+.tcv-pager { margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .task-error { border: 1px solid #fecaca; background: #fef2f2; border-radius: var(--radius-md); padding: 10px 12px; margin: 8px 0; }
 .task-error-fields { margin: 6px 0 0 18px; }
 .tcv-mode { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 6px; }

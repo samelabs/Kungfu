@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,11 +23,38 @@ import (
 
 // §5.1/§6.3 presentation bounds.
 const (
-	workListMax             = 100
+	workListDefaultPageSize = 20
+	workListMaxPageSize     = 100
 	workRequirementsExcerpt = 280 // runes
 	statsWindow             = 30 * 24 * time.Hour
-	listOpenWorkingSet      = 500 // candidate rows before slot/limit filtering
 )
+
+// WorkListFilter is the work_list query surface (WO-19 Q1): a
+// keyword over title/requirements, an exact code, and paging. All
+// fields optional; an absent filter returns page 1 at the default
+// size. Code wins over keyword when both are given.
+type WorkListFilter struct {
+	Q        string
+	Code     string
+	Page     int
+	PageSize int
+}
+
+// Normalize trims, resolves precedence and applies the paging
+// defaults (page 1; page_size 20, range 1–100).
+func (f *WorkListFilter) Normalize() {
+	f.Q = strings.TrimSpace(f.Q)
+	f.Code = strings.TrimSpace(f.Code)
+	if f.Code != "" {
+		f.Q = ""
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > workListMaxPageSize {
+		f.PageSize = workListDefaultPageSize
+	}
+}
 
 // workStats is the §6.3 statistic block (rates are nil when the
 // denominator is 0).
@@ -79,96 +107,124 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 	return myTally(counts, contract), nil
 }
 
-// ListWork is §5.1 work_list: open, claimable, not-own, not-exhausted
-// tasks, newest open first, at most 100. Candidates and their three
-// data classes (contracts, agent counts, 30-day stats) are fetched in
-// at most three batch queries — no per-task round trips.
-func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) ([]map[string]any, error) {
-	rows, err := repository.ListOpenTasksForAgent(ctx, pool, agentID, listOpenWorkingSet)
+// ListWork is §5.1 work_list: open, claimable, not-own,
+// not-cap-exhausted tasks, newest open first, ONE page of the filter
+// with the total number of matching rows. All §5.1 filtering runs in
+// SQL (WO-19 Q1 — no candidate window); the caller's three data
+// classes beyond the page (agent counts, 30-day stats) stay batch
+// queries — no per-task round trips.
+func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, filter WorkListFilter) ([]map[string]any, int64, error) {
+	filter.Normalize()
+	rows, total, err := repository.FindOpenWorkPage(ctx, pool, agentID,
+		repository.WorkFilter{Keyword: filter.Q, Code: filter.Code},
+		filter.PageSize, (filter.Page-1)*filter.PageSize)
 	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if len(rows) == 0 {
-		return []map[string]any{}, nil
+		return []map[string]any{}, total, nil
 	}
 
-	// Batch 1: the current-version contract for every candidate task.
-	taskIDs := make([]int64, len(rows))
-	for i := range rows {
-		taskIDs[i] = rows[i].ID
-	}
-	contractsRaw, err := repository.FindTaskVersionsBatch(ctx, pool, taskIDs)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-
-	// Batch 2: this agent's submission tallies across all candidates.
-	countsByTask, err := repository.CountAgentSubmissionsBatch(ctx, pool, agentID, taskIDs)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
-	}
-
-	// Filter on slots and the rejection cap; only survivors need stats.
-	type kept struct {
-		row      *repository.TaskRow
+	type entry struct {
+		row      repository.WorkCandidate
 		contract task.Contract
 		my       myStats
 	}
-	keptRows := make([]kept, 0, workListMax)
+	entries := make([]entry, 0, len(rows))
+	taskIDs := make([]int64, len(rows))
 	for i := range rows {
-		if len(keptRows) == workListMax {
-			break
-		}
-		t := &rows[i]
-		raw, ok := contractsRaw[t.ID]
-		if !ok || raw == nil {
-			// an open row without a version snapshot is not listable
-			continue
-		}
+		taskIDs[i] = rows[i].Task.ID
 		var contract task.Contract
-		if err := json.Unmarshal(raw, &contract); err != nil {
-			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		if err := json.Unmarshal(rows[i].Contract, &contract); err != nil {
+			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
-		if slotsFor(t, contract) < 1 {
-			continue
-		}
-		counts := countsByTask[t.ID] // zero value when no submissions
-		my := myTally(counts, contract)
-		if my.RejectionsLeft <= 0 {
-			continue // executor exhausted this task's rejection cap
-		}
-		keptRows = append(keptRows, kept{row: t, contract: contract, my: my})
+		entries = append(entries, entry{row: rows[i], contract: contract})
 	}
 
-	// Batch 3: §6.3 statistics for the survivors only.
-	survivorIDs := make([]int64, len(keptRows))
-	for i, k := range keptRows {
-		survivorIDs[i] = k.row.ID
-	}
-	statsByTask, err := repository.GetTaskStatsBatch(ctx, pool, survivorIDs, now.Add(-statsWindow))
+	// Batch 1: this agent's submission tallies across the page (for
+	// the my block — the cap itself was already enforced in SQL).
+	countsByTask, err := repository.CountAgentSubmissionsBatch(ctx, pool, agentID, taskIDs)
 	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	for i := range entries {
+		counts := countsByTask[entries[i].row.Task.ID] // zero value when no submissions
+		entries[i].my = myTally(counts, entries[i].contract)
 	}
 
-	out := make([]map[string]any, 0, len(keptRows))
-	for _, k := range keptRows {
-		stats := statsByTask[k.row.ID] // zero value when no terminals
+	// Batch 2: §6.3 statistics for the page.
+	statsByTask, err := repository.GetTaskStatsBatch(ctx, pool, taskIDs, now.Add(-statsWindow))
+	if err != nil {
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+
+	out := make([]map[string]any, 0, len(entries))
+	for _, k := range entries {
+		stats := statsByTask[k.row.Task.ID] // zero value when no terminals
 		requirements := []rune(k.contract.Requirements)
 		if len(requirements) > workRequirementsExcerpt {
 			requirements = requirements[:workRequirementsExcerpt]
 		}
 		out = append(out, map[string]any{
-			"code":         k.row.Code,
+			"code":         k.row.Task.Code,
 			"title":        k.contract.Title,
 			"requirements": string(requirements),
 			"price":        k.contract.Price,
-			"slots":        slotsFor(k.row, k.contract),
+			"slots":        slotsFor(&k.row.Task, k.contract),
 			"claim":        map[string]any{"required": k.contract.Claim.Required},
 			"stats":        statsView(stats),
 			"my":           k.my,
 		})
 	}
-	return out, nil
+	return out, total, nil
+}
+
+// workBoardRequirementsExcerpt is the homepage board excerpt (WO-19
+// H1) — shorter than the §5.1 listing excerpt.
+const workBoardRequirementsExcerpt = 140 // runes
+
+// WorkBoardRow is one row of the anonymous homepage task board
+// (WO-19 H1): no caller identity, no personal data.
+type WorkBoardRow struct {
+	Code         string `json:"code"`
+	Title        string `json:"title"`
+	Requirements string `json:"requirements"`
+	Price        int64  `json:"price"`
+	Slots        int64  `json:"slots"`
+}
+
+// ListWorkBoard is the anonymous homepage board: the SAME query as
+// work_list (§5.1, WO-19 Q1) with agentID 0 — open status, slots >= 1,
+// version join, keyword/code filters, paging — but no own-task or
+// rejection-cap exclusion (an anonymous view excludes no account).
+func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, page, pageSize int) ([]WorkBoardRow, int64, error) {
+	f := WorkListFilter{Q: keyword, Code: code, Page: page, PageSize: pageSize}
+	f.Normalize()
+	rows, total, err := repository.FindOpenWorkPage(ctx, pool, 0,
+		repository.WorkFilter{Keyword: f.Q, Code: f.Code},
+		f.PageSize, (f.Page-1)*f.PageSize)
+	if err != nil {
+		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	out := make([]WorkBoardRow, 0, len(rows))
+	for i := range rows {
+		var contract task.Contract
+		if err := json.Unmarshal(rows[i].Contract, &contract); err != nil {
+			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		requirements := []rune(contract.Requirements)
+		if len(requirements) > workBoardRequirementsExcerpt {
+			requirements = requirements[:workBoardRequirementsExcerpt]
+		}
+		out = append(out, WorkBoardRow{
+			Code:         rows[i].Task.Code,
+			Title:        contract.Title,
+			Requirements: string(requirements),
+			Price:        contract.Price,
+			Slots:        slotsFor(&rows[i].Task, contract),
+		})
+	}
+	return out, total, nil
 }
 
 // agentVersion resolves the version the agent sees: their active

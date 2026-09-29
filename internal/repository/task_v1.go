@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -128,24 +129,68 @@ func TaskCodeExists(ctx context.Context, q pg.Querier, code string) (bool, error
 	return exists, err
 }
 
-// ListTasksByPublisher returns one publisher's tasks, newest first.
-func ListTasksByPublisher(ctx context.Context, q pg.Querier, publisherID int64) ([]TaskRow, error) {
-	rows, err := q.Query(ctx, taskSelect+`
-		WHERE publisher_id = $1
-		ORDER BY created_at DESC, id DESC`, publisherID)
+// FindTasksByPublisherPage returns ONE page of one publisher's tasks,
+// newest first, with the total number of matching rows (WO-19 Q2).
+// status (exact), code (exact) and keyword (case-insensitive over the
+// effective title — the live version's, else the saved draft's) are
+// all optional; the WHERE building mirrors the page the caller sees,
+// so total and paging stay exact.
+func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int64, status, keyword, code string, limit, offset int) ([]TaskRow, int64, error) {
+	where := ` WHERE tb_task.publisher_id = $1`
+	args := []any{publisherID}
+	if status != "" {
+		args = append(args, status)
+		where += fmt.Sprintf(` AND tb_task.status = $%d`, len(args))
+	}
+	if code != "" {
+		args = append(args, code)
+		where += fmt.Sprintf(` AND tb_task.code = $%d`, len(args))
+	}
+	if keyword != "" {
+		args = append(args, "%"+EscapeLike(keyword)+"%")
+		n := len(args)
+		where += fmt.Sprintf(`
+		  AND COALESCE(v.contract->>'title', tb_task.draft_contract->>'title', '')
+		      ILIKE $%d ESCAPE '\'`, n)
+	}
+	// total runs as its own COUNT over the SAME filters: a window
+	// COUNT(*) OVER() only exists while the page has rows, so an
+	// out-of-range page would report total 0 (WO-19b).
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM tb_task
+		LEFT JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` + where
+	if err := q.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	query := `
+		SELECT tb_task.id, tb_task.code, tb_task.publisher_id, tb_task.status, tb_task.version,
+		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
+		       tb_task.paused_reason, tb_task.closed_reason, tb_task.draft_contract,
+		       tb_task.created_at, tb_task.updated_at
+		FROM tb_task
+		LEFT JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` +
+		where + `
+		ORDER BY tb_task.created_at DESC, tb_task.id DESC
+		LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []TaskRow
 	for rows.Next() {
-		t, err := scanTask(rows)
-		if err != nil {
-			return nil, err
+		var t TaskRow
+		if err := rows.Scan(&t.ID, &t.Code, &t.PublisherID, &t.Status, &t.Version,
+			&t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
+			&t.PausedReason, &t.ClosedReason, &t.DraftContract,
+			&t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, 0, err
 		}
-		out = append(out, *t)
+		out = append(out, t)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 const taskSelect = `
@@ -247,34 +292,6 @@ func FindTaskVersion(ctx context.Context, q pg.Querier, taskID int64, version in
 		return nil, err
 	}
 	return &v, nil
-}
-
-// FindTaskVersionsBatch loads the current-version contract JSON for
-// every (task_id, version) pair implied by the given task rows, in
-// ONE query keyed by task_id.
-func FindTaskVersionsBatch(ctx context.Context, q pg.Querier, taskIDs []int64) (map[int64][]byte, error) {
-	out := make(map[int64][]byte, len(taskIDs))
-	if len(taskIDs) == 0 {
-		return out, nil
-	}
-	rows, err := q.Query(ctx, `
-		SELECT v.task_id, v.contract
-		FROM tb_task_version v
-		JOIN tb_task t ON t.id = v.task_id AND t.version = v.version
-		WHERE v.task_id = ANY($1)`, taskIDs)
-	if err != nil {
-		return nil, fmt.Errorf("find task versions batch: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var contract []byte
-		if err := rows.Scan(&id, &contract); err != nil {
-			return nil, err
-		}
-		out[id] = contract
-	}
-	return out, rows.Err()
 }
 
 // CountAgentSubmissionsBatch tallies one agent's submissions across a
@@ -589,29 +606,103 @@ func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Ti
 	return s, nil
 }
 
-// ListOpenTasksForAgent returns open tasks the agent does NOT own,
-// newest open first (the current version's creation time is the open
-// time). Slot and limit filtering belong to the caller.
-func ListOpenTasksForAgent(ctx context.Context, q pg.Querier, agentID int64, limit int) ([]TaskRow, error) {
-	rows, err := q.Query(ctx, taskSelect+`
-		WHERE status = 'open' AND publisher_id <> $1
-		ORDER BY (SELECT v.created_at FROM tb_task_version v
-		           WHERE v.task_id = tb_task.id AND v.version = tb_task.version) DESC NULLS LAST,
-		         id DESC
-		LIMIT $2`, agentID, limit)
+// WorkFilter narrows an open-work page (WO-19 Q1): a keyword matched
+// over title/requirements and an exact task code. Both optional.
+type WorkFilter struct {
+	Keyword string
+	Code    string
+}
+
+// WorkCandidate is one listable task with its current-version
+// contract snapshot (the title/requirements/price source for the
+// caller's projection).
+type WorkCandidate struct {
+	Task     TaskRow
+	Contract []byte
+}
+
+// EscapeLike escapes the LIKE/ILIKE wildcards of a user keyword so
+// they match literally ('%', '_', '\') under ESCAPE '\'.
+func EscapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// FindOpenWorkPage returns ONE page of open, claimable work for an
+// agent (agentID 0 = anonymous: no own-task exclusion, no rejection
+// cap), newest open first, with the total number of matching rows
+// (WO-19 Q1). All §5.1 filtering runs in SQL: status open, a current
+// version snapshot, slots >= 1 (available >= price), not the agent's
+// own task, and the agent's rejection cap not exhausted. The keyword
+// matches title and requirements case-insensitively (wildcards
+// escaped by the caller); code is an exact match — a code that is
+// not currently claimable simply yields no rows.
+func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFilter, limit, offset int) ([]WorkCandidate, int64, error) {
+	where := ` WHERE tb_task.status = 'open'
+		  AND (v.contract->>'price')::bigint >= 1
+		  AND tb_task.budget_locked - tb_task.settled - tb_task.reserved - tb_task.refunded
+		      >= (v.contract->>'price')::bigint`
+	args := []any{}
+	if agentID > 0 {
+		args = append(args, agentID)
+		n := len(args)
+		where += fmt.Sprintf(` AND tb_task.publisher_id <> $%d`, n)
+		where += fmt.Sprintf(`
+		  AND (SELECT COUNT(*) FROM tb_task_submission s
+		        WHERE s.task_id = tb_task.id AND s.agent_id = $%d AND s.state = 'rejected')
+		      < COALESCE(NULLIF(v.contract #>> '{limits,max_rejected_per_agent}', '')::bigint, %d)`,
+			n, task.DefaultMaxRejectedPerAgent)
+	}
+	if f.Code != "" {
+		args = append(args, f.Code)
+		where += fmt.Sprintf(` AND tb_task.code = $%d`, len(args))
+	}
+	if f.Keyword != "" {
+		args = append(args, "%"+EscapeLike(f.Keyword)+"%")
+		n := len(args)
+		where += fmt.Sprintf(`
+		  AND (COALESCE(v.contract->>'title', '') ILIKE $%d ESCAPE '\'
+		        OR COALESCE(v.contract->>'requirements', '') ILIKE $%d ESCAPE '\')`, n, n)
+	}
+	// total runs as its own COUNT over the SAME filters: a window
+	// COUNT(*) OVER() only exists while the page has rows, so an
+	// out-of-range page would report total 0 (WO-19b).
+	var total int64
+	countQuery := `
+		SELECT COUNT(*) FROM tb_task
+		JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` + where
+	if err := q.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	query := `
+		SELECT tb_task.id, tb_task.code, tb_task.publisher_id, tb_task.status, tb_task.version,
+		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
+		       tb_task.paused_reason, tb_task.closed_reason, tb_task.draft_contract,
+		       tb_task.created_at, tb_task.updated_at,
+		       v.contract
+		FROM tb_task
+		JOIN tb_task_version v ON v.task_id = tb_task.id AND v.version = tb_task.version` +
+		where + `
+		ORDER BY v.created_at DESC NULLS LAST, tb_task.id DESC
+		LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []TaskRow
+	var out []WorkCandidate
 	for rows.Next() {
-		t, err := scanTask(rows)
-		if err != nil {
-			return nil, err
+		var c WorkCandidate
+		if err := rows.Scan(&c.Task.ID, &c.Task.Code, &c.Task.PublisherID, &c.Task.Status, &c.Task.Version,
+			&c.Task.BudgetLocked, &c.Task.Settled, &c.Task.Reserved, &c.Task.Refunded,
+			&c.Task.PausedReason, &c.Task.ClosedReason, &c.Task.DraftContract,
+			&c.Task.CreatedAt, &c.Task.UpdatedAt, &c.Contract); err != nil {
+			return nil, 0, err
 		}
-		out = append(out, *t)
+		out = append(out, c)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // ListAgentSubmissions returns one agent's submissions newest first,
@@ -1071,52 +1162,6 @@ func CountTaskSubmissionsByState(ctx context.Context, q pg.Querier, taskID int64
 }
 
 // ---------------------------------------------------------------------------
-// Homepage task board (WO-8)
-// ---------------------------------------------------------------------------
-
-// TaskBoardRow is one homepage board entry: an open task with at least
-// one open slot (spec §4 可接单).
-type TaskBoardRow struct {
-	Code  string
-	Title string
-	Price int64
-	Slots int64
-}
-
-// ListOpenBoardTasks returns up to `limit` board rows in ONE query,
-// newest open first (the current version's creation time is the open
-// time). Price and title come from the effective version snapshot;
-// slots = ⌊available / price⌋ restricted to ≥ 1 (spec §4).
-func ListOpenBoardTasks(ctx context.Context, q pg.Querier, limit int) ([]TaskBoardRow, error) {
-	rows, err := q.Query(ctx, `
-		SELECT t.code,
-		       COALESCE(v.contract->>'title', ''),
-		       (v.contract->>'price')::bigint AS price,
-		       (t.budget_locked - t.settled - t.reserved - t.refunded)
-		           / (v.contract->>'price')::bigint AS slots
-		FROM tb_task t
-		JOIN tb_task_version v ON v.task_id = t.id AND v.version = t.version
-		WHERE t.status = 'open'
-		  AND (v.contract->>'price')::bigint >= 1
-		  AND t.budget_locked - t.settled - t.reserved - t.refunded
-		      >= (v.contract->>'price')::bigint
-		ORDER BY v.created_at DESC, t.id DESC
-		LIMIT $1`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list open board tasks: %w", err)
-	}
-	defer rows.Close()
-	var out []TaskBoardRow
-	for rows.Next() {
-		var b TaskBoardRow
-		if err := rows.Scan(&b.Code, &b.Title, &b.Price, &b.Slots); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
-}
-
 // ---------------------------------------------------------------------------
 // Money primitives — task counters + credits ledger in one
 // transaction (spec §2 Ledger, §10 items 1–3).

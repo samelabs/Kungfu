@@ -9,9 +9,10 @@ function tcvEscapeHtml(s) {
     }[c]));
 }
 
-// ---- the list (F4): status filter + text-label rows ----
-
-let tcvListFilter = 'all';
+// ---- the list (F4 + WO-19 Q3): server-side search box, status
+// filter and pager. Query state (?q=&status=&page=) lives in the URL
+// via tcvListState (tasks-console.js); this layer only renders and
+// re-triggers tcvLoadList on changes. ----
 
 function tcvFilterRow(active) {
     const items = [['all', 'filter_all'], ['draft', 'status_draft'], ['open', 'status_open'],
@@ -19,6 +20,17 @@ function tcvFilterRow(active) {
     return `<div class="actions tcv-filter" id="tcvFilter">` + items.map(([value, key]) =>
         `<button class="btn${value === active ? ' primary' : ''}" type="button" data-tcv-filter="${value}">${escapeHtml(tcvT(key))}</button>`
     ).join('') + `</div>`;
+}
+
+// tcvPagerRow: prev/next plus "page x of y · total n"; buttons outside
+// the page range are disabled, clicks re-fetch the target page.
+function tcvPagerRow(total, page, pages) {
+    if (total <= 0) return '';
+    const prev = `<button class="btn" type="button" data-tcv-page="${page - 1}"${page <= 1 ? ' disabled' : ''}>${escapeHtml(tcvT('pager_prev'))}</button>`;
+    const next = `<button class="btn" type="button" data-tcv-page="${page + 1}"${page >= pages ? ' disabled' : ''}>${escapeHtml(tcvT('pager_next'))}</button>`;
+    return `<div class="actions tcv-pager" id="tcvPager">${prev}` +
+        `<span class="mono">${escapeHtml(tcvT('pager_page', {page, pages}))} · ${escapeHtml(tcvT('pager_total', {total}))}</span>` +
+        `${next}</div>`;
 }
 
 // tcvFact is one labeled value of a row (text labels, no emoji).
@@ -49,28 +61,68 @@ function tcvTaskRow(task) {
     </div>`;
 }
 
-function tcvRenderTaskList(tasks) {
+function tcvRenderTaskList(env) {
     const box = qs('#taskConsoleList');
     if (!box) return;
-    if (!Array.isArray(tasks) || tasks.length === 0) {
-        box.innerHTML = `<p class="muted">${escapeHtml(tcvT('empty'))}</p>
-            <div class="actions"><a class="btn primary" href="${ownerUrl('/owner/tasks/new')}">${escapeHtml(tcvT('new_task'))}</a></div>`;
-        return;
+    const tasks = Array.isArray(env.tasks) ? env.tasks : [];
+    const total = Number(env.total ?? tasks.length);
+    const page = Number.isInteger(Number(env.page)) && Number(env.page) >= 1 ? Number(env.page) : 1;
+    const pageSize = Number.isInteger(Number(env.page_size)) && Number(env.page_size) >= 1 ? Number(env.page_size) : 20;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    tcvListState.page = page;
+    tcvListState.pages = pages;
+
+    // empty states differ: a filter that matches nothing is "no match";
+    // a truly empty account keeps the "no tasks yet" call to action.
+    const filtered = Boolean(tcvListState.q) || tcvListState.status !== 'all';
+    const emptyBlock = tasks.length
+        ? `<div class="task-list">${tasks.map(tcvTaskRow).join('')}</div>`
+        : (filtered
+            ? `<p class="muted">${escapeHtml(tcvT('no_match'))}</p>`
+            : `<p class="muted">${escapeHtml(tcvT('empty'))}</p>
+    <div class="actions"><a class="btn primary" href="${ownerUrl('/owner/tasks/new')}">${escapeHtml(tcvT('new_task'))}</a></div>`);
+
+    box.innerHTML = `
+    <form class="tcv-search" id="tcvSearchForm" role="search">
+        <input type="search" id="tcvSearchInput" value="${tcvEscapeHtml(tcvListState.q)}"
+            placeholder="${escapeHtml(tcvT('search_placeholder'))}" aria-label="${escapeHtml(tcvT('search_placeholder'))}">
+        <button class="btn primary" type="submit">${escapeHtml(tcvT('search_submit'))}</button>
+    </form>
+    ${tcvFilterRow(tcvListState.status)}
+    ${emptyBlock}
+    ${tcvPagerRow(total, page, pages)}`;
+
+    const form = qs('#tcvSearchForm');
+    if (form) {
+        form.addEventListener('submit', (ev) => {
+            ev.preventDefault();
+            tcvListState.q = (qs('#tcvSearchInput').value || '').trim();
+            tcvListState.page = 1;
+            tcvWriteListStateToURL();
+            tcvLoadList();
+        });
     }
-    const visible = tcvListFilter === 'all'
-        ? tasks
-        : tasks.filter((task) => String(task.status || '') === tcvListFilter);
-    const rows = visible.length
-        ? visible.map(tcvTaskRow).join('')
-        : `<p class="muted">${escapeHtml(tcvT('empty'))}</p>`;
-    box.innerHTML = tcvFilterRow(tcvListFilter) + `<div class="task-list">${rows}</div>`;
     const filter = qs('#tcvFilter');
     if (filter) {
         filter.addEventListener('click', (ev) => {
             const btn = ev.target.closest('[data-tcv-filter]');
             if (!btn) return;
-            tcvListFilter = btn.getAttribute('data-tcv-filter');
-            tcvRenderTaskList(tasks);
+            tcvListState.status = btn.getAttribute('data-tcv-filter') || 'all';
+            tcvListState.page = 1;
+            tcvWriteListStateToURL();
+            tcvLoadList();
+        });
+    }
+    const pager = qs('#tcvPager');
+    if (pager) {
+        pager.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('[data-tcv-page]');
+            if (!btn || btn.disabled) return;
+            const target = Number(btn.getAttribute('data-tcv-page'));
+            if (!Number.isInteger(target) || target < 1 || target > pages || target === page) return;
+            tcvListState.page = target;
+            tcvWriteListStateToURL();
+            tcvLoadList();
         });
     }
 }

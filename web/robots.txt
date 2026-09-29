@@ -1,4 +1,7 @@
 User-agent: *
-Allow: /
+Disallow: /owner
+Disallow: /samelabs
+Disallow: /api/
+Disallow: /mcp
 
 Sitemap: https://kungfu.md/sitemap.xml

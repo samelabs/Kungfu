@@ -134,16 +134,27 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 				},"additionalProperties":false}
 			},"required":["title","requirements","receiver","sample","price"],"additionalProperties":false}`
 
+// contractVisibilityNote opens task_create / task_update (and mirrors
+// the console, llms.txt and spec §3): everything but receiver.url is
+// executor-visible, so no secrets in the contract (WO-19 P1).
+const contractVisibilityNote = `Visibility: the task's title, requirements, sample, output.schema and the memories referenced by harness_refs (snapshotted when the task opens) are visible to every executor; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+
 // tools is the registry.
 var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open, claimable work.
-	Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
-	Result: at most 100 tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left, and total (the number of rows returned).
-	next_action: choose a task, then work_get -> work_claim -> work_submit.`,
-		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
-		Handler:     factory(handleWorkList),
+Preconditions: valid Agent key; not your own tasks; caps not exhausted; slots >= 1 only.
+Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match, q is ignored when given — an empty list means the task is not currently claimable by you), page (default 1) and page_size (default 20, max 100).
+Result: one page of tasks, newest open first — code, title, requirements excerpt, price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate), your accepted/rejected/rejections_left — plus total (ALL tasks matching the filters, not just this page), page and page_size.
+next_action: choose a task, then work_get -> work_claim -> work_submit.`,
+		InputSchema: `{"type":"object","properties":{
+			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
+			"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
+		},"additionalProperties":false}`,
+		Handler: factory(handleWorkList),
 	},
 	{
 		Name: "work_get",
@@ -241,7 +252,8 @@ next_action: the platform triages; continue other work.`,
 	},
 	{
 		Name: "task_create",
-		Description: `Create a draft task and lock its budget (lock_task ledger row).
+		Description: contractVisibilityNote + `
+Create a draft task and lock its budget (lock_task ledger row).
 Preconditions: a contract with title, requirements, receiver.url, sample and price (see the schema; unknown fields are rejected); budget >= price (at least one unit); your balance covers the budget.
 Result: the task view - status "draft" (or "open" with open=true), the full contract, budget_locked, available, slots. open=true opens in the same call (test delivery of the sample to your receiver, which must answer 2xx); if opening fails the task stays draft and that error (e.g. TEST_DELIVERY_FAILED) is returned with the budget locked (task_close + task_refund recover it).
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TEST_DELIVERY_FAILED (open=true), RATE_LIMIT (20 per hour per publisher).`,
@@ -254,10 +266,11 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, TES
 	},
 	{
 		Name: "task_update",
-		Description: `Edit the draft contract of a draft or paused task.
-	Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
-	Result: the task view with the saved draft contract (applied as a NEW version on the next open) — while draft or paused it is also exposed as draft, and draft_pending is true when it differs from the live version. The contract is replaced as a whole: read it with task_get, change it, send it back.
-	Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+		Description: contractVisibilityNote + `
+Edit the draft contract of a draft or paused task.
+Preconditions: the task is yours and its status is draft or paused; the new contract satisfies section 3.
+Result: the task view with the saved draft contract (applied as a NEW version on the next open) — while draft or paused it is also exposed as draft, and draft_pending is true when it differs from the live version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"contract":` + contractInputSchema + `
@@ -322,9 +335,16 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 		Name: "task_list",
 		Description: `List your tasks, newest first.
 Preconditions: valid Agent key.
-Result: tasks[] with the task views and total.`,
-		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
-		Handler:     factory(handleTaskList),
+Parameters (all optional): status (draft / open / paused / closed), q (keyword, case-insensitive over the effective title), code (exact match), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.`,
+		InputSchema: `{"type":"object","properties":{
+			"status":{"type":"string","enum":["draft","open","paused","closed"],"description":"Filter by task status."},
+			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
+			"code":{"type":"string","description":"Exact task code."},
+			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
+		},"additionalProperties":false}`,
+		Handler: factory(handleTaskList),
 	},
 	{
 		Name: "task_submissions",

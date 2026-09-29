@@ -101,6 +101,7 @@ function tcvContractForm(mount, opts) {
         <button class="btn" id="tcvFormModeBtn" type="button" hidden>${escapeHtml(tcvT('form_mode'))}</button>
     </div>
     <div id="tcvFormArea">
+        <p class="tcv-privacy" role="note">${escapeHtml(tcvT('privacy_notice'))}</p>
         <label for="tcvFTitle">${escapeHtml(tcvT('f_title'))}</label>
         <input id="tcvFTitle" maxlength="128"${disabled}>
         <div class="tcv-counter muted" id="tcvTitleCount"></div>
@@ -112,6 +113,7 @@ function tcvContractForm(mount, opts) {
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_requirements_hint'))}</p>
 
         <label>${escapeHtml(tcvT('f_harness'))}</label>
+        <p class="tcv-hint tcv-harness-visible">${escapeHtml(tcvT('f_harness_visibility'))}</p>
         <p class="tcv-hint muted">${escapeHtml(tcvT('f_harness_hint'))}</p>
         <div id="tcvHarnessChips" class="tcv-chips"></div>
         <p class="tcv-hint muted" id="tcvHarnessMsg"></p>
@@ -428,11 +430,47 @@ function tcvContractForm(mount, opts) {
     };
 }
 
-// ---- /owner/tasks: the list (F4) — rows and the status filter live
-// in render-tasks-console.js; this loader only fetches. ----
+// ---- /owner/tasks: the list (F4 + WO-19 Q3) — rendering lives in
+// render-tasks-console.js; this loader owns the URL-backed query
+// state (?q=&status=&page=, kept across refreshes) and fetches one
+// server-filtered, server-paged page. ----
+
+const tcvListState = {
+    q: '',
+    status: 'all', // all | draft | open | paused | closed
+    page: 1,
+    pageSize: 20,
+    pages: 1
+};
+
+function tcvReadListStateFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    tcvListState.q = (params.get('q') || '').trim();
+    const status = params.get('status') || '';
+    tcvListState.status = ['draft', 'open', 'paused', 'closed'].includes(status) ? status : 'all';
+    const page = Number(params.get('page'));
+    tcvListState.page = Number.isInteger(page) && page >= 1 ? page : 1;
+}
+
+function tcvWriteListStateToURL() {
+    const params = new URLSearchParams();
+    if (tcvListState.q) params.set('q', tcvListState.q);
+    if (tcvListState.status !== 'all') params.set('status', tcvListState.status);
+    if (tcvListState.page > 1) params.set('page', String(tcvListState.page));
+    const lang = new URLSearchParams(window.location.search).get('lang');
+    if (lang) params.set('lang', lang);
+    const query = params.toString();
+    history.replaceState(null, '', '/owner/tasks' + (query ? `?${query}` : ''));
+}
 
 function tcvLoadList() {
-    tcvCall('task_list', {}).then((env) => {
+    tcvReadListStateFromURL();
+    tcvCall('task_list', {
+        q: tcvListState.q || undefined,
+        status: tcvListState.status === 'all' ? undefined : tcvListState.status,
+        page: tcvListState.page,
+        page_size: tcvListState.pageSize
+    }).then((env) => {
         tcvShowStatus(env);
         if (!env.ok) {
             // a failed listing shows the tool error where the list
@@ -441,7 +479,7 @@ function tcvLoadList() {
             if (box) box.innerHTML = tcvStatusLine(env);
             return;
         }
-        tcvRenderTaskList(env.tasks || []);
+        tcvRenderTaskList(env);
     }).catch((error) => {
         const box = qs('#taskConsoleList');
         if (box) box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;

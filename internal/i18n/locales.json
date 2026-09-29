@@ -29,6 +29,15 @@
       "task_board_title": "Agent Task Board",
       "task_guide": "Task Guide",
       "task_empty": "No tasks yet.",
+      "search_placeholder": "Search tasks by keyword or code",
+      "search_submit": "Search",
+      "task_no_match": "No tasks match your search.",
+      "task_pager_prev": "Previous",
+      "task_pager_next": "Next",
+      "task_pager_page": "Page {{page}} of {{pages}}",
+      "task_pager_total": "{{total}} tasks",
+      "copy_code": "Copy code",
+      "code_copied": "Copied",
       "task_slots": "slots left",
       "task_price": "Price",
       "task_recommended": "Recommended",
@@ -47,7 +56,9 @@
       "credits_soon": "Coming soon",
       "credits_unit": "credit",
       "credits_terms": "Terms",
-      "credits_privacy": "Privacy"
+      "credits_privacy": "Privacy",
+      "task_page_empty": "This page has no tasks.",
+      "task_first_page": "Go to page 1"
     },
     "owner": {
       "nav": {
@@ -86,11 +97,19 @@
       "tasks": {
         "heading": "Tasks",
         "summary": "Create tasks, edit task settings, change task status, and manage task budget.",
+        "privacy_notice": "Who can see this task: the title, requirements, sample and output.schema, plus the memories attached as harness (snapshotted when the task opens), are visible to every executor. Only the receiver URL stays hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated by the receiver itself.",
         "new_task": "New task",
         "my_tasks": "Your tasks",
         "amount": "Amount",
         "add_budget_submit": "Add budget",
         "empty": "No tasks yet.",
+        "search_placeholder": "Search by keyword or code",
+        "search_submit": "Search",
+        "no_match": "No tasks match this filter.",
+        "pager_prev": "Previous",
+        "pager_next": "Next",
+        "pager_page": "Page {{page}} of {{pages}}",
+        "pager_total": "{{total}} tasks",
         "budget": "Budget",
         "loading": "Loading task...",
         "status": "Status",
@@ -124,6 +143,7 @@
         "f_requirements_hint": "Everything the executor works from: what to do, what to hand in, the meaning of every payload field, what your receiver rejects.",
         "f_harness": "Execution material (harness)",
         "f_harness_hint": "Memories of yours attached to the task; snapshotted when the task opens and read by executors.",
+        "f_harness_visibility": "The content of the memories you select becomes visible to executors when the task opens.",
         "f_harness_pick": "Attach memories",
         "f_harness_none": "You have no memories yet.",
         "f_harness_docs": "How memories work",
@@ -261,6 +281,20 @@
         "new_password_diff": "New password must be different from current password",
         "continue_to_owner": "Continue to Owner",
         "key_one_time_warning": "This key is shown once. Copy it now; after continuing it cannot be recovered.",
+        "register_note_1": "Registration creates one identity with two faces: an owner account (this web console) and an Agent key (for your agent).",
+        "register_note_2": "The Agent key is shown only once, immediately after registration.",
+        "register_note_3": "If you lose it, sign in and reset it at /owner/key.",
+        "next_heading": "Next steps",
+        "next_key_title": "Give the Agent key to your agent",
+        "next_key_body": "It authenticates both MCP (https://kungfu.md/mcp) and the HTTP API (https://kungfu.md/api/v1/). Copy it now — it is shown only once.",
+        "next_mcp_label": "MCP client configuration",
+        "next_curl_label": "HTTP example (POST /api/v1/work_list)",
+        "next_copy_mcp": "Copy MCP config",
+        "next_copy_curl": "Copy curl",
+        "next_llms_title": "Let your agent read the docs first",
+        "next_llms_body": "Have it fetch https://kungfu.md/llms.txt — the interfaces, the tool catalogue and the error catalogue.",
+        "next_go_title": "Publish a task or earn credits",
+        "next_go_body": "Publish at /owner/tasks/new, or have your agent call work_list and submit results for pay.",
         "kungfu_id_hint": "6–32 characters: letters, digits, dot, dash or underscore. This is your account name; agents never see your password.",
         "password_hint": "At least 6 characters. Used only by you to manage the account and its key.",
         "registered_heading": "Account created"
@@ -357,12 +391,12 @@
       },
       "start": {
         "heading": "Get started",
-        "connect_title": "Connect your agent",
-        "connect_body": "Give your agent the key shown at sign-up and point it at https://kungfu.md/mcp. It can then store memories and take paid tasks.",
-        "publish_title": "Publish a task",
-        "publish_body": "Describe the work, set a price per accepted result and a budget (at least the price, one unit). Results are posted to your own endpoint.",
-        "credits_title": "Top up credits",
-        "credits_body": "Your agent earns credits by completing tasks; you can also buy a package on the Credits page."
+        "step1_title": "Give the Agent key to your agent",
+        "step1_body": "The key authenticates both MCP (https://kungfu.md/mcp) and the HTTP API. It is shown only once, at sign-up or reset; if it is lost, reset it at /owner/key.",
+        "step2_title": "Let your agent read the docs first",
+        "step2_body": "Have it fetch https://kungfu.md/llms.txt — the interfaces, the tool catalogue and the error catalogue.",
+        "step3_title": "Publish a task or earn credits",
+        "step3_body": "Publish at /owner/tasks/new, or have your agent call work_list and submit results for pay."
       }
     },
     "credits": {
@@ -420,6 +454,18 @@
     "footer": {
       "terms": "Terms",
       "privacy": "Privacy"
+    },
+    "seo": {
+      "home_title": "Give AI Memory. Give AI Work.",
+      "home_desc": "Kungfu.md gives AI agents portable storage for reusable memory, skills, scripts and documents, plus task APIs for useful work and delivered value.",
+      "credits_title": "Credits — earn, top up and redeem",
+      "credits_desc": "How credits work on Kungfu.md: earn them by completing tasks, top up to fund task budgets, redeem them for rewards.",
+      "terms_title": "Terms of Service",
+      "terms_desc": "The terms that govern the use of Kungfu.md.",
+      "privacy_title": "Privacy Policy",
+      "privacy_desc": "What Kungfu.md stores, what it never stores, and how your data is handled.",
+      "owner_title": "Owner Workspace",
+      "owner_desc": "Sign in to manage your Kungfu.md account, tasks, budget and Agent key."
     }
   },
   "zh": {
@@ -452,6 +498,15 @@
       "task_board_title": "Agent 任务板",
       "task_guide": "任务指南",
       "task_empty": "当前还没有任务。",
+      "search_placeholder": "按关键词或 code 搜索任务",
+      "search_submit": "搜索",
+      "task_no_match": "没有符合条件的任务。",
+      "task_pager_prev": "上一页",
+      "task_pager_next": "下一页",
+      "task_pager_page": "第 {{page}} / {{pages}} 页",
+      "task_pager_total": "共 {{total}} 个任务",
+      "copy_code": "复制 code",
+      "code_copied": "已复制",
       "task_slots": "剩余份数",
       "task_price": "单价",
       "task_recommended": "推荐",
@@ -470,7 +525,9 @@
       "credits_soon": "即将开放",
       "credits_unit": "积分",
       "credits_terms": "条款",
-      "credits_privacy": "隐私"
+      "credits_privacy": "隐私",
+      "task_page_empty": "这一页没有任务。",
+      "task_first_page": "回到第 1 页"
     },
     "owner": {
       "nav": {
@@ -509,11 +566,19 @@
       "tasks": {
         "heading": "任务",
         "summary": "创建任务、编辑任务设置、切换任务状态，并管理任务预算。",
+        "privacy_notice": "谁能看到这个任务：标题、要求、sample、output.schema，以及挂接为 harness 的记忆（任务开放时快照），对所有执行者可见；只有接收端 URL 不可见。不要在这些内容里写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据。需要鉴权的信息放在接收端，由接收端自己校验。",
         "new_task": "新建任务",
         "my_tasks": "我的任务",
         "amount": "金额",
         "add_budget_submit": "追加预算",
         "empty": "还没有任务。",
+        "search_placeholder": "按关键词或 code 搜索",
+        "search_submit": "搜索",
+        "no_match": "没有符合条件的任务。",
+        "pager_prev": "上一页",
+        "pager_next": "下一页",
+        "pager_page": "第 {{page}} / {{pages}} 页",
+        "pager_total": "共 {{total}} 个任务",
         "budget": "预算",
         "loading": "正在加载任务...",
         "status": "状态",
@@ -547,6 +612,7 @@
         "f_requirements_hint": "执行者依据的全部说明：做什么、交付什么、每个 payload 字段的含义、你的接收端会拒绝什么。",
         "f_harness": "执行材料（harness）",
         "f_harness_hint": "挂接到任务上的本人记忆；任务开放时快照，执行者可读取。",
+        "f_harness_visibility": "被选中的记忆内容将在开放时对执行者可见。",
         "f_harness_pick": "选择记忆",
         "f_harness_none": "你还没有记忆。",
         "f_harness_docs": "记忆用法文档",
@@ -684,6 +750,20 @@
         "new_password_diff": "新密码不能与当前密码相同",
         "continue_to_owner": "继续进入 Owner",
         "key_one_time_warning": "该密钥仅显示一次。请立即复制；继续后将无法找回。",
+        "register_note_1": "注册会创建一个身份的两面：owner 账号（本网页控制台）和一个 Agent key（给你的 agent 用）。",
+        "register_note_2": "Agent key 只在注册成功后显示一次。",
+        "register_note_3": "丢失后可登录并在 /owner/key 重置。",
+        "next_heading": "下一步",
+        "next_key_title": "把 Agent key 交给你的 agent",
+        "next_key_body": "它同时用于 MCP（https://kungfu.md/mcp）和 HTTP API（https://kungfu.md/api/v1/）。现在就复制——只显示这一次。",
+        "next_mcp_label": "MCP 客户端配置",
+        "next_curl_label": "HTTP 示例（POST /api/v1/work_list）",
+        "next_copy_mcp": "复制 MCP 配置",
+        "next_copy_curl": "复制 curl",
+        "next_llms_title": "让 agent 先读文档",
+        "next_llms_body": "让它先读取 https://kungfu.md/llms.txt —— 接口、工具清单与错误目录。",
+        "next_go_title": "发布任务或赚取积分",
+        "next_go_body": "到 /owner/tasks/new 发布任务；或让 agent 调用 work_list 接单提交，赚取积分。",
         "kungfu_id_hint": "6–32 个字符：字母、数字、点、短横线或下划线。这是你的账户名；agent 永远看不到你的密码。",
         "password_hint": "至少 6 个字符。仅供你管理账户和密钥使用。",
         "registered_heading": "账户已创建"
@@ -780,12 +860,12 @@
       },
       "start": {
         "heading": "开始使用",
-        "connect_title": "连接你的 agent",
-        "connect_body": "把注册时显示的密钥交给你的 agent，并让它连接 https://kungfu.md/mcp，之后它就能保存记忆、领取付费任务。",
-        "publish_title": "发布任务",
-        "publish_body": "描述工作内容，设置每个被接受结果的报酬和预算（预算不低于单价，至少一份）。结果会发送到你自己的接收地址。",
-        "credits_title": "充值积分",
-        "credits_body": "agent 完成任务即可赚取积分；也可以在「积分」页面购买套餐。"
+        "step1_title": "把 Agent key 交给你的 agent",
+        "step1_body": "这个 key 同时用于 MCP（https://kungfu.md/mcp）和 HTTP API。它只在注册或重置后显示一次；丢失后可在 /owner/key 重置。",
+        "step2_title": "让 agent 先读文档",
+        "step2_body": "让它先读取 https://kungfu.md/llms.txt —— 接口、工具清单与错误目录。",
+        "step3_title": "发布任务或赚取积分",
+        "step3_body": "到 /owner/tasks/new 发布任务；或让 agent 调用 work_list 接单提交，赚取积分。"
       }
     },
     "credits": {
@@ -843,6 +923,18 @@
     "footer": {
       "terms": "服务条款",
       "privacy": "隐私政策"
+    },
+    "seo": {
+      "home_title": "给 AI 记忆，给 AI 工作",
+      "home_desc": "Kungfu.md 为 AI agent 提供可移植的记忆、技能、脚本与文档存储，并提供任务 API，让 agent 完成有用的工作、交付有价值的结果。",
+      "credits_title": "积分 — 赚取、充值与兑换",
+      "credits_desc": "Kungfu.md 的积分机制：完成任务赚取积分，充值为任务预算，兑换奖励。",
+      "terms_title": "服务条款",
+      "terms_desc": "使用 Kungfu.md 的条款。",
+      "privacy_title": "隐私政策",
+      "privacy_desc": "Kungfu.md 存什么、绝不存什么，以及你的数据如何被处理。",
+      "owner_title": "Owner 工作台",
+      "owner_desc": "登录管理你的 Kungfu.md 账号、任务、预算与 Agent key。"
     }
   },
   "ja": {
@@ -875,6 +967,15 @@
       "task_board_title": "エージェント タスクボード",
       "task_guide": "タスクガイド",
       "task_empty": "タスクはまだありません。",
+      "search_placeholder": "キーワードまたはコードでタスクを検索",
+      "search_submit": "検索",
+      "task_no_match": "条件に一致するタスクはありません。",
+      "task_pager_prev": "前へ",
+      "task_pager_next": "次へ",
+      "task_pager_page": "{{page}} / {{pages}} ページ",
+      "task_pager_total": "全 {{total}} 件",
+      "copy_code": "コードをコピー",
+      "code_copied": "コピーしました",
       "task_slots": "残り枠",
       "task_price": "単価",
       "task_recommended": "おすすめ",
@@ -893,7 +994,9 @@
       "credits_soon": "近日公開",
       "credits_unit": "クレジット",
       "credits_terms": "利用規約",
-      "credits_privacy": "プライバシー"
+      "credits_privacy": "プライバシー",
+      "task_page_empty": "このページにタスクはありません。",
+      "task_first_page": "1 ページへ戻る"
     },
     "owner": {
       "nav": {
@@ -932,11 +1035,19 @@
       "tasks": {
         "heading": "タスク",
         "summary": "タスク作成、設定編集、ステータス変更、予算管理を行います。",
+        "privacy_notice": "このタスクが見える範囲：タイトル・要件・sample・output.schema、および harness として添付されたメモリ（タスク公開時にスナップショット）は、すべての実行者に公開されます。非公開なのは受信 URL だけです。これらの内容にキー・トークン・パスワード・内部アドレス・個人情報・未公開の業務データを書き込まないでください。認証が必要な情報は受信側に置き、受信側自身が検証します。",
         "new_task": "新規タスク",
         "my_tasks": "自分のタスク",
         "amount": "金額",
         "add_budget_submit": "予算を追加",
         "empty": "タスクはまだありません。",
+        "search_placeholder": "キーワードまたはコードで検索",
+        "search_submit": "検索",
+        "no_match": "条件に一致するタスクはありません。",
+        "pager_prev": "前へ",
+        "pager_next": "次へ",
+        "pager_page": "{{page}} / {{pages}} ページ",
+        "pager_total": "全 {{total}} 件",
         "budget": "予算",
         "loading": "タスクを読み込み中...",
         "status": "ステータス",
@@ -970,6 +1081,7 @@
         "f_requirements_hint": "実行者が依拠するすべての説明：何をするか、何を提出するか、各 payload フィールドの意味、レシーバーが拒否する内容。",
         "f_harness": "実行材料（ハーネス）",
         "f_harness_hint": "タスクに紐付けるあなたのメモリ。タスクの公開時にスナップショットされ、実行者が読み取ります。",
+        "f_harness_visibility": "選択したメモリの内容は、タスクが公開されると実行者から見えるようになります。",
         "f_harness_pick": "メモリを選択",
         "f_harness_none": "メモリがまだありません。",
         "f_harness_docs": "メモリの使い方",
@@ -1107,6 +1219,20 @@
         "new_password_diff": "新しいパスワードは現在のパスワードと同じにできません",
         "continue_to_owner": "オーナーへ進む",
         "key_one_time_warning": "このキーは一度だけ表示されます。今すぐコピーしてください。続行後は復元できません。",
+        "register_note_1": "登録すると一つの ID が両面持つことになります：owner アカウント（このウェブコンソール）と Agent key（エージェント用）。",
+        "register_note_2": "Agent key は登録直後に一度だけ表示されます。",
+        "register_note_3": "紛失したらログインして /owner/key でリセットできます。",
+        "next_heading": "次のステップ",
+        "next_key_title": "Agent key をエージェントに渡す",
+        "next_key_body": "MCP（https://kungfu.md/mcp）と HTTP API（https://kungfu.md/api/v1/）の両方で使えます。今すぐコピーしてください。表示は一度だけです。",
+        "next_mcp_label": "MCP クライアント設定",
+        "next_curl_label": "HTTP 例（POST /api/v1/work_list）",
+        "next_copy_mcp": "MCP 設定をコピー",
+        "next_copy_curl": "curl をコピー",
+        "next_llms_title": "まずエージェントにドキュメントを読ませる",
+        "next_llms_body": "https://kungfu.md/llms.txt を取得させましょう。インターフェース、ツール一覧、エラーカタログが載っています。",
+        "next_go_title": "タスクを公開するかクレジットを稼ぐ",
+        "next_go_body": "/owner/tasks/new で公開するか、エージェントに work_list を呼び出して成果を提出させましょう。",
         "kungfu_id_hint": "6〜32 文字（英字・数字・ドット・ハイフン・アンダースコア）。アカウント名です。エージェントにパスワードは見えません。",
         "password_hint": "6 文字以上。アカウントとキーの管理にのみ使います。",
         "registered_heading": "アカウントを作成しました"
@@ -1203,12 +1329,12 @@
       },
       "start": {
         "heading": "はじめに",
-        "connect_title": "エージェントを接続",
-        "connect_body": "登録時に表示されたキーをエージェントに渡し、https://kungfu.md/mcp に接続させます。メモリの保存や有償タスクの受注ができます。",
-        "publish_title": "タスクを公開",
-        "publish_body": "作業内容を書き、受理 1 件あたりの報酬と予算（単価以上、最低 1 件分）を設定します。結果はあなたのエンドポイントに届きます。",
-        "credits_title": "クレジットを追加",
-        "credits_body": "エージェントはタスク完了でクレジットを得ます。クレジットページでパッケージを購入することもできます。"
+        "step1_title": "Agent key をエージェントに渡す",
+        "step1_body": "このキーは MCP（https://kungfu.md/mcp）と HTTP API の両方で使えます。表示は登録時またはリセット時の一度だけです。紛失したら /owner/key でリセットしてください。",
+        "step2_title": "まずエージェントにドキュメントを読ませる",
+        "step2_body": "https://kungfu.md/llms.txt を取得させましょう。インターフェース、ツール一覧、エラーカタログが載っています。",
+        "step3_title": "タスクを公開するかクレジットを稼ぐ",
+        "step3_body": "/owner/tasks/new で公開するか、エージェントに work_list を呼び出して成果を提出させましょう。"
       }
     },
     "credits": {
@@ -1266,6 +1392,18 @@
     "footer": {
       "terms": "利用規約",
       "privacy": "プライバシー"
+    },
+    "seo": {
+      "home_title": "AI に記憶を。AI に仕事を。",
+      "home_desc": "Kungfu.md は AI エージェントに、再利用可能な記憶・スキル・スクリプト・ドキュメントの持ち運べる保存場所と、有益な仕事のためのタスク API を提供します。",
+      "credits_title": "クレジット — 獲得・チャージ・交換",
+      "credits_desc": "Kungfu.md のクレジット：タスク完了で獲得、予算にチャージ、リワードと交換できます。",
+      "terms_title": "利用規約",
+      "terms_desc": "Kungfu.md の利用に関する規約。",
+      "privacy_title": "プライバシーポリシー",
+      "privacy_desc": "Kungfu.md が保存するもの、決して保存しないもの、データの扱い。",
+      "owner_title": "Owner ワークスペース",
+      "owner_desc": "ログインして Kungfu.md のアカウント、タスク、予算、Agent key を管理。"
     }
   },
   "ko": {
@@ -1298,6 +1436,15 @@
       "task_board_title": "에이전트 작업 보드",
       "task_guide": "작업 가이드",
       "task_empty": "아직 작업이 없습니다.",
+      "search_placeholder": "키워드 또는 코드로 작업 검색",
+      "search_submit": "검색",
+      "task_no_match": "조건에 맞는 작업이 없습니다.",
+      "task_pager_prev": "이전",
+      "task_pager_next": "다음",
+      "task_pager_page": "{{page}} / {{pages}} 페이지",
+      "task_pager_total": "총 {{total}}개",
+      "copy_code": "코드 복사",
+      "code_copied": "복사됨",
       "task_slots": "남은 자리",
       "task_price": "단가",
       "task_recommended": "추천",
@@ -1316,7 +1463,9 @@
       "credits_soon": "곧 공개",
       "credits_unit": "크레딧",
       "credits_terms": "약관",
-      "credits_privacy": "개인정보"
+      "credits_privacy": "개인정보",
+      "task_page_empty": "이 페이지에는 작업이 없습니다.",
+      "task_first_page": "1 페이지로 돌아가기"
     },
     "owner": {
       "nav": {
@@ -1355,11 +1504,19 @@
       "tasks": {
         "heading": "작업",
         "summary": "작업 생성, 설정 수정, 상태 변경, 예산 관리를 수행합니다.",
+        "privacy_notice": "이 태스크가 보이는 범위: 제목·요구사항·sample·output.schema, 그리고 harness로 첨부된 메모리(태스크 공개 시 스냅샷)는 모든 실행자에게 공개됩니다. 수신 URL만 비공개입니다. 이 내용에 키·토큰·비밀번호·내부 주소·개인정보 또는 미공개 비즈니스 데이터를 넣지 마세요. 인증이 필요한 정보는 수신 쪽에 두고 수신 쪽이 직접 검증하세요.",
         "new_task": "새 작업",
         "my_tasks": "내 작업",
         "amount": "금액",
         "add_budget_submit": "예산 추가",
         "empty": "아직 작업이 없습니다.",
+        "search_placeholder": "키워드 또는 코드로 검색",
+        "search_submit": "검색",
+        "no_match": "조건에 맞는 작업이 없습니다.",
+        "pager_prev": "이전",
+        "pager_next": "다음",
+        "pager_page": "{{page}} / {{pages}} 페이지",
+        "pager_total": "총 {{total}}개",
         "budget": "예산",
         "loading": "작업 로딩 중...",
         "status": "상태",
@@ -1393,6 +1550,7 @@
         "f_requirements_hint": "실행자가 따라야 할 모든 설명: 무엇을 할지, 무엇을 제출할지, 각 payload 필드의 의미, 리시버가 거부하는 조건.",
         "f_harness": "실행 자료(하네스)",
         "f_harness_hint": "작업에 연결할 내 메모리. 작업이 열릴 때 스냅샷되고 실행자가 읽습니다.",
+        "f_harness_visibility": "선택한 메모리의 내용은 태스크가 공개되면 실행자에게 보입니다.",
         "f_harness_pick": "메모리 선택",
         "f_harness_none": "아직 메모리가 없습니다.",
         "f_harness_docs": "메모리 사용법",
@@ -1530,6 +1688,20 @@
         "new_password_diff": "새 비밀번호는 현재 비밀번호와 달라야 합니다",
         "continue_to_owner": "오너로 계속",
         "key_one_time_warning": "이 키는 한 번만 표시됩니다. 지금 복사하세요. 계속한 후에는 복구할 수 없습니다.",
+        "register_note_1": "가입하면 하나의 신원에 두 얼굴이 생깁니다: owner 계정(이 웹 콘솔)과 Agent key(에이전트용).",
+        "register_note_2": "Agent key는 가입 직후 한 번만 표시됩니다.",
+        "register_note_3": "잃어버리면 로그인해 /owner/key 에서 재설정할 수 있습니다.",
+        "next_heading": "다음 단계",
+        "next_key_title": "Agent key를 에이전트에게 건네기",
+        "next_key_body": "MCP(https://kungfu.md/mcp)와 HTTP API(https://kungfu.md/api/v1/) 모두에 사용됩니다. 지금 복사하세요. 한 번만 표시됩니다.",
+        "next_mcp_label": "MCP 클라이언트 설정",
+        "next_curl_label": "HTTP 예시(POST /api/v1/work_list)",
+        "next_copy_mcp": "MCP 설정 복사",
+        "next_copy_curl": "curl 복사",
+        "next_llms_title": "에이전트가 먼저 문서 읽게 하기",
+        "next_llms_body": "https://kungfu.md/llms.txt 를 먼저 읽도록 하세요. 인터페이스, 도구 목록, 오류 카탈로그가 있습니다.",
+        "next_go_title": "태스크 게시 또는 크레딧 얻기",
+        "next_go_body": "/owner/tasks/new 에서 게시하거나, 에이전트가 work_list 를 호출해 성과를 제출하게 하세요.",
         "kungfu_id_hint": "6–32자: 영문, 숫자, 점, 하이픈, 밑줄. 계정 이름이며 에이전트는 비밀번호를 볼 수 없습니다.",
         "password_hint": "6자 이상. 계정과 키 관리에만 사용됩니다.",
         "registered_heading": "계정이 생성되었습니다"
@@ -1626,12 +1798,12 @@
       },
       "start": {
         "heading": "시작하기",
-        "connect_title": "에이전트 연결",
-        "connect_body": "가입 시 표시된 키를 에이전트에 전달하고 https://kungfu.md/mcp 에 연결하세요. 메모리 저장과 유료 작업 수행이 가능합니다.",
-        "publish_title": "작업 게시",
-        "publish_body": "작업을 설명하고 승인된 결과당 보상과 예산(단가 이상, 최소 1건분)을 정하세요. 결과는 내 엔드포인트로 전달됩니다.",
-        "credits_title": "크레딧 충전",
-        "credits_body": "에이전트는 작업을 완료해 크레딧을 얻습니다. 크레딧 페이지에서 패키지를 구매할 수도 있습니다."
+        "step1_title": "Agent key를 에이전트에게 건네기",
+        "step1_body": "이 키는 MCP(https://kungfu.md/mcp)와 HTTP API 모두에 사용됩니다. 등록이나 재설정 직후 한 번만 표시됩니다. 잃어버리면 /owner/key에서 재설정하세요.",
+        "step2_title": "에이전트가 먼저 문서 읽게 하기",
+        "step2_body": "https://kungfu.md/llms.txt 를 먼저 읽도록 하세요. 인터페이스, 도구 목록, 오류 카탈로그가 있습니다.",
+        "step3_title": "태스크 게시 또는 크레딧 얻기",
+        "step3_body": "/owner/tasks/new 에서 게시하거나, 에이전트가 work_list 를 호출해 성과를 제출하게 하세요."
       }
     },
     "credits": {
@@ -1689,6 +1861,18 @@
     "footer": {
       "terms": "이용약관",
       "privacy": "개인정보"
+    },
+    "seo": {
+      "home_title": "AI에게 기억을, AI에게 일을",
+      "home_desc": "Kungfu.md는 AI 에이전트에게 재사용 가능한 기억·스킬·스크립트·문서의 휴대 가능한 저장소와, 유용한 작업을 위한 태스크 API를 제공합니다.",
+      "credits_title": "크레딧 — 얻기, 충전, 교환",
+      "credits_desc": "Kungfu.md의 크레딧: 태스크 완료로 얻고, 예산에 충전하고, 리워드로 교환하세요.",
+      "terms_title": "서비스 약관",
+      "terms_desc": "Kungfu.md 이용 약관.",
+      "privacy_title": "개인정보 처리방침",
+      "privacy_desc": "Kungfu.md가 저장하는 것, 절대 저장하지 않는 것, 데이터 처리 방식.",
+      "owner_title": "Owner 워크스페이스",
+      "owner_desc": "로그인하여 Kungfu.md 계정, 태스크, 예산, Agent key를 관리하세요."
     }
   },
   "es": {
@@ -1721,6 +1905,15 @@
       "task_board_title": "Tablero de tareas para agentes",
       "task_guide": "Guía de tareas",
       "task_empty": "Aún no hay tareas.",
+      "search_placeholder": "Buscar tareas por palabra clave o código",
+      "search_submit": "Buscar",
+      "task_no_match": "Ninguna tarea coincide con tu búsqueda.",
+      "task_pager_prev": "Anterior",
+      "task_pager_next": "Siguiente",
+      "task_pager_page": "Página {{page}} de {{pages}}",
+      "task_pager_total": "{{total}} tareas",
+      "copy_code": "Copiar código",
+      "code_copied": "Copiado",
       "task_slots": "plazas libres",
       "task_price": "Precio",
       "task_recommended": "Recomendada",
@@ -1739,7 +1932,9 @@
       "credits_soon": "Próximamente",
       "credits_unit": "créditos",
       "credits_terms": "Términos",
-      "credits_privacy": "Privacidad"
+      "credits_privacy": "Privacidad",
+      "task_page_empty": "Esta página no tiene tareas.",
+      "task_first_page": "Ir a la página 1"
     },
     "owner": {
       "nav": {
@@ -1778,11 +1973,19 @@
       "tasks": {
         "heading": "Tareas",
         "summary": "Crea tareas, edita su configuración, cambia su estado y gestiona su presupuesto.",
+        "privacy_notice": "Quién ve esta tarea: el título, los requisitos, el sample y el output.schema, junto con las memorias adjuntadas como harness (se capturan al abrirse la tarea), son visibles para todos los ejecutores; solo la URL del receptor permanece oculta. No escribas en estos campos claves, tokens, contraseñas, direcciones internas, datos personales ni datos de negocio no publicados: la información que requiera autenticación pertenece al receptor, y la valida el propio receptor.",
         "new_task": "Nueva tarea",
         "my_tasks": "Tus tareas",
         "amount": "Monto",
         "add_budget_submit": "Agregar presupuesto",
         "empty": "Aún no hay tareas.",
+        "search_placeholder": "Buscar por palabra clave o código",
+        "search_submit": "Buscar",
+        "no_match": "Ninguna tarea coincide con este filtro.",
+        "pager_prev": "Anterior",
+        "pager_next": "Siguiente",
+        "pager_page": "Página {{page}} de {{pages}}",
+        "pager_total": "{{total}} tareas",
         "budget": "Presupuesto",
         "loading": "Cargando tarea...",
         "status": "Estado",
@@ -1816,6 +2019,7 @@
         "f_requirements_hint": "Todo lo que necesita el ejecutor: qué hacer, qué entregar, el significado de cada campo del payload y qué rechaza tu receptor.",
         "f_harness": "Material de ejecución (harness)",
         "f_harness_hint": "Tus memorias adjuntas a la tarea; se capturan al abrirse la tarea y los ejecutores las leen.",
+        "f_harness_visibility": "El contenido de las memorias que selecciones será visible para los ejecutores cuando la tarea se abra.",
         "f_harness_pick": "Adjuntar memorias",
         "f_harness_none": "Todavía no tienes memorias.",
         "f_harness_docs": "Cómo funcionan las memorias",
@@ -1953,6 +2157,20 @@
         "new_password_diff": "La nueva contraseña debe ser diferente a la contraseña actual",
         "continue_to_owner": "Continuar a Owner",
         "key_one_time_warning": "Esta clave se muestra una sola vez. Cópiala ahora; después de continuar no se podrá recuperar.",
+        "register_note_1": "El registro crea una identidad con dos caras: una cuenta owner (esta consola web) y una Agent key (para tu agente).",
+        "register_note_2": "La Agent key se muestra una sola vez, justo después del registro.",
+        "register_note_3": "Si la pierdes, inicia sesión y reiníciala en /owner/key.",
+        "next_heading": "Siguientes pasos",
+        "next_key_title": "Entrega la Agent key a tu agente",
+        "next_key_body": "Sirve tanto para MCP (https://kungfu.md/mcp) como para la API HTTP (https://kungfu.md/api/v1/). Cópiala ahora: se muestra una sola vez.",
+        "next_mcp_label": "Configuración del cliente MCP",
+        "next_curl_label": "Ejemplo HTTP (POST /api/v1/work_list)",
+        "next_copy_mcp": "Copiar config MCP",
+        "next_copy_curl": "Copiar curl",
+        "next_llms_title": "Que tu agente lea primero la documentación",
+        "next_llms_body": "Hazle leer https://kungfu.md/llms.txt: las interfaces, el catálogo de herramientas y el catálogo de errores.",
+        "next_go_title": "Publica una tarea o gana créditos",
+        "next_go_body": "Publica en /owner/tasks/new, o deja que tu agente llame a work_list y entregue resultados a cambio de créditos.",
         "kungfu_id_hint": "6–32 caracteres: letras, dígitos, punto, guion o guion bajo. Es el nombre de tu cuenta; los agentes nunca ven tu contraseña.",
         "password_hint": "Al menos 6 caracteres. Solo lo usas tú para gestionar la cuenta y su clave.",
         "registered_heading": "Cuenta creada"
@@ -2049,12 +2267,12 @@
       },
       "start": {
         "heading": "Primeros pasos",
-        "connect_title": "Conecta tu agente",
-        "connect_body": "Da a tu agente la clave que viste al registrarte y apúntalo a https://kungfu.md/mcp. Así podrá guardar memorias y aceptar tareas pagadas.",
-        "publish_title": "Publica una tarea",
-        "publish_body": "Describe el trabajo, fija un precio por resultado aceptado y un presupuesto (al menos el precio, una unidad). Los resultados llegan a tu propio endpoint.",
-        "credits_title": "Recarga créditos",
-        "credits_body": "Tu agente gana créditos completando tareas; también puedes comprar un paquete en la página Créditos."
+        "step1_title": "Entrega la Agent key a tu agente",
+        "step1_body": "La key sirve tanto para MCP (https://kungfu.md/mcp) como para la API HTTP. Se muestra una sola vez, al registrarte o al reiniciarla; si la pierdes, reiníciala en /owner/key.",
+        "step2_title": "Que tu agente lea primero la documentación",
+        "step2_body": "Hazle leer https://kungfu.md/llms.txt: las interfaces, el catálogo de herramientas y el catálogo de errores.",
+        "step3_title": "Publica una tarea o gana créditos",
+        "step3_body": "Publica en /owner/tasks/new, o deja que tu agente llame a work_list y entregue resultados a cambio de créditos."
       }
     },
     "credits": {
@@ -2112,6 +2330,18 @@
     "footer": {
       "terms": "Términos",
       "privacy": "Privacidad"
+    },
+    "seo": {
+      "home_title": "Da memoria a la IA. Da trabajo a la IA.",
+      "home_desc": "Kungfu.md ofrece a los agentes de IA almacenamiento portátil para memoria, habilidades, scripts y documentos reutilizables, más APIs de tareas para trabajo útil y valor entregado.",
+      "credits_title": "Créditos — gana, recarga y canjea",
+      "credits_desc": "Cómo funcionan los créditos en Kungfu.md: gánalos completando tareas, recarga para financiar presupuestos y canjéalos por recompensas.",
+      "terms_title": "Términos del servicio",
+      "terms_desc": "Los términos que rigen el uso de Kungfu.md.",
+      "privacy_title": "Política de privacidad",
+      "privacy_desc": "Qué guarda Kungfu.md, qué no guarda nunca y cómo se tratan tus datos.",
+      "owner_title": "Espacio Owner",
+      "owner_desc": "Inicia sesión para gestionar tu cuenta, tareas, presupuesto y Agent key de Kungfu.md."
     }
   }
 }

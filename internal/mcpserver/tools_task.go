@@ -56,14 +56,27 @@ func submissionResult(ctx context.Context, deps *Deps, agentID int64, m map[stri
 // -- discovery --
 
 func handleWorkList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
-	items, err := service.ListWork(ctx, deps.Pool, agent.ID, time.Now())
+	var in struct {
+		Q        string `json:"q"`
+		Code     string `json:"code"`
+		Page     int    `json:"page"`
+		PageSize int    `json:"page_size"`
+	}
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`) // a tools/call with no arguments at all
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{}, argError("arguments must match the tool schema")
+	}
+	filter := service.WorkListFilter{Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize}
+	filter.Normalize()
+	items, total, err := service.ListWork(ctx, deps.Pool, agent.ID, time.Now(), filter)
 	if err != nil {
 		return ToolResult{}, err
 	}
-	// total = how many rows this call returned (WO-18): the listing is
-	// capped at 100, so total lets a client tell "exactly these" from
-	// "truncated at the cap" without counting array elements itself.
-	return data(map[string]any{"tasks": items, "total": len(items)})
+	// total = ALL tasks matching the filters (not just this page), so a
+	// client can page or tell "exactly these" without counting itself.
+	return data(map[string]any{"tasks": items, "total": total, "page": filter.Page, "page_size": filter.PageSize})
 }
 
 func handleWorkGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
