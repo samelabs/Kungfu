@@ -238,9 +238,8 @@ func (r *receiver) handler() http.Handler {
 		}
 		key := req.Header.Get("Idempotency-Key")
 		task := req.Header.Get("Kungfu-Task")
-		version := req.Header.Get("")
-		if key == "" || task == "" || version == "" {
-			http.Error(w, "Idempotency-Key, Kungfu-Task and  headers are required", http.StatusBadRequest)
+		if key == "" || task == "" {
+			http.Error(w, "Idempotency-Key and Kungfu-Task headers are required", http.StatusBadRequest)
 			return
 		}
 		var d deliveryRequest
