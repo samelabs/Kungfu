@@ -379,14 +379,27 @@ func TestAdminMgmtSessionsLiveByDefaultPaged(t *testing.T) {
 	}
 	liveTotal := got.Data.Pagination.Total
 
-	// include_ended=1: both fixtures appear
-	rec = e.do(t, "GET", "/api/samelabs/sessions?include_ended=1", "", false)
+	// include_ended=1: both fixtures appear (scoped to this admin so
+	// the shared CI database cannot crowd the page)
+	rec = e.do(t, "GET", fmt.Sprintf("/api/samelabs/sessions?include_ended=1&admin_id=%d", e.adminID), "", false)
 	if rec.Code != 200 {
 		t.Fatalf("include_ended list: %d", rec.Code)
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, fmt.Sprintf(`"id":%d`, revokedID)) || !strings.Contains(body, fmt.Sprintf(`"id":%d`, expiredID)) {
-		t.Fatal("include_ended=1 missing ended sessions")
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	seenRevoked, seenExpired := false, false
+	for _, si := range got.Data.Sessions {
+		if si.ID == revokedID {
+			seenRevoked = true
+		}
+		if si.ID == expiredID {
+			seenExpired = true
+		}
+	}
+	if !seenRevoked || !seenExpired {
+		t.Fatalf("include_ended=1 missing ended sessions (revoked=%v expired=%v): %s",
+			seenRevoked, seenExpired, rec.Body.String())
 	}
 
 	// paging: page 2 of size 1 keeps the full total (>= live sessions)
