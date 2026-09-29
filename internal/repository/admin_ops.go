@@ -117,8 +117,8 @@ const adminTaskColumns = `
 	t.id, t.code, t.publisher_id, b.bot_name, t.status,
 	t.budget_locked, t.settled, t.reserved, t.refunded,
 	t.paused_reason, t.closed_reason,
-	t.contract->>'title',
-	(t.contract->>'price')::bigint,
+	COALESCE(t.contract->>'title', ''),
+	COALESCE((t.contract->>'price')::bigint, 0),
 	t.created_at, t.updated_at`
 
 const adminTaskFrom = `

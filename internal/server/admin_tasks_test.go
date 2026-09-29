@@ -42,7 +42,8 @@ func govTask(t *testing.T, e *adminEnv, publisher int64, code, status string, bu
 	t.Helper()
 	var id int64
 	if err := e.s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract) VALUES ($1, $2, $3, $4, '{}') RETURNING id`,
+		`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
+		VALUES ($1, $2, $3, $4, '{"title":"Seeded","price":5}') RETURNING id`,
 		code, publisher, status, budget).Scan(&id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
