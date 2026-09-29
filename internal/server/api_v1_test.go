@@ -262,7 +262,7 @@ func TestAPIV1LargeBodyReachesValidationNot413(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 	s.buildRouter().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("large body = %d %s", rec.Code, rec.Body.String()[:200])
 	}
 	var env map[string]any

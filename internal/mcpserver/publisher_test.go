@@ -650,7 +650,7 @@ func TestTaskCreateRejectsSampleByName(t *testing.T) {
 	arg["sample"] = map[string]any{"url": "https://example.com/a"}
 	raw, _ := json.Marshal(map[string]any{"contract": arg, "budget": 10})
 	env, status := CallTool(context.Background(), &deps, "task_create", pub, raw)
-	if status != http.StatusBadRequest || env["ok"] != false {
+	if status != http.StatusUnprocessableEntity || env["ok"] != false {
 		t.Fatalf("sample contract: %d %v", status, env)
 	}
 	errObj, _ := env["error"].(map[string]any)
