@@ -197,7 +197,7 @@ type ReportRow struct {
 func adminTaskView(t *repository.AdminTaskRow) *TaskRow {
 	return &TaskRow{
 		ID: t.ID, Code: t.Code, PublisherID: t.PublisherID, PublisherName: t.PublisherName,
-		Status: t.Status, Version: t.Version,
+		Status:       t.Status,
 		BudgetLocked: t.BudgetLocked, Settled: t.Settled, Reserved: t.Reserved, Refunded: t.Refunded,
 		Available: t.Available, Slots: t.Slots,
 		PausedReason: t.PausedReason, ClosedReason: t.ClosedReason,

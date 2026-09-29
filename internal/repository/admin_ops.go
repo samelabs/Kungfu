@@ -115,21 +115,21 @@ type AdminTaskRow struct {
 }
 
 const adminTaskColumns = `
-	t.id, t.code, t.publisher_id, b.bot_name, t.status, t.version,
+	t.id, t.code, t.publisher_id, b.bot_name, t.status,
 	t.budget_locked, t.settled, t.reserved, t.refunded,
 	t.paused_reason, t.closed_reason,
-	COALESCE(v.contract->>'title', t.draft_contract->>'title', ''),
-	COALESCE((v.contract->>'price')::bigint, (t.draft_contract->>'price')::bigint, 0),
+	t.contract->>'title',
+	(t.contract->>'price')::bigint,
 	t.created_at, t.updated_at`
 
 const adminTaskFrom = `
 	FROM tb_task t
 	JOIN tb_bots b ON b.id = t.publisher_id
-	LEFT JOIN tb_task_version v ON v.task_id = t.id AND v.version = t.version`
+	`
 
 func scanAdminTask(row pgx.Row) (*AdminTaskRow, error) {
 	var t AdminTaskRow
-	err := row.Scan(&t.ID, &t.Code, &t.PublisherID, &t.PublisherName, &t.Status, &t.Version,
+	err := row.Scan(&t.ID, &t.Code, &t.PublisherID, &t.PublisherName, &t.Status,
 		&t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
 		&t.PausedReason, &t.ClosedReason, &t.Title, &t.Price, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -182,8 +182,8 @@ func AdminListTasks(ctx context.Context, q pg.Querier, f AdminTaskFilter) ([]Adm
 func AdminGetTask(ctx context.Context, q pg.Querier, code string) (*AdminTaskRow, error) {
 	var t AdminTaskRow
 	err := q.QueryRow(ctx, `SELECT `+adminTaskColumns+`,
-		COALESCE(v.contract, t.draft_contract)`+adminTaskFrom+` WHERE t.code = $1`, code).
-		Scan(&t.ID, &t.Code, &t.PublisherID, &t.PublisherName, &t.Status, &t.Version,
+		t.contract`+adminTaskFrom+` WHERE t.code = $1`, code).
+		Scan(&t.ID, &t.Code, &t.PublisherID, &t.PublisherName, &t.Status,
 			&t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
 			&t.PausedReason, &t.ClosedReason, &t.Title, &t.Price, &t.CreatedAt, &t.UpdatedAt,
 			&t.Contract)
