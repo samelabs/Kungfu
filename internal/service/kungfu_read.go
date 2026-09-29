@@ -85,6 +85,7 @@ func kungfuListItemFromRepo(k *repository.KungfuListItem) map[string]interface{}
 		"tags":        parseJSONTags(k.TagsJSON),
 		"description": k.Description,
 		"visibility":  k.Visibility,
+		"bytes":       k.Bytes,
 		"created_at":  k.CreatedAt,
 		"updated_at":  k.UpdatedAt,
 	}

@@ -49,6 +49,14 @@ function tcvStatusBadge(status, extra) {
     return `<span class="badge${cls}">${tcvEscapeHtml(tcvStatusText(status))}${extra ? tcvEscapeHtml(extra) : ''}</span>`;
 }
 
+// tcvFmtBytes renders a byte count for picker candidates.
+function tcvFmtBytes(n) {
+    if (!Number.isFinite(n) || n < 0) return '0 B';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function tcvFmtDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
@@ -194,6 +202,7 @@ function tcvContractForm(mount, opts) {
     let harness = Array.isArray(src.harness_refs) ? src.harness_refs.slice(0, 10) : [];
     let jsonMode = false;
     let memoriesRequested = false;
+    let memSearchTimer = null;
     const disabled = editable ? '' : ' disabled';
     const memTitles = {}; // code → title, from memory_list
 
@@ -220,7 +229,9 @@ function tcvContractForm(mount, opts) {
         <p class="tcv-hint muted" id="tcvHarnessMsg"></p>
         <details id="tcvHarnessPick" class="tcv-picker">
             <summary>${escapeHtml(tcvT('f_harness_pick'))} <span class="muted">${escapeHtml(tcvT('f_harness_max'))}</span></summary>
+            <input id="tcvHarnessSearch" type="search" placeholder="${escapeHtml(tcvT('f_harness_search'))}" aria-label="${escapeHtml(tcvT('f_harness_search'))}">
             <div id="tcvHarnessOptions"><p class="muted">${escapeHtml(tcvT('f_harness_loading'))}</p></div>
+            <div class="actions"><button class="btn" id="tcvHarnessMore" type="button" hidden>${escapeHtml(tcvT('f_harness_more'))}</button></div>
         </details>
 
         <label for="tcvSReceiver">${escapeHtml(tcvT('f_receiver'))} <span class="tcv-req" aria-hidden="true">*</span></label>
@@ -439,49 +450,89 @@ function tcvContractForm(mount, opts) {
         });
     }
 
-    function loadMemories() {
-        if (memoriesRequested) return;
-        memoriesRequested = true;
+    // memory_list drives the picker: search (300 ms debounce), 20 per
+    // page with Load more, exact-code lookup for a 12-hex query. Each
+    // candidate shows title, visibility and size.
+    let memQuery = '';
+    let memOffset = 0;
+    let memDone = false;
+    let memLoading = false;
+
+    function bindOptionRow(cb) {
+        cb.checked = harness.includes(cb.value);
+        cb.addEventListener('change', () => {
+            const msg = qs('#tcvHarnessMsg');
+            if (msg) msg.textContent = '';
+            if (cb.checked) {
+                if (harness.length >= 10) {
+                    cb.checked = false;
+                    if (msg) msg.textContent = tcvT('f_harness_max');
+                    return;
+                }
+                harness.push(cb.value);
+            } else {
+                harness = harness.filter((c) => c !== cb.value);
+            }
+            renderChips();
+            if (opts.onChange) opts.onChange();
+        });
+    }
+
+    function optionRow(m) {
+        const code = tcvEscapeHtml(m.code || '');
+        const title = tcvEscapeHtml(m.title || m.code || '');
+        const vis = tcvEscapeHtml(m.visibility || '');
+        const size = tcvFmtBytes(Number(m.bytes ?? 0));
+        return `<label class="tcv-criterion tcv-mem-row"><input type="checkbox" value="${code}">
+            <span class="tcv-mem-main"><span class="tcv-mem-title">${title}</span> <span class="mono muted">${code}</span></span>
+            <span class="tcv-mem-meta muted">${vis} · ${escapeHtml(size)}</span></label>`;
+    }
+
+    function loadMemories(reset) {
         const box = qs('#tcvHarnessOptions');
-        if (!editable) { box.innerHTML = `<p class="muted">${escapeHtml(tcvT('f_harness_visibility'))}</p>`; return; }
-        tcvCall('memory_list', {limit: 100}).then((env) => {
+        if (!box || !editable) return;
+        if (memLoading || (memDone && !reset)) return;
+        if (reset) { memOffset = 0; memDone = false; }
+        memLoading = true;
+        if (memOffset === 0) box.innerHTML = `<p class="muted">${escapeHtml(tcvT('f_harness_loading'))}</p>`;
+        const args = {limit: 20, offset: memOffset};
+        const q = memQuery.trim();
+        if (/^[0-9a-f]{12}$/i.test(q)) args.code = q.toLowerCase();
+        else if (q) args.q = q;
+        tcvCall('memory_list', args).then((env) => {
+            memLoading = false;
             if (!env.ok) { box.innerHTML = tcvStatusLine(env); return; }
             const items = env.kungfus || [];
-            if (!items.length) {
+            if (memOffset === 0) box.innerHTML = '';
+            items.forEach((m) => {
+                if (m.code && m.title) memTitles[m.code] = m.title;
+                box.insertAdjacentHTML('beforeend', optionRow(m));
+            });
+            memOffset += items.length;
+            memDone = env.has_more === false || items.length === 0;
+            const more = qs('#tcvHarnessMore');
+            if (more) more.hidden = memDone;
+            if (!items.length && memOffset === 0) {
                 box.innerHTML = `<p class="muted">${escapeHtml(tcvT('f_harness_none'))}
                     <a href="/llms.txt" target="_blank" rel="noopener">${escapeHtml(tcvT('f_harness_docs'))}</a></p>`;
-                return;
             }
-            box.innerHTML = items.map((m) => {
-                const code = tcvEscapeHtml(m.code || '');
-                const title = tcvEscapeHtml(m.title || m.code || '');
-                return `<label class="tcv-criterion"><input type="checkbox" value="${code}"> <span class="mono">${code}</span> ${title}</label>`;
-            }).join('');
-            items.forEach((m) => { if (m.code && m.title) memTitles[m.code] = m.title; });
-            qsa('#tcvHarnessOptions input[type="checkbox"]').forEach((cb) => {
-                cb.checked = harness.includes(cb.value);
-                cb.addEventListener('change', () => {
-                    const msg = qs('#tcvHarnessMsg');
-                    if (msg) msg.textContent = '';
-                    if (cb.checked) {
-                        if (harness.length >= 10) {
-                            cb.checked = false;
-                            if (msg) msg.textContent = tcvT('f_harness_max');
-                            return;
-                        }
-                        harness.push(cb.value);
-                    } else {
-                        harness = harness.filter((c) => c !== cb.value);
-                    }
-                    renderChips();
-                    if (opts.onChange) opts.onChange();
-                });
-            });
+            qsa('#tcvHarnessOptions input[type="checkbox"]').forEach(bindOptionRow);
             renderChips();
         }).catch((error) => {
+            memLoading = false;
             box.innerHTML = `<p class="tcv-err">${escapeHtml(noticeText(error))}</p>`;
         });
     }
+
+    on('#tcvHarnessMore', 'click', () => loadMemories(false));
+    on('#tcvHarnessSearch', 'input', (ev) => {
+        clearTimeout(memSearchTimer);
+        const value = ev.target.value;
+        memSearchTimer = setTimeout(() => {
+            memQuery = value;
+            loadMemories(true);
+        }, 300);
+    });
 
     on('#tcvHarnessChips', 'click', (ev) => {
         const btn = ev.target.closest('[data-tcv-rm]');
@@ -510,7 +561,10 @@ function tcvContractForm(mount, opts) {
     const pick = qs('#tcvHarnessPick');
     if (pick) {
         pick.addEventListener('toggle', () => {
-            if (pick.open && !memoriesRequested) loadMemories();
+            if (pick.open && !memoriesRequested) {
+                memoriesRequested = true;
+                loadMemories(true);
+            }
         });
     }
     showMode();

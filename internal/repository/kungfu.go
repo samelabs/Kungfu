@@ -34,6 +34,7 @@ type KungfuListItem struct {
 	TagsJSON    string
 	Description *string
 	Visibility  string
+	Bytes       int64
 	CreatedAt   string
 	UpdatedAt   string
 }
@@ -62,7 +63,8 @@ func ListActiveKungfusByBot(ctx context.Context, q pg.Querier, botID int64, f Ku
 	}
 	args = append(args, limit, offset)
 	rows, err := q.Query(ctx, `
-		SELECT code, title, tags_json::text, description, visibility, created_at, updated_at
+		SELECT code, title, tags_json::text, description, visibility,
+		       OCTET_LENGTH(content) AS bytes, created_at, updated_at
 		FROM tb_kungfus`+
 		where+`
 		ORDER BY updated_at DESC, id DESC
@@ -77,7 +79,7 @@ func ListActiveKungfusByBot(ctx context.Context, q pg.Querier, botID int64, f Ku
 		var it KungfuListItem
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&it.Code, &it.Title, &it.TagsJSON, &it.Description,
-			&it.Visibility, &createdAt, &updatedAt); err != nil {
+			&it.Visibility, &it.Bytes, &createdAt, &updatedAt); err != nil {
 			return nil, 0, err
 		}
 		it.CreatedAt = createdAt.Format("2006-01-02 15:04:05")

@@ -22,6 +22,7 @@ type MemoryItem struct {
 	Tags        []string `json:"tags"`
 	Description *string  `json:"description"`
 	Visibility  string   `json:"visibility"`
+	Bytes       int64    `json:"bytes"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
 }
@@ -177,12 +178,17 @@ func projectMemoryList(result map[string]interface{}) (MemoryListOutput, error) 
 		if err != nil {
 			return MemoryItem{}, err
 		}
+		bytesVal, err := reqInt(m, "bytes")
+		if err != nil {
+			return MemoryItem{}, err
+		}
 		return MemoryItem{
 			Code:        code,
 			Title:       title,
 			Tags:        tags,
 			Description: optStringPtr(m, "description"),
 			Visibility:  visibility,
+			Bytes:       int64(bytesVal),
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
 		}, nil

@@ -232,7 +232,9 @@
         "revision_current": "Live: revision {{n}} · opened {{time}}",
         "revision_pending_next": "Saved changes become revision {{n}} on the next open.",
         "view_effective": "View the currently live revision ({{n}})",
-        "fix_marked": "Please fix the highlighted fields."
+        "fix_marked": "Please fix the highlighted fields.",
+        "f_harness_search": "Search memories…",
+        "f_harness_more": "Load more"
       },
       "logs": {
         "heading": "Logs",
@@ -716,7 +718,9 @@
         "revision_current": "当前生效：第 {{n}} 版 · 开放于 {{time}}",
         "revision_pending_next": "已保存的修改将在下次开放时成为第 {{n}} 版。",
         "view_effective": "查看当前生效版本（第 {{n}} 版）",
-        "fix_marked": "请修正标出的字段。"
+        "fix_marked": "请修正标出的字段。",
+        "f_harness_search": "搜索记忆…",
+        "f_harness_more": "加载更多"
       },
       "logs": {
         "heading": "日志",
@@ -1200,7 +1204,9 @@
         "revision_current": "現在有効：第 {{n}} 版 · 公開 {{time}}",
         "revision_pending_next": "保存済みの変更は次回の公開で第 {{n}} 版になります。",
         "view_effective": "現在有効なバージョンを表示（第 {{n}} 版）",
-        "fix_marked": "マークされたフィールドを修正してください。"
+        "fix_marked": "マークされたフィールドを修正してください。",
+        "f_harness_search": "メモリを検索…",
+        "f_harness_more": "さらに読み込む"
       },
       "logs": {
         "heading": "ログ",
@@ -1684,7 +1690,9 @@
         "revision_current": "현재 유효: 제 {{n}}판 · 열림 {{time}}",
         "revision_pending_next": "저장된 수정은 다음 오픈 때 제 {{n}}판이 됩니다.",
         "view_effective": "현재 유효 버전 보기(제 {{n}}판)",
-        "fix_marked": "표시된 필드를 수정해 주세요."
+        "fix_marked": "표시된 필드를 수정해 주세요.",
+        "f_harness_search": "메모리 검색…",
+        "f_harness_more": "더 불러오기"
       },
       "logs": {
         "heading": "로그",
@@ -2168,7 +2176,9 @@
         "revision_current": "Vigente: revisión {{n}} · abierta {{time}}",
         "revision_pending_next": "Los cambios guardados serán la revisión {{n}} en la próxima apertura.",
         "view_effective": "Ver la revisión vigente ({{n}})",
-        "fix_marked": "Corrige los campos marcados."
+        "fix_marked": "Corrige los campos marcados.",
+        "f_harness_search": "Buscar memorias…",
+        "f_harness_more": "Cargar más"
       },
       "logs": {
         "heading": "Registros",

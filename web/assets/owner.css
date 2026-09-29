@@ -1005,3 +1005,10 @@ details[open] > .start-summary::after { transform: rotate(-135deg); }
 .tcv-status-err { color: var(--danger); white-space: pre-wrap; }
 .tcv-invalid { border-color: var(--danger) !important; box-shadow: 0 0 0 1px var(--danger) inset; }
 .tcv-field-err { margin: 2px 0 6px; font-size: 12.5px; }
+
+/* ---- WO-21: harness picker candidates ---- */
+.tcv-picker input[type="search"] { width: 100%; margin-bottom: 8px; }
+.tcv-mem-row { align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tcv-mem-main { flex: 1 1 auto; min-width: 0; }
+.tcv-mem-title { font-weight: 600; }
+.tcv-mem-meta { font-size: 12px; flex: 0 0 auto; }
