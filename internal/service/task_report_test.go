@@ -55,9 +55,11 @@ func TestReportTaskGuards(t *testing.T) {
 	agent := pubSeedBot(t, pool, 0)
 	ctx := context.Background()
 
-	draft := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
-	if _, err := ReportTask(ctx, pool, agent, draft, "x"); appErrOf(t, err).Code != "TASK_NOT_FOUND" {
-		t.Fatalf("draft: %v, want TASK_NOT_FOUND", err)
+	// paused tasks are visible and reportable (WO-22d: they are
+	// readable via work_get; reporting matches)
+	paused := pubCreateForTest(t, pool, publisher, submitContract(), 1000)
+	if _, err := ReportTask(ctx, pool, agent, paused, "x"); err != nil {
+		t.Fatalf("paused report: %v, want success", err)
 	}
 	if _, err := ReportTask(ctx, pool, agent, "nope00000000", "x"); appErrOf(t, err).Code != "TASK_NOT_FOUND" {
 		t.Fatalf("missing: %v, want TASK_NOT_FOUND", err)
