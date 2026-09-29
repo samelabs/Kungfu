@@ -42,7 +42,7 @@ func govTask(t *testing.T, e *adminEnv, publisher int64, code, status string, bu
 	t.Helper()
 	var id int64
 	if err := e.s.Pool.QueryRow(context.Background(),
-		`INSERT INTO tb_task (code, publisher_id, status, budget_locked) VALUES ($1, $2, $3, $4) RETURNING id`,
+		`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract) VALUES ($1, $2, $3, $4, '{}') RETURNING id`,
 		code, publisher, status, budget).Scan(&id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
@@ -340,12 +340,12 @@ func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
 	}
 	shown := fmt.Sprintf("gb%d", time.Now().UnixNano()%1_000_000_000)
 	noSlots := fmt.Sprintf("gz%d", time.Now().UnixNano()%1_000_000_000)
-	draft := fmt.Sprintf("gd%d", time.Now().UnixNano()%1_000_000_000)
+	pausedTask := fmt.Sprintf("gd%d", time.Now().UnixNano()%1_000_000_000)
 	closed := fmt.Sprintf("gx%d", time.Now().UnixNano()%1_000_000_000)
 	withBoard(shown, "Alpha board task", 5, 1000, "open")         // slots 200 → on the board
 	withBoard(noSlots, "Exhausted board task", 1000, 500, "open") // available 500 < price → no slot
 	withBoard(closed, "Closed board task", 5, 1000, "closed")     // not open
-	withBoard(draft, "Draft board task", 5, 1000, "draft")        // no version row, not open
+	withBoard(pausedTask, "Draft board task", 5, 1000, "paused")  // paused, not open
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
@@ -357,7 +357,7 @@ func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
 	if !strings.Contains(body, "Alpha board task") || !strings.Contains(body, shown) {
 		t.Fatal("open task missing from the board")
 	}
-	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", draft} {
+	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", pausedTask} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("%s must not be on the board", banned)
 		}
