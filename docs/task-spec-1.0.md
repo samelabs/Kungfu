@@ -76,7 +76,7 @@ paused ──open──▶ open ──pause──▶ paused ──open──▶ 
 | 转换 | 前置条件 | 效果 |
 |---|---|---|
 | `create` | 余额 ≥ `budget`；`budget` ≥ `price`（至少一份）；`budget` ≤ 2^53−1 | 生成 paused 任务（新任务即 paused）；锁定 `budget`（`lock_task`） |
-| `update` | 状态为 paused | 整份替换契约；下次 open 后生效于之后的认领与提交；已有 Claim 与 Submission 保持各自的 `amount` |
+| `update` | 状态为 paused | 整份替换契约；保存后立即对之后的每个提交生效（含 paused 期间既有 active Claim 携带的提交）；Claim 保留其预留的 `amount` |
 | `open` | 状态为 paused；契约校验通过；harness_refs 归属通过 | 状态 open。无出站请求 |
 | `pause` | 状态为 open | 状态 paused；停止接受新 Claim 与不带 Claim 的 Submission；已有 active Claim 仍可提交（不可续期）；进行中的 Submission 照常完成 |
 | `fund` | 状态非 closed；余额 ≥ 追加额；追加额 ≤ 2^53−1 且追加后 `budget_locked` ≤ 2^53−1 | `budget_locked` 增加（`fund_task`） |
@@ -85,7 +85,7 @@ paused ──open──▶ open ──pause──▶ paused ──open──▶ 
 | 平台暂停 | 连续 5 次接收端故障（§7.3） | 状态 paused，`paused_reason` 记录原因；发布者修复后可 open |
 | 平台关闭 | 平台治理 | 状态 closed，`closed_reason` 对发布者与执行者可见 |
 
-契约在 paused 状态被修改后，自下次 open 起对之后的认领与提交生效：已存在的 Claim 保留其预留金额，进行中的 Submission 照常完成；执行者每次读取的都是当前契约。
+契约在 paused 状态被保存修改后，立即对之后的每个提交生效——包括 paused 期间既有 active Claim 携带的提交：它们按当前契约的 `output.schema` 校验，投递到当前的 `receiver.url`。Claim 保留其预留金额；进行中的 Submission 照常完成；执行者每次读取的都是当前契约。
 
 派生量：
 - `available = budget_locked − settled − reserved − refunded`（`reserved` 为全部未终结预留金额之和）

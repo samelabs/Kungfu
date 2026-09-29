@@ -33,14 +33,18 @@
       <label>New password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
       <button class="sl-btn" type="submit">Reset password</button></form>
   </section>
+  {{end}}
+  {{if or $manage $sessions}}
   <section class="sl-card danger">
     <h2>Access</h2>
     <div class="sl-actions">
       {{if $sessions}}<form method="post" action="/samelabs/admins/{{$u.ID}}/force-logout" data-confirm="End all sessions of this admin?">{{template "csrf" .CSRF}}<button class="sl-btn" type="submit">Sign out everywhere</button></form>{{end}}
+      {{if $manage}}
       {{if eq $u.Status "active"}}
       {{if not .Data.Self}}<form method="post" action="/samelabs/admins/{{$u.ID}}/disable" data-confirm="Disable this admin?">{{template "csrf" .CSRF}}<button class="sl-btn danger" type="submit">Disable admin</button></form>{{end}}
       {{else}}
       <form method="post" action="/samelabs/admins/{{$u.ID}}/enable">{{template "csrf" .CSRF}}<button class="sl-btn primary" type="submit">Enable admin</button></form>
+      {{end}}
       {{end}}
     </div>
   </section>

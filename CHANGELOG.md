@@ -33,9 +33,10 @@ actually runs. Requires --apply-migrations (020, 021, 022).
   `sub_total` instead of the charged total, so tax or a discount no
   longer blocks crediting a paid order; a replayed provider event under
   a different object id is treated as already processed instead of an
-  error; a rejected or uncertain checkout never auto-fails its payment
-  row (the owner credits page states that an uncompleted purchase
-  charges nothing), and package credits are capped at the ledger range.
+  error; an uncertain checkout leaves its payment pending so a late
+  webhook can still complete it (the owner credits page states that an
+  uncompleted purchase charges nothing), and package credits are capped
+  at the ledger range.
 - `POST /api/owner/payments/checkout` is rate limited (20 per hour per
   owner); the plain-HTTP surface accepts any case of the Bearer scheme;
   list `page` parameters are clamped so page arithmetic cannot overflow.

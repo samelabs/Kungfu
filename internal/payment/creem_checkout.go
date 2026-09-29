@@ -85,21 +85,19 @@ func validateCreemProduct(p *CreemProduct, expectedID, mode string) error {
 //     automatic resubmission)
 //  5. verify the response facts, return checkout_url
 //
-// Failure handling — the payment row NEVER auto-fails:
-//   - definitive Creem rejection (400/401/403/404): provider error
-//     returned, the row stays pending;
-//   - ambiguous failure (network/429/5xx): 502 returned, the row stays
-//     pending.
-//
-// Marking the row failed on our own read of the provider would poison
-// a late checkout.completed webhook (money taken, credits never
-// granted, endless retries), so the row is left pending in both
-// cases: if Creem actually created and completed the checkout, the
-// webhook still finds the local payment by request_id and completes
-// it. If it did not, the row remains pending — a known runtime gap
-// (no recovery job); the owner UI says nothing was charged and a new
-// purchase may be started. A new checkout call creates a NEW payment;
-// the same code is never resubmitted.
+// Failure handling:
+//   - definitive Creem rejection (400/401/403/404): the checkout was
+//     never created upstream and no webhook can follow — FailPayment,
+//     provider error;
+//   - ambiguous failure (network/429/5xx): the payment stays pending,
+//     502 returned. If Creem actually created the checkout, the later
+//     webhook still finds the local payment by request_id and
+//     completes it; marking it failed on our own uncertain read would
+//     poison that late webhook (money taken, credits never granted).
+//     If it was never created, the row remains pending — a known
+//     runtime gap (no recovery job); the owner UI says nothing was
+//     charged and a new purchase may be started. A new checkout call
+//     creates a NEW payment; the same code is never resubmitted.
 func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, botID int64, packageCode string) (*CheckoutResult, error) {
 	pkg, ok := rt.Packages[packageCode]
 	if !ok {
@@ -139,9 +137,9 @@ func StartCreemCheckout(ctx context.Context, pool *pg.Pool, rt *CreemRuntime, bo
 	})
 	if err != nil {
 		if _, isDefinitive := err.(*ErrCreemDefinitive); isDefinitive {
-			// The row stays pending: a late checkout.completed for it must
-			// stay completable (auto-failing here could take money without
-			// granting credits).
+			// The checkout was never created upstream (400/401/403/404):
+			// no webhook can follow, so the row is terminally failed.
+			_, _ = FailPayment(ctx, pool, p.Code)
 			return nil, errors.New(502, "PAYMENT_PROVIDER_REJECTED", "Payment provider rejected the checkout")
 		}
 		// Ambiguous: the checkout may exist upstream with our request_id.
