@@ -45,7 +45,7 @@ function tcvPauseReasonText(reason) {
 }
 
 function tcvStatusBadge(status, extra) {
-    const cls = ['draft', 'open', 'paused', 'closed'].includes(status) ? ` ${status}` : '';
+    const cls = ['open', 'paused', 'closed'].includes(status) ? ` ${status}` : '';
     return `<span class="badge${cls}">${tcvEscapeHtml(tcvStatusText(status))}${extra ? tcvEscapeHtml(extra) : ''}</span>`;
 }
 
@@ -560,7 +560,7 @@ function tcvReadListStateFromURL() {
     const params = new URLSearchParams(window.location.search);
     tcvListState.q = (params.get('q') || '').trim();
     const status = params.get('status') || '';
-    tcvListState.status = ['draft', 'open', 'paused', 'closed'].includes(status) ? status : 'all';
+    tcvListState.status = ['open', 'paused', 'closed'].includes(status) ? status : 'all';
     const page = Number(params.get('page'));
     tcvListState.page = Number.isInteger(page) && page >= 1 ? page : 1;
 }
@@ -710,7 +710,7 @@ function tcvRenderEditorError(env) {
 }
 
 function tcvHeaderHTML(code, view) {
-    const status = view.status || 'draft';
+    const status = view.status || 'paused';
     const reason = status === 'paused' && view.paused_reason
         ? tcvPauseReasonText(view.paused_reason)
         : (status === 'closed' && view.closed_reason ? String(view.closed_reason) : '');
@@ -769,7 +769,7 @@ function tcvLifecycleButtons(view) {
     const status = view.status;
     const btn = (id, key, show) => show
         ? `<button class="btn" id="${id}" type="button">${escapeHtml(tcvT(key))}</button>` : '';
-    return btn('tcvOpen', 'open', status === 'draft' || status === 'paused')
+    return btn('tcvOpen', 'open', status === 'paused')
         + btn('tcvPause', 'pause', status === 'open')
         + btn('tcvClose', 'close', status !== 'closed')
         + btn('tcvRefund', 'refund', status === 'closed' && Number(view.available ?? 0) > 0);
@@ -797,6 +797,8 @@ function tcvAskConfirm(message, fn) {
 function tcvContractSummaryHTML(view) {
     const c = view.contract || {};
     const excerpt = String(c.requirements || '');
+    // rune-accurate truncation, matching the backend's 280-rune excerpt
+    const excerptRunes = Array.from(excerpt);
     const rules = [
         c.claim && c.claim.required ? tcvT('sum_claim_required') : '',
         c.claim && c.claim.ttl ? tcvT('sum_claim_ttl', {n: c.claim.ttl}) : '',
@@ -804,7 +806,7 @@ function tcvContractSummaryHTML(view) {
         c.limits && c.limits.max_rejected_per_agent ? tcvT('sum_max_rejected', {n: c.limits.max_rejected_per_agent}) : ''
     ].filter(Boolean).join(' · ');
     return `<dl class="sl-kv">
-        <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerpt.length > 280 ? excerpt.slice(0, 280) + '…' : excerpt)}</dd>
+        <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerptRunes.length > 280 ? excerptRunes.slice(0, 280).join('') + '…' : excerpt)}</dd>
         <dt>${escapeHtml(tcvT('f_receiver'))}</dt><dd class="mono">${tcvEscapeHtml(c.receiver && c.receiver.url ? c.receiver.url : '')}</dd>
         <dt>${escapeHtml(tcvT('f_price'))}</dt><dd>${Number(c.price ?? 0)}</dd>
         <dt>${escapeHtml(tcvT('f_harness'))}</dt><dd>${Number((c.harness_refs || []).length)}</dd>
@@ -822,16 +824,18 @@ function tcvContractSummaryHTML(view) {
 function tcvRenderOverview(code, view) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
-    const status = view.status || 'draft';
+    const status = view.status || 'paused';
     const editable = status === 'paused';
     const submissions30d = Number((view.stats || {}).submissions_30d ?? 0);
 
     // The edit button never hides: paused → enabled primary link;
-    // otherwise a grayed non-action (the open case keeps the
-    // explanatory note line, closed is stated by the status badge).
+    // otherwise a grayed non-action with the matching explanatory
+    // note line (open vs closed wording).
     const editBtn = editable
         ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>`
         : `<a class="btn" aria-disabled="true">${escapeHtml(tcvT('edit_contract'))}</a>`;
+    const editNote = status === 'open' ? 'open_readonly_note'
+        : (status === 'closed' ? 'closed_readonly_note' : '');
 
     root.innerHTML = `
     <div class="task-layout">
@@ -842,7 +846,7 @@ function tcvRenderOverview(code, view) {
                 ${editBtn}
                 <a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}/deliveries">${escapeHtml(tcvT('deliveries'))} (${submissions30d})</a>
             </div>
-            ${status === 'open' ? `<p class="muted tcv-edit-note">${escapeHtml(tcvT('open_readonly_note'))}</p>` : ''}
+            ${editNote ? `<p class="muted tcv-edit-note">${escapeHtml(tcvT(editNote))}</p>` : ''}
             <h3>${escapeHtml(tcvT('f_contract'))}</h3>
             ${tcvContractSummaryHTML(view)}
             <div class="actions tcv-actionbar">${tcvLifecycleButtons(view)}${tcvStatusAreaHTML()}</div>
@@ -869,17 +873,17 @@ function tcvRenderOverview(code, view) {
 }
 
 // tcvRenderEditPage is /owner/tasks/{code}/edit: ONLY task_get, then
-// the contract form when the task is draft or paused. Anything else
-// explains why editing is unavailable.
+// the contract form while the task is paused. Anything else explains
+// why editing is unavailable.
 function tcvRenderEditPage(code) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
     const back = `<p><a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}">${escapeHtml(tcvT('back_to_overview'))}</a></p>`;
     tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { root.innerHTML = back + tcvStatusLine(env); return; }
-        const status = env.status || 'draft';
+        const status = env.status || 'paused';
         if (status !== 'paused') {
-            const why = status === 'closed' ? tcvT('status_closed') : tcvT('status_open');
+            const why = status === 'closed' ? tcvT('closed_readonly_note') : tcvT('open_readonly_note');
             root.innerHTML = `
             <div class="panel">
                 <h2>${escapeHtml(tcvT('edit_contract'))}</h2>

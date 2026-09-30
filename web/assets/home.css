@@ -723,8 +723,9 @@ button.btn { font: inherit; }
     .capability-tags { grid-template-columns: 1fr; }
     .task-title-row { align-items: flex-start; }
     .task-board-head { border-radius: 18px; padding: 16px; }
-    .task-search { flex-direction: column; }
-    .task-search .btn { width: 100%; }
+    /* the search row stays a row on phones: the input flexes and the
+       submit button keeps its own width instead of a full-width bar */
+    .task-search .btn { width: auto; flex-shrink: 0; }
     .task-board-row { flex-direction: column; gap: 2px; }
     .task-board-title { white-space: normal; }
     .task-board-meta { flex-wrap: wrap; gap: 8px; }
