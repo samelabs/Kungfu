@@ -390,6 +390,36 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      gap: 14px;
      align-items: start;
  }
+ /* The task panel is FIRST in the DOM so phones stack it above the
+    budget/stats rail; on wide screens the rail returns to the left
+    via explicit placement. */
+ .task-main { grid-column: 2; grid-row: 1; }
+ .task-side { grid-column: 1; grid-row: 1; }
+
+ /* The edit affordance stays visible in every status — grayed out,
+    never hidden, while the task is not editable. */
+ a.btn[aria-disabled="true"] {
+     opacity: .56;
+     cursor: not-allowed;
+     box-shadow: none;
+     pointer-events: none;
+ }
+ .tcv-edit-note { margin: 2px 0 8px; font-size: 13px; }
+
+ /* Key/value blocks render as label-value grid rows instead of the
+    browser's stacked definition list. Contract pairs keep full-width
+    values; the numeric budget/stats rail packs two pairs per row on
+    phones. */
+ .task-main .sl-kv { grid-template-columns: max-content minmax(8rem, 1fr); }
+ .task-side .sl-kv { grid-template-columns: max-content minmax(4rem, 1fr); }
+ .task-main .sl-kv,
+ .task-side .sl-kv {
+     display: grid;
+     gap: 6px 18px;
+     margin: 8px 0 4px;
+ }
+ .task-layout .sl-kv dt { margin: 0; color: #67807b; font-size: 13px; align-self: center; }
+ .task-layout .sl-kv dd { margin: 0; font-weight: 560; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
  .task-list { display: grid; gap: 8px; margin-top: 12px; }
  .task-item {
      width: 100%;
@@ -592,6 +622,7 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
  @media (max-width: 1024px) {
      .shell { padding: 18px 14px 24px; }
      .task-layout { grid-template-columns: 1fr; }
+     .task-main, .task-side { grid-column: auto; grid-row: auto; }
  }
 @media (max-width: 720px) {
      h1 { font-size: 24px; }
@@ -601,6 +632,14 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
      .btn { min-height: 38px; }
      .actions { align-items: flex-start; }
      .actions-split { justify-content: flex-start; }
+     /* phones: the numeric rail packs two label-value pairs per row;
+        long-text contract values stack label-over-value full width */
+     .task-side .sl-kv { grid-template-columns: repeat(2, minmax(0, 1fr) max-content); gap: 10px 12px; }
+     .task-side .sl-kv dt { align-self: center; }
+     .task-side .sl-kv dd { text-align: right; }
+     .task-main .sl-kv { grid-template-columns: 1fr; gap: 2px 0; }
+     .task-main .sl-kv dt { margin-top: 8px; }
+     .task-main .sl-kv dt:first-child { margin-top: 0; }
      .actions-split > .btn,
      .actions-split > a.btn,
      .owner-header-actions > .btn {

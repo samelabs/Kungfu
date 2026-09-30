@@ -813,9 +813,11 @@ function tcvContractSummaryHTML(view) {
 `;
 }
 
-// tcvRenderOverview is /owner/tasks/{code}: ONLY task_get. Header,
-// funds and stats, the read-only contract summary with the two entry
-// buttons, and the lifecycle actions with their confirmations. No
+// tcvRenderOverview is /owner/tasks/{code}: ONLY task_get. The task
+// itself leads — header, the ALWAYS-visible edit affordance (primary
+// while paused, grayed out otherwise), the read-only contract summary
+// and the lifecycle actions; budget and statistics follow as the side
+// rail (left on wide screens, stacked after the task on phones). No
 // contract form, no memory_list, no task_submissions.
 function tcvRenderOverview(code, view) {
     const root = qs('#taskEditorRoot');
@@ -824,24 +826,31 @@ function tcvRenderOverview(code, view) {
     const editable = status === 'paused';
     const submissions30d = Number((view.stats || {}).submissions_30d ?? 0);
 
+    // The edit button never hides: paused → enabled primary link;
+    // otherwise a grayed non-action (the open case keeps the
+    // explanatory note line, closed is stated by the status badge).
+    const editBtn = editable
+        ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>`
+        : `<a class="btn" aria-disabled="true">${escapeHtml(tcvT('edit_contract'))}</a>`;
+
     root.innerHTML = `
     <div class="task-layout">
-        <div>
-            <div class="panel">${tcvFundsHTML(view)}</div>
-            <div class="panel">${tcvStatsHTML(view)}</div>
-        </div>
-        <div class="panel">
+        <div class="panel task-main">
             ${tcvHeaderHTML(code, view)}
-            
+
             <div class="actions">
-                ${status === 'paused' ? `<a class="btn primary" href="/owner/tasks/${tcvEscapeHtml(code)}/edit">${escapeHtml(tcvT('edit_contract'))}</a>` : ''}
-                ${status === 'open' ? `<span class="muted">${escapeHtml(tcvT('open_readonly_note'))}</span>` : ''}
+                ${editBtn}
                 <a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}/deliveries">${escapeHtml(tcvT('deliveries'))} (${submissions30d})</a>
             </div>
+            ${status === 'open' ? `<p class="muted tcv-edit-note">${escapeHtml(tcvT('open_readonly_note'))}</p>` : ''}
             <h3>${escapeHtml(tcvT('f_contract'))}</h3>
             ${tcvContractSummaryHTML(view)}
             <div class="actions tcv-actionbar">${tcvLifecycleButtons(view)}${tcvStatusAreaHTML()}</div>
             <div id="tcvConfirm" hidden></div>
+        </div>
+        <div class="task-side">
+            <div class="panel">${tcvFundsHTML(view)}</div>
+            <div class="panel">${tcvStatsHTML(view)}</div>
         </div>
     </div>`;
 
