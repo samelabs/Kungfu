@@ -5,6 +5,85 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] — 2026-09-30
+
+Detail closeout of the owner console and public pages: the two
+mobile-width regressions, one missing translation key and the
+draft-era residue left behind by the 2.1.0 model change.
+
+### Fixed
+
+- `credits.rewards_cta` was referenced by the public credits page but
+  defined in no language — the button rendered the raw key string.
+  Added to all five locales.
+- Homepage search on phones: the form stacked and the submit button
+  stretched to full width. The row now survives (input flexes, button
+  keeps its own width).
+- Owner tasks header (Task Guide, New task) on phones: both anchors
+  were forced to full width, stacked like form submits. They now wrap
+  inline at their own width.
+- The grayed edit button set `pointer-events: none` alongside
+  `cursor: not-allowed`, which made the cursor unreachable. The
+  suppression is gone (the anchor has no href and cannot navigate);
+  the disabled state also stops responding to hover.
+
+### Added
+
+- Closed tasks get the same one-line explanation the open state has
+  (`closed_readonly_note`, five locales): closed is final, remaining
+  budget is refundable below. The manual-URL edit page shows the full
+  open/closed notes instead of a bare status word.
+
+### Changed
+
+- Draft-era residue cleared: the status badge whitelist, the URL
+  status filter and the Open-button condition no longer mention
+  `draft`; the three `|| 'draft'` fallbacks are `|| 'paused'` (the
+  status a task is actually born with); the dead `.badge.draft` rule
+  and the unused `owner.status.*` / `owner.tasks.status` locale keys
+  are removed (five languages).
+- The requirements excerpt in the contract summary truncates by
+  runes, matching the backend's 280-rune excerpt instead of splitting
+  surrogate pairs.
+
+## [2.1.2] — 2026-09-30
+
+The task overview page is rebuilt around the task itself; the edit
+affordance never hides.
+
+### Changed
+
+- The Edit contract button renders in every status: the primary link
+  while paused, a grayed non-action (`aria-disabled`, no href) with a
+  one-line read-only note otherwise — no longer hidden.
+- Layout: the task body (title, edit/deliveries, contract summary,
+  lifecycle actions) leads; Budget and Statistics sit in a side rail
+  (left column on wide screens, stacked after the task on phones).
+  Previously the budget block filled the first phone screen and the
+  task body landed on the third.
+- Numeric key/value grids are compact: label-left/value-right on
+  desktop, two pairs per row for the side rail on phones, and
+  label-over-value for long contract values (URLs, requirements) so
+  they wrap naturally.
+
+## [2.1.1] — 2026-09-30
+
+Hotfix: the owner task overview crashed in production after the 2.1.0
+version-surface removal.
+
+### Fixed
+
+- `tcvRevisionHTML is not defined` on `/owner/tasks/{code}`: a
+  leftover call from the removed revision surface. All revision
+  leftovers are gone from the owner task console.
+
+### Changed
+
+- `restoreSession` fires the `/api/account` fetch in parallel with
+  `/api/owner/session` instead of strictly after it (one serial round
+  trip less on every owner page load); every branch behaves as
+  before and the harness contract test pins the ordering.
+
 ## [2.1.0] — 2026-09-30
 
 Every confirmed finding of the full logic audit before this release is
