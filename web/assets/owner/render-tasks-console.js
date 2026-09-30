@@ -126,10 +126,10 @@ function tcvRenderTaskList(env) {
     }
 }
 
-// ---- the delivery record rows (F3): time, state, agent_ref, version,
+// ---- the delivery record rows (F3): time, state, agent_ref,
 // amount, reply status; the full reply body expands ----
 
-function tcvSubmissionRow(r, showVersion) {
+function tcvSubmissionRow(r) {
     const state = String(r.state || '');
     const reply = r.reply || null;
     const replyStatus = reply ? `HTTP ${tcvEscapeHtml(String(reply.status))}` : '—';

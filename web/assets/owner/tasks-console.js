@@ -803,7 +803,7 @@ function tcvContractSummaryHTML(view) {
         c.claim && c.claim.max_duration ? tcvT('sum_claim_max', {n: c.claim.max_duration}) : '',
         c.limits && c.limits.max_rejected_per_agent ? tcvT('sum_max_rejected', {n: c.limits.max_rejected_per_agent}) : ''
     ].filter(Boolean).join(' · ');
-    return `${tcvRevisionHTML(view)}<dl class="sl-kv">
+    return `<dl class="sl-kv">
         <dt>${escapeHtml(tcvT('f_requirements'))}</dt><dd>${escapeHtml(excerpt.length > 280 ? excerpt.slice(0, 280) + '…' : excerpt)}</dd>
         <dt>${escapeHtml(tcvT('f_receiver'))}</dt><dd class="mono">${tcvEscapeHtml(c.receiver && c.receiver.url ? c.receiver.url : '')}</dd>
         <dt>${escapeHtml(tcvT('f_price'))}</dt><dd>${Number(c.price ?? 0)}</dd>
@@ -986,11 +986,7 @@ function tcvLoadSubmissions(code, state, page) {
         const rows = env.submissions || [];
         const total = Number(env.total ?? rows.length);
         const pages = Math.max(1, Math.ceil(total / 20));
-        // C4: the contract-revision column appears only when THIS page
-        // spans two or more revisions
-        const versions = new Set(rows.map((r) => Number(r.version ?? 0)));
-        const showVersion = versions.size > 1;
-        box.innerHTML = rows.length ? rows.map((r) => tcvSubmissionRow(r, showVersion)).join('')
+        box.innerHTML = rows.length ? rows.map((r) => tcvSubmissionRow(r)).join('')
             : `<p class="muted">${escapeHtml(tcvT('empty_deliveries'))}</p>`;
         const info = qs('#tcvSubPageInfo');
         if (info) info.textContent = tcvT('page_info', {page, pages, total});
