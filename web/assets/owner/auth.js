@@ -5,7 +5,6 @@ function bindLoginForm() {
         const data = payload(event.currentTarget);
         const error = validateCredentials(data);
         if (error) return showToast(noticeText(error), 'error');
-        // transitional: silent
         try {
             const json = await requestJson('/api/owner/session', {method: 'POST', body: JSON.stringify(data)});
             if (!json.success) return showToast(noticeText(json.error || json), 'error');
@@ -77,7 +76,6 @@ function bindRegisterForm() {
         const data = payload(event.currentTarget);
         const error = validateCredentials(data, true);
         if (error) return showToast(noticeText(error), 'error');
-        // transitional: silent
         try {
             const json = await requestJson('/api/owner/register', {method: 'POST', body: JSON.stringify(data)});
             if (!json.success) return showToast(noticeText(json.error || json), 'error');
@@ -152,7 +150,6 @@ function bindPasswordForm() {
         const error = validatePassword(data.password) || validatePassword(data.new_password, 'new_password');
         if (error) return showToast(noticeText(error), 'error');
         if (data.password === data.new_password) return showToast(noticeText(t('auth.new_password_diff')), 'error');
-        // transitional: silent
         try {
             const json = await requestJson('/api/change-password', {
                 method: 'POST',
@@ -178,7 +175,6 @@ function bindResetKey() {
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (!confirm(t('key.reset_confirm'))) return;
-        // transitional: silent
         try {
             const json = await requestJson('/api/reset-key', {
                 method: 'POST',

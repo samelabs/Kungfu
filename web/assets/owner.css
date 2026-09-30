@@ -397,13 +397,15 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
  .task-side { grid-column: 1; grid-row: 1; }
 
  /* The edit affordance stays visible in every status — grayed out,
-    never hidden, while the task is not editable. */
+    never hidden, while the task is not editable. No pointer-events
+    suppression: the anchor has no href and cannot navigate, and the
+    not-allowed cursor needs pointer events to show. */
  a.btn[aria-disabled="true"] {
      opacity: .56;
      cursor: not-allowed;
      box-shadow: none;
-     pointer-events: none;
  }
+ a.btn[aria-disabled="true"]:hover { filter: none; }
  .tcv-edit-note { margin: 2px 0 8px; font-size: 13px; }
 
  /* Key/value blocks render as label-value grid rows instead of the
@@ -661,9 +663,16 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
          flex-direction: column;
          align-items: stretch;
      }
+     /* head actions wrap inline at their own width — two full-width
+        stacked buttons on a phone read as form submits, not as links */
+     .section-head-actions {
+         display: flex;
+         flex-wrap: wrap;
+         gap: 8px;
+     }
      .section-head-actions > .btn,
      .section-head-actions > a.btn {
-         width: 100%;
+         width: auto;
      }
 }
 
@@ -986,7 +995,6 @@ details[open] > .start-summary::after { transform: rotate(-135deg); }
 }
 
 /* ---- Task 1.0 console (tasks-console / render-tasks-console) ---- */
-.badge.draft { background: #eef2ff; color: #4338ca; }
 .badge.paused { background: #fef3c7; color: #92400e; }
 .tcv-ok { color: var(--ok); }
 .tcv-err { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
