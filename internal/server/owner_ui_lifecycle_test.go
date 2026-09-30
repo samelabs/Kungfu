@@ -208,15 +208,20 @@ func TestBalanceServerFactContract(t *testing.T) {
 	initSrc := ownerAsset(t, "init.js")
 	// /api/account must be awaited before the authed shell reveal in
 	// the restore flow (balance first paint, independent of
-	// Store/Credits). Scoped to restoreSession's own body.
+	// Store/Credits), and it is FIRED before the session await so the
+	// boot chain costs one round trip. Scoped to restoreSession's own
+	// body.
 	restoreFn := regexp.MustCompile(`async function restoreSession\(\) \{[\s\S]*?\n\}`).FindString(initSrc)
 	if restoreFn == "" {
 		t.Fatal("restoreSession not found")
 	}
-	acctIdx := strings.Index(restoreFn, "await requestJson('/api/account'")
+	kickIdx := strings.Index(restoreFn, "requestJson('/api/account'")
+	sessionIdx := strings.Index(restoreFn, "requestJson('/api/owner/session'")
+	awaitIdx := strings.Index(restoreFn, "await accountP")
 	shellIdx := strings.Index(restoreFn, "shellAuthed();")
-	if acctIdx < 0 || shellIdx < 0 || acctIdx > shellIdx {
-		t.Fatal("restoreSession must load /api/account before revealing the authed shell")
+	if kickIdx < 0 || sessionIdx < 0 || awaitIdx < 0 || shellIdx < 0 ||
+		kickIdx > sessionIdx || awaitIdx > shellIdx {
+		t.Fatal("restoreSession must fire /api/account before the session await and await it before revealing the authed shell")
 	}
 	rs := ownerAsset(t, "render-rewards.js")
 	rc := ownerAsset(t, "render-credits.js")

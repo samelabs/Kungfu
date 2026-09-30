@@ -110,7 +110,18 @@ async function activateSession() {
 // Unknown session/account failures are NEVER treated as guest: they
 // surface as a persistent shell error with Retry.
 async function restoreSession() {
+    // Session and account are independent cookie-authenticated GETs:
+    // account is FIRED before the session await so the boot chain costs
+    // one round trip, not two. The session result still decides guest /
+    // failure first (its branches are unchanged); the account result is
+    // consumed only where it always was. The no-op catch keeps an
+    // account rejection from becoming an unhandled rejection on the
+    // paths that return before awaiting it — the awaited promise below
+    // still throws.
+    let accountP = null;
     try {
+        accountP = requestJson('/api/account', {method: 'GET'});
+        accountP.catch(() => {});
         const sessionJson = await requestJson('/api/owner/session', {method: 'GET'});
         if (!sessionJson.success) {
             if (isOwnerLoginRequired(sessionJson)) {
@@ -133,7 +144,7 @@ async function restoreSession() {
     // Balance on first paint comes from HERE — Rewards / Credits load
     // independently afterwards and must never gate it.
     try {
-        const accountJson = await requestJson('/api/account', {method: 'GET'});
+        const accountJson = await accountP;
         if (!accountJson.success) {
             if (isOwnerLoginRequired(accountJson)) {
                 shellGuest();
