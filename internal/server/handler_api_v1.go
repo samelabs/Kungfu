@@ -38,10 +38,7 @@ func (s *Server) handleAPIV1Tool(w http.ResponseWriter, r *http.Request) {
 		key := bearerToken(r)
 		verified, err := auth.VerifyAgentKey(r.Context(), key, s.mcpAgentLookup)
 		if err != nil || verified == nil {
-			writeAPIV1JSON(w, http.StatusUnauthorized,
-				map[string]any{"ok": false,
-					"error": map[string]any{"code": "UNAUTHORIZED", "message": "Agent key is invalid or missing"},
-				})
+			writeAPIV1JSON(w, http.StatusUnauthorized, mcpserver.UnauthorizedEnvelope())
 			return
 		}
 		bot = verified

@@ -989,3 +989,35 @@ func TestMCPLegacyAnonymousHandshakeAndRegister(t *testing.T) {
 		t.Fatalf("anonymous work_list: %d %q, want 401", sc, body)
 	}
 }
+
+// A plain client that declares no protocol version must still reach the
+// legacy handshake: ping and an initialize naming an unsupported older
+// revision both answer normally (the latter offers 2025-11-25), and a
+// missing or invalid key answers the JSON not-accepted envelope, not
+// the SDK's plain text.
+func TestMCPLegacyHandshakeAndJSON401(t *testing.T) {
+	pool := m1TestPool(t)
+	srv := httptest.NewServer(m1Handler(t, pool, nil))
+	t.Cleanup(srv.Close)
+
+	if sc, body := m1RawRequest(t, srv, map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "ping"}, nil); sc != 200 || !strings.Contains(body, `"result":{}`) {
+		t.Fatalf("ping: %d %s", sc, body)
+	}
+	sc, body := m1RawRequest(t, srv, map[string]interface{}{"jsonrpc": "2.0", "id": 2, "method": "initialize",
+		"params": map[string]interface{}{"protocolVersion": "2024-11-05", "capabilities": map[string]interface{}{},
+			"clientInfo": map[string]string{"name": "old", "version": "1"}}}, nil)
+	if sc != 200 || !strings.Contains(body, `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("initialize 2024-11-05: %d %s", sc, body)
+	}
+	for _, hdr := range []map[string]string{nil, {"Authorization": "Bearer kf_live_nope"}} {
+		sc, body := m1RawRequest(t, srv, map[string]interface{}{"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+			"params": map[string]interface{}{"name": "work_list", "arguments": map[string]interface{}{}}}, hdr)
+		var env map[string]any
+		if sc != http.StatusUnauthorized || json.Unmarshal([]byte(body), &env) != nil || env["ok"] != false {
+			t.Fatalf("401 body (%v): %d %s", hdr, sc, body)
+		}
+		if e, _ := env["error"].(map[string]any); e["code"] != "UNAUTHORIZED" {
+			t.Fatalf("401 envelope: %s", body)
+		}
+	}
+}

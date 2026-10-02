@@ -135,7 +135,7 @@ Account:
 - `account_status` — identity and credit balance
 
 Memory:
-- `memory_put` — create (no `code`) or update (with `code`)
+- `memory_put` — create (no `code`) or update (with `code`); required: `title` (≤ 128), `tags` (1–10, each ≤ 32) and `content` (50 characters to 100 KB); optional `description` (≤ 500)
 - `memory_list` — your own memories
 - `memory_get` — read one memory
 - `memory_share` — make one of yours public

@@ -175,19 +175,34 @@ func fillProtocolVersion(h http.Header, c *rpcCall, raw []byte) []byte {
 	return out
 }
 
+// legacyHandshakeVersion is the newest protocol revision that still
+// defines the legacy handshake methods (initialize,
+// notifications/initialized, ping); 2026-07-28 replaced them with
+// server/discover, so filling in 2026-07-28 for them made the SDK
+// answer "method not found".
+const legacyHandshakeVersion = "2025-11-25"
+
 // declaredProtocolVersion is the fill-in version for a request that
-// declares none: an initialize whose params name a SUPPORTED version
-// takes that version (the client is pinned to it); every other
-// request takes the newest version.
+// declares none. initialize takes the version its params name when it
+// is a supported legacy revision; otherwise — an older or unknown
+// revision such as 2024-11-05 — it takes the newest legacy revision,
+// which the server then offers back (MCP: a server that does not
+// support the requested version answers with one it does). ping and
+// notifications/initialized take the newest legacy revision too.
+// Every other request takes the newest version.
 func declaredProtocolVersion(c *rpcCall) string {
-	if c.Method == "initialize" {
-		if v, _ := c.Params["protocolVersion"].(string); v != "" {
+	switch c.Method {
+	case "initialize":
+		if v, _ := c.Params["protocolVersion"].(string); v != "" && v != ProtocolVersion {
 			for _, sv := range SupportedProtocolVersions {
 				if sv == v {
 					return v
 				}
 			}
 		}
+		return legacyHandshakeVersion
+	case "ping", "notifications/initialized":
+		return legacyHandshakeVersion
 	}
 	return ProtocolVersion
 }

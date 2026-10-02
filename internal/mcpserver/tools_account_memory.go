@@ -92,7 +92,7 @@ func handleMemoryList(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "list") {
-		return ToolResult{}, rateLimited()
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "list").RetryAfter)
 	}
 	limit := in.Limit
 	if limit == 0 {
@@ -119,7 +119,7 @@ func handleMemoryGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 		return ToolResult{}, argError("code is required")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "get") {
-		return ToolResult{}, rateLimited()
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "get").RetryAfter)
 	}
 	result, err := service.GetKungfuForBot(ctx, deps.Pool, agent.ID, in.Code)
 	if err != nil {
@@ -144,7 +144,7 @@ func handleMemoryPut(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 		return ToolResult{}, argError("title and content are required")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "push") {
-		return ToolResult{}, rateLimited()
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "push").RetryAfter)
 	}
 	tags := make([]interface{}, len(in.Tags))
 	for i, t := range in.Tags {

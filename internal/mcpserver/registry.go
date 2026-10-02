@@ -327,7 +327,7 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 		Name: "task_get",
 		Description: `Read one of your tasks.
 Preconditions: the task is yours.
-Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, the full contract (receiver included), budget_locked, settled, reserved, refunded, available, slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
+Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, the full contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
 Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskGet),
@@ -406,14 +406,14 @@ Possible errors: NOT_FOUND, PRIVATE_KUNGFU.`,
 	{
 		Name: "memory_put",
 		Description: `Create (no code) or update (with code) one of your memories. Memories are the reusable execution material tasks reference through harness_refs: editing one changes what executors read for every task that references it, immediately.
-Preconditions: valid Agent key; title 1-128 chars; tags 1-10 (each 1-32 chars); description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
+Preconditions: valid Agent key; required: title (1-128 chars), tags (1-10, each 1-32 chars; INVALID_TAGS when missing or empty) and content; description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
 Possible errors: INVALID_CODE, TITLE_TOO_LONG, DESCRIPTION_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.`,
 		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string"},
-			"title":{"type":"string"},
-			"tags":{"type":"array","items":{"type":"string"}},
-			"description":{"type":"string"},
-			"content":{"type":"string"}
+			"code":{"type":"string","description":"Omit to create; give your memory's code to update it."},
+			"title":{"type":"string","minLength":1,"maxLength":128},
+			"tags":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":32},"description":"Required: 1-10 tags."},
+			"description":{"type":"string","maxLength":500,"description":"Shown in task harness directories (work_get)."},
+			"content":{"type":"string","minLength":50,"description":"50 characters to 100 KB."}
 		},"required":["title","tags","content"],"additionalProperties":false}`,
 		Handler: factory(handleMemoryPut),
 	},

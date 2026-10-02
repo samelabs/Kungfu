@@ -5,6 +5,39 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] — 2026-10-02
+
+Protocol and error-format consistency found by an end-to-end client
+check. No migrations.
+
+### Fixed
+
+- `ping` over /mcp answered `-32601 method not found`: a request that
+  declares no protocol version was filled in as 2026-07-28, which no
+  longer defines `ping` (nor `initialize`). `ping` and
+  `notifications/initialized` now take 2025-11-25, the newest revision
+  that defines them.
+- `initialize` naming an unsupported (older) protocol version, e.g.
+  2024-11-05, answered `method not found: "initialize"`. It now gets a
+  normal initialize result offering 2025-11-25, as MCP specifies for a
+  version the server does not support.
+- A missing or invalid Agent key on /mcp answered a plain-text 401
+  (`no bearer token`). Both /mcp and /api/v1 now answer the same JSON
+  not-accepted envelope (`UNAUTHORIZED`, `api_version`, `next_action`),
+  with the Bearer challenge header unchanged.
+- `RATE_LIMIT` from `account_register` (per-IP registration limit) and
+  from `memory_list` / `memory_get` / `memory_put` carried no
+  `retry_after`; it now does, like every other rate limit.
+- `memory_put` documents its required fields: the input schema now
+  carries the bounds (title 1–128, tags 1–10 of ≤ 32, description
+  ≤ 500, content ≥ 50), and llms.txt lists them — a first call no
+  longer has to discover `INVALID_TAGS` by failing.
+- The owner console labelled `budget_locked` "Locked", which read as
+  money still held after a refund. It is the total ever put into the
+  task (create plus every fund) and never decreases; the label is now
+  "Total funded" (five languages), and task_get and the publisher guide
+  define it.
+
 ## [2.2.0] — 2026-10-02
 
 Post-launch governance: the rejection limit becomes a rolling 24-hour
