@@ -237,21 +237,24 @@ func ApplyTaskStatus(ctx context.Context, q pg.Querier, taskID int64, from, even
 }
 
 // CountAgentSubmissionsBatch tallies one agent's submissions across a
-// set of tasks in ONE query, keyed by task_id. Tasks with no
-// submissions are absent from the map (the zero value applies).
-func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64, taskIDs []int64) (map[int64]AgentSubmissionCounts, error) {
+// set of tasks in ONE query, keyed by task_id (same classes and window
+// as CountAgentSubmissions). Tasks with no submissions are absent from
+// the map (the zero value applies).
+func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64, taskIDs []int64, since time.Time) (map[int64]AgentSubmissionCounts, error) {
 	out := make(map[int64]AgentSubmissionCounts, len(taskIDs))
 	if len(taskIDs) == 0 {
 		return out, nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT task_id,
-		  COUNT(*) FILTER (WHERE state = 'settled'),
-		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain')),
-		  COUNT(*) FILTER (WHERE state = 'rejected')
-		FROM tb_task_submission
-		WHERE agent_id = $1 AND task_id = ANY($2)
-		GROUP BY task_id`, agentID, taskIDs)
+		SELECT s.task_id,
+		  COUNT(*) FILTER (WHERE s.state = 'settled'),
+		  COUNT(*) FILTER (WHERE s.state IN ('delivering', 'uncertain')),
+		  COUNT(*) FILTER (WHERE s.state = 'rejected'),
+		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at >= $3),
+		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at >= $3)
+		FROM tb_task_submission s`+rejectedAtJoin+`
+		WHERE s.agent_id = $1 AND s.task_id = ANY($2)
+		GROUP BY s.task_id`, agentID, taskIDs, since)
 	if err != nil {
 		return nil, fmt.Errorf("count agent submissions batch: %w", err)
 	}
@@ -259,7 +262,7 @@ func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64
 	for rows.Next() {
 		var id int64
 		var c AgentSubmissionCounts
-		if err := rows.Scan(&id, &c.Settled, &c.Inflight, &c.Rejected); err != nil {
+		if err := rows.Scan(&id, &c.Settled, &c.Inflight, &c.Rejected, &c.RejectedInWindow, &c.OldestRejectedInWindow); err != nil {
 			return nil, err
 		}
 		out[id] = c
@@ -354,25 +357,46 @@ func RenewClaim(ctx context.Context, q pg.Querier, claimID int64, from string, e
 }
 
 // AgentSubmissionCounts is the per-(task, agent) submission tally
-// behind the §5.3 step-5 limit check (§6.3).
+// behind the §5.3 step-5 limit check (§6.3). Rejected is the lifetime
+// count (display); RejectedInWindow counts only rejections whose
+// transition to 'rejected' happened at or after the window start —
+// the limit is enforced on that count — and OldestRejectedInWindow is
+// the earliest of those transitions (when it ages out, one rejection
+// stops counting).
 type AgentSubmissionCounts struct {
-	Settled  int64
-	Inflight int64 // delivering + uncertain
-	Rejected int64
+	Settled                int64
+	Inflight               int64 // delivering + uncertain
+	Rejected               int64
+	RejectedInWindow       int64
+	OldestRejectedInWindow *time.Time
 }
 
+// rejectedAtJoin attaches each submission's rejection time: the
+// timestamp of its event into 'rejected' (the append-only event log
+// is the authority; a rejected submission is terminal, so there is at
+// most one such event).
+const rejectedAtJoin = `
+		LEFT JOIN LATERAL (
+		  SELECT e.at FROM tb_task_submission_event e
+		  WHERE e.submission_id = s.submission_id AND e.to_state = 'rejected'
+		  ORDER BY e.seq DESC LIMIT 1
+		) r ON s.state = 'rejected'`
+
 // CountAgentSubmissions tallies one agent's submissions on one task by
-// outcome class.
-func CountAgentSubmissions(ctx context.Context, q pg.Querier, taskID, agentID int64) (AgentSubmissionCounts, error) {
+// outcome class; rejections are also counted inside the window that
+// starts at since.
+func CountAgentSubmissions(ctx context.Context, q pg.Querier, taskID, agentID int64, since time.Time) (AgentSubmissionCounts, error) {
 	var c AgentSubmissionCounts
 	err := q.QueryRow(ctx, `
 		SELECT
-		  COUNT(*) FILTER (WHERE state = 'settled'),
-		  COUNT(*) FILTER (WHERE state IN ('delivering', 'uncertain')),
-		  COUNT(*) FILTER (WHERE state = 'rejected')
-		FROM tb_task_submission
-		WHERE task_id = $1 AND agent_id = $2`, taskID, agentID).
-		Scan(&c.Settled, &c.Inflight, &c.Rejected)
+		  COUNT(*) FILTER (WHERE s.state = 'settled'),
+		  COUNT(*) FILTER (WHERE s.state IN ('delivering', 'uncertain')),
+		  COUNT(*) FILTER (WHERE s.state = 'rejected'),
+		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at >= $3),
+		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at >= $3)
+		FROM tb_task_submission s`+rejectedAtJoin+`
+		WHERE s.task_id = $1 AND s.agent_id = $2`, taskID, agentID, since).
+		Scan(&c.Settled, &c.Inflight, &c.Rejected, &c.RejectedInWindow, &c.OldestRejectedInWindow)
 	if err != nil {
 		return AgentSubmissionCounts{}, fmt.Errorf("count agent submissions: %w", err)
 	}
@@ -550,6 +574,9 @@ func GetTaskStats(ctx context.Context, q pg.Querier, taskID int64, since time.Ti
 type WorkFilter struct {
 	Keyword string
 	Code    string
+	// RejectionsSince starts the rejection-limit window: only
+	// rejections at or after it count against max_rejected_per_agent.
+	RejectionsSince time.Time
 }
 
 // WorkCandidate is one listable task with its current-version
@@ -586,11 +613,16 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 		args = append(args, agentID)
 		n := len(args)
 		where += fmt.Sprintf(` AND tb_task.publisher_id <> $%d`, n)
+		args = append(args, f.RejectionsSince)
+		since := len(args)
 		where += fmt.Sprintf(`
 		  AND (SELECT COUNT(*) FROM tb_task_submission s
-		        WHERE s.task_id = tb_task.id AND s.agent_id = $%d AND s.state = 'rejected')
+		        JOIN tb_task_submission_event e
+		          ON e.submission_id = s.submission_id AND e.to_state = 'rejected'
+		        WHERE s.task_id = tb_task.id AND s.agent_id = $%d AND s.state = 'rejected'
+		          AND e.at >= $%d)
 		      < COALESCE(NULLIF(tb_task.contract #>> '{limits,max_rejected_per_agent}', '')::bigint, %d)`,
-			n, task.DefaultMaxRejectedPerAgent)
+			n, since, task.DefaultMaxRejectedPerAgent)
 	}
 	if f.Code != "" {
 		args = append(args, f.Code)

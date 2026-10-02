@@ -124,18 +124,12 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	}
 
 	// §5.3 step 5: the rejected cap.
-	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID)
+	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	rejectedCap := int64(task.DefaultMaxRejectedPerAgent)
-	if contract.Limits.MaxRejectedPerAgent != nil {
-		rejectedCap = *contract.Limits.MaxRejectedPerAgent
-	}
-	if counts.Rejected >= rejectedCap {
-		return claimView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCap),
-			map[string]interface{}{"limit": "rejected"})
+	if err := checkRejectionLimit(counts, contract, now); err != nil {
+		return claimView{}, err
 	}
 
 	// §4 derived: slots = ⌊available / price⌋ must be ≥ 1.

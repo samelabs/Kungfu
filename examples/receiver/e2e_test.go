@@ -362,7 +362,11 @@ func (d *drive) run(t *testing.T, code string) []map[string]any {
 			}
 			args, act = submitArgs(), "work_submit"
 		case "wait":
-			// rate limit: resend the identical request
+			// a short wait (rate limit): resend the identical request;
+			// a long one (the 24h rejection window) ends the journey
+			if ra, _ := env["retry_after"].(float64); ra > 60 {
+				return steps
+			}
 		case "submit":
 			act = "work_submit"
 		default:
@@ -676,8 +680,8 @@ func TestE2EJourney6ReceiverFaultPause(t *testing.T) {
 }
 
 // 7) rejection cap: the rejection that uses up max_rejected_per_agent
-// comes back with stop instead of revise; a further submission is
-// SUBMISSION_LIMIT.
+// (within 24 hours) comes back with wait instead of revise; a further
+// submission is SUBMISSION_LIMIT with wait until it ages out.
 func TestE2EJourney7RejectionCap(t *testing.T) {
 	e := newE2EEnv(t)
 	e.startReceiver(t, `{"listen":"127.0.0.1:0","criteria":[
@@ -689,7 +693,7 @@ func TestE2EJourney7RejectionCap(t *testing.T) {
 	payload := map[string]any{"url": "ftp://nope", "bullets": []string{"s1", "s2", "s3"}}
 	d7 := drive{agent: e.agent, payload: payload}
 	steps := d7.run(t, code)
-	wantActions(t, steps, "stop")
+	wantActions(t, steps, "wait")
 	if steps[0]["state"] != "rejected" {
 		t.Fatalf("first step = %v, want rejected", steps[0])
 	}
@@ -697,6 +701,10 @@ func TestE2EJourney7RejectionCap(t *testing.T) {
 	again := d7b.run(t, code)
 	if errObj, _ := again[0]["error"].(map[string]any); errObj["code"] != "SUBMISSION_LIMIT" {
 		t.Fatalf("further submission = %v, want SUBMISSION_LIMIT", again[0]["error"])
+	}
+	// the rejection counts for 24 hours: wait until it ages out
+	if ra, _ := again[0]["retry_after"].(float64); again[0]["next_action"] != "wait" || ra < 86000 || ra > 86400 {
+		t.Fatalf("further submission next_action/retry_after = %v/%v, want wait/~86400", again[0]["next_action"], again[0]["retry_after"])
 	}
 	e.checkInvariants(t, code)
 }

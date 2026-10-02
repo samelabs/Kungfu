@@ -59,20 +59,23 @@ func asMap(v any) (map[string]any, error) {
 	return m, nil
 }
 
-// submissionResult wraps a submission's flat fields (§8.2) and turns
-// a rejection into "stop" once the agent has no rejections left on the
-// task (§8.3); every other state follows NextAction.
+// submissionResult wraps a submission's flat fields (§8.2). A rejected
+// submission is "revise" — unless the agent has used up the rejection
+// limit within the rolling 24h window: then it is "wait" with the
+// seconds until the oldest counted rejection ages out (§8.3). Every
+// other state follows NextAction.
 func submissionResult(ctx context.Context, deps *Deps, agentID int64, m map[string]any) (ToolResult, error) {
 	res := ToolResult{Data: m}
 	if state, _ := m["state"].(string); state == task.SubRejected {
 		code, _ := m["task_code"].(string)
-		left, err := service.RejectionsLeft(ctx, deps.Pool, agentID, code)
+		limited, wait, err := service.RejectionLimitWait(ctx, deps.Pool, agentID, code, time.Now())
 		if err != nil {
 			return ToolResult{}, err
 		}
-		if left <= 0 {
-			stop := "stop"
-			res.Action = &stop
+		if limited {
+			action := "wait"
+			res.Action = &action
+			res.RetryAfter = &wait
 		}
 	}
 	return res, nil

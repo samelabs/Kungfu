@@ -32,6 +32,11 @@ const (
 	DefaultClaimMaxDuration    = 7200
 )
 
+// RejectionWindowHours is the rolling window of
+// limits.max_rejected_per_agent: only rejections from the last 24
+// hours count against the limit; older ones stop counting.
+const RejectionWindowHours = 24
+
 // MaxAmount is the ceiling on every task money field (price, budget,
 // fund amount and the accumulated budget_locked). 2^53−1 is the exact
 // integer range of an IEEE-754 double: a task amount is therefore

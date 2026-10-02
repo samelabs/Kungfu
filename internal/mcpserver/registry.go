@@ -484,9 +484,11 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		state = s
 	}
 	var errCode string
+	var errDetails map[string]any
 	if err != nil {
 		te := normalizeToolError(err)
 		errCode = te.Code
+		errDetails = te.Details
 		env["error"] = map[string]any{
 			"code":    te.Code,
 			"message": te.Message,
@@ -495,15 +497,8 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 	}
 
 	action, retryAfter := NextAction(state, errCode)
-	if errCode == "RATE_LIMIT" {
-		// retry_after is the limiter remainder carried in details
-		if te, ok := err.(*ToolError); ok {
-			if v, ok := te.Details["retry_after"]; ok {
-				if i := intPtrOf(v); i != nil {
-					retryAfter = i
-				}
-			}
-		}
+	if i := detailRetryAfter(errCode, errDetails); i != nil {
+		retryAfter = i
 	}
 	if result.Action != nil && *result.Action != "" {
 		action = *result.Action
@@ -545,17 +540,26 @@ func notAcceptedEnvelope(code, message string, details map[string]any) map[strin
 	if action != "" {
 		env["next_action"] = action
 	}
-	if code == "RATE_LIMIT" && details != nil {
-		if v, ok := details["retry_after"]; ok {
-			if i := intPtrOf(v); i != nil {
-				retry = i
-			}
-		}
+	if i := detailRetryAfter(code, details); i != nil {
+		retry = i
 	}
 	if retry != nil {
 		env["retry_after"] = *retry
 	}
 	return env
+}
+
+// detailRetryAfter returns the retry_after seconds that RATE_LIMIT
+// (limiter remainder) and SUBMISSION_LIMIT (time until the oldest
+// rejection in the 24h window ages out) carry in their details.
+func detailRetryAfter(code string, details map[string]any) *int {
+	if code != "RATE_LIMIT" && code != "SUBMISSION_LIMIT" {
+		return nil
+	}
+	if v, ok := details["retry_after"]; ok {
+		return intPtrOf(v)
+	}
+	return nil
 }
 
 // intPtrOf normalizes numeric detail values to *int.
