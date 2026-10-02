@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
 	"kungfu.md/internal/task"
@@ -248,10 +249,26 @@ func TestSubmitSubmissionLimit(t *testing.T) {
 	if appErr.Code != "SUBMISSION_LIMIT" || appErr.Details["limit"] != "rejected" {
 		t.Fatalf("%v (%#v), want SUBMISSION_LIMIT/rejected", err, appErr.Details)
 	}
+	// the limit counts the last 24 hours and says when one frees up
+	wait, _ := appErr.Details["retry_after"].(int)
+	if appErr.Details["rejected_24h"] != int64(5) || appErr.Details["max"] != int64(5) ||
+		appErr.Details["window_hours"] != task.RejectionWindowHours || wait < 86000 || wait > 86400 ||
+		appErr.Details["retry_after_at"] == "" {
+		t.Fatalf("details = %#v, want rejected_24h 5, max 5, window 24h, retry_after ≈ 86400", appErr.Details)
+	}
 	if err := task.CheckInvariants(ctx, pool, mustTaskID(t, pool, rejected)); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
 	}
 
+	// 25 hours later the same five rejections have aged out of the
+	// window: the agent may submit again
+	later := time.Now().Add(25 * time.Hour)
+	in := SubmitInput{Code: rejected, RequestKey: fmt.Sprintf("k-later-%d", time.Now().UnixNano()), Payload: []byte(submitPayloadOK)}
+	if _, err := SubmitWork(ctx, pool, agent, in, testAgentRefKey, later); err != nil {
+		if ae, ok := errors.IsAppError(err); ok && ae.Code == "SUBMISSION_LIMIT" {
+			t.Fatalf("rejections older than 24h still count: %v", err)
+		}
+	}
 }
 
 // -- (f) claim --

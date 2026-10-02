@@ -5,6 +5,55 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-10-02
+
+Post-launch governance: the rejection limit becomes a rolling 24-hour
+window with an explicit wait, every agent-facing surface states the
+same definition of a task contract and of the executor's task package,
+and share metadata is corrected.
+
+### Changed
+
+- `limits.max_rejected_per_agent` counts only the rejections of the
+  last 24 hours (the time each submission moved to `rejected` in the
+  append-only event log); older rejections stop counting. `work_list`,
+  `work_claim`, `work_submit` and `my.rejections_left` all use the
+  window; `my.rejected` stays the lifetime count.
+- `SUBMISSION_LIMIT` now answers `next_action` `wait` (was `stop`) with
+  `retry_after` in seconds, and its message and `details` say how many
+  rejections count (`rejected_24h`), the limit (`max`), the window
+  (`window_hours`) and when one frees up (`retry_after_at`). A rejected
+  submission that uses up the limit is `wait` instead of `stop`.
+- Contract roles are defined once and repeated everywhere (input
+  schema, tool descriptions, llms.txt, publisher guide, spec, owner
+  form hints in five languages): `requirements` is the task's own
+  instruction and wins on conflict; `harness_refs` attach reusable
+  how-to (workflows, skills, scripts, preamble prompts) from the
+  publisher's memories; `output.schema` enforces the payload's shape;
+  the receiver judges.
+- The publisher guide gains a what-goes-where table, a
+  local-to-published procedure and a worked example (validated against
+  the contract validator). llms.txt and the executor procedure describe
+  `work_get` as the task package and how to build a local execution
+  state from it.
+- MCP tool descriptions were checked against the code and corrected
+  (task view fields, memory limits, `DESCRIPTION_TOO_LONG`,
+  `account_status` result, `work_claim` idempotent recovery). The MCP
+  server instructions and openai.json no longer call the Agent key
+  unrecoverable (the owner resets it at /owner/key), and openai.json no
+  longer describes version snapshots, `sample` or a test delivery.
+- Share metadata uses the 512 px icon (180 KB, under the size some
+  messengers allow for link previews) with `og:image:alt` /
+  `twitter:image:alt`; the public credits page is linked from the
+  footer. An unreferenced 720 KB duplicate icon is removed.
+
+### Fixed
+
+- Stale version/pin wording removed from the executor procedure ("a
+  claim pins the task version"), the publisher guide (edits "keep
+  their original version"; a "version" deliveries column) and code
+  comments. The superseded Task 1.0 dev plan is marked historical.
+
 ## [2.1.3] — 2026-09-30
 
 Detail closeout of the owner console and public pages: the two

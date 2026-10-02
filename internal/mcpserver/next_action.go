@@ -4,10 +4,12 @@ package mcpserver
 // a pure function of the submission state or the not-accepted error
 // code. The retry_after values come from §11 and the work order
 // decision record: delivering 5s, uncertain 30s, CLAIM_INVALID 0s.
-// RATE_LIMIT's retry_after is the limiter's remaining seconds and is
-// filled in by the caller (NextAction returns nil there). A rejected
-// submission is "revise" here; the caller turns it into "stop" once
-// the executor has no rejections left on the task.
+// RATE_LIMIT's and SUBMISSION_LIMIT's retry_after (the limiter's
+// remaining seconds; the seconds until the oldest rejection in the
+// 24h window ages out) come from the error details and are filled in
+// by the caller (NextAction returns nil there). A rejected submission
+// is "revise" here; the caller turns it into "wait" once the executor
+// has used up the rejection limit within the window.
 
 import (
 	"kungfu.md/internal/task"
@@ -38,7 +40,9 @@ func NextAction(state string, errCode string) (string, *int) {
 		case "SCHEMA_MISMATCH", "CREDENTIAL_IN_PAYLOAD", "PAYLOAD_TOO_LARGE",
 			"IDEMPOTENCY_CONFLICT", "INVALID_REVISES", "INVALID_REQUEST_KEY":
 			return "revise", nil
-		case "TASK_NOT_OPEN", "SLOTS_EXHAUSTED", "SUBMISSION_LIMIT", "OWN_TASK", "TASK_NOT_FOUND":
+		case "SUBMISSION_LIMIT":
+			return "wait", nil // retry_after = seconds until the window frees one (caller)
+		case "TASK_NOT_OPEN", "SLOTS_EXHAUSTED", "OWN_TASK", "TASK_NOT_FOUND":
 			return "stop", nil
 		}
 		return "", nil

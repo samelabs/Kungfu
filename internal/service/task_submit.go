@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"math"
 	"regexp"
 	"time"
 
@@ -122,9 +123,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// (c) task existence / then (d) own task — ownership precedes any
 	// claim parsing (§5.3: existence is step 3, OWN_TASK step 4, the
 	// claim itself step 6), so a publisher probing its own task with a
-	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. The
-	// submission's version is the claim's version when a claim is
-	// carried (spec §5.3), else the task's current version.
+	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. Every
+	// submission is checked against the task's current contract.
 	if t == nil {
 		return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
@@ -145,17 +145,15 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	}
 
 	// (e) limits — same tallies as WO-3.
-	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID)
+	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if counts.Rejected >= rejectedCapFor(contract) {
-		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(contract)),
-			map[string]interface{}{"limit": "rejected"})
+	if err := checkRejectionLimit(counts, contract, now); err != nil {
+		return SubmissionView{}, err
 	}
 
-	// (f) claim: the version's contract decides whether one is
+	// (f) claim: the current contract decides whether one is
 	// required; a carried claim must be this agent's active claim on
 	// this task, unexpired (spec §5.2).
 	if in.ClaimID == nil {
@@ -228,14 +226,12 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, schemaMismatch(errs)
 		}
 	}
-	lockedCounts, err := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID)
+	lockedCounts, err := repository.CountAgentSubmissions(ctx, tx, locked.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if lockedCounts.Rejected >= rejectedCapFor(lockedContract) {
-		return SubmissionView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCapFor(lockedContract)),
-			map[string]interface{}{"limit": "rejected"})
+	if err := checkRejectionLimit(lockedCounts, lockedContract, now); err != nil {
+		return SubmissionView{}, err
 	}
 	amount := lockedContract.Price
 	if in.ClaimID == nil {
@@ -318,6 +314,48 @@ func rejectedCapFor(contract task.Contract) int64 {
 		return *contract.Limits.MaxRejectedPerAgent
 	}
 	return task.DefaultMaxRejectedPerAgent
+}
+
+// rejectionWindow is the rolling window of the rejection limit.
+const rejectionWindow = task.RejectionWindowHours * time.Hour
+
+// rejectionsSince is the start of the rejection-limit window at now.
+func rejectionsSince(now time.Time) time.Time {
+	return now.Add(-rejectionWindow)
+}
+
+// checkRejectionLimit enforces limits.max_rejected_per_agent over the
+// rolling window. At the limit it returns SUBMISSION_LIMIT with the
+// facts an executor needs to act: how many rejections count now, the
+// cap, when the oldest of them stops counting (retry_after_at) and the
+// seconds until then (retry_after, which drives next_action "wait").
+func checkRejectionLimit(counts repository.AgentSubmissionCounts, contract task.Contract, now time.Time) error {
+	max := rejectedCapFor(contract)
+	if counts.RejectedInWindow < max {
+		return nil
+	}
+	retryAt := now.Add(rejectionWindow)
+	if counts.OldestRejectedInWindow != nil {
+		retryAt = counts.OldestRejectedInWindow.Add(rejectionWindow)
+	}
+	wait := int(math.Ceil(retryAt.Sub(now).Seconds()))
+	if wait < 1 {
+		wait = 1
+	}
+	at := retryAt.UTC().Format(time.RFC3339)
+	return errors.NewWithDetails(0, "SUBMISSION_LIMIT",
+		fmt.Sprintf("You have %d rejected submissions on this task in the last %d hours (limit %d). "+
+			"You can submit again after %s. Read reply.body of your rejected submissions "+
+			"(work_history with this code) to see why they were rejected.",
+			counts.RejectedInWindow, task.RejectionWindowHours, max, at),
+		map[string]interface{}{
+			"limit":          "rejected",
+			"max":            max,
+			"rejected_24h":   counts.RejectedInWindow,
+			"window_hours":   task.RejectionWindowHours,
+			"retry_after_at": at,
+			"retry_after":    wait,
+		})
 }
 
 // taskSchema returns the output.schema of a task's contract.

@@ -281,7 +281,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 		{"OWN_TASK", "stop", 403, func() (map[string]any, int) {
 			return call(otherBot, "work_claim", map[string]any{"code": ownCode})
 		}},
-		{"SUBMISSION_LIMIT", "stop", 409, func() (map[string]any, int) {
+		{"SUBMISSION_LIMIT", "wait", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
 			for i := 0; i < 5; i++ {
 				seedRejectedSub(t, pool, c, agentID)

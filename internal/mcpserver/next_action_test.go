@@ -24,7 +24,7 @@ func TestNextActionStates(t *testing.T) {
 		{"delivering poll 5s", task.SubDelivering, "", "poll", iptr(5)},
 		{"uncertain poll 30s", task.SubUncertain, "", "poll", iptr(30)},
 		{"failed stop", task.SubFailed, "", "stop", nil},         // the publisher's side failed
-		{"rejected revise", task.SubRejected, "", "revise", nil}, // stop once no rejections are left (handler)
+		{"rejected revise", task.SubRejected, "", "revise", nil}, // wait once the 24h rejection limit is used up (handler)
 		// §8.3 error rows (executor-side §8.4 codes)
 		{"RATE_LIMIT wait", "", "RATE_LIMIT", "wait", nil}, // retry_after = limiter remainder
 		{"CLAIM_INVALID retry 0s", "", "CLAIM_INVALID", "retry", iptr(0)},
@@ -36,7 +36,7 @@ func TestNextActionStates(t *testing.T) {
 		{"INVALID_REVISES revise", "", "INVALID_REVISES", "revise", nil},
 		{"TASK_NOT_OPEN stop", "", "TASK_NOT_OPEN", "stop", nil},
 		{"SLOTS_EXHAUSTED stop", "", "SLOTS_EXHAUSTED", "stop", nil},
-		{"SUBMISSION_LIMIT stop", "", "SUBMISSION_LIMIT", "stop", nil},
+		{"SUBMISSION_LIMIT wait", "", "SUBMISSION_LIMIT", "wait", nil}, // retry_after from details (caller)
 		{"OWN_TASK stop", "", "OWN_TASK", "stop", nil},
 		{"TASK_NOT_FOUND stop", "", "TASK_NOT_FOUND", "stop", nil},
 		// uncovered → null

@@ -61,8 +61,7 @@ func newClaimView(c *repository.ClaimRow, code string) claimView {
 	}
 }
 
-// effectiveContract loads the contract of the task's current version
-// (open tasks always have one).
+// effectiveContract decodes the task's one current contract.
 func effectiveContract(ctx context.Context, q pg.Querier, t *repository.TaskRow) (task.Contract, error) {
 	var contract task.Contract
 	if err := json.Unmarshal(t.Contract, &contract); err != nil {
@@ -116,26 +115,17 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	}
 
 	contract, err := effectiveContract(ctx, tx, t)
-	if goerrors.Is(err, pgx.ErrNoRows) {
-		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Open task without a version")
-	}
 	if err != nil {
-		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 
 	// §5.3 step 5: the rejected cap.
-	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID)
+	counts, err := repository.CountAgentSubmissions(ctx, tx, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	rejectedCap := int64(task.DefaultMaxRejectedPerAgent)
-	if contract.Limits.MaxRejectedPerAgent != nil {
-		rejectedCap = *contract.Limits.MaxRejectedPerAgent
-	}
-	if counts.Rejected >= rejectedCap {
-		return claimView{}, errors.NewWithDetails(0, "SUBMISSION_LIMIT",
-			fmt.Sprintf("Rejected-submission limit reached (%d)", rejectedCap),
-			map[string]interface{}{"limit": "rejected"})
+	if err := checkRejectionLimit(counts, contract, now); err != nil {
+		return claimView{}, err
 	}
 
 	// §4 derived: slots = ⌊available / price⌋ must be ≥ 1.
@@ -220,8 +210,8 @@ func RenewClaim(ctx context.Context, pool *pg.Pool, agentID, claimID int64, now 
 		return claimView{}, errors.New(0, "CLAIM_INVALID", "Claim deadline reached")
 	}
 
-	// TTL comes from the CLAIM's version (§5.2), not the task's current
-	// version — a paused+reopened task may have changed its claim rules.
+	// TTL comes from the task's current contract (§5.2): a paused edit
+	// applies to renewals of existing claims, too.
 	var contract task.Contract
 	if err := json.Unmarshal(t.Contract, &contract); err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")

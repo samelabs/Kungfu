@@ -1,7 +1,7 @@
 package service
 
 // Agent read interfaces (WO-6a) — spec §5.1 discovery, §6.3 statistics,
-// §10.7 (version-consistent contract/harness) and §10.8 (receiver and
+// the live contract/harness projection, and §10.8 (receiver and
 // publisher identity never exposed to executors). Pure reads; no
 // protocol wiring.
 
@@ -64,8 +64,9 @@ type workStats struct {
 	FailureRate        *float64 `json:"failure_rate"`
 }
 
-// myStats is the executor's own tally on one task (§5.1);
-// rejections_left is what remains of max_rejected_per_agent.
+// myStats is the executor's own tally on one task (§5.1): accepted
+// and rejected are lifetime counts; rejections_left is what remains of
+// max_rejected_per_agent within the rolling 24h window.
 type myStats struct {
 	Accepted       int64 `json:"accepted"`
 	Rejected       int64 `json:"rejected"`
@@ -88,19 +89,20 @@ func statsView(s repository.TaskStats) workStats {
 }
 
 // myTally computes the executor's counts and the rejections left
-// under the contract's cap (§5.3 step 5, §3 缺省 5).
+// under the contract's cap within the rolling window (§5.3 step 5,
+// §3 缺省 5).
 func myTally(counts repository.AgentSubmissionCounts, contract task.Contract) myStats {
-	left := rejectedCapFor(contract) - counts.Rejected
+	left := rejectedCapFor(contract) - counts.RejectedInWindow
 	if left < 0 {
 		left = 0
 	}
 	return myStats{Accepted: counts.Settled, Rejected: counts.Rejected, RejectionsLeft: left}
 }
 
-// myTallyFor reads the agent's tallies for the task's CURRENT version
-// contract (caps do not change per version for listing purposes).
-func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository.TaskRow, contract task.Contract) (myStats, error) {
-	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID)
+// myTallyFor reads the agent's tallies on the task under its current
+// contract.
+func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository.TaskRow, contract task.Contract, now time.Time) (myStats, error) {
+	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return myStats{}, err
 	}
@@ -116,7 +118,7 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, filter WorkListFilter) ([]map[string]any, int64, error) {
 	filter.Normalize()
 	rows, total, err := repository.FindOpenWorkPage(ctx, pool, agentID,
-		repository.WorkFilter{Keyword: filter.Q, Code: filter.Code},
+		repository.WorkFilter{Keyword: filter.Q, Code: filter.Code, RejectionsSince: rejectionsSince(now)},
 		filter.PageSize, (filter.Page-1)*filter.PageSize)
 	if err != nil {
 		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -143,7 +145,7 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, 
 
 	// Batch 1: this agent's submission tallies across the page (for
 	// the my block — the cap itself was already enforced in SQL).
-	countsByTask, err := repository.CountAgentSubmissionsBatch(ctx, pool, agentID, taskIDs)
+	countsByTask, err := repository.CountAgentSubmissionsBatch(ctx, pool, agentID, taskIDs, rejectionsSince(now))
 	if err != nil {
 		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
@@ -195,7 +197,7 @@ type WorkBoardRow struct {
 
 // ListWorkBoard is the anonymous homepage board: the SAME query as
 // work_list (§5.1, WO-19 Q1) with agentID 0 — open status, slots >= 1,
-// version join, keyword/code filters, paging — but no own-task or
+// keyword/code filters, paging — but no own-task or
 // rejection-cap exclusion (an anonymous view excludes no account).
 func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, page, pageSize int) ([]WorkBoardRow, int64, error) {
 	f := WorkListFilter{Q: keyword, Code: code, Page: page, PageSize: pageSize}
@@ -264,7 +266,7 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	my, err := myTallyFor(ctx, pool, agentID, t, contract)
+	my, err := myTallyFor(ctx, pool, agentID, t, contract, now)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
@@ -475,21 +477,28 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 	return out, total, nil
 }
 
-// RejectionsLeft is how many more rejections the agent may collect on
-// the task (§5.3 step 5) under its current version's cap — 0 means a
-// rejected submission ends the agent's work on this task (§8.3 stop).
-func RejectionsLeft(ctx context.Context, pool *pg.Pool, agentID int64, code string) (int64, error) {
+// RejectionLimitWait reports whether the agent has used up the
+// rejection limit on the task within the rolling window and, if so,
+// the seconds until the oldest counted rejection ages out (§8.3: a
+// rejected submission then means "wait", not "revise").
+func RejectionLimitWait(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (bool, int, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if err != nil || t == nil {
-		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return false, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	contract, err := effectiveContract(ctx, pool, t)
 	if err != nil {
-		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return false, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	my, err := myTallyFor(ctx, pool, agentID, t, contract)
+	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
-		return 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		return false, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return my.RejectionsLeft, nil
+	limitErr := checkRejectionLimit(counts, contract, now)
+	if limitErr == nil {
+		return false, 0, nil
+	}
+	ae, _ := errors.IsAppError(limitErr)
+	wait, _ := ae.Details["retry_after"].(int)
+	return true, wait, nil
 }
