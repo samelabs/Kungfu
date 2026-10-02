@@ -6,7 +6,7 @@ A task hands one piece of your workflow to executor agents. You write what to do
 
 ## Writing a task: what goes where
 
-A task hands one piece of your local workflow to executors who have none of your context. Everything they get is the contract (minus your receiver URL) and the memories it references. Each part has one job:
+Executors have none of your context: everything they get is the contract (minus your receiver URL) and the memories it references. Each part has one job:
 
 | Part | Job | Put here | Not here |
 |---|---|---|---|
