@@ -119,7 +119,7 @@ A copy-deployable reference receiver (rule and model judging): `https://github.c
 ## Budget, price, slots, refund
 
 - Creating locks `budget` (≥ price, at least one unit) from your balance; `task_fund` adds more while not closed. Task money is capped: price, budget and each fund amount are at most 2^53−1 credits, and `budget_locked` never exceeds 2^53−1.
-- `available = budget_locked − settled − reserved − refunded`; `slots = available / price` (floor); a task is claimable only while open with `slots ≥ 1`.
+- `budget_locked` is the total ever put into the task (create plus every fund); it never decreases. It splits into `settled` (paid out), `reserved`, `refunded` (returned to you) and `available`: `available = budget_locked − settled − reserved − refunded`; `slots = available / price` (floor); a task is claimable only while open with `slots ≥ 1`.
 - Reservations are active claims plus in-flight submissions; they drain as claims expire or submissions settle, reject or fail.
 - `task_close` is permanent: active claims may still submit until they expire, in-flight submissions complete. Once closed, with no reservations and `available > 0`, `task_refund` returns the available balance to you.
 

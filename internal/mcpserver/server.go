@@ -83,8 +83,15 @@ type Deps struct {
 func (d *Deps) limiter() *ratelimit.Limiter { return d.RateLimiter }
 
 // rateLimited is the shared 429 tool error.
-func rateLimited() error {
-	return &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded"}
+func rateLimited(retryAfter int) error {
+	return &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded",
+		Details: map[string]any{"retry_after": retryAfter}}
+}
+
+// UnauthorizedEnvelope is the not-accepted envelope for a missing or
+// invalid Agent key — the one 401 body of both /mcp and /api/v1.
+func UnauthorizedEnvelope() map[string]any {
+	return notAcceptedEnvelope("UNAUTHORIZED", "Agent key is invalid or missing", nil)
 }
 
 // isPublicCall is the anonymous-call allowlist: MCP protocol
@@ -224,7 +231,8 @@ func authGate(deps Deps, next http.Handler) http.Handler {
 		bearerHandler := bearer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			next.ServeHTTP(rw, req)
 		}))
-		bearerHandler.ServeHTTP(realmAuthResponseWriter{ResponseWriter: w, inject: realmWWWAuth}, r)
+		replaced := false
+		bearerHandler.ServeHTTP(realmAuthResponseWriter{ResponseWriter: w, inject: realmWWWAuth, replaced: &replaced}, r)
 	})
 }
 
@@ -278,13 +286,37 @@ func writeMCPMethodNotAllowed(w http.ResponseWriter) {
 type realmAuthResponseWriter struct {
 	http.ResponseWriter
 	inject func(http.ResponseWriter)
+	// replaced is set once a 401 body has been written as the JSON
+	// envelope; the SDK middleware's plain-text body is then dropped.
+	replaced *bool
 }
 
+// WriteHeader adds the Bearer challenge to 401/403 and turns the SDK
+// middleware's plain-text 401 ("no bearer token", "invalid token")
+// into the same JSON not-accepted envelope /api/v1 answers, so a
+// client sees one error format on both interfaces.
 func (w realmAuthResponseWriter) WriteHeader(code int) {
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		w.inject(w.ResponseWriter)
 	}
+	if code == http.StatusUnauthorized && w.replaced != nil && !*w.replaced {
+		*w.replaced = true
+		h := w.ResponseWriter.Header()
+		h.Set("Content-Type", "application/json")
+		h.Del("Content-Length")
+		w.ResponseWriter.WriteHeader(code)
+		raw, _ := json.Marshal(UnauthorizedEnvelope())
+		_, _ = w.ResponseWriter.Write(raw)
+		return
+	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w realmAuthResponseWriter) Write(b []byte) (int, error) {
+	if w.replaced != nil && *w.replaced {
+		return len(b), nil // the envelope already went out
+	}
+	return w.ResponseWriter.Write(b)
 }
 
 // newServer constructs the MCP server with identity + tools.
@@ -382,7 +414,8 @@ func (d *Deps) limitRegister(ctx context.Context) error {
 		return nil
 	}
 	if rl := d.RateLimiter.CheckRegister(ip); !rl.Allowed {
-		return &ToolError{Code: "RATE_LIMIT", Message: "Too many registrations from this IP; retry later"}
+		return &ToolError{Code: "RATE_LIMIT", Message: "Too many registrations from this IP; retry later",
+			Details: map[string]any{"retry_after": rl.RetryAfter}}
 	}
 	return nil
 }
