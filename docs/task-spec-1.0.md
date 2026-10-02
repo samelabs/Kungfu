@@ -264,7 +264,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
   "next_action": "revise",
   "retry_after": null,
   "error": null,
-  "api_version": "v2.1.0"
+  "api_version": "v2.2.0"
 }
 ```
 

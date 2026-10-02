@@ -587,6 +587,7 @@ func siteFooter(locale string, langOpts, switchID string) string {
         <div class="site-footer-legal">
             <a href="` + i18n.LocaleURL(locale, "/terms") + `">Terms</a>
             <a href="` + i18n.LocaleURL(locale, "/privacy") + `">Privacy</a>
+            <a href="` + i18n.LocaleURL(locale, "/credits") + `">Credits</a>
         </div>
     </div>
     <div class="site-footer-lang">

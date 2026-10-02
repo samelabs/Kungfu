@@ -5,7 +5,8 @@ package server
 // meta description (seo.* keys, one set per page per language), a
 // canonical address (?lang= except en), the hreflang set
 // (en/zh/ja/ko/es + x-default), Open Graph and Twitter card tags with
-// the 1024px app icon as the share image, and <html lang> matching
+// the 512px app icon as the share image (180 KB: under the ~300 KB
+// ceiling some messengers apply to link-preview images), and <html lang> matching
 // the display locale. Pages pass their own extras (stylesheets,
 // manifest, alternates, JSON-LD); private surfaces (owner, samelabs)
 // set NoIndex.
@@ -20,9 +21,10 @@ import (
 
 const (
 	siteCanonicalBase = "https://kungfu.md"
-	ogImageURL        = "https://kungfu.md/assets/icons/app-icon-1024.png"
-	ogImageWidth      = "1024"
-	ogImageHeight     = "1024"
+	ogImageURL        = "https://kungfu.md/assets/icons/app-icon-512.png"
+	ogImageWidth      = "512"
+	ogImageHeight     = "512"
+	ogImageAlt        = "Kungfu.md logo"
 )
 
 // ogLocaleByLang maps a supported locale to its Open Graph locale tag.
@@ -96,10 +98,13 @@ func buildHead(in headInput) string {
     <meta property="og:image" content="` + ogImageURL + `">
     <meta property="og:image:width" content="` + ogImageWidth + `">
     <meta property="og:image:height" content="` + ogImageHeight + `">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:alt" content="` + ogImageAlt + `">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="` + fullTitle + `">
     <meta name="twitter:description" content="` + desc + `">
-    <meta name="twitter:image" content="` + ogImageURL + `">`)
+    <meta name="twitter:image" content="` + ogImageURL + `">
+    <meta name="twitter:image:alt" content="` + ogImageAlt + `">`)
 	if in.ExtraHead != "" {
 		b.WriteString("\n    " + in.ExtraHead)
 	}

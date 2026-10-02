@@ -250,8 +250,8 @@ func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64
 		  COUNT(*) FILTER (WHERE s.state = 'settled'),
 		  COUNT(*) FILTER (WHERE s.state IN ('delivering', 'uncertain')),
 		  COUNT(*) FILTER (WHERE s.state = 'rejected'),
-		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at >= $3),
-		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at >= $3)
+		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at > $3),
+		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at > $3)
 		FROM tb_task_submission s`+rejectedAtJoin+`
 		WHERE s.agent_id = $1 AND s.task_id = ANY($2)
 		GROUP BY s.task_id`, agentID, taskIDs, since)
@@ -359,7 +359,7 @@ func RenewClaim(ctx context.Context, q pg.Querier, claimID int64, from string, e
 // AgentSubmissionCounts is the per-(task, agent) submission tally
 // behind the §5.3 step-5 limit check (§6.3). Rejected is the lifetime
 // count (display); RejectedInWindow counts only rejections whose
-// transition to 'rejected' happened at or after the window start —
+// transition to 'rejected' happened after the window start —
 // the limit is enforced on that count — and OldestRejectedInWindow is
 // the earliest of those transitions (when it ages out, one rejection
 // stops counting).
@@ -392,8 +392,8 @@ func CountAgentSubmissions(ctx context.Context, q pg.Querier, taskID, agentID in
 		  COUNT(*) FILTER (WHERE s.state = 'settled'),
 		  COUNT(*) FILTER (WHERE s.state IN ('delivering', 'uncertain')),
 		  COUNT(*) FILTER (WHERE s.state = 'rejected'),
-		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at >= $3),
-		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at >= $3)
+		  COUNT(*) FILTER (WHERE s.state = 'rejected' AND r.at > $3),
+		  MIN(r.at) FILTER (WHERE s.state = 'rejected' AND r.at > $3)
 		FROM tb_task_submission s`+rejectedAtJoin+`
 		WHERE s.task_id = $1 AND s.agent_id = $2`, taskID, agentID, since).
 		Scan(&c.Settled, &c.Inflight, &c.Rejected, &c.RejectedInWindow, &c.OldestRejectedInWindow)
@@ -575,7 +575,7 @@ type WorkFilter struct {
 	Keyword string
 	Code    string
 	// RejectionsSince starts the rejection-limit window: only
-	// rejections at or after it count against max_rejected_per_agent.
+	// rejections after it count against max_rejected_per_agent.
 	RejectionsSince time.Time
 }
 
@@ -620,7 +620,7 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 		        JOIN tb_task_submission_event e
 		          ON e.submission_id = s.submission_id AND e.to_state = 'rejected'
 		        WHERE s.task_id = tb_task.id AND s.agent_id = $%d AND s.state = 'rejected'
-		          AND e.at >= $%d)
+		          AND e.at > $%d)
 		      < COALESCE(NULLIF(tb_task.contract #>> '{limits,max_rejected_per_agent}', '')::bigint, %d)`,
 			n, since, task.DefaultMaxRejectedPerAgent)
 	}
