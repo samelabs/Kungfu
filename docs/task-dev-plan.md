@@ -1,3 +1,5 @@
+> **Historical work-order record, superseded.** This plan describes the Task 1.0 build-out including task versions, drafts, harness snapshots, the open-time test delivery and retention — all removed in v2.1.0. The current model is `docs/task-spec-1.0.md`.
+
 # Task 1.0 开发工单
 
 依据：`docs/task-spec-1.0.md`（下称「规范」）。规范与本文件冲突时以规范为准；规范本身有歧义时停止并报告，不自行裁量。

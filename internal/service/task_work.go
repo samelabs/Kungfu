@@ -1,7 +1,7 @@
 package service
 
 // Agent read interfaces (WO-6a) — spec §5.1 discovery, §6.3 statistics,
-// §10.7 (version-consistent contract/harness) and §10.8 (receiver and
+// the live contract/harness projection, and §10.8 (receiver and
 // publisher identity never exposed to executors). Pure reads; no
 // protocol wiring.
 
@@ -197,7 +197,7 @@ type WorkBoardRow struct {
 
 // ListWorkBoard is the anonymous homepage board: the SAME query as
 // work_list (§5.1, WO-19 Q1) with agentID 0 — open status, slots >= 1,
-// version join, keyword/code filters, paging — but no own-task or
+// keyword/code filters, paging — but no own-task or
 // rejection-cap exclusion (an anonymous view excludes no account).
 func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, page, pageSize int) ([]WorkBoardRow, int64, error) {
 	f := WorkListFilter{Q: keyword, Code: code, Page: page, PageSize: pageSize}

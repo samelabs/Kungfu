@@ -123,9 +123,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// (c) task existence / then (d) own task — ownership precedes any
 	// claim parsing (§5.3: existence is step 3, OWN_TASK step 4, the
 	// claim itself step 6), so a publisher probing its own task with a
-	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. The
-	// submission's version is the claim's version when a claim is
-	// carried (spec §5.3), else the task's current version.
+	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. Every
+	// submission is checked against the task's current contract.
 	if t == nil {
 		return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
@@ -154,7 +153,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		return SubmissionView{}, err
 	}
 
-	// (f) claim: the version's contract decides whether one is
+	// (f) claim: the current contract decides whether one is
 	// required; a carried claim must be this agent's active claim on
 	// this task, unexpired (spec §5.2).
 	if in.ClaimID == nil {

@@ -236,9 +236,9 @@ func isInsufficientCreditsErr(err error) bool {
 }
 
 // UpdateTask is the §4 update transition: edit the Contract while the
-// task is paused. A paused edit takes effect as a NEW
-// version on the next open; existing claims and submissions keep
-// their version.
+// task is paused. The saved contract applies immediately to every
+// later submission, including those under existing claims (a claim
+// keeps the amount it reserved).
 func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string, contract task.Contract) (map[string]interface{}, error) {
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {

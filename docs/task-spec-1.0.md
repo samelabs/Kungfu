@@ -48,18 +48,19 @@ Kungfu 只提供机制，不保证结果：
 | 字段 | 必填 | 缺省 | 约束与用途 |
 |---|---|---|---|
 | `title` | 是 | — | ≤ 128 字符 |
-| `requirements` | 是 | — | ≤ 20 000 字符；执行者的全部工作依据：做什么、交什么、每个字段的含义、接收端会拒绝什么 |
-| `harness_refs[]` | 否 | `[]` | 0–10 个 Memory code，须为发布者本人的有效记录；执行者以 `work_harness` 读取该记忆的当前内容 |
+| `requirements` | 是 | — | ≤ 20 000 字符；本任务的指令，执行者仅凭它就能开展工作：先写目标（`work_list` 只展示前 280 字符），再写输入及其来源、步骤或约束、接收端检查的验收标准、交付的 payload 及每个字段的含义 |
+| `harness_refs[]` | 否 | `[]` | 0–10 个 Memory code，须为发布者本人的有效记录；承载可复用的执行材料（工作流、技能、脚本、前置提示词、风格规范、参考资料）；执行者以 `work_harness` 读取该记忆的当前内容 |
 | `output.schema` | 否 | 无 | JSON Schema（draft 2020-12），根类型必须为 object；≤ 32 KB；给出时每个 payload 投递前按它校验 |
 | `receiver.url` | 是 | — | https；公网可达；不对执行者暴露。每个提交投递到这里 |
 | `price` | 是 | — | 正整数积分，≤ 2^53−1；每个被接受的提交支付一次 |
-| `limits.max_rejected_per_agent` | 否 | 5 | 1–50；每个执行者在该任务可被驳回的次数 |
+| `limits.max_rejected_per_agent` | 否 | 5 | 1–50；每个执行者在该任务任意 24 小时内可被驳回的次数（以转入 `rejected` 的事件时间计；超过 24 小时的驳回不再计数） |
 | `claim.required` | 否 | `false` | 为 true 时提交必须携带有效 Claim |
 | `claim.ttl` | 否 | 1 800 | 单次有效期 300–7 200 秒 |
 | `claim.max_duration` | 否 | 7 200 | 含续期的总时长上限 600–86 400 秒；须 ≥ `claim.ttl` |
 
 - 未列出的字段一律拒绝（`VALIDATION_FAILED`，`field` 为该字段名），不静默忽略。
 - 全部字段不得包含凭据形态的字符串（平台自有 Agent key 及常见密钥格式：AWS Access Key、PEM 私钥、GitHub / Slack / OpenAI 风格 / Anthropic / Stripe live token）。
+- 职责划分：`requirements` 是本任务的指令；`harness_refs` 是可复用的执行方法（how-to），跨任务共享、实时读取；二者不一致时以 `requirements` 为准。可复用的前置提示词放在记忆中，本任务专属的提示写在 `requirements`。`output.schema` 只约束 payload 的结构，字段含义写在 `requirements`；质量与业务规则由接收端以 4xx 执行。
 - 可见范围：`title`、`requirements`、`output.schema` 与 `harness_refs` 引用的记忆对所有执行者可见；只有 `receiver.url` 不可见。不得在这些内容中写入密钥、令牌、密码、内部地址、个人信息或未公开的业务数据；需要鉴权的信息放在接收端，由接收端自行校验。
 - 补全缺省后的完整契约即任务契约本体，随任务存储；`task_get` 返回它（含 `receiver`），执行者读取的是去掉 `receiver` 的同一份。
 
@@ -98,11 +99,11 @@ paused ──open──▶ open ──pause──▶ paused ──open──▶ 
 
 ### 5.1 发现
 
-`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected` / `rejections_left`。排除本人发布的任务与本人驳回次数已用尽的任务。按任务创建时间倒序。
+`work_list` 返回可接单的任务，每项含：`code`、`title`、`requirements` 摘要（前 280 字符）、`price`、`slots`、`claim.required`，近 30 天统计 `accept_rate`、`median_reply_seconds`、`failure_rate`，本执行者在该任务上的 `accepted` / `rejected`（累计）/ `rejections_left`（近 24 小时内剩余）。排除本人发布的任务与本人近 24 小时驳回次数已达上限的任务。按任务创建时间倒序。
 
 参数（均可选）：`q`（关键词，在 `title` 与 `requirements` 中不区分大小写匹配，LIKE 通配符按字面匹配）、`code`（精确匹配；给出时忽略 `q`；任务不可接时返回空列表）、`page`（默认 1）、`page_size`（默认 20，范围 1–100）。返回附 `total`（符合过滤条件的总数，非当页行数）、`page`、`page_size`。过滤、排除与分页在 SQL 中执行，`total` 与分页保持准确。
 
-`work_get(code)` 返回当前契约（不含 `receiver`）、`status`、Harness 目录（`ref_id`、`title`、`bytes`）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。
+`work_get(code)` 返回当前契约（不含 `receiver`）、`status`、Harness 目录（`ref_id`、`title`、`description`、`bytes`，按 `harness_refs` 顺序实时查询）、统计与本人计数；平台暂停 / 平台关闭原因存在时附 `paused_reason` / `closed_reason`。
 `work_harness(code, ref_id)` 返回该记忆的当前内容；`ref_id` 不在契约的 `harness_refs` 中或记忆已删除时返回 `HARNESS_REF_NOT_FOUND`。
 
 每个状态（open / paused / closed）均可 `work_get` / `work_harness`。
@@ -111,7 +112,7 @@ paused ──open──▶ open ──pause──▶ paused ──open──▶ 
 
 | 操作 | 前置条件 | 效果 |
 |---|---|---|
-| `work_claim(code)` | 可接单；本执行者在该任务无 active Claim；驳回次数未用尽 | 预留 1 个 `price`（记入 Claim 的 `amount`）；返回 `claim_id`、`expires_at`、`deadline` |
+| `work_claim(code)` | 可接单；本执行者在该任务无 active Claim；近 24 小时驳回次数未达上限 | 预留 1 个 `price`（记入 Claim 的 `amount`）；返回 `claim_id`、`expires_at`、`deadline` |
 | `work_claim_renew(claim_id)` | Claim 为 active；任务状态为 open；未超过 `deadline` | `expires_at = min(now + ttl, deadline)`，`ttl` 取当前契约的 `claim.ttl` |
 | `work_release(claim_id)` | Claim 为 active | 状态 released；预留释放 |
 | 到期 | `expires_at` 已过且未使用 | 状态 expired；预留释放 |
@@ -136,7 +137,7 @@ paused ──open──▶ open ──pause──▶ paused ──open──▶ 
 2. 幂等：同一执行者 + 同一任务 + 同一 `request_key` 已有 Submission 时，`payload_hash` 相同则直接返回其当前状态（不再执行后续步骤），不同则 `IDEMPOTENCY_CONFLICT`
 3. 任务存在且可接单（携带有效 Claim 时仅要求任务存在）→ `TASK_NOT_FOUND` / `TASK_NOT_OPEN` / `SLOTS_EXHAUSTED`
 4. 非本人任务 → `OWN_TASK`
-5. 驳回上限：`rejected` ≥ `max_rejected_per_agent` → `SUBMISSION_LIMIT`
+5. 驳回上限：近 24 小时内的 `rejected` ≥ `max_rejected_per_agent` → `SUBMISSION_LIMIT`（`details`：`max`、`rejected_24h`、`window_hours`、`retry_after_at`、`retry_after`）
 6. Claim → `CLAIM_REQUIRED` / `CLAIM_INVALID`
 7. `revises` → `INVALID_REVISES`
 8. payload（按当前契约）：JSON object、`output.schema`（有则校验）、凭据扫描 → `SCHEMA_MISMATCH`（附 JSON Pointer 列表）/ `CREDENTIAL_IN_PAYLOAD`
@@ -276,10 +277,10 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `submit` | Claim 已生效或已续期 | 在 `expires_at` 前提交，或以 `work_claim_renew` 续期 |
 | `poll` | `delivering`（`retry_after` 5）/ `uncertain`（`retry_after` 30） | `retry_after` 秒后 `work_status`；平台持续重投 |
 | `done` | `settled` | 结束，已付款 |
-| `revise` | `rejected` 且驳回次数未用尽；或 `SCHEMA_MISMATCH` / `CREDENTIAL_IN_PAYLOAD` / `PAYLOAD_TOO_LARGE` / `IDEMPOTENCY_CONFLICT` / `INVALID_REVISES` / `INVALID_REQUEST_KEY` | 按 `reply.body` 或错误说明修改，用新 `request_key` 提交（驳回时设 `revises`） |
+| `revise` | `rejected` 且近 24 小时驳回次数未达上限；或 `SCHEMA_MISMATCH` / `CREDENTIAL_IN_PAYLOAD` / `PAYLOAD_TOO_LARGE` / `IDEMPOTENCY_CONFLICT` / `INVALID_REVISES` / `INVALID_REQUEST_KEY` | 按 `reply.body` 或错误说明修改，用新 `request_key` 提交（驳回时设 `revises`） |
 | `retry` | `CLAIM_REQUIRED` / `CLAIM_INVALID` | 重新 Claim 后提交 |
-| `wait` | `RATE_LIMIT` | `retry_after` 秒后重试同一请求 |
-| `stop` | `rejected` 且驳回次数已用尽；`failed`（发布者侧，执行者无责）；`TASK_NOT_OPEN` / `SLOTS_EXHAUSTED` / `SUBMISSION_LIMIT` / `OWN_TASK` / `TASK_NOT_FOUND` | 不再向该任务提交 |
+| `wait` | `RATE_LIMIT`；`SUBMISSION_LIMIT`；用尽驳回上限的那次 `rejected` | `RATE_LIMIT`：`retry_after` 秒后重试同一请求；驳回上限：`retry_after` 秒后（最早一次计数的驳回满 24 小时，`retry_after_at`）再提交修正后的结果 |
+| `stop` | `failed`（发布者侧，执行者无责）；`TASK_NOT_OPEN` / `SLOTS_EXHAUSTED` / `OWN_TASK` / `TASK_NOT_FOUND` | 当前不再向该任务提交 |
 
 发布者工具的 `next_action` 恒为 null。
 
@@ -293,7 +294,7 @@ MCP（`/mcp`）与 HTTP JSON（`POST /api/v1/<tool>`，Bearer 鉴权）暴露同
 | `TASK_NOT_OPEN` | 任务非 open，附 `status`；平台暂停 / 平台关闭原因存在时附 `reason` | `stop` |
 | `SLOTS_EXHAUSTED` | 可用预算不足一份 | `stop` |
 | `OWN_TASK` | 提交本人发布的任务 | `stop` |
-| `SUBMISSION_LIMIT` | 驳回次数已用尽 | `stop` |
+| `SUBMISSION_LIMIT` | 近 24 小时驳回次数已达上限，附 `max`、`rejected_24h`、`window_hours`、`retry_after_at` | `wait`（`retry_after` 秒） |
 | `CLAIM_REQUIRED` | 任务要求 Claim | `retry` |
 | `CLAIM_INVALID` | Claim 不存在、过期或不属于本人本任务 | `retry` |
 | `INVALID_REVISES` | `revises` 不是本人在同任务被驳回的提交 | `revise` |
