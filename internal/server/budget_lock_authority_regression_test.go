@@ -43,6 +43,16 @@ var budgetLockWrongAuthority = map[string][]string{
 	"es": {"Publicar una tarea bloquea el presupuesto", "al abrir la tarea se bloquea"},
 }
 
+// Per-locale markers that must appear in the credits-page budget
+// wording (credits.use_budget, the "What credits are for" section).
+var creditsBudgetCreationMarkers = map[string][]string{
+	"en": {"locked from the balance when a task is created or funded"},
+	"zh": {"创建或追加任务时从余额锁定积分"},
+	"ja": {"タスクの作成・追加時に残高からロックされ"},
+	"ko": {"작업을 만들거나 예산을 추가할 때 잔액에서 잠기며"},
+	"es": {"los créditos se bloquean del saldo al crear o financiar una tarea"},
+}
+
 func TestTermsBudgetLockAuthorityAllLocales(t *testing.T) {
 	for _, locale := range []string{"en", "zh", "ja", "ko", "es"} {
 		t.Run(locale, func(t *testing.T) {
@@ -67,32 +77,15 @@ func TestTermsBudgetLockAuthorityAllLocales(t *testing.T) {
 func TestCreditsBudgetLockMatchesTermsAuthority(t *testing.T) {
 	for _, locale := range []string{"en", "zh", "ja", "ko", "es"} {
 		t.Run(locale, func(t *testing.T) {
-			c := i18n.T(locale, "credits.shared_balance_note")
-			if c == "" || c == "credits.shared_balance_note" {
-				t.Fatalf("credits.shared_balance_note missing for %s", locale)
+			c := i18n.T(locale, "credits.use_budget")
+			if c == "" || c == "credits.use_budget" {
+				t.Fatalf("credits.use_budget missing for %s", locale)
 			}
-			// Credits must state creation-time lock too (its wording is
-			// free-form per locale but must carry the same two facts).
-			switch locale {
-			case "en":
-				if !strings.Contains(c, "locked from your account balance when the task is created") {
-					t.Fatalf("en credits note lost creation-time lock: %s", c)
-				}
-			case "zh":
-				if !strings.Contains(c, "创建任务时") {
-					t.Fatalf("zh credits note lost creation-time lock: %s", c)
-				}
-			case "ja":
-				if !strings.Contains(c, "タスク作成時") && !strings.Contains(c, "作成時に") {
-					t.Fatalf("ja credits note lost creation-time lock: %s", c)
-				}
-			case "ko":
-				if !strings.Contains(c, "작업 생성 시") {
-					t.Fatalf("ko credits note lost creation-time lock: %s", c)
-				}
-			case "es":
-				if !strings.Contains(c, "al crear la tarea") {
-					t.Fatalf("es credits note lost creation-time lock: %s", c)
+			// Credits must state creation-time lock too (WO-28: the fact
+			// moved into the "What credits are for" section wording).
+			for _, want := range creditsBudgetCreationMarkers[locale] {
+				if !strings.Contains(c, want) {
+					t.Fatalf("%s credits.use_budget lost creation-time lock marker %q: %s", locale, want, c)
 				}
 			}
 			// And must NOT carry publish/open-time lock claims.
@@ -112,14 +105,15 @@ func TestTermsCreditsRenderBudgetLockAuthority(t *testing.T) {
 	router := s.buildRouter()
 
 	// /terms renders terms.s2_b (full creation-lock sentence);
-	// /credits renders the shorter shared_balance_note. Both must state
-	// creation-time lock; neither may carry publish/open-time lock claims.
+	// /credits renders the "What credits are for" section (use_budget).
+	// Both must state creation-time lock; neither may carry
+	// publish/open-time lock claims.
 	cases := []struct {
 		path        string
 		wantMarkers []string
 	}{
 		{"/terms", budgetLockCreationMarkers["en"]},
-		{"/credits", []string{"locked from your account balance when the task is created"}},
+		{"/credits", creditsBudgetCreationMarkers["en"]},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

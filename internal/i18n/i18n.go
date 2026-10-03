@@ -126,6 +126,21 @@ func Translate(locale, key string) string {
 	return val
 }
 
+// Has reports whether the key exists in the locale's catalog (the en
+// catalog counts as existence for every locale: T falls back to it).
+// Translate returns the key itself on a miss, so existence checks —
+// e.g. rendering numbered sections while the keys exist — need this.
+func Has(locale, key string) bool {
+	catalog, ok := locales[locale]
+	if !ok {
+		catalog = locales["en"]
+	}
+	if lookup(catalog, key) != "" {
+		return true
+	}
+	return locale != "en" && lookup(locales["en"], key) != ""
+}
+
 // T is a shorthand for Translate.
 func T(locale, key string) string {
 	return Translate(locale, key)

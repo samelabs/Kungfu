@@ -53,56 +53,9 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 	}
 }
 
-// renderLegalPage renders /terms or /privacy from i18n content — a
-// single template source for all five locales. The page uses the
-// dedicated legal document layout (header band, intro lede, numbered
-// section hierarchy, reading-width prose), NOT the generic card grid:
-// legal documents are long-form reading surfaces and must look like one
-// on desktop and mobile.
-func (s *Server) renderLegalPage(w http.ResponseWriter, data *tmplData, kind string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/"+kind)
-
-	var sections strings.Builder
-	for i := 0; i < 7; i++ {
-		h := data.T(fmt.Sprintf(kind+".s%d_h", i))
-		b := data.T(fmt.Sprintf(kind+".s%d_b", i))
-		if h == "" || b == "" {
-			continue
-		}
-		sections.WriteString(`<section class="legal-section" id="s` + strconv.Itoa(i+1) + `">
-            <h2><span class="legal-section-num">` + strconv.Itoa(i+1) + `</span>` + html.EscapeString(h) + `</h2>
-            <p>` + html.EscapeString(b) + `</p>
-        </section>`)
-	}
-
-	htmlOut := buildHead(headInput{
-		Locale:    data.Locale,
-		Path:      "/" + kind,
-		TitleKey:  "seo." + kind + "_title",
-		DescKey:   "seo." + kind + "_desc",
-		ExtraHead: `<link rel="stylesheet" href="/assets/site.css">`,
-	}) + `
-<body class="legal-body">
-<div class="wrap legal-wrap">
-    <header class="legal-header">
-        <a class="legal-home" href="` + i18n.LocaleURL(data.Locale, "/") + `"><span class="site-logo" aria-hidden="true">🥋</span>Kungfu.md</a>
-        <div class="legal-header-meta">` + html.EscapeString(data.T(kind+".heading")) + `</div>
-    </header>
-    <main class="legal-main">
-        <div class="legal-lede">
-            <h1>` + html.EscapeString(data.T(kind+".heading")) + `</h1>
-            <p class="legal-intro">` + html.EscapeString(data.T(kind+".intro")) + `</p>
-        </div>
-        ` + sections.String() + `
-    </main>
-    ` + siteFooter(data.Locale, langOpts, kind+"-lang-switch") + `
-</div>
-<script src="/assets/pwa-register.js"></script>
-</body>
-</html>`
-	w.Write(web.FingerprintHTML([]byte(htmlOut)))
-}
+// renderLegalPage and renderCredits live in pages_public.go: the three
+// public content pages (/terms, /privacy, /credits) share one legal
+// document shell there.
 
 // renderHome renders the homepage with the server-rendered task board
 // (WO-19 H1/H2): ?q= and ?page= search over ALL claimable tasks, the
@@ -399,95 +352,9 @@ func (s *Server) publicCreditsPackages(ctx context.Context) []payment.OwnerCredi
 	return pkgs
 }
 
-// homeCreditsBlockHTML renders the public credits section: what
-// credits are for, the non-transfer note, the refund/terms pointers,
-// and the configured top-up packages (or the coming-soon state).
-func (s *Server) homeCreditsBlockHTML(ctx context.Context, locale string) string {
-	pkgs := s.publicCreditsPackages(ctx)
-	var b strings.Builder
-	b.WriteString(`<div class="card credits-card" id="creditsBlock">`)
-	b.WriteString(`<h2>` + html.EscapeString(i18n.T(locale, "home.credits_title")) + `</h2>`)
-	b.WriteString(`<p>` + html.EscapeString(i18n.T(locale, "home.credits_sub")) + `</p>`)
-	if len(pkgs) == 0 {
-		b.WriteString(`<p class="muted">` + html.EscapeString(i18n.T(locale, "home.credits_soon")) + `</p>`)
-	} else {
-		b.WriteString(`<div class="credits-packages">`)
-		for _, p := range pkgs {
-			b.WriteString(`<div class="credits-package"><b>` + html.EscapeString(p.Name) + `</b>` +
-				`<span>` + html.EscapeString(fmt.Sprintf("%d %s", p.Credits, i18n.T(locale, "home.credits_unit"))) + `</span>` +
-				`<span class="credits-price">` + html.EscapeString(minorAmount(p.AmountMinor, p.Currency)) + `</span></div>`)
-		}
-		b.WriteString(`</div>`)
-	}
-	b.WriteString(`<ul class="credits-notes">` +
-		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_use")) + `</li>` +
-		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_nontransfer")) + `</li>` +
-		`<li>` + html.EscapeString(i18n.T(locale, "home.credits_refund")) +
-		` <a href="/terms">` + html.EscapeString(i18n.T(locale, "home.credits_terms")) + `</a>` +
-		` · <a href="/privacy">` + html.EscapeString(i18n.T(locale, "home.credits_privacy")) + `</a></li></ul>`)
-	b.WriteString(`<div class="actions"><a class="btn primary" href="` + i18n.LocaleURL(locale, "/owner/credits") + `">` +
-		html.EscapeString(i18n.T(locale, "home.credits_buy")) + `</a></div>`)
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
 // minorAmount renders a fiat minor-unit price with its currency.
 func minorAmount(minor int64, currency string) string {
 	return fmt.Sprintf("%d.%02d %s", minor/100, minor%100, strings.ToUpper(currency))
-}
-
-// renderCredits renders the public credits explainer page: the real
-// economic mechanisms that exist today (earn_task, spend_redemption,
-// lock_task/refund_task) and the live entry points. It is a static public
-// page — no session/account fetch; balances live in the Owner Workspace.
-// The old web.StaticFile("credits_page.html") branch never resolved (the
-// file was never embedded) and its fallback promised a future "rewards
-// listing" that the shipped Rewards page has since replaced.
-func (s *Server) renderCredits(w http.ResponseWriter, r *http.Request, data *tmplData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/credits")
-	creditsBlock := s.homeCreditsBlockHTML(r.Context(), data.Locale)
-
-	html := buildHead(headInput{
-		Locale:   data.Locale,
-		Path:     "/credits",
-		TitleKey: "seo.credits_title",
-		DescKey:  "seo.credits_desc",
-		ExtraHead: `<meta name="application-name" content="Kungfu.md">
-    <meta name="theme-color" content="#2f7c73">
-    <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png">
-    <link rel="icon" type="image/svg+xml" href="/assets/icons/app-icon.svg">
-    <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
-    <link rel="stylesheet" href="/assets/site.css">`,
-	}) + `
-<body>
-<div class="wrap">
-    ` + creditsBlock + `
-    <div class="card">
-        <h1>` + data.T("credits.title") + `</h1>
-        <p>` + data.T("credits.summary") + `</p>
-        <p class="muted">` + data.T("credits.balance_explainer") + `</p>
-        <div class="actions">
-            <a class="btn primary" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("credits.task_cta") + `</a>
-            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/rewards") + `">` + data.T("credits.rewards_cta") + `</a>
-            <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("credits.logs_cta") + `</a>
-        </div>
-    </div>
-    <div class="card">
-        <h2>` + data.T("credits.earn_title") + `</h2>
-        <p>` + data.T("credits.earn_body") + `</p>
-        <h2>` + data.T("credits.redeem_title") + `</h2>
-        <p>` + data.T("credits.redeem_body") + `</p>
-        <p class="muted">` + data.T("credits.shared_balance_note") + `</p>
-    </div>
-    ` + siteFooter(data.Locale, langOpts, "credits-lang-switch") + `
-</div>
-<script src="/assets/pwa-register.js"></script>
-</body>
-</html>`
-	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
 // renderOwner renders the owner SPA shell.

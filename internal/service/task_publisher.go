@@ -525,16 +525,21 @@ type TaskListFilter struct {
 	PageSize int
 }
 
-// Normalize trims the text filters and applies the paging defaults
-// (page 1; page_size 20, range 1–100).
+// Normalize trims the text filters and applies the paging rules shared
+// by every page_size handler (WO-28 B8): page below 1 → 1; page_size
+// below 1 → default 20, above the 100 maximum → 100 — clamped, never
+// rejected.
 func (f *TaskListFilter) Normalize() {
 	f.Q = strings.TrimSpace(f.Q)
 	f.Code = strings.TrimSpace(f.Code)
 	if f.Page < 1 {
 		f.Page = 1
 	}
-	if f.PageSize < 1 || f.PageSize > 100 {
+	if f.PageSize < 1 {
 		f.PageSize = 20
+	}
+	if f.PageSize > 100 {
+		f.PageSize = 100
 	}
 }
 

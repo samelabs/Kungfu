@@ -40,8 +40,10 @@ type WorkListFilter struct {
 	PageSize int
 }
 
-// Normalize trims, resolves precedence and applies the paging
-// defaults (page 1; page_size 20, range 1–100).
+// Normalize trims, resolves precedence and applies the paging rules
+// shared by every page_size handler (WO-28 B8): page below 1 → 1;
+// page_size below 1 → default 20, above the 100 maximum → 100 —
+// clamped, never rejected.
 func (f *WorkListFilter) Normalize() {
 	f.Q = strings.TrimSpace(f.Q)
 	f.Code = strings.TrimSpace(f.Code)
@@ -51,8 +53,11 @@ func (f *WorkListFilter) Normalize() {
 	if f.Page < 1 {
 		f.Page = 1
 	}
-	if f.PageSize < 1 || f.PageSize > workListMaxPageSize {
+	if f.PageSize < 1 {
 		f.PageSize = workListDefaultPageSize
+	}
+	if f.PageSize > workListMaxPageSize {
+		f.PageSize = workListMaxPageSize
 	}
 }
 
@@ -448,8 +453,13 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 		}
 		taskID = &t.ID
 	}
-	if pageSize <= 0 || pageSize > 100 {
+	// Same paging rules as work_list / task_list (WO-28 B8); the tool
+	// currently passes the fixed default 20.
+	if pageSize <= 0 {
 		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
 	}
 	if page < 1 {
 		page = 1

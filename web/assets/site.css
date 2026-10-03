@@ -459,3 +459,17 @@ body {
     padding-left: 20px;
     padding-right: 20px;
 }
+
+/* Credits package grid (WO-28), shared by the homepage purchase overlay
+   (home.css provides the .credits-pop chrome around it) and the /credits
+   Packages section. Moved here from home.css so both surfaces load it. */
+.credits-packages { display: grid; gap: 9px; margin: 10px 0; }
+.credits-package {
+    display: flex; align-items: baseline; gap: 10px;
+    border: 1px solid rgba(47, 124, 115, .10);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px; background: rgba(255, 255, 255, .44);
+}
+.credits-package b { color: var(--heading-ink); font-size: 14.5px; }
+.credits-package span { color: var(--muted); font-size: 13px; }
+.credits-package .credits-price { margin-left: auto; color: var(--accent); font-weight: 600; white-space: nowrap; }

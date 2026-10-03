@@ -207,11 +207,16 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
+	// Same paging rules as work_list / task_list (WO-28 B8): below 1 →
+	// default 20, above the 100 maximum → 100.
 	if in.Page < 1 {
 		in.Page = 1
 	}
-	if in.PageSize < 1 || in.PageSize > 100 {
+	if in.PageSize < 1 {
 		in.PageSize = 20
+	}
+	if in.PageSize > 100 {
+		in.PageSize = 100
 	}
 	rows, total, err := service.ListSubmissionsForPublisher(ctx, deps.Pool, agent.ID, in.Code, in.State, in.Page, in.PageSize, deps.AgentRefKey)
 	if err != nil {

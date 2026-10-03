@@ -37,6 +37,14 @@ const (
 	ActionStorageGetPublic Action = "storage.get_public"
 )
 
+// Ledger types the storage policies would book if they were ever
+// charged (kept for statement continuity; both are priced 0 today, so
+// no row of either type can exist yet).
+const (
+	TxnTypeSpendPush = "spend_push"
+	TxnTypeSpendGet  = "spend_get"
+)
+
 // policy is the pricing decision for one action: the credit amount and
 // the ledger type booked. Ledger types keep their historical names so the
 // existing statement stays continuous — no data migration.
@@ -54,13 +62,13 @@ var policies = map[Action]policy{
 	// are kept in the policy for that future.
 	ActionStorageCreate: {
 		amount:  0,
-		txnType: "spend_push",
+		txnType: TxnTypeSpendPush,
 		errCode: "INSUFFICIENT_CREDITS",
 		errMsg:  "Need 1 credit to publish kungfu. Complete platform tasks to earn credits.",
 	},
 	ActionStorageGetPublic: {
 		amount:  0,
-		txnType: "spend_get",
+		txnType: TxnTypeSpendGet,
 		errCode: "INSUFFICIENT_CREDITS",
 		errMsg:  "Need 1 credit to retrieve. Complete platform tasks to earn credits.",
 	},

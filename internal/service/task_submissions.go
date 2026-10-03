@@ -57,8 +57,13 @@ func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID
 					{"field": "state", "message": "must be one of the §5.4 states"}}})
 		}
 	}
-	if pageSize <= 0 || pageSize > 100 {
+	// Same paging rules as work_list / task_list (WO-28 B8): below 1 →
+	// default 20, above the 100 maximum → 100.
+	if pageSize <= 0 {
 		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
 	}
 	if page < 1 {
 		page = 1

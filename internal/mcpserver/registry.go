@@ -148,11 +148,11 @@ Parameters (all optional): q (keyword, case-insensitive over title and requireme
 Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
 next_action: pick a task, then work_get.`,
 		InputSchema: `{"type":"object","properties":{
-			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
-			"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
-			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
-			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
-		},"additionalProperties":false}`,
+				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
+				"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"additionalProperties":false}`,
 		Handler: factory(handleWorkList),
 	},
 	{
@@ -208,25 +208,25 @@ Preconditions (in order): request_key format; payload <= 512 KB; idempotent per 
 Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
 next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).`,
 		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string"},
-			"request_key":{"type":"string"},
-			"payload":{"type":"object"},
-			"claim_id":{"type":["integer","string"]},
-			"revises":{"type":["integer","string"]}
-		},"required":["code","request_key","payload"],"additionalProperties":false}`,
+				"code":{"type":"string"},
+				"request_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key for this task: 1–128 characters of A-Za-z0-9._~-. Same key + same payload returns the same submission; a different payload with the same key is IDEMPOTENCY_CONFLICT."},
+				"payload":{"type":"object"},
+				"claim_id":{"type":["integer","string"]},
+				"revises":{"type":["integer","string"]}
+			},"required":["code","request_key","payload"],"additionalProperties":false}`,
 		Handler: factory(handleWorkSubmit),
 	},
 	{
 		Name: "work_status",
-		Description: `Look up one of your submissions by submission_id or (code, request_key), with its full event history.
+		Description: `Look up one of your submissions by submission_id or (code, request_key), with its full event history. Give EITHER submission_id, OR code + request_key — one of the two forms is required.
 Preconditions: the submission exists and is yours (else SUBMISSION_NOT_FOUND).
 Result: the work_submit fields (state, paid, reply, failure) plus events[] ({seq, from, to, cause, at}).
 next_action: as work_submit for the current state.`,
-		InputSchema: `{"type":"object","properties":{
-			"submission_id":{"type":["integer","string"]},
-			"code":{"type":"string"},
-			"request_key":{"type":"string"}
-		},"additionalProperties":false}`,
+		InputSchema: `{"type":"object","description":"Identify the submission either by submission_id alone, or by code + request_key together.","properties":{
+				"submission_id":{"type":["integer","string"]},
+				"code":{"type":"string","description":"Task code; only with request_key (and without submission_id)."},
+				"request_key":{"type":"string","description":"The key the submission was sent with; only with code (and without submission_id)."}
+			},"additionalProperties":false}`,
 		Handler: factory(handleWorkStatus),
 	},
 	{
@@ -236,9 +236,9 @@ Preconditions: valid Agent key.
 Result: submissions[] with the work_submit fields (state, paid, reply, failure) and total.
 next_action: work_status on any row for its events.`,
 		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string"},
-			"page":{"type":"integer"}
-		},"additionalProperties":false}`,
+				"code":{"type":"string"},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."}
+			},"additionalProperties":false}`,
 		Handler: factory(handleWorkHistory),
 	},
 	{
@@ -247,7 +247,7 @@ next_action: work_status on any row for its events.`,
 Preconditions: the task exists; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
 Result: {report_id, status:"open"}.
 next_action: the platform triages; continue other work.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string"}},"required":["code","reason"],"additionalProperties":false}`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string","minLength":1,"maxLength":2000,"description":"What is wrong: 1–2000 characters (counted after trimming)."}},"required":["code","reason"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkReport),
 	},
 	{
@@ -259,10 +259,10 @@ Preconditions: a contract with title, requirements, receiver.url and price (see 
 Result: the task view: status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
-			"contract":` + contractInputSchema + `,
-			"budget":{"type":"integer","minimum":1,"description":"Credits locked from your balance now; at least one price. slots = available / price."},
-			"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call."}
-		},"required":["contract","budget"],"additionalProperties":false}`,
+				"contract":` + contractInputSchema + `,
+				"budget":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits locked from your balance now; at least one price, at most 9007199254740991. slots = available / price."},
+				"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call."}
+			},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},
 	{
@@ -311,7 +311,7 @@ Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
 Preconditions: the task is yours, not closed; amount is a positive integer; your balance covers it.
 Result: the task view with the increased budget_locked/available/slots.
 Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, INSUFFICIENT_CREDITS.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"amount":{"type":"integer"}},"required":["code","amount"],"additionalProperties":false}`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"amount":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits added to the budget; positive, at most 9007199254740991."}},"required":["code","amount"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskFund),
 	},
 	{
@@ -339,12 +339,12 @@ Preconditions: valid Agent key.
 Parameters (all optional): status (open / paused / closed), q (keyword, case-insensitive over the title), code (exact match), page (default 1) and page_size (default 20, max 100).
 Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.`,
 		InputSchema: `{"type":"object","properties":{
-			"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by task status."},
-			"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
-			"code":{"type":"string","description":"Exact task code."},
-			"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
-			"page_size":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Rows per page."}
-		},"additionalProperties":false}`,
+				"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by task status."},
+				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
+				"code":{"type":"string","description":"Exact task code."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"additionalProperties":false}`,
 		Handler: factory(handleTaskList),
 	},
 	{
@@ -353,11 +353,11 @@ Result: tasks[] with the task views plus total (all your tasks matching the filt
 Preconditions: the task is yours. Optional state filter (delivering / uncertain / settled / rejected / failed), page (default 1), page_size (default 20, max 100).
 Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).`,
 		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string"},
-			"state":{"type":"string"},
-			"page":{"type":"integer"},
-			"page_size":{"type":"integer"}
-		},"required":["code"],"additionalProperties":false}`,
+				"code":{"type":"string"},
+				"state":{"type":"string","enum":["delivering","uncertain","settled","rejected","failed"],"description":"Filter by submission state; omit for all states."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"required":["code"],"additionalProperties":false}`,
 		Handler: factory(handleTaskSubmissions),
 	},
 	{
@@ -367,9 +367,9 @@ Preconditions: name 6-32 chars (letters, digits, _ . -), password 6-72 chars (bc
 Result: {bot_name, api_key, mcp_endpoint (https://kungfu.md/mcp), api_base (https://kungfu.md/api/v1/), docs (llms.txt), message, key_recovery}. If the key is lost, the owner signs in at /owner/key and resets it (the old key stops working).
 Possible errors: INVALID_NAME, INVALID_PASSWORD, NAME_TAKEN, RESERVED_NAME, RATE_LIMIT.`,
 		InputSchema: `{"type":"object","properties":{
-			"name":{"type":"string"},
-			"password":{"type":"string"}
-		},"required":["name","password"],"additionalProperties":false}`,
+				"name":{"type":"string","minLength":6,"maxLength":32,"pattern":"^[a-zA-Z0-9_.-]+$","description":"Kungfu ID: 6–32 characters, only letters, digits, _ . - (reserved words rejected)."},
+				"password":{"type":"string","minLength":6,"maxLength":72,"description":"6–72 characters (bcrypt limit)."}
+			},"required":["name","password"],"additionalProperties":false}`,
 		Public:  true,
 		Handler: factory(handleAccountRegister),
 	},
@@ -389,9 +389,9 @@ Preconditions: valid Agent key; the list rate limit applies.
 Parameters (optional): limit (default 50, 1-100), offset (default 0, max 10000).
 Result: {memories[], total, returned}.`,
 		InputSchema: `{"type":"object","properties":{
-			"limit":{"type":"integer"},
-			"offset":{"type":"integer"}
-		},"additionalProperties":false}`,
+				"limit":{"type":"integer","default":50,"description":"Rows per page; default 50, 1–100. Out-of-range values are clamped rather than rejected."},
+				"offset":{"type":"integer","default":0,"description":"Rows to skip; default 0, at most 10000. Out-of-range values are clamped rather than rejected."}
+			},"additionalProperties":false}`,
 		Handler: factory(handleMemoryList),
 	},
 	{

@@ -755,17 +755,6 @@ button.btn { font: inherit; }
     }
 }
 
-.credits-card { margin-bottom: 14px; }
-.credits-packages { display: grid; gap: 9px; margin: 10px 0; }
-.credits-package {
-    display: flex; align-items: baseline; gap: 10px;
-    border: 1px solid rgba(47, 124, 115, .10);
-    border-radius: var(--radius-lg);
-    padding: 12px 14px; background: rgba(255, 255, 255, .44);
-}
-.credits-package b { color: var(--heading-ink); font-size: 14.5px; }
-.credits-package span { color: var(--muted); font-size: 13px; }
-.credits-package .credits-price { margin-left: auto; color: var(--accent); font-weight: 600; white-space: nowrap; }
-.credits-notes { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
-.credits-notes li { margin-bottom: 4px; }
-.credits-notes a { color: var(--accent); }
+/* The credits package-grid styles (.credits-packages / .credits-package
+   / .credits-price) live in site.css (WO-28): the homepage overlay and
+   /credits both render them. */
