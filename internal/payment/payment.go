@@ -32,8 +32,13 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-// Credit grant type recorded in tb_transactions for a paid payment.
-const TxnTypeGrantPayment = "grant_payment"
+// Credit ledger types recorded in tb_transactions for payments:
+// the grant on a confirmed top-up and the authoritative reversal when
+// the provider reports a refund or dispute (internal/payment only).
+const (
+	TxnTypeGrantPayment   = "grant_payment"
+	TxnTypeReversePayment = "reverse_payment"
+)
 
 // Provider names are stored identifiers (e.g. "manual", future "stripe"),
 // not secrets; webhook secrets never enter this table.

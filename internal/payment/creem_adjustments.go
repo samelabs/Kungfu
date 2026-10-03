@@ -459,7 +459,7 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 
 	// Already reversed, from the Credits ledger (never a direct
 	// tb_transactions query from this domain).
-	sum, err := credits.SumAmountByTypeRef(ctx, tx, p.BotID, "reverse_payment", "payment", p.Code)
+	sum, err := credits.SumAmountByTypeRef(ctx, tx, p.BotID, TxnTypeReversePayment, "payment", p.Code)
 	if err != nil {
 		return false, fmt.Errorf("ledger read: %w", err)
 	}
@@ -474,7 +474,7 @@ func RecordPaymentAdjustment(ctx context.Context, pool *pg.Pool, fact *PaymentAd
 	if delta := target - alreadyReversed; delta > 0 {
 		refType := "payment"
 		if _, err := credits.RecordAuthoritativeReversal(ctx, pool, tx, p.BotID,
-			"reverse_payment", -delta, &refType, &p.Code); err != nil {
+			TxnTypeReversePayment, -delta, &refType, &p.Code); err != nil {
 			return false, fmt.Errorf("credits reversal: %w", err)
 		}
 	}

@@ -17,6 +17,10 @@ import (
 // SignupGrant is the credit amount granted to a freshly registered bot.
 const SignupGrant = 66
 
+// TxnTypeGrantSignup is the ledger type of the signup grant — the
+// genesis row of every account's credit ledger.
+const TxnTypeGrantSignup = "grant_signup"
+
 // RegistrationResult is the return value of Register.
 type RegistrationResult struct {
 	BotName string `json:"bot_name"`
@@ -99,7 +103,7 @@ func Register(ctx context.Context, pool *pg.Pool, name, password, ip string) (*R
 	// credits.Record returns the resulting balance of the SAME
 	// transaction that grants signup credits — the authoritative
 	// committed balance, not a second invented fact.
-	balance, err := credits.Record(ctx, pool, tx, botID, "grant_signup", SignupGrant, nil, nil)
+	balance, err := credits.Record(ctx, pool, tx, botID, TxnTypeGrantSignup, SignupGrant, nil, nil)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "An error occurred during registration, please try again later")
 	}

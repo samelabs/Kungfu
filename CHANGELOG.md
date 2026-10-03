@@ -5,6 +5,51 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] — 2026-10-03
+
+Routine closeout: one structure for the public info pages, MCP input
+schemas that state exactly what the server enforces, and the economic
+chain written down and guarded. No mechanism change, no migrations, no
+new endpoints.
+
+### Changed
+
+- `/terms`, `/privacy` and `/credits` share one legal document shell
+  (header band with the home link, lede, numbered sections, site
+  footer, the same head extras). `/credits` now renders in that layout
+  with the sections Packages, Where credits come from, What credits
+  are for, Purchases and refunds, and One balance — and links to no
+  signed-in-only screen except the top-up button (the /owner/rewards
+  and /owner/logs buttons are gone). The legal renderer walks the i18n
+  sections (s0, s1, …) instead of a fixed count.
+- Terms: "Opening a task" (validation-only) is folded into "Tasks and
+  delivery", and the credits section now carries the purchase/refund
+  rule: a top-up refunded or charged back through Creem reverses the
+  credits it granted — proportionally for a refund, in full for a
+  chargeback — even if the balance goes below zero. Privacy now states
+  that account data includes the registration IP, operational logs
+  include IP addresses, and IPs are used for rate limiting.
+- The credits package-grid CSS moved from home.css to site.css (used by
+  both the homepage overlay and /credits).
+- MCP input schemas declare the enforced bounds: `request_key` pattern
+  `^[A-Za-z0-9._~-]{1,128}$`, `work_report.reason` 1–2000,
+  `task_fund.amount` / `task_create.budget` 1…2^53−1,
+  `task_submissions.state` enum, `account_register` name pattern 6–32
+  and password 6–72, `page` minimum 1 everywhere. Values the server
+  clamps (page_size, limit, offset) state default and max in their
+  descriptions only. `work_status` says it takes either submission_id,
+  or code + request_key.
+- page_size is clamped identically everywhere: below 1 → default 20,
+  above the 100 maximum → 100 (previously out-of-range reset to 20).
+
+### Added
+
+- "Where credits move" ledger table (type → when → whose balance →
+  sign) in `web/task-guide.md` and `docs/task-spec-1.0.md` §12,
+  including `spend_get` / `spend_push` marked as priced 0 today.
+- A test proving every ledger type the code writes has an
+  `owner.logs.tx_<type>` label in all five languages.
+
 ## [2.2.1] — 2026-10-02
 
 Protocol and error-format consistency found by an end-to-end client
