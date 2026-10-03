@@ -136,9 +136,9 @@ func (s *Server) renderCredits(w http.ResponseWriter, r *http.Request, data *tmp
 
 	refunds := "<p>" + html.EscapeString(t("credits.refunds_creem")) + " " + html.EscapeString(t("home.credits_nontransfer")) + "</p>" +
 		"<p>" + html.EscapeString(t("credits.refunds_reversal")) + "</p>" +
-		"<p>" + html.EscapeString(t("home.credits_refund")) +
-		` <a href="/terms">` + html.EscapeString(t("home.credits_terms")) + `</a>` +
-		` · <a href="/privacy">` + html.EscapeString(t("home.credits_privacy")) + `</a></p>`
+		"<p>" + html.EscapeString(t("credits.full_terms_label")) +
+		` <a href="` + i18n.LocaleURL(data.Locale, "/terms") + `">` + html.EscapeString(t("home.credits_terms")) + `</a>` +
+		` · <a href="` + i18n.LocaleURL(data.Locale, "/privacy") + `">` + html.EscapeString(t("home.credits_privacy")) + `</a></p>`
 
 	sections := []legalSection{
 		{Heading: t("credits.packages_h"), BodyHTML: packages.String()},
