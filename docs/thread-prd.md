@@ -131,6 +131,7 @@ thread_memories
 - thread_id
 - memory_id
 - seq
+- changed_revision
 - added_by_role_id
 - created_at
 ~~~
@@ -142,7 +143,7 @@ seq：
 - 表示 Memory 进入该 Thread 的顺序；
 - 同一 Memory 在同一 Thread 中只有一个位置。
 
-ThreadMemory 建立后保持位置稳定。
+ThreadMemory 建立后保持位置稳定。changed_revision 记录这条 timeline entry 最近一次对当前 Thread 可见内容发生变化时的 Thread revision；首次 append 时等于该次 append revision。
 
 Thread 对外暴露：
 
@@ -170,7 +171,7 @@ Thread 保存关系，不复制 Memory 内容。
 
 Memory 使用活引用：
 
-- Memory 更新后，Thread 展示更新后的当前内容；
+- Memory 更新后，Thread 展示更新后的当前内容；对应 ThreadMemory.changed_revision 同步推进到该 Thread 的新 revision；
 - Memory soft-delete 后，原 timeline 位置展示 tombstone；
 - tombstone 保留 seq；
 - anchor 对应 Memory 删除后，已有 Child 继续保留该 anchor 关系。
@@ -180,7 +181,7 @@ Memory update / delete 会影响两类 Thread：
 1. timeline 中包含该 Memory 的 Thread；
 2. 以该 Memory 作为 anchor 的 Child Thread。
 
-所有受影响 Thread 都推进 revision；同一 Thread 在一次 Memory mutation 中只推进一次。
+所有受影响 Thread 都推进 revision；同一 Thread 在一次 Memory mutation 中只推进一次。timeline 引用同时把对应 ThreadMemory.changed_revision 更新为该 Thread 的新 revision。
 
 ## 6. ThreadRole
 
@@ -382,15 +383,15 @@ thread_changed(T, revision=43, head_seq=18)
 
 客户端比较本地状态：
 
-- head_seq 前进：读取 after_seq 后的 timeline；
-- revision 前进但 head_seq 未变：刷新 Thread 当前状态。
+- head_seq 前进：读取 after_seq 后的新 timeline entry；
+- revision 前进：同时请求 after_revision 后的 timeline delta 与当前 Thread metadata。
 
 ### 10.2 离线与重连
 
 重连后：
 
 1. thread_list 获取 revision、head_seq、seen_revision、seen_seq；
-2. 对需要恢复的 Thread 调 thread_get(after_seq=本地最后 seq)；
+2. 对需要恢复的 Thread 调 thread_get(after_seq=本地最后 seq, after_revision=本地最后 revision)；
 3. 消费完成后调用 thread_seen。
 
 signal 可以重复，也可能在断线期间遗漏。revision + head_seq + timeline 保证恢复到当前事实。
@@ -534,7 +535,28 @@ Child：
 - commit 后 parent subscribers 收到 thread_changed；
 - Child 从自己的 revision / head_seq 开始独立通讯。
 
-## 15. Memory mutation 与 Thread fan-out
+## 15. 增量同步与 Memory mutation fan-out
+
+thread_get 支持双游标增量：
+
+~~~
+thread_get(
+  after_seq,
+  after_revision
+)
+~~~
+
+返回：
+
+- seq > after_seq 的新 timeline entry；
+- changed_revision > after_revision 的既有 timeline entry；
+- 当前 Thread metadata、roles、children、revision / head_seq。
+
+同一 entry 同时满足两类条件时只返回一次。
+
+这样客户端既能增量拿到新消息，也能拿到已经存在但内容后来发生变化的 Memory。
+
+## 16. Memory mutation 与 Thread fan-out
 
 Memory 继续使用现有 update / soft-delete 语义。
 
@@ -550,11 +572,12 @@ threads.anchor_memory_id = M
 
 - revision + 1；
 - head_seq 保持；
+- 若 Memory 位于该 Thread timeline，则对应 ThreadMemory.changed_revision = 新 revision；
 - commit 后各发一个 thread_changed。
 
 这样 Memory 活引用与实时通讯保持一致。
 
-## 16. 状态操作
+## 17. 状态操作
 
 Thread 核心语义能力：
 
@@ -571,7 +594,7 @@ Thread 核心语义能力：
 
 协议层按现有 MCP / HTTP 能力组织这些语义，所有入口共享同一 service 规则。
 
-## 17. 最小持久结构
+## 18. 最小持久结构
 
 ### Thread
 
@@ -608,11 +631,12 @@ thread_memories
 - thread_id
 - memory_id
 - seq
+- changed_revision
 - added_by_role_id
 - created_at
 ~~~
 
-## 18. 通讯不变量
+## 19. 通讯不变量
 
 实现保持：
 
@@ -622,19 +646,21 @@ thread_memories
 4. revision 单调递增；
 5. seen_revision 单调且不超过 revision；
 6. Thread 共享状态变化反映到 revision；
-7. timeline append 同时推进 head_seq 与 revision；
+7. timeline append 同时推进 head_seq 与 revision，并写入该 entry 的 changed_revision；
 8. Memory update / delete 对所有 timeline / anchor 引用 Thread 做去重 revision fan-out；
-9. thread_post 的 Memory create 与 timeline append 原子提交；
-10. ThreadRole 是 scoped access、通讯游标与 realtime subscription 资格的统一事实源；
-11. Child 有 parent，anchor 可选；
-12. anchor 存在时属于直接 parent；
-13. Root creator 在每个 descendant 中保持 manage ThreadRole；
-14. role removal 立即撤销 scoped read 与 realtime signal；
-15. durable state commit 先于 thread_changed；
-16. signal 丢失或重复后，客户端仍可通过 revision + head_seq + timeline 恢复；
-17. thread_seen 只推进个人游标，不改变共享 revision。
+9. timeline Memory update / delete 同时推进对应 ThreadMemory.changed_revision；
+10. thread_get(after_seq, after_revision) 能恢复新 entry 与已存在 entry 的后续变化；
+11. thread_post 的 Memory create 与 timeline append 原子提交;
+12. ThreadRole 是 scoped access、通讯游标与 realtime subscription 资格的统一事实源；
+13. Child 有 parent，anchor 可选；
+14. anchor 存在时属于直接 parent；
+15. Root creator 在每个 descendant 中保持 manage ThreadRole；
+16. role removal 立即撤销 scoped read 与 realtime signal；
+17. durable state commit 先于 thread_changed；
+18. signal 丢失或重复后，客户端仍可通过 revision + head_seq + timeline delta 恢复；
+19. thread_seen 只推进个人游标，不改变共享 revision。
 
-## 19. 场景验收
+## 20. 场景验收
 
 ### 私聊
 
@@ -661,8 +687,8 @@ Timeline: #1 ... #N
 Agent：
 
 ~~~
-thread_get(after_seq=120)
-→ consume
+thread_get(after_seq=120, after_revision=known_revision)
+→ consume new / changed entries
 → thread_seen(seen_seq=head_seq, seen_revision=revision)
 ~~~
 
@@ -736,9 +762,9 @@ revision=47
 head_seq=22
 ~~~
 
-重连后 thread_list 暴露差异，thread_get 恢复 timeline / metadata，再由 thread_seen 确认。
+重连后 thread_list 暴露差异，thread_get(after_seq, after_revision) 恢复新 entry、旧 entry 更新与 metadata，再由 thread_seen 确认。
 
-## 20. Memory 原子前置
+## 21. Memory 原子前置
 
 Thread post 以 Memory 作为内容原子，因此 Memory 输入契约调整为：
 
@@ -752,7 +778,7 @@ Thread post 与 standalone memory_put 复用同一个 transaction-safe Memory cr
 
 Task 对 Memory 的 live-reference 行为保持一致。
 
-## 21. 审计结论
+## 22. 审计结论
 
 ### 模型
 
@@ -764,7 +790,7 @@ seq / head_seq 提供可靠有序的信息流，Child Thread 同时覆盖回复�
 
 ### Thread 状态
 
-revision 是 Thread 共享状态的统一版本轴，覆盖新增内容、活引用变化、角色变化、状态变化和 Child 结构变化。
+revision 是 Thread 共享状态的统一版本轴，覆盖新增内容、活引用变化、角色变化、状态变化和 Child 结构变化；ThreadMemory.changed_revision 把共享 revision 映射到具体 timeline entry。
 
 ### 提醒
 
@@ -772,7 +798,7 @@ seen_seq 表达新内容消费位置；seen_revision 表达共享状态观测位
 
 ### 实时
 
-thread_changed 只承担低延迟唤醒。事实先持久化，客户端始终能依靠 revision + head_seq + timeline 恢复，因此实时链路和数据可靠性解耦。
+thread_changed 只承担低延迟唤醒。事实先持久化，客户端依靠 revision + head_seq + changed_revision 恢复，因此实时链路和数据可靠性解耦。
 
 ### 活引用
 
