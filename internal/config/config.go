@@ -176,6 +176,10 @@ func defaultRateLimits() map[string]RateLimitConfig {
 		"push":             {Window: 3600, Limit: 60, Enabled: &t},
 		"task_submit":      {Window: 60, Limit: 120, Enabled: &t},
 		"task_create":      {Window: 3600, Limit: 20, Enabled: &t},
+		"thread_create":    {Window: 3600, Limit: 60, Enabled: &t},
+		"thread_invite":    {Window: 3600, Limit: 120, Enabled: &t},
+		"thread_read":      {Window: 60, Limit: 600, Enabled: &t},
+		"thread_write":     {Window: 60, Limit: 240, Enabled: &t},
 		"payment_checkout": {Window: 3600, Limit: 20, Enabled: &t},
 	}
 }
