@@ -58,7 +58,7 @@ func threadErrCode(t *testing.T, err error) string {
 
 func TestThreadIsolationInviteJoinAndHandoff(t *testing.T) {
 	pool := threadTestPool(t)
-	ownerID, ownerName := threadSeedBot(t, pool, "thowner")
+	ownerID, _ := threadSeedBot(t, pool, "thowner")
 	memberID, memberName := threadSeedBot(t, pool, "thmember")
 	outsiderID, outsiderName := threadSeedBot(t, pool, "thoutside")
 	ctx := context.Background()
@@ -114,8 +114,13 @@ func TestThreadIsolationInviteJoinAndHandoff(t *testing.T) {
 		t.Fatalf("join retry: %v", err)
 	}
 
-	if _, err := HandoffThread(ctx, pool, ownerID, code, memberName, "Verify the first 20 media contacts."); err != nil {
+	if _, err := HandoffThread(ctx, pool, ownerID, code, ownerName, "Prepare the media plan."); err != nil {
 		t.Fatalf("owner handoff: %v", err)
+	}
+	// The member is authorized by membership, not by the baton. They may
+	// intervene and set the next step even while the owner is next_actor.
+	if _, err := HandoffThread(ctx, pool, memberID, code, memberName, "Verify the first 20 media contacts."); err != nil {
+		t.Fatalf("member intervention: %v", err)
 	}
 	memberView, err := GetThread(ctx, pool, memberID, code)
 	if err != nil {
@@ -125,14 +130,8 @@ func TestThreadIsolationInviteJoinAndHandoff(t *testing.T) {
 	if next["bot_name"] != memberName || memberView["next_action"] != "Verify the first 20 media contacts." {
 		t.Fatalf("handoff state: %#v", memberView)
 	}
-
-	// The current baton holder can hand the thread onward.
-	if _, err := HandoffThread(ctx, pool, memberID, code, ownerName, "Review the verified list."); err != nil {
-		t.Fatalf("member handoff: %v", err)
-	}
-	// A participant who does not hold the baton cannot redirect it.
-	if _, err := HandoffThread(ctx, pool, memberID, code, memberName, "Take it back."); threadErrCode(t, err) != "THREAD_NOT_CURRENT_ACTOR" {
-		t.Fatalf("non-current handoff: %v", err)
+	if _, err := HandoffThread(ctx, pool, outsiderID, code, memberName, "Intrude."); threadErrCode(t, err) != "THREAD_NOT_FOUND" {
+		t.Fatalf("outsider handoff: %v", err)
 	}
 }
 
@@ -188,7 +187,7 @@ func TestThreadInviteReplacementAndRemovalInvalidateOldTokens(t *testing.T) {
 	}
 }
 
-func TestThreadMessagesDeliveriesReviewAndClose(t *testing.T) {
+func TestThreadMessagesDeliveriesAndClose(t *testing.T) {
 	pool := threadTestPool(t)
 	ownerID, _ := threadSeedBot(t, pool, "thowner")
 	memberID, memberName := threadSeedBot(t, pool, "thmember")
@@ -210,31 +209,23 @@ func TestThreadMessagesDeliveriesReviewAndClose(t *testing.T) {
 	if _, err := AddThreadMessage(ctx, pool, memberID, code, "I have started the requested review."); err != nil {
 		t.Fatalf("message: %v", err)
 	}
-	d1, err := SubmitThreadDelivery(ctx, pool, memberID, code, "First pass", "The first delivery body.", nil)
+	if _, err := SubmitThreadDelivery(ctx, pool, memberID, code, "First pass", "The first delivery body."); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	if _, err := SubmitThreadDelivery(ctx, pool, memberID, code, "Second pass", "A later formal delivery."); err != nil {
+		t.Fatalf("second delivery: %v", err)
+	}
+	got, err := GetThread(ctx, pool, ownerID, code)
 	if err != nil {
-		t.Fatalf("deliver: %v", err)
+		t.Fatalf("get thread: %v", err)
 	}
-	d1ID := d1["delivery_id"].(int64)
-	if _, err := ReviewThreadDelivery(ctx, pool, ownerID, code, d1ID, "rejected", "Add source URLs."); err != nil {
-		t.Fatalf("reject: %v", err)
-	}
-
-	d2, err := SubmitThreadDelivery(ctx, pool, memberID, code, "Revised pass", "The revised delivery includes source URLs.", &d1ID)
-	if err != nil {
-		t.Fatalf("revise: %v", err)
-	}
-	d2ID := d2["delivery_id"].(int64)
-	if _, err := ReviewThreadDelivery(ctx, pool, ownerID, code, d2ID, "accepted", "Accepted."); err != nil {
-		t.Fatalf("accept: %v", err)
-	}
-	if _, err := ReviewThreadDelivery(ctx, pool, ownerID, code, d2ID, "rejected", "change mind"); threadErrCode(t, err) != "THREAD_DELIVERY_FINAL" {
-		t.Fatalf("second review: %v", err)
+	if len(got["deliveries"].([]map[string]interface{})) != 2 {
+		t.Fatalf("deliveries: %#v", got["deliveries"])
 	}
 
 	if _, err := CloseThread(ctx, pool, ownerID, code); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	// Membership survives closing so the completed collaboration remains readable.
 	if got, err := GetThread(ctx, pool, memberID, code); err != nil || got["status"] != "closed" {
 		t.Fatalf("closed read: got=%#v err=%v", got, err)
 	}
@@ -295,5 +286,4 @@ func TestThreadUpdatesResumeFromCursor(t *testing.T) {
 	if len(again["events"].([]map[string]interface{})) != 0 {
 		t.Fatalf("events replayed: %#v", again)
 	}
-	_ = ownerName
 }
