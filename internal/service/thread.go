@@ -197,7 +197,7 @@ func GetThreadUpdates(ctx context.Context, q pg.Querier, actorID int64, code str
 	events := make([]map[string]interface{}, 0, len(rows))
 	nextCursor := cursor
 	for i := range rows {
-		events = append(events, eventView(&rows[i]))
+		events = append(events, threadEventView(&rows[i]))
 		nextCursor = rows[i].ID
 	}
 	currentCursor, err := repository.MaxThreadEventID(ctx, q, t.ID)
@@ -235,7 +235,7 @@ func InviteThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 		return nil, threadInternal("invite participant")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, _, err := requireThreadOwner(ctx, tx, actorID, code)
+	t, _, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +247,10 @@ func InviteThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 	} else if existing != nil {
 		return nil, apperr.New(409, "THREAD_MEMBER_EXISTS", "participant is already in the thread")
 	}
+	replacedInvites, err := repository.RevokeOutstandingThreadInvitesForInvitee(ctx, tx, t.ID, participant)
+	if err != nil {
+		return nil, threadInternal("invite participant")
+	}
 
 	token, tokenHash, err := threaddomain.NewInviteToken()
 	if err != nil {
@@ -257,9 +261,13 @@ func InviteThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 	if err != nil {
 		return nil, threadInternal("invite participant")
 	}
-	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "participant.invited", map[string]interface{}{
+	inviteEvent := map[string]interface{}{
 		"invite_id": inviteID, "participant": participant, "expires_at": expiresAt.UTC().Format(time.RFC3339),
-	}); err != nil {
+	}
+	if replacedInvites > 0 {
+		inviteEvent["replaced_invites"] = replacedInvites
+	}
+	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "participant.invited", inviteEvent); err != nil {
 		return nil, threadInternal("invite participant")
 	}
 	if err := repository.TouchThread(ctx, tx, t.ID); err != nil {
@@ -289,7 +297,7 @@ func RevokeThreadInvite(ctx context.Context, pool *pg.Pool, actorID int64, code 
 		return nil, threadInternal("revoke invite")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, _, err := requireThreadOwner(ctx, tx, actorID, code)
+	t, _, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -327,44 +335,67 @@ func JoinThread(ctx context.Context, pool *pg.Pool, actorID int64, actorName, to
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
+	// First lookup is intentionally unlocked: it reveals only the internal
+	// thread id needed to acquire the canonical mutation lock. After that
+	// we re-read the invite FOR UPDATE and validate every field again.
+	probe, err := repository.FindThreadInviteByHash(ctx, tx, tokenHash)
+	if err != nil {
+		return nil, threadInternal("join thread")
+	}
+	if probe == nil {
+		return nil, invalidThreadInvite()
+	}
+	t, err := repository.FindThreadByIDForUpdate(ctx, tx, probe.ThreadID)
+	if err != nil {
+		return nil, threadInternal("join thread")
+	}
+	if t == nil {
+		return nil, invalidThreadInvite()
+	}
 	invite, err := repository.FindThreadInviteByHashForUpdate(ctx, tx, tokenHash)
 	if err != nil {
 		return nil, threadInternal("join thread")
 	}
-	if invite == nil || invite.RevokedAt != nil || time.Now().UTC().After(invite.ExpiresAt) ||
-		invite.ThreadStatus != threaddomain.StatusActive {
+	if invite == nil || invite.ThreadID != t.ID || invite.InviteeName == nil || *invite.InviteeName != actorName {
 		return nil, invalidThreadInvite()
 	}
-	if invite.InviteeName == nil || *invite.InviteeName != actorName {
-		return nil, invalidThreadInvite()
-	}
+
+	// Retrying a consumed invite is idempotent only while the participant
+	// is still active. Removal by the owner must permanently defeat old
+	// invite tokens.
 	if invite.AcceptedAt != nil {
-		if invite.AcceptedByID != nil && *invite.AcceptedByID == actorID {
-			t, err := findThreadByIDCode(ctx, tx, invite.ThreadID)
-			if err != nil {
-				return nil, err
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return nil, threadInternal("join thread")
-			}
-			return GetThread(ctx, pool, actorID, t.Code)
+		if invite.AcceptedByID == nil || *invite.AcceptedByID != actorID {
+			return nil, invalidThreadInvite()
 		}
+		member, err := repository.FindActiveThreadMembership(ctx, tx, t.ID, actorID)
+		if err != nil {
+			return nil, threadInternal("join thread")
+		}
+		if member == nil {
+			return nil, invalidThreadInvite()
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, threadInternal("join thread")
+		}
+		return GetThread(ctx, pool, actorID, t.Code)
+	}
+
+	if invite.RevokedAt != nil || time.Now().UTC().After(invite.ExpiresAt) || t.Status != threaddomain.StatusActive {
 		return nil, invalidThreadInvite()
 	}
-	if err := repository.UpsertThreadMember(ctx, tx, invite.ThreadID, actorID); err != nil {
+	if err := repository.UpsertThreadMember(ctx, tx, t.ID, actorID); err != nil {
 		return nil, threadInternal("join thread")
 	}
 	if err := repository.MarkThreadInviteAccepted(ctx, tx, invite.ID, actorID); err != nil {
 		return nil, threadInternal("join thread")
 	}
-	t, err := findThreadByIDCode(ctx, tx, invite.ThreadID)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := insertThreadEvent(ctx, tx, invite.ThreadID, &actorID, "participant.joined", map[string]interface{}{"participant": actorName}); err != nil {
+	if _, err := repository.RevokeOutstandingThreadInvitesForInvitee(ctx, tx, t.ID, actorName); err != nil {
 		return nil, threadInternal("join thread")
 	}
-	if err := repository.TouchThread(ctx, tx, invite.ThreadID); err != nil {
+	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "participant.joined", map[string]interface{}{"participant": actorName}); err != nil {
+		return nil, threadInternal("join thread")
+	}
+	if err := repository.TouchThread(ctx, tx, t.ID); err != nil {
 		return nil, threadInternal("join thread")
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -384,7 +415,7 @@ func RemoveThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 		return nil, threadInternal("remove participant")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, _, err := requireThreadOwner(ctx, tx, actorID, code)
+	t, _, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -405,12 +436,20 @@ func RemoveThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 	if err != nil || !changed {
 		return nil, threadInternal("remove participant")
 	}
+	revokedInvites, err := repository.RevokeOutstandingThreadInvitesForInvitee(ctx, tx, t.ID, participant)
+	if err != nil {
+		return nil, threadInternal("remove participant")
+	}
 	if t.NextActorID != nil && *t.NextActorID == target.BotID {
 		if err := repository.ClearThreadHandoffIfActor(ctx, tx, t.ID, target.BotID); err != nil {
 			return nil, threadInternal("remove participant")
 		}
 	}
-	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "participant.removed", map[string]interface{}{"participant": participant}); err != nil {
+	removeEvent := map[string]interface{}{"participant": participant}
+	if revokedInvites > 0 {
+		removeEvent["revoked_invites"] = revokedInvites
+	}
+	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "participant.removed", removeEvent); err != nil {
 		return nil, threadInternal("remove participant")
 	}
 	if err := repository.TouchThread(ctx, tx, t.ID); err != nil {
@@ -439,7 +478,7 @@ func AddThreadMessage(ctx context.Context, pool *pg.Pool, actorID int64, code, b
 		return nil, threadInternal("add message")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, member, err := requireThreadMember(ctx, tx, actorID, code)
+	t, member, err := requireThreadMemberForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +530,7 @@ func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, cod
 		return nil, threadInternal("submit delivery")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, member, err := requireThreadMember(ctx, tx, actorID, code)
+	t, member, err := requireThreadMemberForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +554,8 @@ func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, cod
 		return nil, threadInternal("submit delivery")
 	}
 	payload := map[string]interface{}{
-		"delivery_id": id, "author": member.BotName, "title": title, "status": threaddomain.DeliverySubmitted,
+		"delivery_id": id, "author": member.BotName, "title": title, "body": body,
+		"status": threaddomain.DeliverySubmitted,
 	}
 	if revisesID != nil {
 		payload["revises"] = *revisesID
@@ -561,7 +601,7 @@ func ReviewThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, cod
 		return nil, threadInternal("review delivery")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, owner, err := requireThreadOwner(ctx, tx, actorID, code)
+	t, owner, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +658,7 @@ func HandoffThread(ctx context.Context, pool *pg.Pool, actorID int64, code, part
 		return nil, threadInternal("handoff thread")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, member, err := requireThreadMember(ctx, tx, actorID, code)
+	t, member, err := requireThreadMemberForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +700,7 @@ func CloseThread(ctx context.Context, pool *pg.Pool, actorID int64, code string)
 		return nil, threadInternal("close thread")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
-	t, _, err := requireThreadOwner(ctx, tx, actorID, code)
+	t, _, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -684,8 +724,24 @@ func CloseThread(ctx context.Context, pool *pg.Pool, actorID int64, code string)
 }
 
 func requireThreadMember(ctx context.Context, q pg.Querier, actorID int64, code string) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
+	return requireThreadMemberMode(ctx, q, actorID, code, false)
+}
+
+func requireThreadMemberForUpdate(ctx context.Context, q pg.Querier, actorID int64, code string) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
+	return requireThreadMemberMode(ctx, q, actorID, code, true)
+}
+
+func requireThreadMemberMode(ctx context.Context, q pg.Querier, actorID int64, code string, forUpdate bool) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
 	code = strings.ToLower(strings.TrimSpace(code))
-	t, err := repository.FindThreadByCode(ctx, q, code)
+	var (
+		t   *repository.ThreadRow
+		err error
+	)
+	if forUpdate {
+		t, err = repository.FindThreadByCodeForUpdate(ctx, q, code)
+	} else {
+		t, err = repository.FindThreadByCode(ctx, q, code)
+	}
 	if err != nil {
 		return nil, nil, threadInternal("read thread")
 	}
@@ -705,7 +761,24 @@ func requireThreadMember(ctx context.Context, q pg.Querier, actorID int64, code 
 }
 
 func requireThreadOwner(ctx context.Context, q pg.Querier, actorID int64, code string) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
-	t, member, err := requireThreadMember(ctx, q, actorID, code)
+	return requireThreadOwnerMode(ctx, q, actorID, code, false)
+}
+
+func requireThreadOwnerForUpdate(ctx context.Context, q pg.Querier, actorID int64, code string) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
+	return requireThreadOwnerMode(ctx, q, actorID, code, true)
+}
+
+func requireThreadOwnerMode(ctx context.Context, q pg.Querier, actorID int64, code string, forUpdate bool) (*repository.ThreadRow, *repository.ThreadMemberRow, error) {
+	var (
+		t      *repository.ThreadRow
+		member *repository.ThreadMemberRow
+		err    error
+	)
+	if forUpdate {
+		t, member, err = requireThreadMemberForUpdate(ctx, q, actorID, code)
+	} else {
+		t, member, err = requireThreadMember(ctx, q, actorID, code)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -713,21 +786,6 @@ func requireThreadOwner(ctx context.Context, q pg.Querier, actorID int64, code s
 		return nil, nil, apperr.New(403, "THREAD_NOT_OWNER", "only the thread owner can perform this action")
 	}
 	return t, member, nil
-}
-
-func findThreadByIDCode(ctx context.Context, q pg.Querier, threadID int64) (*repository.ThreadRow, error) {
-	// Invite rows intentionally do not expose the thread code. Resolve
-	// it only after a valid, target-matching invite has authenticated
-	// the caller to the thread.
-	var code string
-	if err := q.QueryRow(ctx, `SELECT code FROM tb_thread WHERE id = $1`, threadID).Scan(&code); err != nil {
-		return nil, threadInternal("join thread")
-	}
-	t, err := repository.FindThreadByCode(ctx, q, code)
-	if err != nil || t == nil {
-		return nil, threadInternal("join thread")
-	}
-	return t, nil
 }
 
 func insertThreadEvent(ctx context.Context, q pg.Querier, threadID int64, actorID *int64, eventType string, payload map[string]interface{}) (int64, error) {
@@ -800,7 +858,7 @@ func deliveryViews(rows []repository.ThreadDeliveryRow) []map[string]interface{}
 	return out
 }
 
-func eventView(r *repository.ThreadEventRow) map[string]interface{} {
+func threadEventView(r *repository.ThreadEventRow) map[string]interface{} {
 	var payload interface{} = map[string]interface{}{}
 	if r.Payload != "" {
 		var decoded interface{}
