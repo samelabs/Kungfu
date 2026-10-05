@@ -18,10 +18,6 @@ const (
 	MemberActive  = "active"
 	MemberRemoved = "removed"
 
-	DeliverySubmitted = "submitted"
-	DeliveryAccepted  = "accepted"
-	DeliveryRejected  = "rejected"
-
 	InvitePrefix = "kf_thread_inv_"
 )
 
