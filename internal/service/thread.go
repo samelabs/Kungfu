@@ -7,7 +7,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"kungfu.md/internal/auth"
 	apperr "kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
@@ -221,8 +220,8 @@ func GetThreadUpdates(ctx context.Context, q pg.Querier, actorID int64, code str
 
 func InviteThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, code, participant string, expiresInHours int) (map[string]interface{}, error) {
 	participant = strings.TrimSpace(participant)
-	if valid, _ := auth.ValidateBotName(participant); !valid {
-		return nil, validationError("participant", "participant must be a valid Kungfu ID")
+	if !validThreadParticipantName(participant) {
+		return nil, validationError("participant", "participant must be 6-32 characters using only letters, digits, _ . -")
 	}
 	if expiresInHours == 0 {
 		expiresInHours = 168
@@ -821,6 +820,21 @@ func timePtrRFC3339(t *time.Time) interface{} {
 		return nil
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+func validThreadParticipantName(name string) bool {
+	if len(name) < 6 || len(name) > 32 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
+			(b >= '0' && b <= '9') || b == '_' || b == '.' || b == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validationError(field, message string) error {
