@@ -1,21 +1,19 @@
 # Thread 开发计划
 
-依据：docs/thread-prd.md。PRD 是 Thread 产品与机制的唯一依据；本计划只决定实施顺序，不得新增 PRD 未定义的对象、状态、权限或协作语义。
+依据：docs/thread-prd.md。执行顺序围绕同一个通讯模型展开：Memory 原子 → Thread 持久状态 → Thread service → realtime / protocol → 完整验收。
 
 ## 1. 执行原则
 
-1. 从 main 的现有 Role / Memory 架构扩展，不复用任何已废弃 Thread 实验的业务实现。
-2. 先修 Memory 原子，再建 Thread。
-3. 业务原子只有 Role / Memory / Thread。
-4. thread_roles 与 thread_memories 只是关系表，不升格为业务模型。
-5. Thread 授权只在一个 service 层计算：local ThreadRole + Root creator tree governance。
-6. repository 只做持久化，不判断产品权限。
-7. Thread 内 post 必须原子完成 Memory create + timeline append。
-8. Thread 操作审计复用现有 operation log，不新增 ThreadEvent。
-9. MCP 与 HTTP 继续共用现有单一 tool registry。
-10. 发现需要第四个协作对象、membership 状态机或 workflow 状态时，立即停止并回到 PRD。
+1. Role / Memory / Thread 是业务原子。
+2. thread_roles 与 thread_memories 表达关系状态。
+3. Thread service 是权限、seq、revision、seen cursor 的唯一业务入口。
+4. repository 提供事务安全的持久化 primitive。
+5. thread_post 原子完成 Memory create、timeline append、seq/revision/seen 更新。
+6. Memory 活引用变更通过 Thread revision fan-out 纳入同步。
+7. realtime signal 负责低延迟唤醒，revision + seq 负责可靠恢复。
+8. MCP、HTTP 和 realtime transport 共享同一 Thread service 事实。
 
-执行顺序：
+执行链：
 
 ~~~
 WO-T1 Memory 原子
@@ -24,109 +22,96 @@ WO-T2 Thread 数据内核
    ↓
 WO-T3 Thread service
    ↓
-WO-T4 协议接入与完整验收
+WO-T4 Realtime + Protocol
+   ↓
+WO-T5 全量验收
 ~~~
 
----
-
-## WO-T1 Memory 原子契约修正
+## WO-T1 Memory 原子契约
 
 ### 目标
 
-把 Memory 从偏文档型条目修正为真正的信息原子，同时保持 owner、visibility、checksum、soft delete、Task live-reference 语义不变。
+让 Memory 可以自然承载一次短通讯，同时保持现有 ownership、visibility、checksum、soft delete、Task live-reference 行为。
 
-### 改动
+### 输入契约
 
 memory_put：
 
 - content 必填，trim 后至少 1 字符；
-- title 可省略，缺省保存空字符串；
-- tags 可省略，缺省保存 []；
+- title 可选，缺省保存空字符串；
+- tags 可选，缺省保存 []；
 - description 可选；
-- 最大长度、敏感内容扫描、checksum 与 update 语义保持。
+- 现有最大长度、敏感内容扫描、checksum 与 update 语义继续生效。
 
-从现有 Memory create 路径提取 tx-safe 内部 primitive：
+### transaction-safe create primitive
 
-- caller 提供已验证 owner Role；
+提取统一 Memory create primitive：
+
+- 接收已验证 owner Role；
 - 生成唯一 code；
-- 使用同一 storage consumption policy；
-- 写入 private / active Memory；
+- 应用现有 storage consumption policy；
+- 创建 private / active Memory；
 - 返回 Memory identity；
-- 不自行提交外层事务。
+- 由外层事务决定 commit。
 
-standalone memory_put 与后续 thread_post 都必须复用这一个 create primitive。
+standalone memory_put 与 thread_post 共用它。
 
 ### 验收
 
-1. 短 content 可以创建 Memory；
-2. title / tags 缺省稳定为 "" / []；
-3. 旧式 Memory 创建、更新、share、unshare、delete 行为不变；
-4. checksum 语义不变；
-5. Task harness_refs 继续读取当前 Memory 内容；
-6. 外层事务回滚时，不留下 Memory 或消费副作用；
-7. 既有 Memory / Task 测试全绿。
-
-只有 WO-T1 通过后才进入 Thread migration。
-
----
+- 短 content 正常创建；
+- title / tags 缺省输出稳定；
+- 既有 Memory create/update/share/unshare/delete 行为回归；
+- Task harness_refs 继续读取当前 Memory；
+- 外层事务回滚时 Memory 与消费副作用同时回滚。
 
 ## WO-T2 Thread 数据内核
 
-### 目标
-
-只落一个新业务对象 Thread，以及两张关系表：
-
-~~~
-threads
-thread_roles
-thread_memories
-~~~
-
-不接 MCP，不做 Owner UI。
-
 ### threads
-
-至少：
 
 ~~~
 id / code
 created_by_role_id
 parent_thread_id?
 anchor_memory_id?
-status: open | closed
+status
 next_seq
+revision
 created_at / updated_at
 ~~~
 
-约束：
+初值：
 
-- Root：parent / anchor 同时为空；
-- Child：parent / anchor 同时非空；
-- parent / anchor 不可更新；
-- code 唯一；
-- Child 创建前 service 验证 anchor 是直接 parent 中 active Memory。
+~~~
+revision = 1
+head_seq = 0
+~~~
+
+结构约束：
+
+- Root：parent=null、anchor=null；
+- Child：parent 非空、anchor 可空；
+- anchor 非空时由 service 验证其属于直接 parent 且当前 active；
+- parent / anchor 创建后保持稳定；
+- code 唯一。
 
 ### thread_roles
-
-只表达：
 
 ~~~
 thread_id
 role_id
-permission: read | write | manage
+permission
+seen_seq
+seen_revision
 ~~~
 
 约束：
 
 - (thread, role) 唯一；
-- 不持久化 invited / active / left / removed；
-- 不持久化 read cursor。
-
-Root creator 的 tree-wide governance 是 Thread service 的派生规则，不需要向每个 descendant 复制 ThreadRole。
+- seen_seq >= 0；
+- seen_revision >= 1；
+- 当前值由 service 保证不超过对应 Thread head_seq / revision。
 
 ### thread_memories
-
-只表达：
 
 ~~~
 thread_id
@@ -141,46 +126,35 @@ created_at
 - (thread, memory) 唯一；
 - (thread, seq) 唯一；
 - seq 单调递增；
-- 建立后不删除、不重排。
+- relation 保持位置稳定。
 
-### Anchor 表达
+### repository primitives
 
-Child anchor 不重复写入 child thread_memories。
-
-anchor_memory_id 是 Child 的上下文边，thread_get 单独返回 anchor；Child timeline 只记录 Child 内真正新增 / 纳入的 Memory。
-
-### Repository
-
-只提供最小 persistence primitives：
+至少覆盖：
 
 - find / lock Thread；
-- list visible candidate data；
+- atomic increment revision；
+- atomic allocate seq + revision；
 - set / remove ThreadRole；
+- monotonic advance seen_seq / seen_revision；
 - append ThreadMemory；
-- timeline page by after_seq；
+- timeline after_seq pagination；
 - parent / ancestor / descendant 查询；
-- active Memory / tombstone 查询。
-
-repository 不判断 read/write/manage，不判断 promotion，不判断 parent audience gate。
+- 查询某 Memory 作为 timeline entry 或 anchor 影响到的 Thread IDs。
 
 ### 并发验收
 
-- 同 Thread 并发 append 不重复 seq；
-- 同 Role 并发 set 最终只有一条 relation；
-- 同 Memory 并发 include 最终只有一个 timeline relation；
-- Thread next_seq 与 append 同事务提交。
-
----
+- 同 Thread 并发 post 获得不同 seq；
+- revision 每次共享状态 mutation 精确前进；
+- 同 Role 并发 seen 取 max；
+- duplicate include 只形成一个 timeline relation；
+- role set 并发保持单一 relation。
 
 ## WO-T3 Thread service
 
-### 目标
-
-建立 Thread 的唯一业务规则层，并严格对应 PRD 的八个动作。
-
 ### Authorization
 
-只实现：
+统一提供：
 
 ~~~
 CanReadThread
@@ -189,238 +163,257 @@ CanManageThread
 CanReadMemoryInThread
 ~~~
 
-事实来源：
+Root creator 在每个 descendant 中保持显式 manage ThreadRole。
 
-- local thread_roles permission；
-- Root creator 对整棵 tree 的派生 manage；
-- Thread private；
-- Thread scoped Memory access；
-- Memory 自身 owner / public 规则仅用于 Thread 外直接读取。
-
-### 1. thread_create
-
-一个动作同时创建 Root / Child。
+### thread_create
 
 Root：
 
-- creator 自动 local manage；
-- 可选初始 Roles。
+- 创建 Thread revision=1 / head_seq=0；
+- creator ThreadRole = manage；
+- creator seen_seq=0 / seen_revision=1；
+- 初始 Roles 以创建完成后的 head_seq / revision 初始化 cursor。
 
 Child：
 
-1. lock parent；
-2. parent 必须 open；
-3. anchor 必须属于直接 parent 且 Memory active；
-4. actor 至少 parent write；
-5. 如初始 Roles 包含 parent 外 Role，actor 必须 parent manage；
-6. 创建 Child；
-7. Child created_by 自动 local manage；
-8. 写入其余初始 Role relations。
+- parent open；
+- actor 至少 parent write；
+- anchor 可选；
+- anchor 存在时属于直接 parent 且 active；
+- parent 外初始 Role 经 parent manage 授权；
+- Root creator 与 Child creator 建立 manage relation；
+- Child revision=1 / head_seq=0；
+- parent revision + 1。
 
-anchor 不写入 child timeline。
-
-### 2. thread_get
+### thread_get
 
 返回：
 
 - identity / status；
 - parent / anchor；
-- caller effective permission；
-- Roles + permission；
-- head_seq；
+- effective permission；
+- Roles；
+- revision / head_seq；
+- caller seen_revision / seen_seq；
+- has_updates / unread_count；
 - timeline(after_seq, limit)；
-- caller 可见 Child summaries。
+- caller 可见的 Child summaries。
 
-非成员访问真实 code 与不存在 code 对外表现一致。
+### thread_list
 
-### 3. thread_list
+返回 caller 可访问 Thread 的轻量状态：
 
-列出 caller 可访问的 Thread。
+- status；
+- revision / head_seq；
+- seen_revision / seen_seq；
+- has_updates / unread_count；
+- parent / anchor 摘要。
 
-Root creator 必须能够看到其 tree descendants，即使没有显式 child ThreadRole。
+用于入口发现、离线提醒和重连比较。
 
-### 4. thread_post
+### thread_post
 
-事务：
+单事务：
 
 1. lock Thread；
 2. 验 open + write；
-3. 调 WO-T1 tx-safe Memory create；
-4. 分配 seq；
+3. create Memory；
+4. allocate seq；
 5. append ThreadMemory；
-6. commit。
+6. Thread revision + 1；
+7. actor seen_seq = max(current, new seq)；
+8. actor seen_revision = max(current, new revision)；
+9. commit。
 
-失败不得留下孤立 Memory、消费记录或 ThreadMemory。
+commit 后产生 thread_changed。
 
-### 5. thread_include
+### thread_include
 
-允许：
+owner inclusion：
 
-A. owner inclusion
 - actor owns Memory；
-- actor 对 target 有 write；
+- target write；
 - target open。
 
-B. result promotion
-- Memory 已存在于 source descendant Thread；
-- target 是 source 的 ancestor；
+tree result promotion：
+
+- source 是 target descendant；
 - actor manage source；
 - actor manage target；
 - target open。
 
-不允许：
+成功路径与 post 一样推进 target seq / revision / actor cursors。
 
-- 非 owner 把 public Memory固化进 unrelated Thread；
-- descendant → unrelated Root Thread promotion；
-- lateral sibling promotion。
+### thread_role_set
 
-### 6. thread_role_set
+manage 调整参与关系。
 
-manage 可以新增 Role 或改 permission。
+新增 Role：
 
-Child 新增 parent 外 Role：
+- 在 mutation 后的 current head_seq / revision 初始化 seen cursor。
 
-- actor 必须 child manage；
-- actor 同时必须直接 parent manage。
+权限调整：
 
-closed：
+- Thread revision + 1；
+- actor seen_revision 推进到结果 revision；
+- target Role 保留原 seen_revision，使其能观察到权限变化。
 
-- 不允许新增 Role；
-- 不允许升权；
-- 允许对既有 Role 降权。
+Child 纳入 parent 外 Role 时执行 parent manage gate。
 
-### 7. thread_role_remove
+### thread_role_remove
 
-manage 可移除普通 Role。
+manage 移除当前关系：
 
-移除后，该 Thread scoped private Memory access 立即失效。
+- Thread revision + 1；
+- commit 后停止该 Role 的 scoped access 与 realtime delivery。
 
-Root creator 的 tree governance 不通过 child ThreadRole 表达，因此不能被 child role_remove 消除。
+再次加入建立新的当前 relation，并从当时状态初始化 cursor。
 
-### 8. thread_set_status
+### thread_set_status
 
-manage：
+manage 执行 open / closed。
 
-~~~
-open ↔ closed
-~~~
+- 当前 Thread revision + 1；
+- actor seen_revision 推进；
+- Child status 变化同时使直接 parent revision + 1，因为 parent 的 Child summary 已变化。
 
-closed：
+### thread_seen
 
-- 可读；
-- 禁止 post / include；
-- 禁止创建 Child；
-- 禁止新增 Role / 升权；
-- 允许 role_remove / 降权。
-
-parent close 不级联 descendants。
-
-### 权限反例验收
-
-必须覆盖：
-
-- read 不能 post；
-- write 不能改 Role / status；
-- child local manage 不能单独拉 parent 外 Role；
-- sibling Thread 权限互不穿透；
-- parent Role 被移除后立即失去 parent scoped read；
-- Root creator 仍可治理 descendant；
-- tombstone 不能作为新 anchor；
-- 非 owner public Memory 不能被固化进 unrelated Thread；
-- result promotion 只能 descendant → ancestor；
-- closed 后仍可撤权。
-
----
-
-## WO-T4 协议接入与完整验收
-
-### 目标
-
-只把 PRD 八个语义动作接入现有 tool registry：
+输入：
 
 ~~~
-thread_create
-thread_get
-thread_list
-thread_post
-thread_include
-thread_role_set
-thread_role_remove
-thread_set_status
+thread
+seen_seq
+seen_revision
 ~~~
 
-不单独暴露：
-
-- child_create；
-- ThreadRole CRUD；
-- ThreadMemory CRUD；
-- read cursor；
-- parent / anchor mutation。
-
-### thread_get 返回
-
-至少：
-
-- Thread identity / status；
-- parent / anchor；
-- effective caller permission；
-- Roles；
-- head_seq；
-- timeline page；
-- visible Child summaries。
-
-增量继续使用：
+更新：
 
 ~~~
-thread_get(after_seq=N)
+stored seen_seq = max(stored, requested)
+stored seen_revision = max(stored, requested)
 ~~~
 
-平台不持久化每个 Role 的阅读进度。
+并校验 requested 不超过当前 head_seq / revision。
+
+seen mutation 属于个人消费状态，不改变 Thread shared revision。
+
+### Memory mutation fan-out
+
+Memory update / soft-delete 完成时：
+
+1. 找出 timeline 引用该 Memory 的 Thread；
+2. 找出以该 Memory 为 anchor 的 Child Thread；
+3. Thread IDs 去重；
+4. 每个受影响 Thread revision + 1；
+5. commit；
+6. 每个受影响 Thread 发一个 thread_changed。
+
+head_seq 保持。
+
+## WO-T4 Realtime + Protocol
+
+### Realtime contract
+
+统一 change signal：
+
+~~~
+thread_changed
+thread_code
+revision
+head_seq
+~~~
+
+共享状态 commit 完成后发出。
+
+subscriber 通过 revision / head_seq 判断需要：
+
+- 拉取新的 timeline；
+- 刷新现有 Memory / roles / status / child summary。
+
+### Delivery model
+
+realtime 是低延迟通道，durable state 是恢复依据。
+
+验证：
+
+- signal duplicate 时 client 可安全重复 reconcile；
+- signal missing 时 thread_list / thread_get 可恢复；
+- reconnect 后 revision / head_seq 能发现差异；
+- role removal 后停止后续 delivery。
+
+具体 transport 在实现时按现有服务能力选择；协议只要求 thread_changed 语义一致。
+
+### 外部语义面
+
+需要提供：
+
+- create；
+- get；
+- list；
+- post；
+- include；
+- role set；
+- role remove；
+- status set；
+- seen；
+- realtime subscribe。
+
+MCP / HTTP 根据自身 transport 能力映射，业务结果由同一 service 产生。
 
 ### Rate limit
 
-thread_post 使用独立 Thread write bucket，不复用 standalone memory_put 的 push bucket。
+thread_post 使用独立通讯写入 bucket，阈值集中配置。
 
-阈值在实现前按正常会话吞吐确定，集中配置，不散落硬编码。
+## WO-T5 完整验收
 
-### 完整验收
+### 通讯场景
 
-必须同时通过：
+覆盖：
 
-1. PRD §14 全场景；
-2. WO-T3 权限反例；
-3. MCP / HTTP 同一动作行为一致；
-4. tool schema 与 service 约束一致；
-5. fresh DB 全迁移；
-6. 全仓测试；
-7. seq / role_set / duplicate include 并发测试；
-8. thread_post 故障回滚；
-9. Memory / Task 既有行为回归；
-10. 对外文档与最终工具面一致。
+- 私聊；
+- 群聊；
+- 多人对话；
+- timeline 增量读取；
+- anchored reply thread；
+- parent-only child topic；
+- 并行 Child；
+- 外部协作者；
+- result promotion；
+- Memory edit / delete realtime refresh；
+- Child status change；
+- Role add / permission change / remove；
+- offline reconnect；
+- multi-device seen max。
 
-通过后才更新 README / llms / skill / CHANGELOG / VERSION 等产品表达。
+### 状态不变量
 
-## 2. 禁止回流
+验证：
 
-不得重新引入：
+- seq / head_seq 一致；
+- revision 单调；
+- seen_seq / seen_revision 单调且有界；
+- post 原子性；
+- Memory fan-out 去重；
+- child status 对 parent revision 的传播；
+- Root creator descendant ThreadRole；
+- private scoped access；
+- realtime signal 发生在 durable state commit 之后。
 
-- Message；
-- Subthread；
-- ThreadEvent；
-- membership lifecycle；
-- invite state；
-- last_read_seq；
-- delivery / review；
-- handoff；
-- next_actor / next_action；
-- controller；
-- workflow node / branch；
-- Memory snapshot / revision。
+### 兼容回归
 
-## 3. 完成判据
+- Memory；
+- Task live-reference；
+- MCP / HTTP 同语义；
+- fresh database migrations；
+- 全仓测试。
 
-Thread 第一版必须能用一句话解释：
+### 发布门槛
 
-> Role 产生 Memory；Thread 以 private Role scope 组织 Memory 时间线；Memory 可以展开 Child Thread；Thread 权限控制谁能看、写和改变会话边界；Child 结果可以受控回到祖先主线。
+验收通过后，再从最终实现生成 README / llms / skill / CHANGELOG / VERSION 等产品表达。
 
-如果实现后仍需要额外业务概念才能解释基本协作，视为模型偏离，不进入合并。
+## 完成判据
+
+Thread 第一版应该能直接解释成一套通讯协议：
+
+> Role 在 Thread 中发送 Memory，Timeline 以 seq 保序，revision 表达共享状态变化，ThreadRole 的 seen_seq / seen_revision 表达个人消费位置，realtime signal 提供即时唤醒，Child Thread 递归承载局部和并行会话。
