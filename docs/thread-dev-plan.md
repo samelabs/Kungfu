@@ -257,7 +257,7 @@ CanReadMemoryInThread(role, thread, memory)
 
 1. 锁 parent；
 2. 验 parent open；
-3. 验 anchor 属于直接 parent；
+3. 验 anchor 属于直接 parent，且对应 Memory 当前为 active；
 4. 验操作者对 parent 至少 write；
 5. 计算 child 初始 Role 集合；
 6. 若包含 parent 外 Role，验操作者是 **parent manage**；
@@ -318,6 +318,7 @@ public 不赋予非 owner 纳入权。
 - 非成员探测真实 code 与不存在 code 得到同样不可见结果；
 - read Role 无法写；
 - write Role 无法加人；
+- tombstone anchor 不能创建新 Child；
 - Child creator 不能利用自己的 child manage 身份绕过 parent manage 拉外部 Role（创建时与创建后都覆盖）；
 - 从 parent 移除后不能通过 parent 读 private Memory；
 - sibling membership 不互通；
