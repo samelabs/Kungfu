@@ -30,8 +30,7 @@ var publisherTools = map[string]bool{
 	"thread_create": true, "thread_list": true, "thread_get": true,
 	"thread_updates": true, "thread_invite": true, "thread_invite_revoke": true,
 	"thread_join": true, "thread_remove_member": true, "thread_message": true,
-	"thread_deliver": true, "thread_review_delivery": true,
-	"thread_handoff": true, "thread_close": true,
+	"thread_deliver": true, "thread_handoff": true, "thread_close": true,
 }
 
 func (s *Server) handleOwnerTool(w http.ResponseWriter, r *http.Request) {
