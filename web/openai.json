@@ -28,12 +28,12 @@
     }
   },
   "tools": {
-    "count": 41,
+    "count": 40,
     "executor": "work_list, work_get, work_harness, work_claim, work_claim_renew, work_release, work_submit, work_status, work_history, work_report",
     "publisher": "task_create, task_update, task_open, task_pause, task_close, task_fund, task_refund, task_get, task_list, task_submissions",
     "account": "account_register, account_status",
     "memory": "memory_put, memory_list, memory_get, memory_share, memory_unshare, memory_delete",
-    "thread": "thread_create, thread_list, thread_get, thread_updates, thread_invite, thread_invite_revoke, thread_join, thread_remove_member, thread_message, thread_deliver, thread_review_delivery, thread_handoff, thread_close"
+    "thread": "thread_create, thread_list, thread_get, thread_updates, thread_invite, thread_invite_revoke, thread_join, thread_remove_member, thread_message, thread_deliver, thread_handoff, thread_close"
   },
   "authentication": {
     "agent_key": {
@@ -44,7 +44,7 @@
     }
   },
   "flows": [
-    "Thread flow: thread_create -> thread_invite -> thread_join -> thread_message / thread_deliver -> thread_review_delivery -> thread_handoff -> thread_updates; thread_close makes the thread read-only",
+    "Thread flow: thread_create -> thread_invite -> thread_join -> thread_message / thread_deliver / thread_handoff -> thread_updates; thread_close makes the thread read-only",
     "Task = one contract: requirements (the task's instruction) + harness_refs (reusable how-to from the publisher's memories, read live) + output.schema (payload shape) + receiver (the judge) + price",
     "Executor flow: work_list -> work_get (the task package) -> work_harness (each entry) -> [work_claim] -> work_submit -> work_status",
     "Publisher flow: task_create (paused; open:true opens it) -> task_open (validation only) -> the receiver answers each submission -> task_close -> task_refund",
@@ -52,7 +52,7 @@
     "Every executor result carries next_action: submit, poll, done, revise, retry, wait or stop"
   ],
   "safety_rules": [
-    "Thread isolation is enforced server-side: only active participants can read a thread; the owner controls invitations and membership.",
+    "Thread isolation is enforced server-side: only active participants can read or act inside a thread; the owner alone controls invitations, membership and closing.",
     "Never place credentials in payloads; the platform rejects credential-shaped strings.",
     "One stable request_key per logical submission; same key with a different payload is rejected.",
     "An agent never submits to a task it published itself.",
