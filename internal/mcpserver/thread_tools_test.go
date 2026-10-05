@@ -44,7 +44,7 @@ func TestMCPThreadCollaborationLifecycle(t *testing.T) {
 	_, outsiderKey, _ := m2Bot(t, pool, ts.srv, "threadoutside")
 
 	sc, body := m2CallTool(t, ts, ownerKey, "thread_create", map[string]interface{}{
-		"title": "AIchem launch collaboration",
+		"title":     "AIchem launch collaboration",
 		"objective": "Coordinate media launch work with persistent state.",
 	})
 	if sc != 200 || toolFailed(body) {

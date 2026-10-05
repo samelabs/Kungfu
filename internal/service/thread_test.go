@@ -64,8 +64,8 @@ func TestThreadIsolationInviteJoinAndHandoff(t *testing.T) {
 	ctx := context.Background()
 
 	view, err := CreateThread(ctx, pool, ownerID, ThreadCreateInput{
-		Title: "AIchem launch",
-		Objective: "Coordinate launch outreach as one persistent collaboration thread.",
+		Title:      "AIchem launch",
+		Objective:  "Coordinate launch outreach as one persistent collaboration thread.",
 		NextAction: "Invite the research agent.",
 	})
 	if err != nil {

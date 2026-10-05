@@ -15,15 +15,15 @@ import (
 )
 
 const (
-	threadTitleMax       = 160
-	threadObjectiveMax   = 20000
-	threadMessageMax     = 20000
-	threadDeliveryMax    = 100000
+	threadTitleMax         = 160
+	threadObjectiveMax     = 20000
+	threadMessageMax       = 20000
+	threadDeliveryMax      = 100000
 	threadDeliveryTitleMax = 160
-	threadActionMax      = 1000
-	threadReviewNoteMax  = 2000
-	threadListMax        = 100
-	threadUpdateMax      = 50
+	threadActionMax        = 1000
+	threadReviewNoteMax    = 2000
+	threadListMax          = 100
+	threadUpdateMax        = 50
 )
 
 type ThreadCreateInput struct {
@@ -131,9 +131,9 @@ func ListThreads(ctx context.Context, q pg.Querier, actorID int64, filter Thread
 		items = append(items, threadSummary(&rows[i]))
 	}
 	return map[string]interface{}{
-		"threads": items,
-		"total": total,
-		"page": filter.Page,
+		"threads":   items,
+		"total":     total,
+		"page":      filter.Page,
 		"page_size": filter.PageSize,
 	}, nil
 }
@@ -207,14 +207,14 @@ func GetThreadUpdates(ctx context.Context, q pg.Querier, actorID int64, code str
 	return map[string]interface{}{
 		"code": code,
 		"state": map[string]interface{}{
-			"status": t.Status,
-			"next_actor": participantRef(t.NextActorID, t.NextActorName),
+			"status":      t.Status,
+			"next_actor":  participantRef(t.NextActorID, t.NextActorName),
 			"next_action": t.NextAction,
 		},
-		"events": events,
-		"next_cursor": nextCursor,
+		"events":         events,
+		"next_cursor":    nextCursor,
 		"current_cursor": currentCursor,
-		"has_more": hasMore,
+		"has_more":       hasMore,
 	}, nil
 }
 
@@ -270,13 +270,13 @@ func InviteThreadParticipant(ctx context.Context, pool *pg.Pool, actorID int64, 
 	}
 	threadLog(ctx, pool, actorID, "thread_invite", code, map[string]interface{}{"participant": participant})
 	return map[string]interface{}{
-		"code": code,
-		"invite_id": inviteID,
-		"participant": participant,
+		"code":         code,
+		"invite_id":    inviteID,
+		"participant":  participant,
 		"invite_token": token,
-		"expires_at": expiresAt.UTC().Format(time.RFC3339),
-		"created_at": createdAt.UTC().Format(time.RFC3339),
-		"warning": "The invite token is shown once. Give it only to the invited participant.",
+		"expires_at":   expiresAt.UTC().Format(time.RFC3339),
+		"created_at":   createdAt.UTC().Format(time.RFC3339),
+		"warning":      "The invite token is shown once. Give it only to the invited participant.",
 	}, nil
 }
 
@@ -648,8 +648,8 @@ func HandoffThread(ctx context.Context, pool *pg.Pool, actorID int64, code, part
 	}
 	threadLog(ctx, pool, actorID, "thread_handoff", code, map[string]interface{}{"to": target.BotName})
 	return map[string]interface{}{
-		"code": code,
-		"next_actor": map[string]interface{}{"bot_id": target.BotID, "bot_name": target.BotName},
+		"code":        code,
+		"next_actor":  map[string]interface{}{"bot_id": target.BotID, "bot_name": target.BotName},
 		"next_action": action,
 	}, nil
 }
@@ -740,16 +740,16 @@ func insertThreadEvent(ctx context.Context, q pg.Querier, threadID int64, actorI
 
 func threadSummary(t *repository.ThreadRow) map[string]interface{} {
 	return map[string]interface{}{
-		"code": t.Code,
-		"title": t.Title,
-		"objective": t.Objective,
-		"status": t.Status,
-		"owner": map[string]interface{}{"bot_id": t.OwnerID, "bot_name": t.OwnerName},
-		"next_actor": participantRef(t.NextActorID, t.NextActorName),
+		"code":        t.Code,
+		"title":       t.Title,
+		"objective":   t.Objective,
+		"status":      t.Status,
+		"owner":       map[string]interface{}{"bot_id": t.OwnerID, "bot_name": t.OwnerName},
+		"next_actor":  participantRef(t.NextActorID, t.NextActorName),
 		"next_action": t.NextAction,
-		"created_at": t.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at": t.UpdatedAt.UTC().Format(time.RFC3339),
-		"closed_at": timePtrRFC3339(t.ClosedAt),
+		"created_at":  t.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":  t.UpdatedAt.UTC().Format(time.RFC3339),
+		"closed_at":   timePtrRFC3339(t.ClosedAt),
 	}
 }
 
@@ -788,12 +788,12 @@ func deliveryViews(rows []repository.ThreadDeliveryRow) []map[string]interface{}
 		r := rows[i]
 		out = append(out, map[string]interface{}{
 			"delivery_id": r.ID,
-			"author": map[string]interface{}{"bot_id": r.AuthorID, "bot_name": r.AuthorName},
-			"title": r.Title, "body": r.Body, "status": r.Status, "revises": r.RevisesID,
-			"reviewer": participantRef(r.ReviewerID, r.ReviewerName),
+			"author":      map[string]interface{}{"bot_id": r.AuthorID, "bot_name": r.AuthorName},
+			"title":       r.Title, "body": r.Body, "status": r.Status, "revises": r.RevisesID,
+			"reviewer":    participantRef(r.ReviewerID, r.ReviewerName),
 			"review_note": r.ReviewNote,
-			"created_at": r.CreatedAt.UTC().Format(time.RFC3339),
-			"updated_at": r.UpdatedAt.UTC().Format(time.RFC3339),
+			"created_at":  r.CreatedAt.UTC().Format(time.RFC3339),
+			"updated_at":  r.UpdatedAt.UTC().Format(time.RFC3339),
 			"reviewed_at": timePtrRFC3339(r.ReviewedAt),
 		})
 	}
@@ -810,7 +810,7 @@ func eventView(r *repository.ThreadEventRow) map[string]interface{} {
 	}
 	return map[string]interface{}{
 		"cursor": r.ID, "type": r.Type,
-		"actor": participantRef(r.ActorID, r.ActorName),
+		"actor":   participantRef(r.ActorID, r.ActorName),
 		"payload": payload, "created_at": r.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

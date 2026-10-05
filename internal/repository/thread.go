@@ -38,17 +38,17 @@ type ThreadMemberRow struct {
 }
 
 type ThreadInviteRow struct {
-	ID             int64
-	ThreadID       int64
-	CreatedByID    int64
-	InviteeName    *string
-	ExpiresAt      time.Time
-	AcceptedByID   *int64
-	AcceptedAt     *time.Time
-	RevokedAt      *time.Time
-	CreatedAt      time.Time
-	ThreadStatus   string
-	ThreadOwnerID  int64
+	ID            int64
+	ThreadID      int64
+	CreatedByID   int64
+	InviteeName   *string
+	ExpiresAt     time.Time
+	AcceptedByID  *int64
+	AcceptedAt    *time.Time
+	RevokedAt     *time.Time
+	CreatedAt     time.Time
+	ThreadStatus  string
+	ThreadOwnerID int64
 }
 
 type ThreadMessageRow struct {
