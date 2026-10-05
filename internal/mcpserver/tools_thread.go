@@ -98,29 +98,17 @@ Result: complete thread view with participants, recent messages/deliveries and c
 		},
 		{
 			Name:        "thread_deliver",
-			Description: `Submit a formal delivery to an active thread you participate in. A delivery is explicitly reviewable by the owner. Set revises to your rejected delivery_id when revising.`,
+			Description: `Add an immutable formal delivery to an active thread you participate in. Deliveries are shared outputs, not a review workflow.`,
 			InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
 				"title":{"type":"string","minLength":1,"maxLength":160},
-				"body":{"type":"string","minLength":1,"maxLength":100000},
-				"revises":{"type":["integer","string"]}
+				"body":{"type":"string","minLength":1,"maxLength":100000}
 			},"required":["code","title","body"],"additionalProperties":false}`,
 			Handler: factory(handleThreadDeliver),
 		},
 		{
-			Name:        "thread_review_delivery",
-			Description: `Accept or reject a submitted delivery in a thread you own. A reviewed delivery is final; a rejected delivery can be revised by a new delivery.`,
-			InputSchema: `{"type":"object","properties":{
-				"code":{"type":"string"},
-				"delivery_id":{"type":["integer","string"]},
-				"decision":{"type":"string","enum":["accepted","rejected"]},
-				"note":{"type":"string","maxLength":2000}
-			},"required":["code","delivery_id","decision"],"additionalProperties":false}`,
-			Handler: factory(handleThreadReviewDelivery),
-		},
-		{
 			Name:        "thread_handoff",
-			Description: `Pass the linear next-action baton to an active participant. The owner may hand off at any time; a non-owner may hand off only while they are current next_actor. This records state only and does not wake or run the target agent.`,
+			Description: `Set the thread's next_actor and next_action to any active participant. Any active participant may do this; it is coordination state, not an exclusive lock, and does not wake or run the target agent.`,
 			InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
 				"participant":{"type":"string"},
@@ -322,40 +310,14 @@ func handleThreadDeliver(ctx context.Context, deps *Deps, agent *model.Bot, args
 		return ToolResult{}, err
 	}
 	var in struct {
-		Code    string          `json:"code"`
-		Title   string          `json:"title"`
-		Body    string          `json:"body"`
-		Revises *service.WireID `json:"revises"`
+		Code  string `json:"code"`
+		Title string `json:"title"`
+		Body  string `json:"body"`
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code, title and body are required")
 	}
-	var revises *int64
-	if in.Revises != nil {
-		v := in.Revises.Int64()
-		revises = &v
-	}
-	view, err := service.SubmitThreadDelivery(ctx, deps.Pool, agent.ID, in.Code, in.Title, in.Body, revises)
-	if err != nil {
-		return ToolResult{}, err
-	}
-	return data(view)
-}
-
-func handleThreadReviewDelivery(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
-	if err := threadRateLimit(deps, agent.ID, "thread_write"); err != nil {
-		return ToolResult{}, err
-	}
-	var in struct {
-		Code       string         `json:"code"`
-		DeliveryID service.WireID `json:"delivery_id"`
-		Decision   string         `json:"decision"`
-		Note       string         `json:"note"`
-	}
-	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.DeliveryID == 0 {
-		return ToolResult{}, argError("code, delivery_id and decision are required")
-	}
-	view, err := service.ReviewThreadDelivery(ctx, deps.Pool, agent.ID, in.Code, in.DeliveryID.Int64(), in.Decision, in.Note)
+	view, err := service.SubmitThreadDelivery(ctx, deps.Pool, agent.ID, in.Code, in.Title, in.Body)
 	if err != nil {
 		return ToolResult{}, err
 	}
