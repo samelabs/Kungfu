@@ -13,7 +13,7 @@ import (
 var versionFile string
 
 // Version holds the application version string.
-var Version = "v1.3.0"
+var Version = "v2.3.0"
 
 func init() {
 	v := strings.TrimSpace(versionFile)
