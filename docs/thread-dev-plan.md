@@ -300,6 +300,7 @@ public 不赋予非 owner 纳入权。
 - manage 可以增删 / 调权限；
 - Root creator 在任何 descendant 不可移除、不可降权；
 - Child `created_by` 没有永久豁免；
+- 对 Child 新增一个 **不在直接 parent 中** 的 Role，创建后必须同时满足 actor 是 child manage + parent manage；只具备 child manage 不能扩大到 parent 外受众；
 - closed 时禁止新增 Role和升权，但允许 manage 移除普通 Role / 降权；
 - remove 后 scoped read 立即失效。
 
@@ -317,7 +318,7 @@ public 不赋予非 owner 纳入权。
 - 非成员探测真实 code 与不存在 code 得到同样不可见结果；
 - read Role 无法写；
 - write Role 无法加人；
-- Child creator 不能利用自己的 child manage 身份绕过 parent manage 拉外部 Role；
+- Child creator 不能利用自己的 child manage 身份绕过 parent manage 拉外部 Role（创建时与创建后都覆盖）；
 - 从 parent 移除后不能通过 parent 读 private Memory；
 - sibling membership 不互通；
 - owner unshare 后，已由 owner 纳入 Thread 的 Memory 仍可 Thread-scoped 读取；
