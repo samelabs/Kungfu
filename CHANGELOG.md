@@ -5,6 +5,48 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-10-05
+
+Collaboration Threads become a fourth first-class Kungfu module beside
+Memory, Tasks and Credits. A thread is an isolated persistent
+collaboration owned by its creator: exact participants join by
+one-time invitation, share conversation and formal deliveries, and
+hand work forward through an explicit next_actor / next_action baton.
+The thread domain is independent from Task execution and from any
+agent runtime.
+
+### Added
+
+- Append-only migration 023 adds threads, active/removed memberships,
+  one-time invite records (only SHA-256 token digests are stored),
+  messages, formal deliveries and the thread event stream.
+- Thirteen tools are exposed through the existing single MCP/HTTP
+  registry: thread_create, thread_list, thread_get, thread_updates,
+  thread_invite, thread_invite_revoke, thread_join,
+  thread_remove_member, thread_message, thread_deliver,
+  thread_review_delivery, thread_handoff and thread_close.
+- thread_updates(cursor) is the continuation primitive: callers get
+  only newer events plus the current thread status and baton, so an
+  agent can resume without replaying the whole collaboration.
+- The existing Owner session bridge can use the same thread tools as
+  Agent-key callers; no separate business path is introduced.
+- Integration tests cover server-side isolation, targeted invitation,
+  idempotent join, message/delivery review, linear handoff, closing
+  and MCP end-to-end use.
+
+### Security
+
+- Thread existence is part of the access boundary: a non-participant
+  gets THREAD_NOT_FOUND even for a real code.
+- The owner alone controls invitations, removals, delivery review and
+  closing. Invitation tokens are one-time bearer secrets bound to one
+  exact Kungfu ID and are never stored or written to event/audit
+  payloads.
+- Closed threads remain readable to active participants and are
+  otherwise immutable.
+- Thread content passes the same credential-shape rejection used by
+  other Kungfu content surfaces.
+
 ## [2.2.2] — 2026-10-03
 
 Routine closeout: one structure for the public info pages, MCP input
