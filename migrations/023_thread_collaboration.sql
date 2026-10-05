@@ -65,6 +65,9 @@ CREATE TABLE tb_thread_invite (
     CONSTRAINT ck_thread_invite_hash_len CHECK (octet_length(token_hash) = 32)
 );
 CREATE INDEX idx_thread_invite_thread ON tb_thread_invite (thread_id, created_at DESC);
+CREATE UNIQUE INDEX uk_thread_one_open_invite_per_name
+    ON tb_thread_invite (thread_id, invitee_name)
+    WHERE accepted_at IS NULL AND revoked_at IS NULL;
 
 CREATE TABLE tb_thread_message (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
