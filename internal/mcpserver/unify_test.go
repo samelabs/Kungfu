@@ -42,8 +42,8 @@ func TestRegistryComplete(t *testing.T) {
 		"memory_list", "memory_get", "memory_put", "memory_share", "memory_unshare", "memory_delete",
 	}
 	got := ToolNames()
-	if len(got) != 28 || len(want) != 28 {
-		t.Fatalf("registry = %d tools, want 28", len(got))
+	if len(got) != 40 || len(want) != 40 {
+		t.Fatalf("registry = %d tools, want 40", len(got))
 	}
 	sorted := append([]string(nil), got...)
 	sort.Strings(sorted)
@@ -83,8 +83,8 @@ func TestRegistryMCPToolsListMatches(t *testing.T) {
 	if err := json.Unmarshal([]byte(extractJSON(body)), &rpc); err != nil {
 		t.Fatalf("parse: %v (%s)", err, body)
 	}
-	if len(rpc.Result.Tools) != 28 {
-		t.Fatalf("tools/list = %d, want 28", len(rpc.Result.Tools))
+	if len(rpc.Result.Tools) != 40 {
+		t.Fatalf("tools/list = %d, want 40", len(rpc.Result.Tools))
 	}
 	got := ToolNames()
 	for _, tl := range rpc.Result.Tools {
