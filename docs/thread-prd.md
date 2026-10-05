@@ -146,7 +146,7 @@ ThreadMemory 关系建立后不可删除、不可重排。若 owner 删除 Memor
 - **write**：包含 read；可以在 Thread 中发布新 Memory，可以把自己拥有的既有 Memory 纳入 Thread，可以围绕 Thread 中的 Memory 创建 Child Thread；
 - **manage**：包含 write；可以增删 Role、调整权限、关闭/重新打开 Thread，并按规则扩大 Child Thread 受众。
 
-每个 Thread 都有 creator。creator 创建时自动为 manage，不能被移除或降权。第一版不支持 creator transfer。
+每个 Thread 记录 `created_by` 作为来源事实。Root Thread 的 creator 同时是整棵 Thread tree 的治理锚；Child Thread 的 `created_by` 只表示谁发起了该局部会话，不形成不可撤销的永久权限。Child creator 创建时默认获得 manage，但 Root creator 可以调整或移除其 Child Thread 权限。第一版不支持 Root creator transfer。
 
 ## 5. Thread 对 private Memory 的权限穿透
 
@@ -204,14 +204,20 @@ can_read(Role R, Memory M) =
 
 ## 7. Creator 与树级治理
 
-每个 Thread creator 管理自己创建的 Thread。
+**Root Thread creator 是整棵 Thread tree 唯一不可撤销的治理锚。**
 
-除此之外，**Root Thread creator 掌握整个 Thread tree 全景**：
-
+- 创建 Root Thread 时，Root creator 自动获得 manage；
 - 创建任何 descendant Thread 时，Root creator 自动成为该 Thread 的 manage Role；
-- Root creator 在所有 descendants 中都不可被移除或降权；
+- Root creator 在所有 descendants 中不可被移除或降权；
 - Root creator 可以读取并管理整个树；
 - Child Thread 可以有独立 Role 集合，但不能对 Root creator 隐藏。
+
+Child Thread 的 `created_by` 只记录“谁发起了这个局部会话”：
+
+- 创建时默认获得该 Child Thread 的 manage；
+- 其权限不是永久的；
+- Root creator 可以降权或移除 Child `created_by`；
+- 普通 Thread manage 不能移除或降权 Root creator。
 
 因此：
 
@@ -310,7 +316,7 @@ Thread 只有：
 - 移除普通 Role；
 - 降低普通 Role 权限。
 
-creator 与 Root creator 的不可移除 / 不可降权规则继续生效。
+Root creator 的不可移除 / 不可降权规则继续生效；普通 Child `created_by` 不享有该永久豁免。
 
 manage 可以 reopen。
 
@@ -332,26 +338,27 @@ Child Thread 中产生结果 Memory R 后：
 
 实现必须保证：
 
-1. 每个 Thread 有且只有一个 creator；
-2. creator 始终是该 Thread 的 manage Role；
-3. Root creator 显式存在于每个 descendant Thread，始终为 manage；
-4. Child Thread 必须同时有 parent 与 anchor；Root Thread 两者都为空；
-5. Child Thread anchor 必须存在于 parent Thread；
-6. parent / anchor 创建后不可修改；
-7. 同一 `(thread, role)` 只有一个当前成员关系；
-8. 同一 `(thread, memory)` 只有一个时间线关系；
-9. ThreadMemory `seq` 在 Thread 内唯一且单调递增；
-10. ThreadMemory 建立后不可删除或重排；
-11. 非 ThreadRole 不得通过该 Thread 读取 private Memory；
-12. ThreadRole 移除后，该 Thread 的 scoped read 立即失效；
-13. read 不能写；write 不能治理成员；
-14. child 扩大到 parent 外 Role 时，操作者必须同时是 parent manage；
-15. scoped read 不产生 ownership、public visibility 或任意跨 Thread 传播权；
-16. 既有 Memory 纳入 Thread 时，操作者必须是该 Memory owner；Child anchor 除外；
-17. closed Thread 不允许内容写入、受众扩大或新 Child Thread；
-18. closed Thread 仍允许受众收缩；
-19. Memory 删除不删除 ThreadMemory，只留下 tombstone；
-20. Thread 内直接发布必须原子完成“创建 Memory + 纳入 timeline”，不能留下孤立的半成品。
+1. 每个 Thread 有且只有一个 `created_by` 来源事实；
+2. Root Thread creator 始终是 Root Thread 的 manage Role；
+3. Root creator 显式存在于每个 descendant Thread，始终为 manage，且不可移除或降权；
+4. Child Thread 的 `created_by` 创建时默认获得 manage，但该权限可被 Root creator 调整或移除；
+5. Child Thread 必须同时有 parent 与 anchor；Root Thread 两者都为空；
+6. Child Thread anchor 必须存在于 parent Thread；
+7. parent / anchor 创建后不可修改；
+8. 同一 `(thread, role)` 只有一个当前成员关系；
+9. 同一 `(thread, memory)` 只有一个时间线关系；
+10. ThreadMemory `seq` 在 Thread 内唯一且单调递增；
+11. ThreadMemory 建立后不可删除或重排；
+12. 非 ThreadRole 不得通过该 Thread 读取 private Memory；
+13. ThreadRole 移除后，该 Thread 的 scoped read 立即失效；
+14. read 不能写；write 不能治理成员；
+15. child 扩大到 parent 外 Role 时，操作者必须同时是 parent manage；
+16. scoped read 不产生 ownership、public visibility 或任意跨 Thread 传播权；
+17. 既有 Memory 纳入 Thread 时，操作者必须是该 Memory owner；Child anchor 除外；
+18. closed Thread 不允许内容写入、受众扩大或新 Child Thread；
+19. closed Thread 仍允许受众收缩；
+20. Memory 删除不删除 ThreadMemory，只留下 tombstone；
+21. Thread 内直接发布必须原子完成“创建 Memory + 纳入 timeline”，不能留下孤立的半成品。
 
 ## 13. 第一版场景验收
 
@@ -451,7 +458,7 @@ Thread 的 parent / anchor 是 Thread 自身关系，不另造 Subthread 对象�
 ```
 Thread
 - id / code
-- creator_role_id
+- created_by_role_id
 - parent_thread_id?
 - anchor_memory_id?
 - status
