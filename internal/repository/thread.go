@@ -114,14 +114,30 @@ func InsertOwnerMembership(ctx context.Context, q pg.Querier, threadID, ownerID 
 }
 
 func FindThreadByCode(ctx context.Context, q pg.Querier, code string) (*ThreadRow, error) {
-	row := q.QueryRow(ctx, `
+	return findThread(ctx, q, "t.code = $1", code, false)
+}
+
+func FindThreadByCodeForUpdate(ctx context.Context, q pg.Querier, code string) (*ThreadRow, error) {
+	return findThread(ctx, q, "t.code = $1", code, true)
+}
+
+func FindThreadByIDForUpdate(ctx context.Context, q pg.Querier, threadID int64) (*ThreadRow, error) {
+	return findThread(ctx, q, "t.id = $1", threadID, true)
+}
+
+func findThread(ctx context.Context, q pg.Querier, predicate string, arg any, forUpdate bool) (*ThreadRow, error) {
+	query := `
 		SELECT t.id, t.code, t.owner_id, owner.bot_name, t.title, t.objective,
 		       t.status, t.next_actor_id, next_bot.bot_name, t.next_action,
 		       t.created_at, t.updated_at, t.closed_at
 		FROM tb_thread t
 		JOIN tb_bots owner ON owner.id = t.owner_id
 		LEFT JOIN tb_bots next_bot ON next_bot.id = t.next_actor_id
-		WHERE t.code = $1`, code)
+		WHERE ` + predicate
+	if forUpdate {
+		query += " FOR UPDATE OF t"
+	}
+	row := q.QueryRow(ctx, query, arg)
 	var r ThreadRow
 	if err := row.Scan(
 		&r.ID, &r.Code, &r.OwnerID, &r.OwnerName, &r.Title, &r.Objective,
@@ -285,15 +301,26 @@ func InsertThreadInvite(ctx context.Context, q pg.Querier, threadID, creatorID i
 	return id, createdAt, err
 }
 
+func FindThreadInviteByHash(ctx context.Context, q pg.Querier, tokenHash []byte) (*ThreadInviteRow, error) {
+	return findThreadInviteByHash(ctx, q, tokenHash, false)
+}
+
 func FindThreadInviteByHashForUpdate(ctx context.Context, q pg.Querier, tokenHash []byte) (*ThreadInviteRow, error) {
-	row := q.QueryRow(ctx, `
+	return findThreadInviteByHash(ctx, q, tokenHash, true)
+}
+
+func findThreadInviteByHash(ctx context.Context, q pg.Querier, tokenHash []byte, forUpdate bool) (*ThreadInviteRow, error) {
+	query := `
 		SELECT i.id, i.thread_id, i.created_by_id, i.invitee_name, i.expires_at,
 		       i.accepted_by_id, i.accepted_at, i.revoked_at, i.created_at,
 		       t.status, t.owner_id
 		FROM tb_thread_invite i
 		JOIN tb_thread t ON t.id = i.thread_id
-		WHERE i.token_hash = $1
-		FOR UPDATE OF i`, tokenHash)
+		WHERE i.token_hash = $1`
+	if forUpdate {
+		query += " FOR UPDATE OF i"
+	}
+	row := q.QueryRow(ctx, query, tokenHash)
 	var r ThreadInviteRow
 	if err := row.Scan(
 		&r.ID, &r.ThreadID, &r.CreatedByID, &r.InviteeName, &r.ExpiresAt,
@@ -311,10 +338,24 @@ func FindThreadInviteByHashForUpdate(ctx context.Context, q pg.Querier, tokenHas
 func RevokeThreadInvite(ctx context.Context, q pg.Querier, threadID, inviteID int64) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE tb_thread_invite
-		SET revoked_at = COALESCE(revoked_at, NOW())
-		WHERE id = $1 AND thread_id = $2 AND accepted_at IS NULL`,
+		SET revoked_at = NOW()
+		WHERE id = $1 AND thread_id = $2
+		  AND accepted_at IS NULL AND revoked_at IS NULL`,
 		inviteID, threadID)
 	return err == nil && tag.RowsAffected() == 1, err
+}
+
+func RevokeOutstandingThreadInvitesForInvitee(ctx context.Context, q pg.Querier, threadID int64, inviteeName string) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE tb_thread_invite
+		SET revoked_at = NOW()
+		WHERE thread_id = $1 AND invitee_name = $2
+		  AND accepted_at IS NULL AND revoked_at IS NULL`,
+		threadID, inviteeName)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 func MarkThreadInviteAccepted(ctx context.Context, q pg.Querier, inviteID, botID int64) error {
