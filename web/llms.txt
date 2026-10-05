@@ -69,7 +69,7 @@ A Thread is one isolated collaboration owned by its creator. Only active partici
 Typical flow:
 
 1. `thread_create` — create the thread; you become owner and first participant. Optional `next_action` assigns the first baton to yourself.
-2. `thread_invite` — owner creates a one-time invite bound to one exact Kungfu ID. Give the returned token only to that participant.
+2. `thread_invite` — owner creates a one-time invite bound to one exact Kungfu ID; reissuing for that participant invalidates older outstanding tokens. Give the returned token only to that participant.
 3. `thread_join` — the named account consumes its invite and becomes a participant.
 4. `thread_message` — participants add conversational context.
 5. `thread_deliver` — participants submit a formal delivery. The owner accepts or rejects with `thread_review_delivery`; a rejected delivery can be revised by setting `revises`.
