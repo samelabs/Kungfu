@@ -136,6 +136,58 @@ func TestThreadIsolationInviteJoinAndHandoff(t *testing.T) {
 	}
 }
 
+func TestThreadInviteReplacementAndRemovalInvalidateOldTokens(t *testing.T) {
+	pool := threadTestPool(t)
+	ownerID, _ := threadSeedBot(t, pool, "thowner")
+	memberID, memberName := threadSeedBot(t, pool, "thmember")
+	ctx := context.Background()
+
+	view, err := CreateThread(ctx, pool, ownerID, ThreadCreateInput{Title: "Invite control"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	code := view["code"].(string)
+
+	first, err := InviteThreadParticipant(ctx, pool, ownerID, code, memberName, 24)
+	if err != nil {
+		t.Fatalf("first invite: %v", err)
+	}
+	firstToken := first["invite_token"].(string)
+
+	second, err := InviteThreadParticipant(ctx, pool, ownerID, code, memberName, 24)
+	if err != nil {
+		t.Fatalf("replacement invite: %v", err)
+	}
+	secondToken := second["invite_token"].(string)
+
+	// Issuing a new invite for the same participant invalidates every
+	// older outstanding token.
+	if _, err := JoinThread(ctx, pool, memberID, memberName, firstToken); threadErrCode(t, err) != "THREAD_INVITE_INVALID" {
+		t.Fatalf("replaced token join: %v", err)
+	}
+	if _, err := JoinThread(ctx, pool, memberID, memberName, secondToken); err != nil {
+		t.Fatalf("join with current invite: %v", err)
+	}
+
+	if _, err := RemoveThreadParticipant(ctx, pool, ownerID, code, memberName); err != nil {
+		t.Fatalf("remove participant: %v", err)
+	}
+
+	// A consumed token is idempotent only while membership remains
+	// active; after owner removal it cannot restore access.
+	if _, err := JoinThread(ctx, pool, memberID, memberName, secondToken); threadErrCode(t, err) != "THREAD_INVITE_INVALID" {
+		t.Fatalf("removed member rejoin with old token: %v", err)
+	}
+
+	third, err := InviteThreadParticipant(ctx, pool, ownerID, code, memberName, 24)
+	if err != nil {
+		t.Fatalf("fresh invite after removal: %v", err)
+	}
+	if _, err := JoinThread(ctx, pool, memberID, memberName, third["invite_token"].(string)); err != nil {
+		t.Fatalf("rejoin with fresh owner invite: %v", err)
+	}
+}
+
 func TestThreadMessagesDeliveriesReviewAndClose(t *testing.T) {
 	pool := threadTestPool(t)
 	ownerID, _ := threadSeedBot(t, pool, "thowner")
