@@ -61,20 +61,13 @@ type ThreadMessageRow struct {
 }
 
 type ThreadDeliveryRow struct {
-	ID           int64
-	ThreadID     int64
-	AuthorID     int64
-	AuthorName   string
-	Title        string
-	Body         string
-	Status       string
-	RevisesID    *int64
-	ReviewerID   *int64
-	ReviewerName *string
-	ReviewNote   *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	ReviewedAt   *time.Time
+	ID         int64
+	ThreadID   int64
+	AuthorID   int64
+	AuthorName string
+	Title      string
+	Body       string
+	CreatedAt  time.Time
 }
 
 type ThreadEventRow struct {
@@ -404,50 +397,23 @@ func ListRecentThreadMessages(ctx context.Context, q pg.Querier, threadID int64,
 	return out, rows.Err()
 }
 
-func InsertThreadDelivery(ctx context.Context, q pg.Querier, threadID, authorID int64, title, body string, revisesID *int64) (int64, time.Time, error) {
+func InsertThreadDelivery(ctx context.Context, q pg.Querier, threadID, authorID int64, title, body string) (int64, time.Time, error) {
 	var id int64
 	var createdAt time.Time
 	err := q.QueryRow(ctx, `
 		INSERT INTO tb_thread_delivery
-		    (thread_id, author_id, title, body, status, revises_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'submitted', $5, NOW(), NOW())
+		    (thread_id, author_id, title, body, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
 		RETURNING id, created_at`,
-		threadID, authorID, title, body, revisesID).Scan(&id, &createdAt)
+		threadID, authorID, title, body).Scan(&id, &createdAt)
 	return id, createdAt, err
-}
-
-func FindThreadDeliveryForUpdate(ctx context.Context, q pg.Querier, threadID, deliveryID int64) (*ThreadDeliveryRow, error) {
-	row := q.QueryRow(ctx, `
-		SELECT d.id, d.thread_id, d.author_id, author.bot_name, d.title, d.body,
-		       d.status, d.revises_id, d.reviewer_id, reviewer.bot_name,
-		       d.review_note, d.created_at, d.updated_at, d.reviewed_at
-		FROM tb_thread_delivery d
-		JOIN tb_bots author ON author.id = d.author_id
-		LEFT JOIN tb_bots reviewer ON reviewer.id = d.reviewer_id
-		WHERE d.thread_id = $1 AND d.id = $2
-		FOR UPDATE OF d`, threadID, deliveryID)
-	var r ThreadDeliveryRow
-	if err := row.Scan(
-		&r.ID, &r.ThreadID, &r.AuthorID, &r.AuthorName, &r.Title, &r.Body,
-		&r.Status, &r.RevisesID, &r.ReviewerID, &r.ReviewerName,
-		&r.ReviewNote, &r.CreatedAt, &r.UpdatedAt, &r.ReviewedAt,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &r, nil
 }
 
 func ListRecentThreadDeliveries(ctx context.Context, q pg.Querier, threadID int64, limit int) ([]ThreadDeliveryRow, error) {
 	rows, err := q.Query(ctx, `
-		SELECT d.id, d.thread_id, d.author_id, author.bot_name, d.title, d.body,
-		       d.status, d.revises_id, d.reviewer_id, reviewer.bot_name,
-		       d.review_note, d.created_at, d.updated_at, d.reviewed_at
+		SELECT d.id, d.thread_id, d.author_id, author.bot_name, d.title, d.body, d.created_at
 		FROM tb_thread_delivery d
 		JOIN tb_bots author ON author.id = d.author_id
-		LEFT JOIN tb_bots reviewer ON reviewer.id = d.reviewer_id
 		WHERE d.thread_id = $1
 		ORDER BY d.id DESC
 		LIMIT $2`, threadID, limit)
@@ -458,25 +424,12 @@ func ListRecentThreadDeliveries(ctx context.Context, q pg.Querier, threadID int6
 	out := []ThreadDeliveryRow{}
 	for rows.Next() {
 		var r ThreadDeliveryRow
-		if err := rows.Scan(
-			&r.ID, &r.ThreadID, &r.AuthorID, &r.AuthorName, &r.Title, &r.Body,
-			&r.Status, &r.RevisesID, &r.ReviewerID, &r.ReviewerName,
-			&r.ReviewNote, &r.CreatedAt, &r.UpdatedAt, &r.ReviewedAt,
-		); err != nil {
+		if err := rows.Scan(&r.ID, &r.ThreadID, &r.AuthorID, &r.AuthorName, &r.Title, &r.Body, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-func ReviewThreadDelivery(ctx context.Context, q pg.Querier, deliveryID, reviewerID int64, status string, note *string) error {
-	_, err := q.Exec(ctx, `
-		UPDATE tb_thread_delivery
-		SET status = $1, reviewer_id = $2, review_note = $3,
-		    reviewed_at = NOW(), updated_at = NOW()
-		WHERE id = $4`, status, reviewerID, note, deliveryID)
-	return err
 }
 
 func UpdateThreadHandoff(ctx context.Context, q pg.Querier, threadID int64, nextActorID *int64, nextAction *string) error {
