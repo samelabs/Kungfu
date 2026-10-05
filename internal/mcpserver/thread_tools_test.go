@@ -28,7 +28,7 @@ func TestThreadToolsRequireAuth(t *testing.T) {
 		"thread_create", "thread_list", "thread_get", "thread_updates",
 		"thread_invite", "thread_invite_revoke", "thread_join",
 		"thread_remove_member", "thread_message", "thread_deliver",
-		"thread_review_delivery", "thread_handoff", "thread_close",
+		"thread_handoff", "thread_close",
 	} {
 		sc, _ := m2CallTool(t, ts, "", tool, map[string]interface{}{})
 		if sc != 401 {
@@ -39,9 +39,9 @@ func TestThreadToolsRequireAuth(t *testing.T) {
 
 func TestMCPThreadCollaborationLifecycle(t *testing.T) {
 	pool, ts := toolsSetup(t)
-	ownerName, ownerKey, _ := m2Bot(t, pool, ts.srv, "threadowner")
-	memberName, memberKey, _ := m2Bot(t, pool, ts.srv, "threadmember")
-	_, outsiderKey, _ := m2Bot(t, pool, ts.srv, "threadoutside")
+	ownerName, ownerKey, _ := m2Bot(t, pool, ts.srv, "tho")
+	memberName, memberKey, _ := m2Bot(t, pool, ts.srv, "thm")
+	_, outsiderKey, _ := m2Bot(t, pool, ts.srv, "thx")
 
 	sc, body := m2CallTool(t, ts, ownerKey, "thread_create", map[string]interface{}{
 		"title":     "AIchem launch collaboration",
@@ -88,10 +88,18 @@ func TestMCPThreadCollaborationLifecycle(t *testing.T) {
 	}
 
 	sc, body = m2CallTool(t, ts, ownerKey, "thread_handoff", map[string]interface{}{
+		"code": code, "participant": ownerName, "next_action": "Prepare the media plan.",
+	})
+	if sc != 200 || toolFailed(body) {
+		t.Fatalf("owner thread_handoff: %d %.500s", sc, body)
+	}
+	// Membership grants collaboration rights: the member may intervene
+	// even when they are not the current next_actor.
+	sc, body = m2CallTool(t, ts, memberKey, "thread_handoff", map[string]interface{}{
 		"code": code, "participant": memberName, "next_action": "Verify the first media batch.",
 	})
 	if sc != 200 || toolFailed(body) {
-		t.Fatalf("thread_handoff: %d %.500s", sc, body)
+		t.Fatalf("member thread_handoff: %d %.500s", sc, body)
 	}
 
 	sc, body = m2CallTool(t, ts, memberKey, "thread_deliver", map[string]interface{}{
@@ -106,13 +114,6 @@ func TestMCPThreadCollaborationLifecycle(t *testing.T) {
 		t.Fatalf("delivery_id: %#v", delivery)
 	}
 
-	sc, body = m2CallTool(t, ts, ownerKey, "thread_review_delivery", map[string]interface{}{
-		"code": code, "delivery_id": int64(deliveryID), "decision": "accepted", "note": "Use this batch.",
-	})
-	if sc != 200 || toolFailed(body) {
-		t.Fatalf("thread_review_delivery: %d %.500s", sc, body)
-	}
-
 	sc, body = m2CallTool(t, ts, ownerKey, "thread_updates", map[string]interface{}{
 		"code": code, "cursor": int64(startCursor), "limit": 50,
 	})
@@ -121,8 +122,8 @@ func TestMCPThreadCollaborationLifecycle(t *testing.T) {
 	}
 	updates := threadStructured(t, body)
 	events, _ := updates["events"].([]interface{})
-	if len(events) < 5 {
-		t.Fatalf("updates events = %d, want invite/join/message/handoff/delivery/review activity: %#v", len(events), updates)
+	if len(events) < 6 {
+		t.Fatalf("updates events = %d, want invite/join/message/handoffs/delivery activity: %#v", len(events), updates)
 	}
 
 	sc, body = m2CallTool(t, ts, ownerKey, "thread_get", map[string]interface{}{"code": code})
