@@ -21,7 +21,7 @@ import (
 
 var (
 	// toolIdent matches every tool-shaped identifier in prose.
-	textToolIdent = regexp.MustCompile(`\b(?:work|task|account|memory)_[a-z_]+\b`)
+	textToolIdent = regexp.MustCompile(`\b(?:work|task|account|memory|thread)_[a-z_]+\b`)
 	// backtickCode matches a backtick-quoted ALL_CAPS_UNDERSCORE token.
 	backtickCode = regexp.MustCompile("`([A-Z][A-Z_]+[A-Z])`")
 )
