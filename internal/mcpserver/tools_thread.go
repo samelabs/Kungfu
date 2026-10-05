@@ -55,10 +55,10 @@ Result: complete thread view with participants, recent messages/deliveries and c
 		},
 		{
 			Name:        "thread_invite",
-			Description: `Invite one exact Kungfu account ID to a thread you own. The returned invite_token is shown once and only its hash is stored. Default expiry is 168 hours, maximum 720.`,
+			Description: `Invite one exact Kungfu account ID to a thread you own. Reissuing an invite for the same participant invalidates every older outstanding token. The returned invite_token is shown once and only its hash is stored. Default expiry is 168 hours, maximum 720.`,
 			InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
-				"participant":{"type":"string","minLength":6,"maxLength":32},
+				"participant":{"type":"string","minLength":6,"maxLength":32,"pattern":"^[A-Za-z0-9_.-]{6,32}$"},
 				"expires_in_hours":{"type":"integer","minimum":1,"maximum":720,"default":168}
 			},"required":["code","participant"],"additionalProperties":false}`,
 			Handler: factory(handleThreadInvite),
