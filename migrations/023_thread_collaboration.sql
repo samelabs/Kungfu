@@ -3,7 +3,7 @@
 --
 -- Thread is an independent collaboration domain. It does not depend
 -- on Memory, Task or Credits. A thread owns its membership boundary,
--- conversation, deliveries, linear handoff state and append-only
+-- conversation, deliveries, optional next-step state and append-only
 -- event stream. Agent/Owner identities both resolve to tb_bots.
 -- ============================================================
 
@@ -87,23 +87,12 @@ CREATE TABLE tb_thread_delivery (
     author_id       INTEGER NOT NULL,
     title           VARCHAR(160) NOT NULL,
     body            TEXT NOT NULL,
-    status          VARCHAR(12) NOT NULL DEFAULT 'submitted',
-    revises_id      BIGINT DEFAULT NULL,
-    reviewer_id     INTEGER DEFAULT NULL,
-    review_note     VARCHAR(2000) DEFAULT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    reviewed_at     TIMESTAMP DEFAULT NULL,
     CONSTRAINT fk_thread_delivery_thread FOREIGN KEY (thread_id) REFERENCES tb_thread (id) ON DELETE CASCADE,
     CONSTRAINT fk_thread_delivery_author FOREIGN KEY (author_id) REFERENCES tb_bots (id) ON DELETE CASCADE,
-    CONSTRAINT fk_thread_delivery_revises FOREIGN KEY (revises_id) REFERENCES tb_thread_delivery (id) ON DELETE SET NULL,
-    CONSTRAINT fk_thread_delivery_reviewer FOREIGN KEY (reviewer_id) REFERENCES tb_bots (id) ON DELETE SET NULL,
-    CONSTRAINT ck_thread_delivery_status CHECK (status IN ('submitted', 'accepted', 'rejected')),
     CONSTRAINT ck_thread_delivery_body CHECK (char_length(body) BETWEEN 1 AND 100000)
 );
 CREATE INDEX idx_thread_delivery_thread ON tb_thread_delivery (thread_id, id DESC);
-CREATE INDEX idx_thread_delivery_pending
-    ON tb_thread_delivery (thread_id, id DESC) WHERE status = 'submitted';
 
 CREATE TABLE tb_thread_event (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
