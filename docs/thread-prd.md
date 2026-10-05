@@ -190,7 +190,7 @@ can_read(Role R, Memory M) =
 
 非 owner 的唯一结构化传播例外是 **Child Thread anchor**：
 
-- anchor 必须已经存在于 parent Thread；
+- anchor 必须已经存在于 parent Thread，且创建 Child 时该 Memory 仍为 active；已删除 tombstone 可继续保留既有 Child，但不能作为新 Child 的起点；
 - 创建者必须对 parent 有 write 或 manage；
 - 若 child 只使用 parent 已有 Role，write 即可；
 - 若 child 纳入 parent 之外的新 Role，必须由 **parent manage** 执行；
@@ -343,7 +343,7 @@ Child Thread 中产生结果 Memory R 后：
 3. Root creator 显式存在于每个 descendant Thread，始终为 manage，且不可移除或降权；
 4. Child Thread 的 `created_by` 创建时默认获得 manage，但该权限可被 Root creator 调整或移除；
 5. Child Thread 必须同时有 parent 与 anchor；Root Thread 两者都为空；
-6. Child Thread anchor 必须存在于 parent Thread；
+6. Child Thread anchor 必须存在于 parent Thread，且创建 Child 时对应 Memory 必须为 active；
 7. parent / anchor 创建后不可修改；
 8. 同一 `(thread, role)` 只有一个当前成员关系；
 9. 同一 `(thread, memory)` 只有一个时间线关系；
