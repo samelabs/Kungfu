@@ -101,7 +101,7 @@ func InsertThread(ctx context.Context, q pg.Querier, code string, ownerID int64,
 	err := q.QueryRow(ctx, `
 		INSERT INTO tb_thread
 		    (code, owner_id, title, objective, status, next_actor_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'active', $2, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, 'active', NULL, NOW(), NOW())
 		RETURNING id`, code, ownerID, title, objective).Scan(&id)
 	return id, err
 }
