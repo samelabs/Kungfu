@@ -21,7 +21,6 @@ const (
 	threadDeliveryMax      = 100000
 	threadDeliveryTitleMax = 160
 	threadActionMax        = 1000
-	threadReviewNoteMax    = 2000
 	threadListMax          = 100
 	threadUpdateMax        = 50
 )
@@ -209,7 +208,7 @@ func GetThreadUpdates(ctx context.Context, q pg.Querier, actorID int64, code str
 		"state": map[string]interface{}{
 			"status":      t.Status,
 			"next_actor":  participantRef(t.NextActorID, t.NextActorName),
-			"next_action": t.NextAction,
+			"next_action": stringPtrValue(t.NextAction),
 		},
 		"events":         events,
 		"next_cursor":    nextCursor,
@@ -506,7 +505,7 @@ func AddThreadMessage(ctx context.Context, pool *pg.Pool, actorID int64, code, b
 	}, nil
 }
 
-func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, code, title, body string, revisesID *int64) (map[string]interface{}, error) {
+func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, code, title, body string) (map[string]interface{}, error) {
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)
 	if title == "" {
@@ -537,30 +536,13 @@ func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, cod
 	if t.Status != threaddomain.StatusActive {
 		return nil, threadClosed()
 	}
-	if revisesID != nil {
-		if *revisesID <= 0 {
-			return nil, validationError("revises", "revises must be positive")
-		}
-		prior, err := repository.FindThreadDeliveryForUpdate(ctx, tx, t.ID, *revisesID)
-		if err != nil {
-			return nil, threadInternal("submit delivery")
-		}
-		if prior == nil || prior.AuthorID != actorID || prior.Status != threaddomain.DeliveryRejected {
-			return nil, apperr.New(422, "INVALID_REVISES", "revises must identify your rejected delivery in this thread")
-		}
-	}
-	id, createdAt, err := repository.InsertThreadDelivery(ctx, tx, t.ID, actorID, title, body, revisesID)
+	id, createdAt, err := repository.InsertThreadDelivery(ctx, tx, t.ID, actorID, title, body)
 	if err != nil {
 		return nil, threadInternal("submit delivery")
 	}
-	payload := map[string]interface{}{
+	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "delivery.added", map[string]interface{}{
 		"delivery_id": id, "author": member.BotName, "title": title, "body": body,
-		"status": threaddomain.DeliverySubmitted,
-	}
-	if revisesID != nil {
-		payload["revises"] = *revisesID
-	}
-	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "delivery.submitted", payload); err != nil {
+	}); err != nil {
 		return nil, threadInternal("submit delivery")
 	}
 	if err := repository.TouchThread(ctx, tx, t.ID); err != nil {
@@ -571,70 +553,8 @@ func SubmitThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, cod
 	}
 	return map[string]interface{}{
 		"code": code, "delivery_id": id, "author": member.BotName,
-		"title": title, "body": body, "status": threaddomain.DeliverySubmitted,
-		"revises": revisesID, "created_at": createdAt.UTC().Format(time.RFC3339),
+		"title": title, "body": body, "created_at": createdAt.UTC().Format(time.RFC3339),
 	}, nil
-}
-
-func ReviewThreadDelivery(ctx context.Context, pool *pg.Pool, actorID int64, code string, deliveryID int64, decision, note string) (map[string]interface{}, error) {
-	if deliveryID <= 0 {
-		return nil, validationError("delivery_id", "delivery_id must be positive")
-	}
-	decision = strings.TrimSpace(decision)
-	if decision != threaddomain.DeliveryAccepted && decision != threaddomain.DeliveryRejected {
-		return nil, validationError("decision", "decision must be accepted or rejected")
-	}
-	note = strings.TrimSpace(note)
-	if utf8.RuneCountInString(note) > threadReviewNoteMax {
-		return nil, validationError("note", "note maximum 2000 characters")
-	}
-	if security.ContainsCredential(note) {
-		return nil, apperr.New(422, "SENSITIVE_CONTENT", "review note must not contain credential-shaped strings")
-	}
-	var notePtr *string
-	if note != "" {
-		notePtr = &note
-	}
-
-	tx, err := pool.TxBegin(ctx)
-	if err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	defer func() { _ = pg.Rollback(tx) }()
-	t, owner, err := requireThreadOwnerForUpdate(ctx, tx, actorID, code)
-	if err != nil {
-		return nil, err
-	}
-	if t.Status != threaddomain.StatusActive {
-		return nil, threadClosed()
-	}
-	delivery, err := repository.FindThreadDeliveryForUpdate(ctx, tx, t.ID, deliveryID)
-	if err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	if delivery == nil {
-		return nil, apperr.New(404, "THREAD_DELIVERY_NOT_FOUND", "delivery not found")
-	}
-	if delivery.Status != threaddomain.DeliverySubmitted {
-		return nil, apperr.NewWithDetails(409, "THREAD_DELIVERY_FINAL", "delivery was already reviewed", map[string]interface{}{"status": delivery.Status})
-	}
-	if err := repository.ReviewThreadDelivery(ctx, tx, deliveryID, actorID, decision, notePtr); err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	payload := map[string]interface{}{"delivery_id": deliveryID, "decision": decision, "reviewer": owner.BotName}
-	if note != "" {
-		payload["note"] = note
-	}
-	if _, err := insertThreadEvent(ctx, tx, t.ID, &actorID, "delivery."+decision, payload); err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	if err := repository.TouchThread(ctx, tx, t.ID); err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, threadInternal("review delivery")
-	}
-	return map[string]interface{}{"code": code, "delivery_id": deliveryID, "status": decision, "review_note": notePtr}, nil
 }
 
 func HandoffThread(ctx context.Context, pool *pg.Pool, actorID int64, code, participant, action string) (map[string]interface{}, error) {
@@ -664,9 +584,6 @@ func HandoffThread(ctx context.Context, pool *pg.Pool, actorID int64, code, part
 	}
 	if t.Status != threaddomain.StatusActive {
 		return nil, threadClosed()
-	}
-	if member.Role != threaddomain.RoleOwner && (t.NextActorID == nil || *t.NextActorID != actorID) {
-		return nil, apperr.New(409, "THREAD_NOT_CURRENT_ACTOR", "only the owner or current next actor can hand off the thread")
 	}
 	target, err := repository.FindActiveThreadMemberByName(ctx, tx, t.ID, participant)
 	if err != nil {
@@ -804,7 +721,7 @@ func threadSummary(t *repository.ThreadRow) map[string]interface{} {
 		"status":      t.Status,
 		"owner":       map[string]interface{}{"bot_id": t.OwnerID, "bot_name": t.OwnerName},
 		"next_actor":  participantRef(t.NextActorID, t.NextActorName),
-		"next_action": t.NextAction,
+		"next_action": stringPtrValue(t.NextAction),
 		"created_at":  t.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at":  t.UpdatedAt.UTC().Format(time.RFC3339),
 		"closed_at":   timePtrRFC3339(t.ClosedAt),
@@ -847,12 +764,9 @@ func deliveryViews(rows []repository.ThreadDeliveryRow) []map[string]interface{}
 		out = append(out, map[string]interface{}{
 			"delivery_id": r.ID,
 			"author":      map[string]interface{}{"bot_id": r.AuthorID, "bot_name": r.AuthorName},
-			"title":       r.Title, "body": r.Body, "status": r.Status, "revises": r.RevisesID,
-			"reviewer":    participantRef(r.ReviewerID, r.ReviewerName),
-			"review_note": r.ReviewNote,
+			"title":       r.Title,
+			"body":        r.Body,
 			"created_at":  r.CreatedAt.UTC().Format(time.RFC3339),
-			"updated_at":  r.UpdatedAt.UTC().Format(time.RFC3339),
-			"reviewed_at": timePtrRFC3339(r.ReviewedAt),
 		})
 	}
 	return out
@@ -871,6 +785,13 @@ func threadEventView(r *repository.ThreadEventRow) map[string]interface{} {
 		"actor":   participantRef(r.ActorID, r.ActorName),
 		"payload": payload, "created_at": r.CreatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func stringPtrValue(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func timePtrRFC3339(t *time.Time) interface{} {
