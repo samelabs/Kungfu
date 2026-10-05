@@ -352,7 +352,7 @@ Child Thread 中产生结果 Memory R 后：
 12. 非 ThreadRole 不得通过该 Thread 读取 private Memory；
 13. ThreadRole 移除后，该 Thread 的 scoped read 立即失效；
 14. read 不能写；write 不能治理成员；
-15. child 扩大到 parent 外 Role 时，操作者必须同时是 parent manage；
+15. child 扩大到 parent 外 Role 时：创建时操作者必须是 parent manage；创建后的成员变更必须同时是 child manage 与 parent manage；
 16. scoped read 不产生 ownership、public visibility 或任意跨 Thread 传播权；
 17. 既有 Memory 纳入 Thread 时，操作者必须是该 Memory owner；Child anchor 除外；
 18. closed Thread 不允许内容写入、受众扩大或新 Child Thread；
