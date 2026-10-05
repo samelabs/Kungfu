@@ -117,6 +117,7 @@ seen_revision
 thread_id
 memory_id
 seq
+changed_revision
 added_by_role_id
 created_at
 ~~~
@@ -126,6 +127,7 @@ created_at
 - (thread, memory) 唯一；
 - (thread, seq) 唯一；
 - seq 单调递增；
+- changed_revision <= Thread revision；
 - relation 保持位置稳定。
 
 ### repository primitives
@@ -137,8 +139,9 @@ created_at
 - atomic allocate seq + revision；
 - set / remove ThreadRole；
 - monotonic advance seen_seq / seen_revision；
-- append ThreadMemory；
+- append ThreadMemory 并写入 changed_revision；
 - timeline after_seq pagination；
+- timeline changed_after_revision 查询；
 - parent / ancestor / descendant 查询；
 - 查询某 Memory 作为 timeline entry 或 anchor 影响到的 Thread IDs。
 
@@ -196,7 +199,7 @@ Child：
 - revision / head_seq；
 - caller seen_revision / seen_seq；
 - has_updates / unread_count；
-- timeline(after_seq, limit)；
+- timeline(after_seq, after_revision, limit)，同时返回新 entry 与后续发生变化的既有 entry；
 - caller 可见的 Child summaries。
 
 ### thread_list
@@ -219,8 +222,8 @@ Child：
 2. 验 open + write；
 3. create Memory；
 4. allocate seq；
-5. append ThreadMemory；
-6. Thread revision + 1；
+5. Thread revision + 1；
+6. append ThreadMemory，并令 changed_revision = new revision；
 7. actor seen_seq = max(current, new seq)；
 8. actor seen_revision = max(current, new revision)；
 9. commit。
@@ -306,8 +309,9 @@ Memory update / soft-delete 完成时：
 2. 找出以该 Memory 为 anchor 的 Child Thread；
 3. Thread IDs 去重；
 4. 每个受影响 Thread revision + 1；
-5. commit；
-6. 每个受影响 Thread 发一个 thread_changed。
+5. timeline 引用同步把对应 ThreadMemory.changed_revision 写为新 revision；
+6. commit；
+7. 每个受影响 Thread 发一个 thread_changed。
 
 head_seq 保持。
 
@@ -328,8 +332,9 @@ head_seq
 
 subscriber 通过 revision / head_seq 判断需要：
 
-- 拉取新的 timeline；
-- 刷新现有 Memory / roles / status / child summary。
+- 读取 after_seq 后的新 timeline entry；
+- 读取 after_revision 后发生变化的既有 timeline entry；
+- 刷新 roles / status / child summary。
 
 ### Delivery model
 
@@ -338,7 +343,7 @@ realtime 是低延迟通道，durable state 是恢复依据。
 验证：
 
 - signal duplicate 时 client 可安全重复 reconcile；
-- signal missing 时 thread_list / thread_get 可恢复；
+- signal missing 时 thread_list / thread_get(after_seq, after_revision) 可恢复；
 - reconnect 后 revision / head_seq 能发现差异；
 - role removal 后停止后续 delivery。
 
@@ -380,7 +385,7 @@ thread_post 使用独立通讯写入 bucket，阈值集中配置。
 - 并行 Child；
 - 外部协作者；
 - result promotion；
-- Memory edit / delete realtime refresh；
+- Memory edit / delete 的 changed_revision 增量恢复；
 - Child status change；
 - Role add / permission change / remove；
 - offline reconnect；
@@ -394,7 +399,7 @@ thread_post 使用独立通讯写入 bucket，阈值集中配置。
 - revision 单调；
 - seen_seq / seen_revision 单调且有界；
 - post 原子性；
-- Memory fan-out 去重；
+- Memory fan-out 去重与 ThreadMemory.changed_revision；
 - child status 对 parent revision 的传播；
 - Root creator descendant ThreadRole；
 - private scoped access；
@@ -416,4 +421,4 @@ thread_post 使用独立通讯写入 bucket，阈值集中配置。
 
 Thread 第一版应该能直接解释成一套通讯协议：
 
-> Role 在 Thread 中发送 Memory，Timeline 以 seq 保序，revision 表达共享状态变化，ThreadRole 的 seen_seq / seen_revision 表达个人消费位置，realtime signal 提供即时唤醒，Child Thread 递归承载局部和并行会话。
+> Role 在 Thread 中发送 Memory，Timeline 以 seq 保序，revision 表达共享状态变化，ThreadMemory.changed_revision 定位既有内容变化，ThreadRole 的 seen_seq / seen_revision 表达个人消费位置，realtime signal 提供即时唤醒，Child Thread 递归承载局部和并行会话。
