@@ -15,7 +15,7 @@ Thread 表达一个持续存在的 private conversation / collaboration scope。
 - 从父会话派生的新话题；
 - 多个并行子会话；
 - 人与 Agent 的持续协作；
-- 在线实时接收、离线恢复和未读提醒。
+- 在线实时接收、离线恢复和提醒。
 
 Thread 的通讯内核是：
 
@@ -120,7 +120,7 @@ T0
 └─ T2
 ~~~
 
-Root creator 掌握整棵 tree 的全景治理。创建 descendant 时，Root creator 在该 Thread 建立 manage 关系，因此权限、实时订阅和 seen_seq 都使用同一 ThreadRole 事实源。
+Root creator 掌握整棵 tree 的全景治理。创建 descendant 时，Root creator 在该 Thread 建立 manage 关系，因此权限、实时订阅和通讯游标都使用同一 ThreadRole 事实源。
 
 ## 4. Timeline
 
@@ -175,7 +175,12 @@ Memory 使用活引用：
 - tombstone 保留 seq；
 - anchor 对应 Memory 删除后，已有 Child 继续保留该 anchor 关系。
 
-Memory 的更新和删除属于 Thread 可见状态变化，因此所有包含该 Memory 的 Thread 都推进 revision，并产生实时 change signal。
+Memory update / delete 会影响两类 Thread：
+
+1. timeline 中包含该 Memory 的 Thread；
+2. 以该 Memory 作为 anchor 的 Child Thread。
+
+所有受影响 Thread 都推进 revision；同一 Thread 在一次 Memory mutation 中只推进一次。
 
 ## 6. ThreadRole
 
@@ -185,7 +190,7 @@ ThreadRole 表达：
 Role ∈ Thread
 ~~~
 
-以及这个 Role 在 Thread 内的权限与通讯消费位置。
+以及这个 Role 在 Thread 内的权限和通讯消费位置。
 
 持久字段：
 
@@ -195,6 +200,7 @@ thread_roles
 - role_id
 - permission: read | write | manage
 - seen_seq
+- seen_revision
 ~~~
 
 permission：
@@ -203,24 +209,28 @@ permission：
 - write：包含 read，并可发送 Memory、纳入已有 Memory、创建 Child；
 - manage：包含 write，并可调整 Roles、权限和 Thread status。
 
-seen_seq 是通讯游标：
+两个通讯游标承担不同职责：
 
-- 表示该 Role 已确认消费到的 timeline seq；
-- 单调前进；
-- 不超过 head_seq；
-- 新增 Role 时初始化为当前 head_seq，因此历史可读但不自动形成历史未读；
-- Role 自己 post / include 成功后，seen_seq 至少推进到刚写入的 seq。
+- seen_seq：已确认消费到的 timeline 位置；
+- seen_revision：已确认观察到的 Thread 共享状态版本。
 
-未读是派生量：
+新 Role 加入已有 Thread 时：
 
 ~~~
-unread_count = head_seq - seen_seq
-has_unread = head_seq > seen_seq
+seen_seq = current head_seq
+seen_revision = current revision
 ~~~
 
-thread_list 与 thread_get 返回 caller 的 seen_seq、head_seq、unread_count。
+这样历史仍可读取，提醒从加入后的变化开始。
 
-## 7. Thread 状态
+Role 自己完成 post / include 后：
+
+- seen_seq 至少推进到新 seq；
+- seen_revision 至少推进到该操作产生的 revision。
+
+Role 自己完成 role/status 等 Thread mutation 后，seen_revision 至少推进到该操作产生的 revision。
+
+## 7. Thread 共享状态
 
 Thread 持久状态：
 
@@ -233,7 +243,7 @@ open 表示会话继续接收内容和结构变化。
 
 closed 表示当前会话结束写入，历史保持可读，manage 可以重新打开。
 
-Thread 的当前协作现场由以下事实组成：
+Thread 的共享协作现场由以下事实组成：
 
 ~~~
 status
@@ -254,16 +264,26 @@ children.status
 - 结果回流；
 - 当前会话是否继续。
 
-## 8. revision：Thread 状态版本
+seen_seq / seen_revision 属于 Role 在该 Thread 中的个人消费状态，不属于共享 revision。
+
+## 8. revision：Thread 共享状态版本
 
 每个 Thread 维护单调递增 revision。
 
-revision 表示“这个 Thread 对可见参与者呈现的状态发生过一次变化”。
+新建 Thread 初始：
+
+~~~
+revision = 1
+head_seq = 0
+~~~
+
+revision 表示“这个 Thread 对参与者呈现的共享状态发生过一次变化”。
 
 以下动作推进对应 Thread revision：
 
 - timeline append；
-- Thread 内 Memory 的 update / delete；
+- timeline Memory 的 update / delete；
+- anchor Memory 的 update / delete；
 - Role 新增、权限调整、移除；
 - status 改变；
 - Child 创建；
@@ -279,14 +299,55 @@ head_seq = 18
 revision 42 → 43
 ~~~
 
-这样客户端能区分：
+客户端因此可以区分：
 
-- head_seq 变化：有新的 timeline entry；
+- head_seq 变化：出现新的 timeline entry；
 - revision 变化但 head_seq 不变：现有内容或 Thread 结构发生变化。
 
-## 9. 实时通讯
+thread_seen 只更新个人游标，不推进 Thread revision。
 
-实时层传递轻量 change signal，事实仍以数据库中的 Thread 状态为准。
+## 9. 提醒状态
+
+提醒由两个维度组成。
+
+新内容：
+
+~~~
+has_unread = head_seq > seen_seq
+unread_count = head_seq - seen_seq
+~~~
+
+共享状态变化：
+
+~~~
+has_updates = revision > seen_revision
+~~~
+
+因此：
+
+- 新 Memory 会同时形成 has_unread 和 has_updates；
+- 旧 Memory 编辑、Child 状态变化、权限变化等只形成 has_updates；
+- thread_list 与 thread_get 返回 revision、head_seq、seen_revision、seen_seq、unread_count、has_updates。
+
+thread_seen 语义：
+
+~~~
+thread_seen(thread, seen_seq, seen_revision)
+~~~
+
+规则：
+
+- caller 可以读取该 Thread；
+- seen_seq 不超过当前 head_seq；
+- seen_revision 不超过当前 revision；
+- 两个游标都只向前推进；
+- 多设备并发分别取 max。
+
+thread_get 负责读取；thread_seen 负责确认消费。
+
+## 10. 实时通讯
+
+实时层传递轻量 change signal，数据库中的 Thread 状态是恢复依据。
 
 统一信号：
 
@@ -301,17 +362,15 @@ thread_changed
 
 ~~~
 transaction commit
-→ Thread durable state 已更新
+→ durable Thread state 已更新
 → emit thread_changed
 → subscriber receives signal
-→ thread_get(after_seq=...)
+→ client reconciles with thread_get
 ~~~
 
-信号可以重复，也允许连接期间遗漏；客户端通过 revision、head_seq 和 timeline 恢复。
+signal 只表达“状态已变化”，不携带 Memory content。
 
-因此实时链路故障不会造成通讯事实丢失。
-
-### 9.1 在线
+### 10.1 在线
 
 在线客户端订阅自己可读 Thread 的 change signal。
 
@@ -324,68 +383,37 @@ thread_changed(T, revision=43, head_seq=18)
 客户端比较本地状态：
 
 - head_seq 前进：读取 after_seq 后的 timeline；
-- revision 前进但 head_seq 未变：刷新 Thread metadata / 当前 Memory 状态。
+- revision 前进但 head_seq 未变：刷新 Thread 当前状态。
 
-### 9.2 离线与重连
+### 10.2 离线与重连
 
 重连后：
 
-1. thread_list 获取各 Thread 的 revision、head_seq、seen_seq；
+1. thread_list 获取 revision、head_seq、seen_revision、seen_seq；
 2. 对需要恢复的 Thread 调 thread_get(after_seq=本地最后 seq)；
 3. 消费完成后调用 thread_seen。
 
-实时信号负责低延迟，revision + seq 负责恢复。
+signal 可以重复，也可能在断线期间遗漏。revision + head_seq + timeline 保证恢复到当前事实。
 
-### 9.3 权限
+### 10.3 权限
 
 实时信号只送达当前可读该 Thread 的 Role。
 
-Role 被移出 Thread 后，其 scoped read 与后续实时信号同时停止。
+Role 被移出 Thread 后，其 scoped read 与后续 realtime signal 同时停止。
 
-signal 本身不携带 Memory content。
-
-## 10. 提醒与已读
-
-提醒直接由 ThreadRole.seen_seq 与 Thread.head_seq 计算。
-
-例：
-
-~~~
-head_seq = 31
-seen_seq = 27
-unread_count = 4
-~~~
-
-这是一条稳定的跨设备状态。
-
-thread_seen 语义：
-
-~~~
-thread_seen(thread, seq)
-~~~
-
-规则：
-
-- caller 必须可以读取该 Thread；
-- seq 不超过当前 head_seq；
-- seen_seq 只向前推进；
-- 多设备并发取 max。
-
-thread_get 是读取动作；seen 由 thread_seen 显式确认。
-
-这样 Agent 可以先读取、处理，再确认消费位置；人类客户端也可以在内容真正呈现后确认已读。
+不同接入协议可以使用各自合适的 push transport；不具备 server-push 的调用方使用 revision / seq 轮询恢复同一状态。
 
 ## 11. Role 加入与会话边界
 
-manage 通过 ThreadRole 改变 Thread 的参与边界。
+manage 通过 ThreadRole 改变参与边界。
 
-加入：
+加入或调权限：
 
 ~~~
 thread_role_set(Thread, Role, permission)
 ~~~
 
-产生或更新 ThreadRole。
+创建新 ThreadRole 时，seen_seq / seen_revision 初始化为该事务完成后的当前 head_seq / revision。
 
 移除：
 
@@ -393,9 +421,11 @@ thread_role_set(Thread, Role, permission)
 thread_role_remove(Thread, Role)
 ~~~
 
-移除当前参与关系，同时撤销该 Thread 提供的 private Memory scoped access 和实时信号。
+移除当前参与关系，同时撤销该 Thread 提供的 private Memory scoped access 和 realtime signal。
 
-Root creator 在每个 descendant 中保持显式 manage ThreadRole，以统一治理、实时订阅与 seen_seq。
+再次加入时建立新的当前 ThreadRole，并从新的 head_seq / revision 开始提醒。
+
+Root creator 在每个 descendant 中保持显式 manage ThreadRole，以统一治理、实时订阅和通讯游标。
 
 ## 12. Child Thread 的参与边界
 
@@ -403,19 +433,19 @@ Child 使用独立 Role 集合。
 
 创建 Child 的 actor 至少需要 parent write。
 
-Child 的初始 Role：
+Child 初始 Role：
 
 - parent 中已有 Role 可以直接纳入；
 - parent 外 Role 的纳入由 parent manage 授权。
 
-Child 创建后继续加入 parent 外 Role时，actor 同时具备：
+Child 创建后继续加入 parent 外 Role 时，actor 同时具备：
 
 - Child manage；
 - 直接 parent manage。
 
 anchor 存在时，Child participant 可以通过 Child scope 读取该 anchor，即使其不是 parent participant。
 
-该授权只覆盖 anchor 与 Child 自身 timeline。
+该授权覆盖 anchor 与 Child 自身 timeline。
 
 ## 13. Private Memory scoped access
 
@@ -454,7 +484,8 @@ Role writes content
 → append Memory to Thread timeline
 → head_seq + 1
 → revision + 1
-→ poster seen_seq advances
+→ actor seen_seq / seen_revision advance
+→ commit
 → emit thread_changed
 ~~~
 
@@ -484,7 +515,8 @@ tree result promotion：
 append target timeline
 → target head_seq + 1
 → target revision + 1
-→ actor target seen_seq advances
+→ actor target seen_seq / seen_revision advance
+→ commit
 → emit target thread_changed
 ~~~
 
@@ -496,17 +528,39 @@ Child：
 
 - parent 必填；
 - anchor 可选；
-- 创建后 parent revision 推进；
-- parent subscribers 收到 thread_changed；
+- Child 初始 revision=1、head_seq=0；
+- creator 与 Root creator 建立 manage ThreadRole；
+- parent revision 推进；
+- commit 后 parent subscribers 收到 thread_changed；
 - Child 从自己的 revision / head_seq 开始独立通讯。
 
-## 15. 状态操作
+## 15. Memory mutation 与 Thread fan-out
+
+Memory 继续使用现有 update / soft-delete 语义。
+
+Memory 发生 update / delete 时，在同一业务事务中解析受影响 Thread：
+
+~~~
+thread_memories.memory_id = M
+UNION
+threads.anchor_memory_id = M
+~~~
+
+对去重后的每个 Thread：
+
+- revision + 1；
+- head_seq 保持；
+- commit 后各发一个 thread_changed。
+
+这样 Memory 活引用与实时通讯保持一致。
+
+## 16. 状态操作
 
 Thread 核心语义能力：
 
 - create：创建 Root / Child；
 - get：读取当前 Thread 与 timeline 增量；
-- list：发现可访问 Thread，并返回 revision / head_seq / seen_seq / unread_count；
+- list：发现可访问 Thread，并返回提醒状态；
 - post：产生新 Memory；
 - include：纳入已有 Memory；
 - role set：加入 Role 或调整权限；
@@ -515,9 +569,9 @@ Thread 核心语义能力：
 - seen：确认消费位置；
 - realtime subscribe：接收 thread_changed。
 
-协议层可以按现有 MCP / HTTP 能力组织这些语义，所有入口共享同一 service 规则。
+协议层按现有 MCP / HTTP 能力组织这些语义，所有入口共享同一 service 规则。
 
-## 16. 最小持久结构
+## 17. 最小持久结构
 
 ### Thread
 
@@ -534,7 +588,7 @@ threads
 - updated_at
 ~~~
 
-head_seq 可由 next_seq 派生或由实现以等价方式维护，但对外语义保持一致。
+head_seq 可由 next_seq 派生或由实现以等价方式维护，对外语义保持一致。
 
 ### ThreadRole
 
@@ -544,6 +598,7 @@ thread_roles
 - role_id
 - permission
 - seen_seq
+- seen_revision
 ~~~
 
 ### ThreadMemory
@@ -557,28 +612,29 @@ thread_memories
 - created_at
 ~~~
 
-## 17. 通讯不变量
+## 18. 通讯不变量
 
-实现必须保持：
+实现保持：
 
 1. 同一 Thread 的 seq 唯一且单调；
 2. head_seq 与 timeline 最新 seq 一致；
 3. seen_seq 单调且不超过 head_seq；
 4. revision 单调递增；
-5. 所有外部可见 Thread 变化最终反映到 revision；
-6. timeline append 同时推进 head_seq 与 revision；
-7. Memory update / delete 影响到的每个 Thread 都推进 revision；
-8. thread_post 的 Memory create 与 timeline append 原子提交；
-9. ThreadRole 是 scoped access、seen state 与实时订阅资格的统一事实源；
-10. Child 有 parent，anchor 可选；
-11. anchor 存在时属于直接 parent；
-12. Root creator 在每个 descendant 中保持 manage ThreadRole；
-13. private Thread 对非参与者保持不可见；
-14. role removal 立即撤销 scoped read 与实时信号；
-15. realtime signal 在 durable state commit 之后产生；
-16. 信号丢失或重复后，客户端仍可通过 revision + head_seq + timeline 恢复一致状态。
+5. seen_revision 单调且不超过 revision；
+6. Thread 共享状态变化反映到 revision；
+7. timeline append 同时推进 head_seq 与 revision；
+8. Memory update / delete 对所有 timeline / anchor 引用 Thread 做去重 revision fan-out；
+9. thread_post 的 Memory create 与 timeline append 原子提交；
+10. ThreadRole 是 scoped access、通讯游标与 realtime subscription 资格的统一事实源；
+11. Child 有 parent，anchor 可选；
+12. anchor 存在时属于直接 parent；
+13. Root creator 在每个 descendant 中保持 manage ThreadRole；
+14. role removal 立即撤销 scoped read 与 realtime signal；
+15. durable state commit 先于 thread_changed；
+16. signal 丢失或重复后，客户端仍可通过 revision + head_seq + timeline 恢复；
+17. thread_seen 只推进个人游标，不改变共享 revision。
 
-## 18. 场景验收
+## 19. 场景验收
 
 ### 私聊
 
@@ -588,7 +644,7 @@ Roles: A, B
 Timeline: M1 → M2 → M3
 ~~~
 
-双方实时接收 signal，离线后按 seen_seq / head_seq 恢复。
+双方可实时接收 signal；离线后按 revision / seq 恢复。
 
 ### 群聊 / 多人对话
 
@@ -598,17 +654,17 @@ Roles: A, B, C, D
 Timeline: #1 ... #N
 ~~~
 
-每个 Role 拥有独立 seen_seq 和 unread_count。
+每个 Role 拥有独立 seen_seq / seen_revision。
 
 ### 时间线消费
 
-Agent 保存 last seq：
+Agent：
 
 ~~~
 thread_get(after_seq=120)
+→ consume
+→ thread_seen(seen_seq=head_seq, seen_revision=revision)
 ~~~
-
-读取 121..head，并在完成处理后 thread_seen(head)。
 
 ### 回复串
 
@@ -618,7 +674,7 @@ T0
    └─ T1
 ~~~
 
-T1 的 anchor=M8，T1 participants 可以读取 M8 和 T1 timeline。
+T1 participants 可以读取 M8 和 T1 timeline。
 
 ### 新话题
 
@@ -631,42 +687,60 @@ T1 有 parent、无 anchor，形成父会话下独立话题。
 
 ### 并行协作
 
-同一 parent 同时拥有多个 Child，每个 Child 独立 Roles、timeline、revision、seen state。
+同一 parent 同时拥有多个 Child，每个 Child 独立 Roles、timeline、revision 和通讯游标。
 
 ### 外部协作者
 
-parent manage 将外部 Role 加入 Child。外部 Role 只获得 Child scope。
+parent manage 将外部 Role 加入 Child。外部 Role 获得 Child scope。
 
 ### 结果回主线
 
-Child Memory 经 tree result promotion 进入 ancestor timeline，ancestor head_seq / revision 前进并实时通知其参与者。
+Child Memory 经 tree result promotion 进入 ancestor timeline，ancestor head_seq / revision 前进并实时通知参与者。
 
-### 编辑同步
+### 编辑提醒
 
 M5 已存在于 T0，owner 更新 M5：
 
 ~~~
 T0 head_seq 保持
 T0 revision + 1
+participant seen_revision 保持
+has_updates = true
 emit thread_changed
 ~~~
 
-客户端收到 revision 变化并刷新当前状态。
+### Child 状态提醒
+
+T1 从 open 变 closed：
+
+~~~
+T1 revision + 1
+T0 revision + 1
+~~~
+
+T1 participant 和可见 T0 participant 都能观察到状态变化。
 
 ### 断线恢复
 
-客户端错过若干 realtime signal：
+客户端离线前：
 
 ~~~
-local revision=40, seq=18
-server revision=47, head_seq=22
+local revision=40
+local seq=18
 ~~~
 
-重新连接后通过 thread_list / thread_get 恢复到 revision 47、seq 22，再提交 seen。
+服务器当前：
 
-## 19. Memory 原子前置
+~~~
+revision=47
+head_seq=22
+~~~
 
-Thread post 以 Memory 作为唯一内容原子，因此 Memory 输入契约调整为：
+重连后 thread_list 暴露差异，thread_get 恢复 timeline / metadata，再由 thread_seen 确认。
+
+## 20. Memory 原子前置
+
+Thread post 以 Memory 作为内容原子，因此 Memory 输入契约调整为：
 
 - content 必填，最少 1 个字符；
 - title 可选；
@@ -678,28 +752,32 @@ Thread post 与 standalone memory_put 复用同一个 transaction-safe Memory cr
 
 Task 对 Memory 的 live-reference 行为保持一致。
 
-## 20. 审计结论
+## 21. 审计结论
 
 ### 模型
 
 Role / Memory / Thread 三个业务原子足以表达通讯与协作。ThreadRole、ThreadMemory 承担关系状态。
 
-### 通讯
+### Timeline
 
-Timeline + seq 提供可靠有序消息流；Child Thread 提供回复串、新话题和并行会话。
+seq / head_seq 提供可靠有序的信息流，Child Thread 同时覆盖回复串、新话题和并行会话。
 
-### 实时
+### Thread 状态
 
-revision 负责所有 Thread 可见变化，head_seq 负责 timeline append，thread_changed 提供低延迟信号。实时链路与持久事实分离，支持断线恢复。
+revision 是 Thread 共享状态的统一版本轴，覆盖新增内容、活引用变化、角色变化、状态变化和 Child 结构变化。
 
 ### 提醒
 
-seen_seq 是必要的最小参与者通讯状态。它只表达消费位置，并直接推导 unread_count。
+seen_seq 表达新内容消费位置；seen_revision 表达共享状态观测位置。两者共同形成跨设备、离线可恢复的提醒状态。
+
+### 实时
+
+thread_changed 只承担低延迟唤醒。事实先持久化，客户端始终能依靠 revision + head_seq + timeline 恢复，因此实时链路和数据可靠性解耦。
 
 ### 活引用
 
-Memory edit/delete 通过 Thread revision fan-out 纳入实时同步，因此活引用与 Timeline 模型保持一致。
+Memory update / delete 对 timeline 引用和 anchor 引用统一做 revision fan-out，活引用不会绕过 Thread 同步状态。
 
 ### 场景
 
-私聊、群聊、多人对话、时间线、回复串、新话题、并行协作、外部协作者、结果回流、Agent 轮询、实时客户端均由同一套 Thread 通讯逻辑表达。
+私聊、群聊、多人对话、时间线、回复串、新话题、并行协作、外部协作者、结果回流、Agent 增量消费、实时客户端和断线恢复均由同一套 Thread 通讯逻辑表达。
