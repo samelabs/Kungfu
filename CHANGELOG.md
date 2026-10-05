@@ -20,18 +20,18 @@ agent runtime.
 - Append-only migration 023 adds threads, active/removed memberships,
   one-time invite records (only SHA-256 token digests are stored),
   messages, formal deliveries and the thread event stream.
-- Thirteen tools are exposed through the existing single MCP/HTTP
+- Twelve tools are exposed through the existing single MCP/HTTP
   registry: thread_create, thread_list, thread_get, thread_updates,
   thread_invite, thread_invite_revoke, thread_join,
   thread_remove_member, thread_message, thread_deliver,
-  thread_review_delivery, thread_handoff and thread_close.
+  thread_handoff and thread_close.
 - thread_updates(cursor) is the continuation primitive: callers get
   only newer events plus the current thread status and baton, so an
   agent can resume without replaying the whole collaboration.
 - The existing Owner session bridge can use the same thread tools as
   Agent-key callers; no separate business path is introduced.
 - Integration tests cover server-side isolation, targeted invitation,
-  idempotent join, message/delivery review, linear handoff, closing
+  idempotent join, message/delivery creation, collaborative handoff, closing
   and MCP end-to-end use.
 
 ### Security
