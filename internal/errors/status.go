@@ -64,13 +64,10 @@ var statusByCode = map[string]int{
 	"THREAD_MEMBER_NOT_FOUND":   http.StatusNotFound,
 	"THREAD_INVITE_NOT_FOUND":   http.StatusNotFound,
 	"THREAD_INVITE_INVALID":     http.StatusNotFound,
-	"THREAD_DELIVERY_NOT_FOUND": http.StatusNotFound,
 	"THREAD_NOT_OWNER":          http.StatusForbidden,
 	"THREAD_MEMBER_EXISTS":      http.StatusConflict,
 	"THREAD_OWNER_REQUIRED":     http.StatusConflict,
 	"THREAD_CLOSED":             http.StatusConflict,
-	"THREAD_DELIVERY_FINAL":     http.StatusConflict,
-	"THREAD_NOT_CURRENT_ACTOR":  http.StatusConflict,
 }
 
 // StatusFor resolves a wire code to its HTTP status. The bool reports
