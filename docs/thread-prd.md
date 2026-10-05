@@ -1,103 +1,73 @@
 # Thread PRD
 
-> 本文是 Kungfu Thread 的产品与机制唯一依据。进入实现前必须先通过本文审计；实现不得自行补充本文未定义的协作语义。若实现需要新增状态、权限或对象，先修改并重新审计本文。
+> 本文是 Kungfu Thread 的产品与机制唯一依据。实现不得自行增加本文未定义的协作对象、状态或权限语义；如确有必要，先回到 PRD 证明现有模型无法表达。
 
-## 1. 目标
+## 1. 定位
 
-Thread 为 Role 与 Memory 提供一个默认私有、可递归展开的协作会话边界。
+Thread 是 Role 与 Memory 之间的 private collaboration / conversation scope。
 
-Kungfu 的基础关系保持不变：
+它解决四件事：
 
-```
-Role ──produces──> Memory
-```
+1. 哪些 Role 在同一个协作现场；
+2. 哪些 Memory 属于这条会话时间线；
+3. 一条 Memory 如何继续展开局部子对话；
+4. 会话当前是否仍开放，以及局部会话如何产生、推进和结束。
 
-- **Role**：行为主体。当前实现身份映射为 Bot。
-- **Memory**：由 Role 产生并拥有的信息原子；默认 private，可显式 public。
-- **Thread**：私有会话容器，定义参与 Role、Memory 时间线、父子会话和会话边界。
+Thread 不承担 Task、工作流、审批、交付、next actor 等业务义务。
 
-Thread 不改变 Memory ownership。它只决定：哪些 Role 在哪个会话范围内，可以读取和继续产生哪些 Memory。
+## 2. 业务形状
 
-```
+业务原子只有三个：
+
+~~~
+Role
+Memory
+Thread
+~~~
+
+关系只有四条：
+
+~~~
+Role   ─produces────> Memory
+Role   ─participates→ Thread
+Thread ─contains────> Memory
+Thread ─parent──────> Thread
+~~~
+
+其中：
+
+- Role：行为主体。当前实现映射为 Bot。
+- Memory：Role 产生并拥有的信息原子；默认 private，可显式 public。
+- Thread：默认 private 的协作会话容器。
+- Child Thread 仍然是 Thread，不建立 Subthread 对象。
+- Message 不存在；会话内容就是 Memory。
+
+数据库中的 thread_roles 与 thread_memories 只是关系表，不是新的业务原子。
+
+## 3. Thread 形状
+
+### 3.1 Root Thread
+
+Root Thread 表达一条协作主线：
+
+~~~
 Thread
 ├─ Roles
 ├─ ordered Memories
-└─ child Threads
-```
-
-主线和子对话使用同一个 Thread 模型，不建立第二套 Subthread / Message 业务对象。
-
-## 2. Memory 作为会话原子的前置条件
-
-当前 Memory 的产品契约偏“文档”：title、tags 必填，content 至少 50 字；这不能承载自然会话。
-
-Thread 实现前必须先把 Memory 收正为真正的信息原子：
-
-- content 必填，最少 1 个字符，最大值沿用现有限制；
-- title 改为可选；
-- tags 改为可选；
-- description 继续可选；
-- owner、private/public、checksum、软删除、更新语义保持不变；
-- 不新增 Message 表或 Message 类型。
-
-数据库可继续保存 `title=""`、`tags=[]`，不要求新增 nullable 语义。
-
-这是一项 **Memory 原子契约修正**，不是 Thread 特例。已有带 title/tags 的 Memory 行为不变；上层能力若需要更强元数据，应在上层约束，不反向污染 Memory 原子。
-
-### 2.1 Thread 内发布
-
-Thread 内的正常“发言”不是两次外部调用：
-
-```
-memory_put
-→ thread_add_memory
-```
-
-而是一个原子语义：
-
-```
-Role posts content into Thread
-→ 创建一个由该 Role 拥有的 Memory
-→ 同事务纳入 Thread timeline
-```
-
-这样仍然只有 Memory 一个内容原子，但不会产生半创建、半纳入的中间态。
-
-Thread 内发布使用 Thread 自己的写入节流，不继承当前 `memory_put` 的文档型 push 限额。直接 `memory_put` 仍作为独立 Memory 管理入口存在。
-
-## 3. Thread
-
-### 3.1 Thread 定义
-
-Thread 是一个 **private conversation scope**。
-
-它定义：
-
-1. 当前会话有哪些 Role；
-2. 当前会话包含哪些 Memory；
-3. Memory 在当前会话中的顺序；
-4. 当前会话是否由父 Thread 中某个 Memory 派生；
-5. 当前会话的生命周期；
-6. 每个 Role 的阅读位置。
-
-Thread 默认且固定为 private。第一版不提供 public Thread。
-
-### 3.2 Root Thread 与 Child Thread
+└─ Child Threads
+~~~
 
 Root Thread：
 
-- parent 为空；
-- anchor Memory 为空；
-- 表达一条协作主线。
+- parent_thread_id = null
+- anchor_memory_id = null
+- created_by 是该 Thread tree 的创建者与全景治理者。
 
-Child Thread：
+### 3.2 Child Thread
 
-- 必须有且只有一个 parent Thread；
-- 必须锚定 parent Thread 中的一条 Memory；
-- 表达围绕该 Memory 独立展开的局部会话；
-- 仍然是完整 Thread，拥有自己的 Role、Memory、timeline 和生命周期。
+任一 active Memory 都可以作为局部会话起点：
 
-```
+~~~
 T0
 ├─ M1
 ├─ M2
@@ -107,478 +77,642 @@ T0
 │  └─ T2
 │     └─ M6
 └─ M3
-```
+~~~
 
-同一 Memory 可以派生多个 Child Thread。
+Child Thread：
 
-parent 与 anchor 创建后不可修改。Child Thread 只能指向已存在的 parent，因此结构天然无环。
+- 必须有一个直接 parent；
+- 必须锚定 parent 中的一条 active Memory；
+- 拥有自己的 Roles、timeline 和 open / closed 状态；
+- parent 与 anchor 创建后不可修改；
+- 同一 Memory 可以派生多个 Child Thread。
+
+Thread 只能指向已经存在的 parent，因此树结构天然无环。
 
 ### 3.3 Memory 与 Thread
 
-Memory 的 producer / owner 永远是产生它的 Role。
+Memory 的 owner 永远是产生它的 Role。Thread 不改变 ownership。
 
-Memory 可以被纳入多个 Thread；Thread 不复制 Memory 内容，只保存 Memory 与该 Thread 的会话关系和顺序。
+同一 Memory 可以出现在多个 Thread 中：
 
-```
+~~~
 Role A ─produces→ M1
 
 M1 ∈ T0
 M1 ∈ T1
-```
+~~~
 
-同一 Memory 在同一 Thread 中只出现一次。需要形成新的时间线节点，应产生新的 Memory。
+Thread 只保存“该 Memory 进入这个会话”的关系和顺序，不复制内容。
 
-ThreadMemory 关系建立后不可删除、不可重排。若 owner 删除 Memory，Thread 保留其时间线位置并呈现 tombstone。
+同一 (thread, memory) 只出现一次。
 
-第一版沿用 Kungfu 当前 Memory 的“活引用”语义：
+Memory 在 Thread 中保持活引用：
 
-- Memory 被更新后，各 Thread 读取它时看到当前有效内容；
-- Thread 不保存内容快照；
-- 不引入 Memory revision。
+- Memory 更新后，Thread 读取当前内容；
+- Memory soft-delete 后，原时间线位置保留 tombstone；
+- tombstone 不能再作为新 Child Thread 的 anchor；
+- 第一版不引入 Memory revision / snapshot。
 
-## 4. ThreadRole 权限
+## 4. Thread 状态表达
 
-权限只落在 **Thread ↔ Role** 关系上。Thread 不修改 Memory owner 或 visibility。
+Thread 的动态状态围绕 Thread 本身表达，不为 Role 建成员生命周期状态机。
 
-每个 ThreadRole 只有三档权限：
-
-- **read**：读取 Thread、timeline、Thread 内 Memory，以及当前 Role 有权知道的 Child Thread 元数据；
-- **write**：包含 read；可以在 Thread 中发布新 Memory，可以把自己拥有的既有 Memory 纳入 Thread，可以围绕 Thread 中的 Memory 创建 Child Thread；
-- **manage**：包含 write；可以增删 Role、调整权限、关闭/重新打开 Thread，并按规则扩大 Child Thread 受众。
-
-每个 Thread 记录 `created_by` 作为来源事实。Root Thread 的 creator 同时是整棵 Thread tree 的治理锚；Child Thread 的 `created_by` 只表示谁发起了该局部会话，不形成不可撤销的永久权限。Child creator 创建时默认获得 manage，但 Root creator 可以调整或移除其 Child Thread 权限。第一版不支持 Root creator transfer。
-
-## 5. Thread 对 private Memory 的权限穿透
-
-Memory 默认 private，Thread 默认 private。Thread membership 提供一条额外的 scoped read 路径：
-
-```
-can_read(Role R, Memory M) =
-    R owns M
-    OR M is public
-    OR exists Thread T:
-         R is a current ThreadRole of T
-         AND M is contained in T
-```
-
-第三条只在 Thread scope 内成立：
-
-- Memory 不会因此变成 public；
-- ownership 不变；
-- Role 不获得 Thread 外读取权；
-- Role 被移出 Thread 后，该 Thread 路径立即失效。
-
-直接 `memory_get` 的既有权限语义保持不变。Thread 内对 private Memory 的 scoped read 由 Thread 读取接口完成。
-
-### 5.1 把 Memory 纳入 Thread 的含义
-
-当 Memory owner 主动把自己的 Memory 纳入 Thread，等价于：
-
-> owner 同意该 Memory 在这个 Thread 的成员治理下被读取。
-
-因此 Thread manage 后续增加 Role，会扩大该 Thread 内这些 Memory 的受众；这仍然不会改变 Memory 的全局 private/public 状态。
-
-这是 Thread 权限能够穿透 Memory 权限的授权基础。
-
-## 6. 读取权与传播权分离
-
-拥有 scoped read 不等于获得传播权。
-
-第一版只有 **Memory owner** 可以把一个既有 Memory 正式纳入任意自己有 write 权限的 Thread。
-
-即使一个 Memory 当前是 public，非 owner 也不能通过“纳入 Thread”把它转化为一个长期 Thread scoped grant。这样 owner 以后 `memory_unshare` 时，不会被第三方此前建立的 Thread 关系绕过。
-
-非 owner 的唯一结构化传播例外是 **Child Thread anchor**：
-
-- anchor 必须已经存在于 parent Thread，且创建 Child 时该 Memory 仍为 active；已删除 tombstone 可继续保留既有 Child，但不能作为新 Child 的起点；
-- 创建者必须对 parent 有 write 或 manage；
-- 若 child 只使用 parent 已有 Role，write 即可；
-- 若 child 纳入 parent 之外的新 Role，必须由 **parent manage** 执行；
-- 这个检查针对“立即 parent”，即使创建者在 child 中是 creator/manage，也不能绕过 parent manage。
-
-因此：
-
-- scoped read 只负责消费；
-- owner inclusion 负责主动传播；
-- child anchor 负责在父级治理下进行局部披露。
-
-## 7. Creator 与树级治理
-
-**Root Thread creator 是整棵 Thread tree 唯一不可撤销的治理锚。**
-
-- 创建 Root Thread 时，Root creator 自动获得 manage；
-- 创建任何 descendant Thread 时，Root creator 自动成为该 Thread 的 manage Role；
-- Root creator 在所有 descendants 中不可被移除或降权；
-- Root creator 可以读取并管理整个树；
-- Child Thread 可以有独立 Role 集合，但不能对 Root creator 隐藏。
-
-Child Thread 的 `created_by` 只记录“谁发起了这个局部会话”：
-
-- 创建时默认获得该 Child Thread 的 manage；
-- 其权限不是永久的；
-- Root creator 可以降权或移除 Child `created_by`；
-- 普通 Thread manage 不能移除或降权 Root creator。
-
-因此：
-
-> Child Thread 的 private，指对子 Thread 之外的普通 Role 私有；不对该协作树的 Root creator 私有。
-
-如果需要连现有 Root creator 都不可见的独立会话，应创建新的 Root Thread。
-
-## 8. Child Thread 的私有边界
-
-Child Thread 是新的 private scope。
-
-它可以：
-
-- 只包含 parent Role 的子集；
-- 包含 parent 中不存在的新 Role，但必须由 parent manage 扩大受众；
-- 拥有自己的 timeline、read cursor 和生命周期。
-
-Child Role 可以读取：
-
-- child anchor Memory；
-- child timeline 内的 Memory。
-
-Child Role 不会因此读取 parent 的其他 Memory，也不会自动进入 sibling Thread。
-
-### 8.1 成员变化不级联
-
-除了 Root creator 的树级治理关系外，普通 Role 的成员关系在各 Thread 中彼此独立：
-
-- 从 parent 移除某 Role，不自动移除其 descendant membership；
-- 从 child 移除某 Role，不影响 parent；
-- 如需整树撤权，由 Root creator / 各 Thread manage 显式处理。
-
-这样保证每个 Thread 都是独立的会话权限域，不引入隐式继承状态。
-
-## 9. Timeline 与阅读状态
-
-### 9.1 Timeline
-
-Thread 中 Memory 以 Thread 内单调递增的 `seq` 排序：
-
-```
-T0
-#1 M1
-#2 M2
-#3 M3
-```
-
-`seq` 表示“该 Memory 何时进入这个 Thread”，不等于 Memory 创建时间。
-
-ThreadMemory 一旦建立，不删除、不重排。
-
-### 9.2 Read cursor
-
-每个 ThreadRole 维护自己的 `last_read_seq`。
-
-```
-thread head = 31
-Role B last_read_seq = 24
-=> B 的未读范围是 25..31
-```
-
-新加入 Role 默认可以读取完整历史；其初始 read cursor 由调用方选择“未读全部”或“标记到当前”，但不能改变可读历史范围。
-
-第一版不把 mention、reaction、在线状态、notification 建进 Thread 核心模型。
-
-## 10. 生命周期
+### 4.1 持久状态
 
 Thread 只有：
 
-- `open`
-- `closed`
+~~~
+open
+closed
+~~~
 
-### open
+open：
 
-允许符合权限的：
+- 可以产生 / 纳入 Memory；
+- 可以创建 Child Thread；
+- 可以新增、调整、移除 Role。
 
-- 发布 / 纳入 Memory；
-- 创建 Child Thread；
-- 新增 Role；
-- 提升或降低 Role 权限；
-- 移除 Role。
+closed：
 
-### closed
+- 保留读取；
+- 禁止新增内容；
+- 禁止创建 Child Thread；
+- 禁止新增 Role 或升权；
+- 为安全撤权，仍允许移除 Role 或降权；
+- manage 可以 reopen。
 
-保留读取和 read cursor 更新。
+关闭 parent 不自动关闭已有 Child Thread；每个 Thread 是独立会话边界。
 
-禁止：
+### 4.2 过程状态
 
-- 新增 Memory；
-- 创建 Child Thread；
-- 新增 Role；
-- 提升 Role 权限。
+对话过程不再增加 waiting / processing / next_actor / handoff 等状态。
 
-为了安全撤权，closed 状态仍允许 manage：
+当前协作现场由以下事实直接表达：
 
-- 移除普通 Role；
-- 降低普通 Role 权限。
+~~~
+Thread.status
+Thread.roles
+Thread.head_seq
+Thread.timeline
+Thread.children + children.status
+~~~
 
-Root creator 的不可移除 / 不可降权规则继续生效；普通 Child `created_by` 不享有该永久豁免。
+因此：
 
-manage 可以 reopen。
+- 新 Memory 进入 → 主线前进；
+- 新 Child Thread 产生 → 局部会话展开；
+- Child Thread closed → 局部会话结束；
+- Child 结果重新纳入祖先 Thread → 结果回到主线；
+- Role 被加入 / 移除 → 会话边界变化；
+- Root Thread closed → 主会话停止继续写入。
 
-关闭 Child Thread 不影响 parent。关闭 parent 也不自动关闭已有 descendants；descendant 是独立 scope，可继续存在。parent 关闭后不能再从它创建新的 Child Thread。
+这就是 Thread 的协作状态，不再额外建立工作流状态机。
 
-第一版不提供 Thread 删除。
+客户端 / Agent 的阅读位置由调用方使用 after_seq 等 cursor 自己维护；第一版不在 thread_roles 持久化 read-state。
 
-## 11. 结果回主线
+## 5. Role 参与关系与权限
 
-Child Thread 中产生结果 Memory R 后：
+ThreadRole 不是业务对象，只表达：
 
-- 若 R owner 同时对 parent 有 write，则 owner 可把 R 纳入 parent；
-- 若 R owner 不在 parent 或没有 write，则 parent manage 先调整 parent membership / permission，再由 R owner 纳入；
-- 其他普通成员不能代替 R owner 把其 private Memory跨 scope 传播。
+~~~
+Role ∈ Thread
+~~~
 
-这样结果可以回主线，同时不把“读过别人 private Memory”升级成“可以替别人传播”。
+以及该 Role 在 Thread 中的权限。
 
-## 12. 数据不变量
+第一版只有三档：
 
-实现必须保证：
+- read：读取 Thread、timeline、Thread 内 Memory，以及自己有权进入的 Child Thread；
+- write：包含 read；可以在 Thread 中发布 Memory、纳入允许传播的 Memory、创建符合规则的 Child Thread；
+- manage：包含 write；可以改变 Thread 的 Role 边界与权限，并改变 Thread open / closed 状态。
 
-1. 每个 Thread 有且只有一个 `created_by` 来源事实；
-2. Root Thread creator 始终是 Root Thread 的 manage Role；
-3. Root creator 显式存在于每个 descendant Thread，始终为 manage，且不可移除或降权；
-4. Child Thread 的 `created_by` 创建时默认获得 manage，但该权限可被 Root creator 调整或移除；
-5. Child Thread 必须同时有 parent 与 anchor；Root Thread 两者都为空；
-6. Child Thread anchor 必须存在于 parent Thread，且创建 Child 时对应 Memory 必须为 active；
-7. parent / anchor 创建后不可修改；
-8. 同一 `(thread, role)` 只有一个当前成员关系；
-9. 同一 `(thread, memory)` 只有一个时间线关系；
-10. ThreadMemory `seq` 在 Thread 内唯一且单调递增；
-11. ThreadMemory 建立后不可删除或重排；
-12. 非 ThreadRole 不得通过该 Thread 读取 private Memory；
-13. ThreadRole 移除后，该 Thread 的 scoped read 立即失效；
-14. read 不能写；write 不能治理成员；
-15. child 扩大到 parent 外 Role 时：创建时操作者必须是 parent manage；创建后的成员变更必须同时是 child manage 与 parent manage；
-16. scoped read 不产生 ownership、public visibility 或任意跨 Thread 传播权；
-17. 既有 Memory 纳入 Thread 时，操作者必须是该 Memory owner；Child anchor 除外；
-18. closed Thread 不允许内容写入、受众扩大或新 Child Thread；
-19. closed Thread 仍允许受众收缩；
-20. Memory 删除不删除 ThreadMemory，只留下 tombstone；
-21. Thread 内直接发布必须原子完成“创建 Memory + 纳入 timeline”，不能留下孤立的半成品。
+关系表最小语义：
 
-## 13. 第一版场景验收
+~~~
+thread_roles
+- thread_id
+- role_id
+- permission: read | write | manage
+~~~
 
-### 13.1 私有多人主线
+技术时间戳可以存在，但不形成新的业务状态。
 
-A 创建 T0；A manage，B write，C read。
+### 5.1 加入与退出
 
-- A/B 可发 Memory；
-- C 只能读；
-- 非成员 X 看不到 T0；
-- T0 中 private Memory 可被 A/B/C 按 Thread 权限读取。
+第一版不建 invited / active / left / removed 等 membership 状态。
 
-### 13.2 局部子对话
+加入：
 
-T0 的 M2 需要 A、B 单独展开。
+~~~
+thread_role_set(Thread, Role, permission)
+→ 建立 Role ∈ Thread
+~~~
 
-B 有 parent write，因此可创建 T1，成员只取 parent 已有 Role A、B。C 不读取 T1。
+退出 / 移除：
 
-### 13.3 局部引入外部 Role
+~~~
+thread_role_remove(Thread, Role)
+→ Role 不再属于 Thread
+~~~
 
-T0 的 M2 需要 X。
+如果以后需要邀请链接、一次性 token、接受邀请等交互，它们属于“建立这条关系之前”的协议层能力，不进入 Thread 核心模型。
 
-普通 writer 不能把 X 纳入 Child Thread。parent manage 创建 / 扩展 T1，T1 Roles 为 A、B、X。
+## 6. Private Memory 的 Thread scoped access
 
-X 可以读取 M2 和 T1 内 Memory，但不能读取 T0 其他 Memory。
+Memory 默认 private，Thread 默认 private。
 
-### 13.4 并行协作
+Role 成为 Thread 参与者后，可以在该 Thread scope 内读取 Thread 中的 private Memory：
 
-M2 同时派生 T1、T2。两者拥有独立 Role、timeline、read cursor 和生命周期，互不泄露。
+~~~
+can_read_in_thread(R, T, M) =
+    R can read T
+    AND M ∈ T
+~~~
 
-### 13.5 结果回主线
+这条授权：
 
-T1 中 B 产生 R；B 同时是 T0 writer。
+- 不把 Memory 改成 public；
+- 不改变 Memory owner；
+- 不授予 Thread 外读取权；
+- Role 被移出 Thread 后立即失效。
 
-B 把 R 纳入 T0，Memory 不复制，owner 不变；T0 其他 Role 通过 T0 获得 R 的 scoped read。
+直接 memory_get 继续遵守 Memory 原有 owner / public-private 规则；Thread scoped read 由 Thread 服务完成。
 
-### 13.6 外部 Role 结果回主线
+## 7. Root creator 与树级治理
 
-T1 中 X 产生 R，但 X 不属于 T0。
+Root Thread 的 created_by 掌握整棵 Thread tree 全景。
 
-T0 manager 若决定采用 R，先把 X 纳入 T0 并授予 write，再由 X 把 R 纳入 T0。其他成员不能替 X 扩散其 private Memory。
+Root creator：
 
-### 13.7 移除与撤权
+- 对 Root Thread 为 manage；
+- 对所有 descendants 具有派生的 read / write / manage 权限；
+- 可以查看整个树；
+- 可以调整 Child Thread 的 Role 边界和状态；
+- 不需要为了表达这项治理权，在每个 Child 的 thread_roles 中复制一条成员关系。
 
-B 被从 T0 移除：
+Child Thread 的 created_by：
 
-- B 立即失去 T0 scoped read；
-- B 在某个 Child Thread 的独立 membership 不自动消失；
-- Root creator 仍可进入所有 descendants 管理撤权。
+- 记录谁发起了该局部会话；
+- 创建时获得该 Child Thread 的 manage 关系；
+- 该 local manage 可以被 Root creator 调整或移除；
+- 不拥有对整棵树的永久权力。
 
-### 13.8 closed 撤权
+如果需要连 Root creator 都不可见的独立会话，应创建新的 Root Thread。
 
-T0 closed 后不能新增内容或新增成员；若发现权限风险，manage 仍可移除成员或降权，无需 reopen。
+## 8. Child Thread 的受众边界
 
-### 13.9 Memory unshare
+Child Thread 可以：
 
-A 的 public Memory M 被 A 自己纳入 T0，之后 A 将 M 改回 private。
+- 使用 parent Role 的子集；
+- 在需要时引入 parent 之外的新 Role。
 
-T0 Role 仍可通过 T0 读取 M，因为 A 曾主动把 M 交给 T0 的成员治理；Thread 外非 owner 不再能直接 `memory_get`。
+但 Child 的 anchor 来自 parent，因此扩大到 parent 外受众属于受控披露。
 
-第三方不能在 M public 时擅自把它纳入自己的 Thread，因此不会形成 owner 未授权的长期 scoped grant。
+规则：
 
-## 14. 非目标
+1. 创建者至少需要对 parent 有 write；
+2. Child 初始 Roles 全部来自 parent 时，write 足够；
+3. Child 创建时若包含 parent 外 Role，创建者必须对 parent 有 manage；
+4. Child 创建后新增 parent 外 Role，操作者必须同时有：
+   - Child manage；
+   - 直接 parent manage。
 
-第一版不承担：
+Child Role 只能因 Child 获得：
 
-- Task、deadline、assignee、approval 等业务义务；
-- workflow step / next actor；
-- mention / attention routing；
-- notification delivery；
-- reaction；
-- public Thread；
-- Thread 搜索与推荐；
-- Memory revision / snapshot；
-- creator transfer；
-- 任意 private Memory 跨 Thread 转发；
-- 多 parent Thread / DAG；
-- Thread 删除；
-- 隐式的父子成员继承或级联撤权。
+- anchor Memory；
+- Child timeline 中的 Memory。
 
-这些能力如未来需要，应建立在本模型之上，不能反向改变 Thread 的会话和权限边界。
+不会因此读取 parent 的其他 Memory，也不会自动进入 sibling Thread。
 
-## 15. 实现边界
+普通 Role 的 parent / child 参与关系互不级联。只有 Root creator 具有树级派生治理权。
 
-第一版持久关系只围绕：
+## 9. 信息产生、传递与回流
 
-```
-Thread
-ThreadRole
-ThreadMemory
-```
+Thread 协作只有三种信息动作。
 
-Thread 的 parent / anchor 是 Thread 自身关系，不另造 Subthread 对象。
+### 9.1 Post：在 Thread 中产生新 Memory
 
-概念字段：
+thread_post 是一个原子动作：
 
-```
-Thread
+~~~
+Role writes into Thread
+→ 创建由该 Role 拥有的 private Memory
+→ 同事务 append 到 Thread timeline
+~~~
+
+不能要求调用方先 memory_put 再 thread_include，避免半完成状态。
+
+### 9.2 Include：把已有 Memory 纳入 Thread
+
+thread_include 不复制 Memory，只建立新的 ThreadMemory 关系。
+
+允许两种情况：
+
+1. owner inclusion：Memory owner 对目标 Thread 有 write；
+2. result promotion：Memory 已存在于某 descendant Thread，操作者同时 manage 来源 Thread 与目标 ancestor Thread，可把该 Memory 提升回祖先主线。
+
+第二条只用于同一 Thread tree 内的结果回流，不赋予任意跨 Root Thread 转发权。
+
+任意 unrelated Thread 之间传播 private Memory，仍由 Memory owner 自己完成。
+
+### 9.3 Child：围绕 Memory 展开局部会话
+
+~~~
+Memory in T0
+→ thread_create(parent=T0, anchor=M)
+→ Child Thread
+~~~
+
+这就是上下文向局部协作空间的传递。
+
+因此完整协作链是：
+
+~~~
+创建主线
+→ 纳入 Role
+→ post / include Memory
+→ 某 Memory 展开 Child Thread
+→ Child 独立协作
+→ result promotion 回祖先主线
+→ close Child
+→ 主线继续
+~~~
+
+不需要 handoff / delivery / next_actor。
+
+## 10. Timeline
+
+ThreadMemory 是时间线关系：
+
+~~~
+thread_memories
+- thread_id
+- memory_id
+- seq
+- added_by_role_id
+~~~
+
+seq：
+
+- 在 Thread 内唯一；
+- 单调递增；
+- 表示 Memory 进入该 Thread 的顺序；
+- 不等于 Memory 创建时间；
+- relation 建立后不删除、不重排。
+
+Thread 对外可返回：
+
+~~~
+head_seq
+timeline(after_seq, limit)
+~~~
+
+调用方据此增量继续，无需持久化每个 Role 的阅读状态。
+
+## 11. 核心动作 / 功能暴露面
+
+第一版只暴露八个 Thread 语义动作。
+
+### 11.1 thread_create
+
+创建 Root Thread；传 parent + anchor 时创建 Child Thread。
+
+负责：
+
+- 创建 Thread；
+- 建立 creator 的 local manage；
+- 可选设置初始 Roles；
+- Child 时执行 §8 的受众校验。
+
+不单独提供 thread_create_child。
+
+### 11.2 thread_get
+
+读取一个 Thread 当前协作现场：
+
+- identity / status；
+- parent / anchor；
+- caller permission；
+- Roles + permission；
+- head_seq；
+- timeline；
+- 当前 caller 可见的 Child Thread 摘要。
+
+timeline 支持 cursor / limit。
+
+### 11.3 thread_list
+
+列出当前 Role 可访问的 Thread。
+
+只负责发现入口，不创造新状态。
+
+### 11.4 thread_post
+
+在 Thread 内原子创建 Memory 并 append timeline。
+
+### 11.5 thread_include
+
+把已有 Memory 纳入 Thread。
+
+权限严格按 §9.2。
+
+### 11.6 thread_role_set
+
+新增 Role 或调整现有 Role 的 read / write / manage。
+
+它就是“加入 Thread”的核心动作。
+
+Child 引入 parent 外 Role 时必须额外执行 §8 的 parent manage 校验。
+
+### 11.7 thread_role_remove
+
+将 Role 移出 Thread。
+
+关系消失后，该 Role 立即失去来自该 Thread 的 private Memory scoped access。
+
+### 11.8 thread_set_status
+
+~~~
+open ↔ closed
+~~~
+
+只有 manage 可执行。
+
+closed 下只允许安全收缩：role remove / permission downgrade；不允许新增内容或扩大受众。
+
+### 11.9 不暴露关系表 CRUD
+
+对外不得暴露：
+
+- create/delete ThreadRole row；
+- create/delete ThreadMemory row；
+- update parent；
+- update anchor；
+- reorder timeline。
+
+外部只看到上述八个产品语义动作。
+
+## 12. 最小持久结构
+
+### 12.1 Thread
+
+~~~
+threads
 - id / code
 - created_by_role_id
 - parent_thread_id?
 - anchor_memory_id?
-- status
+- status: open | closed
 - next_seq
-- created_at / updated_at
+- created_at
+- updated_at
+~~~
 
-ThreadRole
+### 12.2 ThreadRole
+
+~~~
+thread_roles
 - thread_id
 - role_id
 - permission: read | write | manage
-- last_read_seq
-- joined_at
+~~~
 
-ThreadMemory
+### 12.3 ThreadMemory
+
+~~~
+thread_memories
 - thread_id
 - memory_id
 - seq
 - added_by_role_id
 - created_at
-```
+~~~
 
-字段名可按仓库规范调整，但不得改变关系和不变量。
+三张表表达的是：
 
-Memory 表不新增 Thread 外键。Thread 与 Memory 是多对多会话关系。
+- 一个业务对象：Thread；
+- 两条多对多关系：Thread↔Role、Thread↔Memory。
 
-## 16. 协议语义
+Role、Memory 继续使用现有表。
 
-接口名称在开发工单中确定；PRD 只规定必须支持的语义：
+## 13. 数据与权限不变量
 
-- 创建 Root Thread；
-- 创建 Child Thread；
-- 在 Thread 内原子发布新 Memory；
-- owner 把自己的既有 Memory 纳入 Thread；
-- 读取 Thread 与 timeline；
-- 列出当前 Role 可见 Thread；
-- 新增 / 移除 / 调整 ThreadRole；
-- 更新 read cursor；
-- close / reopen Thread。
+实现必须保证：
 
-所有 Thread 读取必须在服务端完成：
+1. 业务原子只有 Role、Memory、Thread；
+2. Root Thread 的 parent / anchor 同时为空；
+3. Child Thread 的 parent / anchor 同时存在；
+4. Child anchor 创建时必须是 parent 中 active Memory；
+5. parent / anchor 创建后不可修改；
+6. 同一 (thread, role) 最多一个参与关系；
+7. 同一 (thread, memory) 最多一个 timeline 关系；
+8. (thread, seq) 唯一且单调递增；
+9. ThreadMemory 不删除、不重排；
+10. Memory ownership 不因进入 Thread 改变；
+11. 非 Thread participant 不能通过该 Thread 读取 private Memory；
+12. Role 被移出后 Thread scoped access 立即失效；
+13. read 不能写；write 不能治理 Role / status；
+14. Root creator 始终拥有整棵 tree 的 manage；
+15. Child 扩大到 parent 外 Role 时必须经过 §8 的 parent manage gate；
+16. Thread scoped read 不产生跨 Root Thread 传播权；
+17. thread_post 必须原子完成 Memory create + timeline append；
+18. closed Thread 不允许内容写入、Child 创建、Role 新增或升权；
+19. closed Thread 仍允许 Role 移除或降权；
+20. tombstone 保留原 timeline 位置，但不能作为新 Child anchor；
+21. result promotion 只允许 descendant → ancestor，且 actor 同时 manage source 与 target；
+22. 非成员读取真实 Thread code 与不存在 code 的外部表现一致，不泄露 private Thread 是否存在。
 
-1. Thread membership / tree-owner 鉴权；
-2. Thread scoped Memory authorization；
-3. tombstone 处理。
+## 14. 场景验收
 
-非成员读取 private Thread 时按“不可见对象”处理，不泄露 Thread 是否存在。
+### 14.1 私有多人主线
 
-## 17. 现有架构兼容要求
+A 创建 T0：
 
-实现前必须先完成并验证 Memory 原子契约修正：
+~~~
+A manage
+B write
+C read
+~~~
 
-- `memory_put` 不再要求 title、tags；
-- content 最小长度由 50 调整为 1；
-- 既有 Memory 数据与 owner / visibility / checksum / soft delete 行为不变；
-- Task 的 live Memory 引用语义不变；
-- Thread posting 不走当前 `memory_put` 的 60/hour transport limiter，而使用独立 Thread write 限额。
+A/B 可 post，C 只读，X 不在 T0 则看不到 T0。
 
-除上述 Memory 原子修正外，第一阶段不得改 Task 模型。
+### 14.2 局部讨论
 
-## 18. PRD 审计
+T0/M2 创建 T1，只纳入 A、B。
 
-### 18.1 对象闭合
+C 仍属于 T0，但看不到 T1。
 
-**通过。**
+### 14.3 外部专家
 
-核心业务对象仍只有 Role、Memory、Thread。Child conversation 是 Thread 自递归；timeline 内容仍是 Memory，不需要 Message / Subthread 新业务对象。
+T0 manage 围绕 M2 创建 T1，并加入外部 X。
 
-### 18.2 权限闭合
+X 只获得 M2 + T1 timeline，不获得 T0 其他 Memory。
 
-**通过，已修正两个高风险点。**
+### 14.4 并行协作
 
-- 已区分 scoped read 与传播权；
-- 已禁止非 owner 把 public Memory 固化成长期 Thread scoped grant；
-- child 扩大受众必须检查 parent manage，不能利用 child creator/manage 绕过；
-- closed Thread 仍允许撤权，避免“关闭后无法止损”。
+M2 可同时派生 T1、T2。
 
-### 18.3 会话闭合
+两者 Roles、timeline、status 相互独立。
 
-**通过，但依赖 Memory 原子契约修正。**
+### 14.5 结果回主线
 
-现有 Memory 的 title/tags/50 字限制与会话冲突，已明确列为实现前置；Thread 不通过新增 Message 对象绕开问题。
+T1 产生 R。
 
-### 18.4 父子会话闭合
+同时 manage T1 与祖先 T0 的 Role 可把 R promote 到 T0。
 
-**通过。**
+Memory 不复制，owner 不变，T0 timeline 获得新的 ThreadMemory 位置。
 
-一个 parent + 一个 anchor 足以表达会话树；多来源协作通过 Memory 在不同 Thread 中复用保留来源，不需要多 parent DAG。
+### 14.6 Role 调整
 
-### 18.5 协作表达力
+manage 用 thread_role_set 加入 / 调权限，用 thread_role_remove 移出。
 
-**通过。**
+不建立 invited / active / left / removed 状态机。
 
-§13 已覆盖：
+### 14.7 Thread 结束
 
-- 多人主线；
-- 局部私聊；
-- 外部 Role 局部接入；
-- 并行子对话；
-- 结果回主线；
-- Agent / 人接续；
-- 撤权；
-- closed 后安全收缩。
+T1 closed：
 
-这些场景均不需要额外 workflow 原语。
+- 历史仍可读；
+- 不能继续 post；
+- T0 不受影响；
+- 如有安全需要，仍可撤权。
 
-### 18.6 当前阻断项
+### 14.8 Agent 持续协作
 
-PRD 通过后，真正进入 Thread 实现前只有一个基础改动：
+Agent 调：
 
-> **先把 Memory 从“文档型存储条目”修正为“通用信息原子”。**
+~~~
+thread_get(after_seq=N)
+~~~
 
-该改动必须先独立验证，确认不破坏现有 Memory 与 Task live-reference 行为；验证通过后再开始 Thread schema / service。
+即可继续消费增量 timeline。
 
-## 19. 开发准入
+不需要平台维护 Role read cursor。
 
-只有同时满足以下条件才能进入代码：
+## 15. Memory 前置修正
 
-1. 本 PRD 已审计通过；
-2. Memory 原子契约修正有独立工单和验收；
-3. Thread schema 不引入第四个协作业务对象；
-4. 所有权限路径可由 §12 不变量直接判定；
-5. 所有第一版场景可由 §13 原语完成；
-6. 实现中若发现必须新增状态 / 权限 / 对象，立即停止，先回到 PRD。
+Thread 要成立，Memory 必须先成为真正的信息原子。
+
+当前 Memory 的 title、tags 必填、content 至少 50 字，偏文档型，无法自然承载会话。
+
+实现 Thread 前先修正：
+
+- content 必填，最少 1 个字符；
+- title 可选；
+- tags 可选；
+- description 可选；
+- owner、private/public、checksum、soft delete、update 语义保持不变；
+- 不新增 Message；
+- Task 对 Memory 的 live-reference 语义保持不变。
+
+数据库可继续使用 title=""、tags=[]，无需为此增加新的业务状态。
+
+Thread 内 post 必须复用同一 Memory 创建内核，但使用 Thread 自己的写入入口，不要求调用方走 standalone memory_put。
+
+## 16. 非目标
+
+第一版不引入：
+
+- Message；
+- Subthread；
+- ThreadEvent；
+- membership lifecycle；
+- invite state；
+- read cursor state；
+- mention；
+- notification；
+- reaction；
+- delivery；
+- review；
+- handoff；
+- next_actor / next_action；
+- workflow node / branch；
+- public Thread；
+- Memory revision / snapshot；
+- Thread 删除；
+- 多 parent / DAG；
+- Task 语义。
+
+以后新增能力必须建立在 Role / Memory / Thread 之上，不能反向把 Thread 改造成工作流模型。
+
+## 17. 逻辑闭合审计
+
+### 17.1 对象闭合
+
+通过。
+
+三个业务原子足以表达全部核心协作：
+
+~~~
+Role → Memory
+Role ↔ Thread
+Thread ↔ Memory
+Thread → Thread
+~~~
+
+关系表不升格为新业务对象。
+
+### 17.2 发起闭合
+
+通过。
+
+thread_create 同时覆盖 Root 与 Child。
+
+### 17.3 加入闭合
+
+通过。
+
+thread_role_set 直接建立 Role ∈ Thread；邀请协议不是 Thread 核心状态。
+
+### 17.4 内容闭合
+
+通过，依赖 §15 Memory 修正。
+
+新内容用 thread_post，已有内容用 thread_include，均仍以 Memory 为唯一内容原子。
+
+### 17.5 传递闭合
+
+通过。
+
+- 人进入会话：Role relation；
+- 信息进入会话：post / include；
+- 上下文下钻：Child Thread；
+- 结果回主线：descendant → ancestor promotion。
+
+没有额外 handoff 对象。
+
+### 17.6 状态闭合
+
+通过。
+
+Thread 的 open / closed、timeline head、Role 边界、Child Thread 结构与 Child status 已足够表达对话过程。
+
+Role 不需要额外 membership state；阅读进度不需要服务端持久化。
+
+### 17.7 权限闭合
+
+通过。
+
+- ThreadRole 负责 local ACL；
+- Root creator 提供 tree-wide governance；
+- parent manage gate 控制 Child 对外扩展；
+- Thread scoped read 穿透 private Memory，但不改变 Memory 全局权限；
+- private Memory 不允许任意跨 Root Thread 传播。
+
+### 17.8 协作场景闭合
+
+通过。
+
+多人主线、局部讨论、外部专家、并行子对话、结果回流、Role 调整、Agent 接续都只使用本文原语完成。
+
+## 18. 开发准入
+
+进入代码前必须同时满足：
+
+1. 本 PRD 作为唯一 Thread 机制依据；
+2. 先完成 Memory 原子修正；
+3. Thread 实现只建立 Thread + 两张关系表；
+4. 对外只围绕 §11 八个语义动作；
+5. 权限判断集中在 Thread service；
+6. repository 不复制产品授权规则；
+7. 实现中若出现第四个协作业务对象、新 membership 状态机或 workflow 状态，立即停止并回到 PRD。
