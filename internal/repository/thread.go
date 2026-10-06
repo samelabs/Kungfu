@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
@@ -395,4 +396,190 @@ func RootCreatorCanGovernThread(ctx context.Context, q pg.Querier, threadID, rol
 			WHERE parent_thread_id IS NULL AND created_by_role_id = $2
 		)`, threadID, roleID).Scan(&ok)
 	return ok, err
+}
+
+
+// ---- T3 receipt / membership state ---------------------------------------
+
+func InsertPendingThreadReceipt(ctx context.Context, q pg.Querier, threadID, inputEntryID, roleID int64, reason string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		INSERT INTO thread_receipts
+		    (thread_id, input_entry_id, role_id, reason, state)
+		VALUES ($1, $2, $3, $4, 'pending')
+		ON CONFLICT (thread_id, input_entry_id, role_id) DO NOTHING`,
+		threadID, inputEntryID, roleID, reason)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func FindThreadReceipt(ctx context.Context, q pg.Querier, threadID, inputEntryID, roleID int64) (*model.ThreadReceipt, error) {
+	var r model.ThreadReceipt
+	err := q.QueryRow(ctx, `
+		SELECT thread_id, input_entry_id, role_id, reason, state,
+		       created_at, handled_at, withdrawn_at
+		FROM thread_receipts
+		WHERE thread_id=$1 AND input_entry_id=$2 AND role_id=$3`,
+		threadID, inputEntryID, roleID).Scan(
+		&r.ThreadID, &r.InputEntryID, &r.RoleID, &r.Reason, &r.State,
+		&r.CreatedAt, &r.HandledAt, &r.WithdrawnAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// HandlePendingThreadReceipt is the Todo-consuming CAS. RowsAffected=false
+// means the input is stale (already handled/withdrawn or never pending).
+func HandlePendingThreadReceipt(ctx context.Context, q pg.Querier, threadID, inputEntryID, roleID int64) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state='handled', handled_at=NOW(), withdrawn_at=NULL
+		WHERE thread_id=$1 AND input_entry_id=$2 AND role_id=$3
+		  AND state='pending'`, threadID, inputEntryID, roleID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func WithdrawPendingThreadReceiptsByRole(ctx context.Context, q pg.Querier, threadID, roleID int64) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state='withdrawn', withdrawn_at=NOW(), handled_at=NULL
+		WHERE thread_id=$1 AND role_id=$2 AND state='pending'`, threadID, roleID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+func WithdrawAllPendingThreadReceipts(ctx context.Context, q pg.Querier, threadID int64) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state='withdrawn', withdrawn_at=NOW(), handled_at=NULL
+		WHERE thread_id=$1 AND state='pending'`, threadID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+func UpdateThreadRolePermission(ctx context.Context, q pg.Querier, threadID, roleID int64, permission string, entryID *int64) error {
+	var tag pgconn.CommandTag
+	var err error
+	if entryID == nil {
+		tag, err = q.Exec(ctx, `
+			UPDATE thread_roles
+			SET permission=$3
+			WHERE thread_id=$1 AND role_id=$2`,
+			threadID, roleID, permission)
+	} else {
+		tag, err = q.Exec(ctx, `
+			UPDATE thread_roles
+			SET permission=$3, entry_id=$4
+			WHERE thread_id=$1 AND role_id=$2`,
+			threadID, roleID, permission, *entryID)
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func DeleteThreadRole(ctx context.Context, q pg.Querier, threadID, roleID int64) error {
+	tag, err := q.Exec(ctx, `
+		DELETE FROM thread_roles WHERE thread_id=$1 AND role_id=$2`,
+		threadID, roleID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func SetThreadStatus(ctx context.Context, q pg.Querier, threadID int64, from, to string) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET status=$3, revision=revision+1, updated_at=NOW()
+		WHERE id=$1 AND status=$2`, threadID, from, to)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func SetThreadSubject(ctx context.Context, q pg.Querier, threadID int64, subject string) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET subject=$2, revision=revision+1, updated_at=NOW()
+		WHERE id=$1`, threadID, subject)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// ---- T3 idempotency -------------------------------------------------------
+
+func TryInsertThreadIdempotency(ctx context.Context, q pg.Querier, roleID int64, operation, key string, requestHash []byte) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		INSERT INTO thread_idempotency
+		    (role_id, operation, idempotency_key, request_hash, result_ref)
+		VALUES ($1, $2, $3, $4, '')
+		ON CONFLICT (role_id, operation, idempotency_key) DO NOTHING`,
+		roleID, operation, key, requestHash)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func FindThreadIdempotency(ctx context.Context, q pg.Querier, roleID int64, operation, key string) (*model.ThreadIdempotency, error) {
+	var id model.ThreadIdempotency
+	err := q.QueryRow(ctx, `
+		SELECT role_id, operation, idempotency_key, request_hash, result_ref, created_at
+		FROM thread_idempotency
+		WHERE role_id=$1 AND operation=$2 AND idempotency_key=$3`,
+		roleID, operation, key).Scan(
+		&id.RoleID, &id.Operation, &id.IdempotencyKey, &id.RequestHash,
+		&id.ResultRef, &id.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+func CompleteThreadIdempotency(ctx context.Context, q pg.Querier, roleID int64, operation, key, resultRef string) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_idempotency
+		SET result_ref=$4
+		WHERE role_id=$1 AND operation=$2 AND idempotency_key=$3
+		  AND result_ref=''`,
+		roleID, operation, key, resultRef)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }

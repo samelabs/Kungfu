@@ -1,0 +1,490 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"kungfu.md/internal/model"
+	"kungfu.md/internal/pg"
+	"kungfu.md/internal/repository"
+)
+
+func threadIdem(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+type threadPairFixture struct {
+	A     int64
+	B     int64
+	Thread *model.Thread
+	Root  *model.ThreadMemory
+}
+
+func threadPairWithPendingB(t *testing.T, pool *pg.Pool) threadPairFixture {
+	t.Helper()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+	result, err := CreateThreadState(context.Background(), pool, a, ThreadCreateInput{
+		Subject: "Pair work",
+		Content: "root input",
+		Participants: []ThreadParticipantSpec{
+			{RoleID: b, Permission: model.ThreadWrite},
+		},
+		IdempotencyKey: threadIdem("create"),
+	})
+	if err != nil {
+		t.Fatalf("CreateThreadState: %v", err)
+	}
+	return threadPairFixture{A: a, B: b, Thread: result.Thread, Root: result.RootEntry}
+}
+
+func countReceipts(t *testing.T, pool *pg.Pool, threadID, roleID int64, state string) int64 {
+	t.Helper()
+	var n int64
+	if err := pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM thread_receipts
+		WHERE thread_id=$1 AND role_id=$2 AND state=$3`,
+		threadID, roleID, state).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestThreadRoundTripTodoReplyHandle(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+
+	if got := countReceipts(t, pool, f.Thread.ID, f.B, model.ThreadReceiptPending); got != 1 {
+		t.Fatalf("B initial pending = %d, want 1", got)
+	}
+	reply, err := ReplyThreadState(ctx, pool, f.B, ThreadReplyInput{
+		ThreadID: f.Thread.ID, ReplyToEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+		Content: "B response", IdempotencyKey: threadIdem("reply"),
+	})
+	if err != nil {
+		t.Fatalf("B reply: %v", err)
+	}
+	bReceipt, _ := repository.FindThreadReceipt(ctx, pool, f.Thread.ID, f.Root.ID, f.B)
+	if bReceipt == nil || bReceipt.State != model.ThreadReceiptHandled {
+		t.Fatalf("B root receipt = %+v", bReceipt)
+	}
+	aReceipt, _ := repository.FindThreadReceipt(ctx, pool, f.Thread.ID, reply.Entry.ID, f.A)
+	if aReceipt == nil || aReceipt.State != model.ThreadReceiptPending || aReceipt.Reason != model.ThreadReceiptReply {
+		t.Fatalf("A reply receipt = %+v", aReceipt)
+	}
+	if _, err := HandleThreadInput(ctx, pool, f.A, f.Thread.ID, reply.Entry.ID, threadIdem("handle")); err != nil {
+		t.Fatalf("A handle: %v", err)
+	}
+	if got := countReceipts(t, pool, f.Thread.ID, f.A, model.ThreadReceiptPending); got != 0 {
+		t.Fatalf("A pending after handle = %d", got)
+	}
+}
+
+func TestThreadReplyIdempotencyAndConflict(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+	key := threadIdem("reply-idem")
+	in := ThreadReplyInput{
+		ThreadID: f.Thread.ID, ReplyToEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+		Content: "one durable reply", IdempotencyKey: key,
+	}
+	first, err := ReplyThreadState(ctx, pool, f.B, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ReplyThreadState(ctx, pool, f.B, in)
+	if err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if !second.AlreadyApplied || second.Entry.ID != first.Entry.ID {
+		t.Fatalf("reply replay = %+v first=%+v", second, first)
+	}
+	var entries int64
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries != 2 {
+		t.Fatalf("timeline entries after replay = %d, want root+one reply", entries)
+	}
+	conflict := in
+	conflict.Content = "different request under same key"
+	if _, err := ReplyThreadState(ctx, pool, f.B, conflict); !errors.Is(err, ErrThreadIdempotencyConflict) {
+		t.Fatalf("same key/different request err=%v, want IDEMPOTENCY conflict", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries != 2 {
+		t.Fatalf("conflict wrote an extra entry: %d", entries)
+	}
+}
+
+func TestStaleTodoReplyProducesNoWrite(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+
+	if _, err := HandleThreadInput(ctx, pool, f.B, f.Thread.ID, f.Root.ID, threadIdem("consume")); err != nil {
+		t.Fatal(err)
+	}
+	var memoryBefore, entryBefore, childBefore int64
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_kungfus WHERE origin='thread'`).Scan(&memoryBefore)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entryBefore)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM threads WHERE parent_thread_id=$1`, f.Thread.ID).Scan(&childBefore)
+
+	_, err := ReplyThreadState(ctx, pool, f.B, ThreadReplyInput{
+		ThreadID: f.Thread.ID, ReplyToEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+		Content: "must not persist", IdempotencyKey: threadIdem("stale-reply"),
+	})
+	if !errors.Is(err, ErrThreadStaleInput) {
+		t.Fatalf("stale reply err=%v", err)
+	}
+	var memoryAfter, entryAfter, childAfter int64
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tb_kungfus WHERE origin='thread'`).Scan(&memoryAfter)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entryAfter)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM threads WHERE parent_thread_id=$1`, f.Thread.ID).Scan(&childAfter)
+	if memoryAfter != memoryBefore || entryAfter != entryBefore || childAfter != childBefore {
+		t.Fatalf("stale action wrote state: memory %d→%d entry %d→%d child %d→%d",
+			memoryBefore, memoryAfter, entryBefore, entryAfter, childBefore, childAfter)
+	}
+}
+
+func TestTodoRaceHandleVsReply(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := HandleThreadInput(ctx, pool, f.B, f.Thread.ID, f.Root.ID, threadIdem("race-handle"))
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := ReplyThreadState(ctx, pool, f.B, ThreadReplyInput{
+			ThreadID: f.Thread.ID, ReplyToEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+			Content: "race reply", IdempotencyKey: threadIdem("race-reply"),
+		})
+		errs <- err
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	success, stale := 0, 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrThreadStaleInput):
+			stale++
+		default:
+			t.Fatalf("unexpected race error: %v", err)
+		}
+	}
+	if success != 1 || stale != 1 {
+		t.Fatalf("handle/reply race success=%d stale=%d, want 1/1", success, stale)
+	}
+	var entries int64
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries < 1 || entries > 2 {
+		t.Fatalf("race produced impossible timeline count %d", entries)
+	}
+}
+
+func TestTodoRaceReplyVsBranch(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := ReplyThreadState(ctx, pool, f.B, ThreadReplyInput{
+			ThreadID: f.Thread.ID, ReplyToEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+			Content: "race reply", IdempotencyKey: threadIdem("race-rb-reply"),
+		})
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := BranchThreadState(ctx, pool, f.B, ThreadBranchInput{
+			ParentThreadID: f.Thread.ID, AnchorEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+			Subject: "race child", IdempotencyKey: threadIdem("race-rb-branch"),
+		})
+		errs <- err
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	success, stale := 0, 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrThreadStaleInput):
+			stale++
+		default:
+			t.Fatalf("unexpected race error: %v", err)
+		}
+	}
+	if success != 1 || stale != 1 {
+		t.Fatalf("reply/branch race success=%d stale=%d, want 1/1", success, stale)
+	}
+	var entries, children int64
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM thread_memories WHERE thread_id=$1`, f.Thread.ID).Scan(&entries)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM threads WHERE parent_thread_id=$1`, f.Thread.ID).Scan(&children)
+	if (entries == 2 && children != 0) || (entries == 1 && children != 1) || entries < 1 || entries > 2 || children > 1 {
+		t.Fatalf("reply/branch race effects entries=%d children=%d", entries, children)
+	}
+}
+
+func TestMultiplePendingAndBranchChildTodo(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	c := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+	threadTestActiveLink(t, pool, a, c)
+	threadTestActiveLink(t, pool, b, c)
+
+	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
+		Subject: "Multi", Content: "root",
+		Participants: []ThreadParticipantSpec{{RoleID: b}, {RoleID: c}},
+		IdempotencyKey: threadIdem("multi-create"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bReply, err := ReplyThreadState(ctx, pool, b, ThreadReplyInput{
+		ThreadID: root.Thread.ID, ReplyToEntryID: root.RootEntry.ID, InputEntryID: int64Ptr(root.RootEntry.ID),
+		Content: "B reply", IdempotencyKey: threadIdem("multi-b"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReplyThreadState(ctx, pool, c, ThreadReplyInput{
+		ThreadID: root.Thread.ID, ReplyToEntryID: root.RootEntry.ID, InputEntryID: int64Ptr(root.RootEntry.ID),
+		Content: "C reply", IdempotencyKey: threadIdem("multi-c"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, a, model.ThreadReceiptPending); got != 2 {
+		t.Fatalf("A pending inputs = %d, want 2", got)
+	}
+
+	// Branch one specific pending input; the other remains pending.
+	child, err := BranchThreadState(ctx, pool, a, ThreadBranchInput{
+		ParentThreadID: root.Thread.ID, AnchorEntryID: bReply.Entry.ID, InputEntryID: int64Ptr(bReply.Entry.ID),
+		Subject: "Child work",
+		Participants: []ThreadParticipantSpec{{RoleID: c, Permission: model.ThreadWrite}},
+		IdempotencyKey: threadIdem("multi-branch"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, a, model.ThreadReceiptPending); got != 1 {
+		t.Fatalf("A pending after one branch = %d, want 1", got)
+	}
+	childReceipt, _ := repository.FindThreadReceipt(ctx, pool, child.Thread.ID, bReply.Entry.ID, c)
+	if childReceipt == nil || childReceipt.State != model.ThreadReceiptPending || childReceipt.Reason != model.ThreadReceiptEntry {
+		t.Fatalf("Child initial receipt = %+v", childReceipt)
+	}
+}
+
+func TestPermissionCloseReopenAndReadRoleTodoRules(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	c := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+	threadTestActiveLink(t, pool, a, c)
+
+	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
+		Subject: "Permissions", Content: "root",
+		Participants: []ThreadParticipantSpec{
+			{RoleID: b, Permission: model.ThreadWrite},
+			{RoleID: c, Permission: model.ThreadRead},
+		},
+		IdempotencyKey: threadIdem("perm-create"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, c, model.ThreadReceiptPending); got != 0 {
+		t.Fatalf("read Role got %d Todo receipts", got)
+	}
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadRead, nil, threadIdem("downgrade")); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := repository.FindThreadReceipt(ctx, pool, root.Thread.ID, root.RootEntry.ID, b)
+	if r == nil || r.State != model.ThreadReceiptWithdrawn {
+		t.Fatalf("downgraded receipt = %+v", r)
+	}
+
+	// Create a different current entry for B's new actionable entry.
+	proactive, err := ReplyThreadState(ctx, pool, a, ThreadReplyInput{
+		ThreadID: root.Thread.ID, ReplyToEntryID: root.RootEntry.ID,
+		Content: "new work point", IdempotencyKey: threadIdem("proactive"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadWrite,
+		int64Ptr(proactive.Entry.ID), threadIdem("upgrade")); err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, b, model.ThreadReceiptPending); got != 1 {
+		t.Fatalf("upgraded B pending = %d, want 1", got)
+	}
+
+	if _, err := CloseThreadState(ctx, pool, a, root.Thread.ID, threadIdem("close")); err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, b, model.ThreadReceiptPending); got != 0 {
+		t.Fatalf("close left %d pending", got)
+	}
+	if _, err := ReopenThreadState(ctx, pool, a, root.Thread.ID, threadIdem("reopen")); err != nil {
+		t.Fatal(err)
+	}
+	if got := countReceipts(t, pool, root.Thread.ID, b, model.ThreadReceiptPending); got != 0 {
+		t.Fatalf("reopen restored %d old pending receipts", got)
+	}
+}
+
+func TestParticipantRemovalRevokesJoinKeyButChildSurvives(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+
+	child, err := BranchThreadState(ctx, pool, f.B, ThreadBranchInput{
+		ParentThreadID: f.Thread.ID, AnchorEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+		Subject: "Independent child", IdempotencyKey: threadIdem("child"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ResetThreadJoinKeyState(ctx, pool, f.A, f.Thread.ID, f.Root.ID, threadIdem("key"))
+	if err != nil || key.JoinKey == "" {
+		t.Fatalf("reset key: %+v err=%v", key, err)
+	}
+	if _, err := RemoveThreadParticipant(ctx, pool, f.A, f.Thread.ID, f.B, threadIdem("remove")); err != nil {
+		t.Fatal(err)
+	}
+	parent, _ := repository.FindThreadByID(ctx, pool, f.Thread.ID)
+	if len(parent.JoinKeyHash) != 0 || parent.JoinEntryID != nil {
+		t.Fatalf("participant removal did not revoke join key: %+v", parent)
+	}
+	if role, err := repository.FindThreadRole(ctx, pool, child.Thread.ID, f.B); err != nil || role == nil || role.Permission != model.ThreadManage {
+		t.Fatalf("Child participation was cascaded: role=%+v err=%v", role, err)
+	}
+	childAfter, _ := repository.FindThreadByID(ctx, pool, child.Thread.ID)
+	if childAfter == nil || childAfter.Status != model.ThreadOpen {
+		t.Fatalf("Child lifecycle changed: %+v", childAfter)
+	}
+}
+
+func TestCreateJoinAndKeyResetOneTimeDisclosure(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	createKey := threadIdem("key-create")
+	in := ThreadCreateInput{
+		Subject: "Join path", Content: "entry", IssueJoinKey: true, IdempotencyKey: createKey,
+	}
+	first, err := CreateThreadState(ctx, pool, a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.JoinKey == "" || first.JoinKeyFingerprint == "" {
+		t.Fatalf("first create did not disclose join key once: %+v", first)
+	}
+	replay, err := CreateThreadState(ctx, pool, a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replay.AlreadyApplied || replay.JoinKey != "" || replay.JoinKeyFingerprint != first.JoinKeyFingerprint {
+		t.Fatalf("create replay re-disclosed or lost fingerprint: %+v", replay)
+	}
+
+	joined, err := JoinThreadState(ctx, pool, b, first.JoinKey, threadIdem("join"))
+	if err != nil || !joined.Joined || joined.Role.Permission != model.ThreadWrite || joined.Role.EntryID != first.RootEntry.ID {
+		t.Fatalf("join = %+v err=%v", joined, err)
+	}
+	if got := countReceipts(t, pool, first.Thread.ID, b, model.ThreadReceiptPending); got != 1 {
+		t.Fatalf("join pending = %d, want 1", got)
+	}
+	repeatJoin, err := JoinThreadState(ctx, pool, b, first.JoinKey, threadIdem("join-again"))
+	if err != nil || repeatJoin.Joined {
+		t.Fatalf("existing participant join = %+v err=%v", repeatJoin, err)
+	}
+	if got := countReceipts(t, pool, first.Thread.ID, b, model.ThreadReceiptPending); got != 1 {
+		t.Fatalf("repeat join duplicated receipt: %d", got)
+	}
+
+	resetKey := threadIdem("reset")
+	reset, err := ResetThreadJoinKeyState(ctx, pool, a, first.Thread.ID, first.RootEntry.ID, resetKey)
+	if err != nil || reset.JoinKey == "" || reset.JoinKey == first.JoinKey {
+		t.Fatalf("reset = %+v err=%v", reset, err)
+	}
+	resetReplay, err := ResetThreadJoinKeyState(ctx, pool, a, first.Thread.ID, first.RootEntry.ID, resetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resetReplay.AlreadyApplied || resetReplay.JoinKey != "" || resetReplay.JoinKeyFingerprint != reset.JoinKeyFingerprint {
+		t.Fatalf("reset replay = %+v", resetReplay)
+	}
+}
+
+func TestChildCloseReopenBumpsParentWithoutCascading(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	f := threadPairWithPendingB(t, pool)
+	child, err := BranchThreadState(ctx, pool, f.B, ThreadBranchInput{
+		ParentThreadID: f.Thread.ID, AnchorEntryID: f.Root.ID, InputEntryID: int64Ptr(f.Root.ID),
+		Subject: "Child status", IdempotencyKey: threadIdem("branch-status"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBefore, _ := repository.FindThreadByID(ctx, pool, f.Thread.ID)
+	if _, err := CloseThreadState(ctx, pool, f.A, child.Thread.ID, threadIdem("close-child")); err != nil {
+		t.Fatalf("root govern close child: %v", err)
+	}
+	parentAfterClose, _ := repository.FindThreadByID(ctx, pool, f.Thread.ID)
+	if parentAfterClose.Revision != parentBefore.Revision+1 {
+		t.Fatalf("child close parent revision = %d, want %d", parentAfterClose.Revision, parentBefore.Revision+1)
+	}
+	if _, err := ReopenThreadState(ctx, pool, f.A, child.Thread.ID, threadIdem("reopen-child")); err != nil {
+		t.Fatalf("root govern reopen child: %v", err)
+	}
+	parentAfterReopen, _ := repository.FindThreadByID(ctx, pool, f.Thread.ID)
+	if parentAfterReopen.Revision != parentAfterClose.Revision+1 {
+		t.Fatalf("child reopen parent revision = %d, want %d", parentAfterReopen.Revision, parentAfterClose.Revision+1)
+	}
+}

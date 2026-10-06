@@ -12,6 +12,12 @@ const (
 	ThreadRead   = "read"
 	ThreadWrite  = "write"
 	ThreadManage = "manage"
+
+	ThreadReceiptEntry     = "entry"
+	ThreadReceiptReply     = "reply"
+	ThreadReceiptPending   = "pending"
+	ThreadReceiptHandled   = "handled"
+	ThreadReceiptWithdrawn = "withdrawn"
 )
 
 type RoleLink struct {
@@ -56,5 +62,25 @@ type ThreadMemory struct {
 	Seq            int64
 	AuthorRoleID   int64
 	ReplyToEntryID *int64
+	CreatedAt      time.Time
+}
+
+type ThreadReceipt struct {
+	ThreadID      int64
+	InputEntryID  int64
+	RoleID        int64
+	Reason        string
+	State         string
+	CreatedAt     time.Time
+	HandledAt     *time.Time
+	WithdrawnAt   *time.Time
+}
+
+type ThreadIdempotency struct {
+	RoleID         int64
+	Operation      string
+	IdempotencyKey string
+	RequestHash    []byte
+	ResultRef      string
 	CreatedAt      time.Time
 }
