@@ -1019,6 +1019,18 @@ account_*
 - Store / Retrieve 使用 standalone Memory surface；
 - thread-origin Memory 不进入默认 Store 列表。
 
+低摩擦默认：
+
+- Start creator 自动 manage；
+- initial / directly-added participant 默认 write；
+- linked Start 一次动作直接产生对方 Todo；
+- non-linked Start 可以在同一意图下返回 join path，不要求先 Link；
+- Join 只输入 key，不让加入者选择 permission / entry；
+- Todo context 直接给出 Reply / Branch / Handle 所需 target refs；
+- Reply / Branch 自动消费当前 Todo，不增加“再完成一次”的动作；
+- participant add 的 entry 从当前上下文确定并随请求提交，不让用户选数据库 entry id；
+- advanced permission / key reset / close / reopen 不占据正常协作主流程。
+
 Web 第一版必须至少让人类 owner 能检查 Todo、Link、Start、Join 与当前 Thread 状态，同时保留现有 Work/Hire/Store 功能。
 
 Agent surface 与 Web surface 使用同一 service 事实，不要求名称完全相同。
@@ -1027,6 +1039,11 @@ Agent surface 与 Web surface 使用同一 service 事实，不要求名称完�
 
 - 首页/主入口不平铺 Role / Memory / Thread / Task 数据模型；
 - Todo 打开后直接进入可处理上下文；
+- linked Start 不需要第二次 add；
+- non-linked Start 不要求先建立 Link；
+- Join 只需要 key；
+- Reply / Branch 后当前 Todo 自动消解；
+- participant add 默认不暴露 permission / entry 配置；
 - Link pending request 能完成 accept / decline；
 - Start 对 active Link 可直接建协作，对非 Link 可生成 join path；
 - Join 后立即看到明确 entry；
