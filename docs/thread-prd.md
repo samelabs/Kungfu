@@ -456,7 +456,7 @@ Memory 可以继续作为独立存储对象演化；Thread 读取当时进入协
 
 ## 10. Reply 驱动
 
-thread_reply 是 Thread 最核心的推进动作。
+collab_respond 是 Thread 最核心的推进动作。
 
 ~~~
 Role B
@@ -569,7 +569,7 @@ handle 表达该输入已处理，本轮在这里结束。
 
 ### 10.3 Todo 视图
 
-thread_todos(role) 查询 pending receipts，并按 Thread 聚合。
+collab_inbox(role) 查询 pending receipts，并按 Thread 聚合。
 
 返回：
 
@@ -588,7 +588,7 @@ Todo 没有独立创建、分配、关闭生命周期。
 
 ## 12. Branch 驱动
 
-thread_branch：
+collab_branch：
 
 ~~~
 current Thread T
@@ -632,7 +632,7 @@ current Thread
 
 Reply target 必须属于当前 Thread 可回应范围；Branch anchor 必须属于当前 Thread 可分叉范围。
 
-Agent 切换 Thread 时，通过新的 thread_open 建立新的上下文。
+Agent 切换协作事项时，通过新的 collab_open 建立新的 Agent 工作上下文。
 
 跨 Thread 共享依赖显式 Memory 引用、分享或新的协作动作。
 
@@ -640,132 +640,227 @@ Agent 切换 Thread 时，通过新的 thread_open 建立新的上下文。
 
 > 有来源、有结构、有共享事实，同时保持当前工作集隔离。
 
-## 14. Agent Context Envelope
+## 14. Agent 访问面
 
-Agent-first 接口返回结构化协作包，而不是裸数据库对象。
+Kungfu 的外部访问面面向 Agent 的工作意图表达；Thread、ThreadMemory、ThreadReceipt、seq、revision 等属于内部结构事实。
+
+Agent 使用产品时只需要理解：
+
+~~~
+我有什么需要处理的协作
+→ 进入一个协作事项
+→ 为什么我在这里
+→ 当前哪些输入需要我处理
+→ 我需要哪些上下文
+→ 我可以怎样继续
+~~~
+
+外部协议使用稳定语义层：
+
+~~~
+memory_*   信息存储与分享
+collab_*   持续协作
+work_*     开放雇佣
+role_*     身份、寻址与信任
+~~~
+
+其中现有 work_* 继续表达 Task 的开放雇佣流程；collab_* 表达 Thread 协作。
+
+### 14.1 Agent 协作入口
+
+高频入口：
+
+~~~
+collab_inbox()
+collab_open(collaboration)
+collab_respond(input, content)
+collab_branch(input, subject, roles?)
+collab_done(input)
+~~~
+
+含义：
+
+- collab_inbox：告诉 Agent 当前有哪些协作事项正在等待自己；
+- collab_open：进入一个事项，并得到可直接工作的协作包；
+- collab_respond：对一个待处理输入作出回应；
+- collab_branch：把当前输入展开成独立子事项；
+- collab_done：确认当前输入已经处理完成。
+
+协作建立：
+
+~~~
+collab_start(subject, roles, content)
+collab_join(key)
+collab_invite(collaboration, role, at)
+collab_remove(collaboration, role)
+~~~
+
+信任与寻址继续使用：
+
+~~~
+role_find(username)
+role_link(...)
+role_unlink(...)
+~~~
+
+Memory 继续独立使用：
+
+~~~
+memory_put
+memory_get
+memory_share
+...
+~~~
+
+Agent 不需要知道 reply_to_entry_id、ThreadReceipt 主键、seq 分配方式或 revision 推进规则才能完成协作。
+
+### 14.2 Agent 引用
+
+访问面使用稳定、可回传的 opaque refs：
+
+~~~
+collaboration_ref
+input_ref
+memory_ref
+role_ref
+continuation_ref
+~~~
+
+这些 ref 允许 Agent 把 Kungfu 返回的目标直接用于下一次调用。
+
+内部 service 负责把 Agent ref 解析为：
+
+~~~
+thread_id
+thread_memory_id
+receipt
+memory revision
+permission scope
+~~~
+
+因此写回动作由 Kungfu 提供准确挂载位置，Agent 不需要重建内部关系。
+
+## 15. Agent Context Envelope
+
+collab_open 返回 Agent 可直接工作的结构化协作包。
 
 统一 Envelope：
 
 ~~~
 schema_version
 
-identity
-- current_role
-- thread_code
-- effective_permission
-
-matter
+collaboration
+- ref
 - subject
 - status
-- creator
-- participants
 
-position
-- root
-- parent
-- anchor
-- lineage[]
+identity
+- current_role
+- permission
 
-todos
-- pending inputs for current Role
-- reason
-- source author
-- reply target
+why_here
+- entry reason
+- source
+- lineage summary
+
+attention
+- pending inputs
+  - input_ref
+  - from
+  - reason
+  - content / memory_ref
+  - created_at
 
 context
-- root / anchor Memory refs
-- relevant Timeline index
-- direct Child summaries
-- pagination / expansion refs
+- focused memory
+- relevant memory refs
+- lineage summary
+- related child summaries
+- continuation_ref
 
-capabilities
-- reply
-- branch
-- handle
-- add_role
-- remove_role
-- reset_key
-- close
+participants
+- roles relevant to current collaboration
 
-writeback
-- valid reply targets
-- valid branch anchors
+actions
+- respond(input_ref)
+- branch(input_ref)
+- done(input_ref)
+- invite(role_ref, at?)
+- close()
 
-agent_guidance
-- current collaboration scope
-- current actionable inputs
-- expected writeback shape
-- available next actions
+guidance
+- current matter
+- what requires attention now
+- useful context already included
+- how to continue
 ~~~
 
-### 13.1 Guidance 可信边界
+### 15.1 表达原则
 
-agent_guidance 由 Kungfu 根据协议状态确定性生成。
-
-Memory content 作为 collaboration data 返回，与 guidance 分区。
-
-因此 Agent 可以稳定区分：
+Envelope 先回答 Agent 的工作问题：
 
 ~~~
-系统协作指引
-vs
-参与者写入的信息内容
+What is this?
+Why am I here?
+What needs my attention?
+What context do I need?
+What can I do next?
 ~~~
 
-### 13.2 按需读取
+内部结构字段只在协议实现所需的位置出现，并通过 opaque ref 隔离。
 
-Thread Context 先提供结构地图，再由 Agent 按需展开 Memory。
+attention 是 Todo 的 Agent 表达。
 
-高价值信息可以直接内联：
+Todo 底层仍由 pending ThreadReceipt 可靠支撑，但访问面不返回 ThreadReceipt 结构本身。
 
-- 当前 pending inputs；
-- 当前 anchor；
-- lineage anchor。
+lineage 在访问面表达为来源脉络与必要 anchor 摘要；Agent 可以按需继续展开，而不是接收整棵 Thread tree。
 
-大体量历史通过 Memory ref 与 timeline pagination 按需读取。
+### 15.2 Guidance 可信边界
 
-Agent 的上下文成本因此与当前工作集相关，而不是与整个历史长度线性增长。
+guidance 由 Kungfu 根据当前 Role、协作状态、pending inputs 与权限确定性生成。
 
-## 15. Agent 操作面
+Memory content 是参与者提供的信息数据，与 Kungfu guidance 分区。
 
-### 高频
+Agent 因此可以区分：
 
 ~~~
-thread_todos()
-thread_open(thread)
-thread_reply(thread, reply_to, content)
-thread_branch(thread, anchor, subject, roles)
-thread_handle(thread, input)
+Kungfu 协作指引
+参与者内容
 ~~~
 
-### 协作建立
+### 15.3 按需读取
+
+首包优先包含：
+
+- 当前 attention；
+- 当前进入原因；
+- 当前事项；
+- 必要 lineage 摘要；
+- 能直接执行的 actions。
+
+大体量 Memory 使用 memory_ref 按需读取。
+
+长 Timeline 使用 continuation_ref 按需展开。
+
+Agent 的上下文成本与当前工作集相关，而不是与整个历史长度线性增长。
+
+### 15.4 内部映射
+
+Agent 访问面映射到 Thread 内核：
 
 ~~~
-thread_create(subject, initial_roles, content)
-thread_join(key)
-thread_role_add(thread, role, entry_memory)
-thread_role_remove(thread, role)
+collab_inbox   → pending ThreadReceipt projection
+collab_open    → Thread context assembler
+collab_respond → thread_reply
+collab_branch  → thread_branch
+collab_done    → thread_handle
+collab_start   → thread_create
+collab_join    → thread_join
+collab_invite  → thread_role_add
+collab_remove  → thread_role_remove
 ~~~
 
-### 信任与寻址
-
-~~~
-role_find(username)
-role_link(...)
-role_unlink(...)
-thread_key_reset(thread)
-~~~
-
-### 结构读取
-
-~~~
-memory_get(memory)
-thread_lineage(thread)
-thread_tree(root)
-thread_timeline(thread, cursor)
-~~~
-
-所有入口共享同一 Thread service 规则。
+外部语义可以保持稳定，内部结构可以独立演进。
 
 ## 16. Thread create
 
@@ -794,7 +889,7 @@ manage Role 与目标 Role 存在 Link：
 thread_role_add(thread, target, entry_memory)
 → establish ThreadRole
 → create entry receipt
-→ target immediately appears in thread_todos
+→ target immediately appears in collab_inbox
 ~~~
 
 ### 16.2 Key 自主加入
@@ -878,7 +973,7 @@ thread_changed
 durable transaction commit
 → thread_changed
 → online Agent/client wakes
-→ thread_open / delta read
+→ collab_open / delta read
 ~~~
 
 Todo 本身由 durable ThreadReceipt 支撑，因此掉线期间不会丢失。
@@ -886,9 +981,9 @@ Todo 本身由 durable ThreadReceipt 支撑，因此掉线期间不会丢失。
 重新连接：
 
 ~~~
-thread_todos()
+collab_inbox()
 → discover current actionable Threads
-→ thread_open()
+→ collab_open()
 → continue
 ~~~
 
@@ -906,9 +1001,9 @@ Thread revision 用于判断结构变化。
 
 ~~~
 thread_create
-thread_reply
-thread_branch
-thread_handle
+collab_respond
+collab_branch
+collab_done
 thread_role_add
 thread_join
 ~~~
@@ -1098,7 +1193,7 @@ T3 Agent 直接得到 lineage 与 anchors，并只加载当前工作集。
 A 收到一个 pending input，完成判断后执行：
 
 ~~~
-thread_handle(T, input)
+collab_done(T, input)
 ~~~
 
 receipt 变 handled，该轮协作在 A 处结束。
@@ -1108,7 +1203,7 @@ receipt 变 handled，该轮协作在 A 处结束。
 B 针对 pending M20 创建 Child：
 
 ~~~
-thread_branch(T0, M20, ...)
+collab_branch(T0, M20, ...)
 → B receipt(M20) handled
 → Child T1 established
 → T1 initial Roles receive entry receipts
@@ -1123,9 +1218,9 @@ Agent 离线期间收到多个 Reply。
 重新连接：
 
 ~~~
-thread_todos()
+collab_inbox()
 → 返回仍为 pending 的 Threads
-→ thread_open(T)
+→ collab_open(T)
 → 返回当前 pending inputs 与 lineage
 ~~~
 
@@ -1175,11 +1270,11 @@ Kungfu Thread 的核心表达：
 Agent 的核心循环：
 
 ~~~
-thread_todos
-→ thread_open
+collab_inbox
+→ collab_open
 → memory_get as needed
 → local work
-→ thread_reply / thread_branch / thread_handle
+→ collab_respond / collab_branch / collab_done
 → next collaboration round
 ~~~
 
