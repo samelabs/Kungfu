@@ -1,62 +1,146 @@
 # Thread 开发计划
 
-依据：docs/thread-prd.md。
+依据：`docs/thread-prd.md`
 
-目标：实现一套 Agent-first 协作协议，让任意外部 Agent 通过 API / MCP 进入 Thread、读取结构化上下文、本地执行、写回结果，并由协作关系自动形成下一轮 Todo。
+目标：把 Thread 协作模型落到现有 Kungfu 架构，保持 Memory、Task、Account 现有合同稳定，并让 Agent 在任一步都能明确当前状态与下一步。
 
-## 1. 实现主线
-
-~~~text
-WO-T1 Memory 兼容演进
-   ↓
-WO-T2 Role / Link / Thread 数据内核
-   ↓
-WO-T3 Reply / Receipt / Todo
-   ↓
-WO-T4 Agent 工作上下文合同
-   ↓
-WO-T5 Protocol / API / MCP
-   ↓
-WO-T6 Product Surface
-   ↓
-WO-T7 场景与鲁棒性验收
-~~~
-
-实现围绕以下事实源展开：
+## 1. 执行顺序
 
 ~~~text
-Role = existing Agent account (tb_bots)
-Memory = existing tb_kungfus + revision history
-Thread
-RoleLink
-ThreadRole
-ThreadMemory
-ThreadReceipt
+T0 迁移与兼容
+ ↓
+T1 Memory 兼容演进
+ ↓
+T2 Role / Link / Thread 内核
+ ↓
+T3 Reply / Receipt / Todo 状态机
+ ↓
+T4 Agent 工作上下文
+ ↓
+T5 API / MCP
+ ↓
+T6 Product Surface
+ ↓
+T7 全量验收
 ~~~
 
-不得新增第二套 Role / account 身份表。role_id 统一使用 tb_bots.id，role name 使用 bot_name。
+执行使用一个 feature branch，按 T0 → T7 顺序推进。每个工作单通过验收后再进入下一单，最终只开一个实现 PR。
 
-Todo 是 pending ThreadReceipt 的产品投影。
+旧 `feat/thread-collaboration-v01` 仅供查实现经验。
 
-现有 Task 继续保持开放雇佣 Agent 执行模型：publisher 发布并开放 Task，executor Agent 通过 work_list/work_get 发现，按合同 claim/submit，平台完成 receiver delivery 与 settlement。Thread 实现不改写 Task 状态机；回归测试必须证明两套机制并行稳定。
+当前事实源：
 
-## 2. 执行工作列表与可行性闸门
+~~~text
+Role        = tb_bots
+Memory      = tb_kungfus + memory_revisions
+Task / Work = 现有 Task 1.0
+Thread      = threads + thread_roles + thread_memories
+Todo        = pending thread_receipts 的产品投影
+Link        = role_links
+~~~
 
-### 执行纪律
+## 2. 全局实现约束
 
-实现从已审计设计基线出发，旧 `feat/thread-collaboration-v01` 仅用于查实现经验，不整体 cherry-pick，不继承其 delivery / handoff / next_actor 语义。
+### 2.1 事务
 
-实现阶段使用一个 feature branch。先在分支内完成各闸门并本地跑测试，最终只开一个实现 PR。
+以下动作必须在单事务内完成：
 
-当前 CI 仅在 pull_request 与 main push 触发，因此 feature branch 可按 checkpoint push 而不触发整套 CI；正式 PR 在发布闸门通过后再建立。
+- Memory 更新与旧 revision 归档；
+- Thread create；
+- Reply；
+- Branch；
+- Handle；
+- participant add/remove/permission change；
+- close/reopen；
+- join；
+- join key reset/revoke；
+- idempotency result 持久化。
 
-每个工作单只完成自己的事实层；下一层不得提前侵入当前层。
+Repository 方法继续接受 `pg.Querier`，事务归 service 所有。
 
-### Gate 0 — Migration / Backward Compatibility Proof
+### 2.2 稳定引用
 
-先证明新模型可以进入现有数据库，而不是先写 Thread UI。
+协作挂载点统一使用 ThreadMemory entry：
 
-建议迁移拆分：
+~~~text
+thread_memories.id = entry id
+~~~
+
+以下字段都引用 entry：
+
+- `anchor_entry_id`
+- `entry_id`
+- `join_entry_id`
+- `reply_to_entry_id`
+- `input_entry_id`
+
+Memory id 只表示信息对象，entry id 表示该信息在某个协作结构中的确定位置。
+
+### 2.3 默认行为
+
+正常路径使用固定默认值：
+
+~~~text
+Start
+→ creator = manage
+→ participant = write
+→ entry = root entry
+
+Join
+→ input = join key
+→ permission = write
+→ entry = key-bound entry
+
+Reply from Todo
+→ 自动携带 input ref
+→ 自动处理该 Todo
+
+Branch from Todo
+→ 自动携带 anchor + input ref
+→ 自动处理该 Todo
+
+Handle
+→ 用于不需要 Reply / Branch 的输入
+~~~
+
+participant add 默认：
+
+- target 来自 active Link；
+- permission = write；
+- entry 使用当前工作上下文给出的 entry。
+
+高级权限、key 管理、close/reopen 放在管理动作中。
+
+### 2.4 Agent 方向感
+
+每个 Agent-facing 响应都要明确：
+
+~~~text
+where   当前协作与作用域
+why     为什么当前 Role 在这里
+what    当前需要处理的输入
+next    当前允许的动作
+effect  动作会改变什么
+~~~
+
+响应需要满足：
+
+- 新进程只凭当前响应即可继续；
+- 空 Todo 明确返回当前没有待处理输入；
+- stale input 明确返回当前状态与重新读取入口；
+- Join 后立即给出 entry 与当前动作；
+- Reply / Branch / Handle 后返回写入结果与新的协作状态；
+- closed / removed / permission changed 返回当前状态和可继续动作。
+
+Agent-facing 返回不暴露 ThreadReceipt、seq、revision 等内部结构。
+
+## 3. T0 — 迁移与兼容
+
+### 目标
+
+证明新结构可以安全进入当前数据库。
+
+### 迁移
 
 ~~~text
 023_memory_revision_origin.sql
@@ -64,365 +148,13 @@ Todo 是 pending ThreadReceipt 的产品投影。
 025_thread_receipt_idempotency.sql
 ~~~
 
-023：
+#### 023
 
-- tb_kungfus 增加 revision / origin；
-- 建立 memory_revisions；
-- 现有行回填 standalone / revision=1；
-- 不复制现有正文。
-
-024：
-
-- role_links；
-- threads；
-- thread_roles；
-- thread_memories；
-- entry / anchor / parent / key indexes 与约束。
-
-025：
-
-- thread_receipts；
-- thread_idempotency；
-- pending / idempotency indexes。
-
-必须验证两条迁移路径：
-
-~~~text
-fresh database
-001 → ... → 025
-
-upgrade rehearsal
-001 → ... → 022
-→ seed existing Memory + Task data
-→ snapshot counts / checksums / Task contracts
-→ 023 → 024 → 025
-→ assert old facts unchanged
-~~~
-
-CI 增加独立 upgrade rehearsal；现有 fresh-chain CI 保留。
-
-**Gate 0 PASS：**
-
-- fresh migration chain 通过；
-- upgrade rehearsal 通过；
-- existing Memory / Task 数据无语义变化；
-- migration 可重复从空库构建；
-- 没有 Thread 代码依赖未落库字段。
-
-Gate 0 不通过，停止后续实现。
-
-### Gate 1 — Memory Compatibility
-
-对应 WO-T1。
-
-主要改动面：
-
-~~~text
-migrations/023_memory_revision_origin.sql
-internal/model/kungfu.go
-internal/repository/kungfu.go
-internal/service/kungfu_manage.go
-internal/service/kungfu_read.go
-memory integration tests
-Task harness regression tests
-~~~
-
-实现顺序：
-
-1. current row 增加 revision / origin；
-2. standalone list 过滤 origin=standalone；
-3. 建立 revision resolver；
-4. update 改为 lock current → archive old → update current；
-5. 建立 thread-origin Memory internal primitive；
-6. 验证既有 memory_* contract 无变化；
-7. 验证 Task harness 仍读取 current。
-
-**Gate 1 PASS：**
-
-- 原 Memory 工具回归全绿；
-- Task harness 回归全绿；
-- Thread-origin Memory 不进入 Store 默认列表；
-- Thread-origin 首次写入正文只存一份；
-- pinned revision 在后续 update / soft-delete 后仍可读取。
-
-### Gate 2 — Role / Link / Thread Kernel
-
-对应 WO-T2。
-
-主要改动面：
-
-~~~text
-migrations/024_thread_core.sql
-internal/model/thread*.go
-internal/repository/thread*.go
-internal/service/thread*.go
-role lookup projection
-integration tests
-~~~
-
-先只做持久事实：
-
-- Role = existing tb_bots；
-- exact role lookup；
-- canonical RoleLink；
-- Root / Child Thread；
-- ThreadRole；
-- ThreadMemory；
-- seq / revision；
-- exact entry / anchor validation；
-- lineage / direct children；
-- inherited Root read + govern。
-
-这一 Gate 不实现 Todo 自动推进，不实现 MCP surface。
-
-**Gate 2 PASS：**
-
-- A/B 双向并发 Link request 只能产生一个 pair；
-- Child anchor 精确落到 parent ThreadMemory entry + revision；
-- Root govern 不产生 descendant participant；
-- concurrent timeline append 获得唯一 seq；
-- 20 层 Child lineage 正确；
-- Parent close/remove 不级联破坏既有 Child。
-
-### Gate 3 — Collaboration State Machine
-
-对应 WO-T3，是最高风险 Gate。
-
-实现：
-
-~~~text
-migrations/025_thread_receipt_idempotency.sql
-thread_create
-thread_reply
-thread_branch
-thread_handle
-ThreadReceipt
-ThreadIdempotency
-permission transition
-close / reopen
-participant remove
-~~~
-
-核心事务路径：
-
-~~~text
-Todo action
-→ lock / CAS pending receipt
-→ validate target
-→ create Memory / Child if needed
-→ append structural fact
-→ create next receipts
-→ revision update
-→ persist idempotency result
-→ commit
-~~~
-
-必须先写 real PostgreSQL concurrency tests，再开放协议层。
-
-**Gate 3 PASS：**
-
-最小纵向闭环：
-
-~~~text
-A Link B
-→ A Start with B
-→ B gets Todo(root)
-→ B Reply
-→ A gets Todo(reply)
-→ A Handle
-→ no pending
-~~~
-
-再验证：
-
-- handle vs reply 只有一个成功；
-- reply vs branch 只有一个成功；
-- retry 不重复追加；
-- stale input 不产生新 Memory / ThreadMemory；
-- 主动回复历史 entry 不清 Todo；
-- branch creator 成为 Child manage participant；
-- read Role 不产生 Todo；
-- permission downgrade 撤销 pending；
-- participant removal 同事务撤销 pending + revoke join key；
-- close 撤销 pending，reopen 不复活旧 pending。
-
-Gate 3 不通过，不进入 MCP / Web。
-
-### Gate 4 — Read Model / Agent Context
-
-对应 WO-T4。
-
-实现只读投影：
-
-- Todo projection；
-- Thread work context；
-- why_here；
-- pending inputs；
-- participants；
-- allowed actions；
-- timeline cursor；
-- lineage；
-- direct children；
-- bounded Memory expansion。
-
-**Gate 4 PASS：**
-
-- Agent 不读 ThreadReceipt / seq / revision 内部结构即可处理 Todo；
-- 1,000+ ThreadMemory 首包大小受控；
-- 20 层 Child 可直接理解 lineage；
-- 多 pending 同 Thread 聚合正确；
-- read / write / manage / inherited govern 返回的 allowed actions 正确。
-
-### Gate 5 — API / MCP Vertical Slice
-
-对应 WO-T5。
-
-继续复用现有单一 `mcpserver` registry：
-
-~~~text
-tool definition
-→ one handler
-→ one service
-→ MCP /mcp
-→ POST /api/v1/<tool>
-~~~
-
-不新增独立 Thread HTTP business layer。
-
-在此 Gate 开始前只做一次窄范围 naming freeze：名称必须从已完成能力映射产生，不能反向改状态机。
-
-join-key secret 特例：
-
-- raw key 只首次成功响应披露；
-- idempotent replay 返回 already_applied + fingerprint；
-- 丢失 raw key 时再次 reset。
-
-**Gate 5 PASS：**
-
-使用两个不同客户端完成同一真实闭环：
-
-~~~text
-API client A
-MCP client B
-
-A Start
-→ B Todo
-→ B Reply
-→ A Todo
-→ A Branch / Handle
-~~~
-
-两端获得一致事实与错误语义。
-
-### Gate 6 — Product Surface
-
-对应 WO-T6。
-
-一级优先级：
-
-~~~text
-Todo
-Link
-Start
-Join
-Work
-Hire
-Store
-Retrieve
-~~~
-
-Web 复用现有 Owner session + unified tool registry；扩展 owner tool bridge/页面表达，不复制业务规则。
-
-上下文内动作：
-
-~~~text
-Reply
-Branch
-Handle
-participants
-close / reopen
-join-key management
-~~~
-
-**Gate 6 PASS：**
-
-- Todo 第一眼可以知道轮到自己什么；
-- Link 请求可完整 accept / decline / cancel / remove；
-- Start / Join 能真正建立可继续的协作；
-- Work / Hire 原路径无退化；
-- Store / Retrieve 不出现 Thread 高频 Memory；
-- 页面不把 Role / Memory / Thread / Task 数据表模型直接平铺成导航。
-
-### Gate 7 — Release Proof
-
-对应 WO-T7。
-
-必须一次性通过：
-
-~~~text
-gofmt -l .
-go vet ./...
-go test -p 1 ./...
-go build ./...
-fresh migration chain
-upgrade rehearsal
-container build
-healthz / readyz / SIGTERM smoke
-~~~
-
-额外产品回归：
-
-- Memory backward compatibility；
-- Task 1.0 full regression；
-- Todo race；
-- Link / Key security；
-- deep lineage；
-- large Thread；
-- API / MCP parity；
-- Owner Web Product Surface。
-
-通过后再同步：
-
-~~~text
-README
-llms.txt
-kungfu_skill.md
-MCP descriptions
-HTTP contract
-release notes
-~~~
-
-### 可行性判断
-
-基于当前 main 架构：
-
-| 部分 | 可行性 | 依据 | 主要风险 |
-| --- | --- | --- | --- |
-| Memory revision | 高 | tb_kungfus 已是稳定 current row；repository 使用 pg.Querier，可事务化升级 | migration / update 并发 |
-| Thread state machine | 高 | PostgreSQL + pgx transaction / row lock / unique constraint 足够表达 | Todo CAS 与 seq 并发 |
-| Link / Key | 高 | Role 直接复用 tb_bots；现有 auth 已稳定 | bearer key 撤销与枚举防护 |
-| API / MCP | 很高 | 当前两个 transport 已共用 mcpserver registry | 工具命名漂移 |
-| Task 共存 | 很高 | Task 1.0 已独立 service / repository / tests | Memory current 语义被误改 |
-| Web | 高 | Owner 已通过 unified tool bridge 调 publisher tools | 过早做 UI 导致模型反向漂移 |
-| Realtime | 非阻塞 | durable pull 已足够闭合异步协作 | 未来只作为 wake-up 优化 |
-
-**Go / No-Go：Go。**
-
-真正需要重点验证的不是“技术能不能做”，而是 Gate 1 的兼容迁移、Gate 3 的并发状态机、Gate 6 的产品表面。三处通过后，产品与工程两边都成立。
-
-## WO-T1 Memory 兼容演进
-
-### 目标
-
-统一 Memory 的独立存储、Task live harness 与 Thread 稳定历史语义。
-
-### 数据迁移
-
-现有 tb_kungfus 保持 current-row 角色，新增：
+`tb_kungfus` 增加：
 
 ~~~text
 revision BIGINT NOT NULL
-origin VARCHAR(...) NOT NULL  -- standalone | thread
+origin VARCHAR(...) NOT NULL
 ~~~
 
 新增：
@@ -440,60 +172,171 @@ memory_revisions
 PRIMARY KEY (memory_id, revision)
 ~~~
 
-迁移：
+现有 Memory 回填：
 
-1. 全量现有 tb_kungfus 回填 origin=standalone、revision=1；
-2. 不生成 revision=1 全量正文副本；
-3. standalone update 在同一事务执行 lock current → archive old revision → update current + revision+1；
-4. Task harness 查询路径继续读取 current row，不改现有 live semantics；
-5. ThreadMemory 保存 memory_id + revision；
-6. revision resolver：requested=current 时读 tb_kungfus，requested<current 时读 memory_revisions。
+~~~text
+origin = standalone
+revision = 1
+~~~
 
-### 创建 primitive
+现有正文不复制到 history。
 
-新增内部 Memory persistence primitive：
+#### 024
 
-- owner = authenticated Role；
-- origin；
-- content 必填且有明确 size bound；
-- title / tags / description 可选；
-- credential scan；
-- checksum；
-- revision=1；
-- 不额外写 history row；
-- caller-owned transaction。
+新增：
 
-standalone memory_put 继续保留现有 title / tags / content 合同，并 origin=standalone。
+~~~text
+role_links
+threads
+thread_roles
+thread_memories
+~~~
 
-Thread root / reply 使用 origin=thread；可用空 title、[] tags 的内部表示，不受 standalone 50-character minimum 约束。
+建立：
 
-Thread-generated Memory 不调用 consumption.ActionStorageCreate。Store 定价与 Thread 写入定价保持两个策略边界。
+- Role pair 唯一约束；
+- Thread code 唯一约束；
+- parent / anchor / entry 外键与 scope 校验基础；
+- `(thread_id, role_id)` 唯一；
+- `(thread_id, seq)` 唯一；
+- join key hash 索引。
+
+#### 025
+
+新增：
+
+~~~text
+thread_receipts
+thread_idempotency
+~~~
+
+建立：
+
+~~~text
+UNIQUE(thread_id, input_entry_id, role_id)
+UNIQUE(role_id, operation, idempotency_key)
+~~~
+
+以及 pending 查询索引。
 
 ### 验收
 
-- standalone memory_list 默认只返回 origin=standalone，现有用户结果不被 Thread 消息污染；
-- memory_get 已知 code 仍可读取 owner 的 thread-origin Memory；
-- standalone memory_get/put/share/unshare/delete 既有字段与错误合同保持；
-- Task harness_refs 始终读取 Memory current/latest；
-- Thread pin revision 后不随 standalone update 改义；
-- standalone soft-delete 不破坏既有 Thread history；
-- Thread reply 创建 current Memory + ThreadMemory 同事务且正文只保存一次；
-- Memory 更新前的旧 current revision 能被原 Thread 正确读取；
-- 一个 Memory revision 可以进入多个 Thread。
+同时跑两条路径：
 
-## WO-T2 Role / Link / Thread 数据内核
+~~~text
+fresh:
+001 → ... → 025
 
-### Role / Role lookup
+upgrade:
+001 → ... → 022
+→ seed Memory + Task
+→ snapshot counts / checksums / Task contracts
+→ 023 → 024 → 025
+→ compare snapshot
+~~~
 
-Role 直接映射 existing tb_bots。
+完成条件：
 
-最小能力：
+- fresh migration 全绿；
+- upgrade rehearsal 全绿；
+- 现有 Memory / Task 事实保持；
+- CI 增加 upgrade rehearsal。
 
-- exact lookup by bot_name；
-- 返回稳定 public ref + bot_name；
-- 不暴露 balance、credential、register metadata。
+T0 未通过时停止后续实现。
 
-### RoleLink
+## 4. T1 — Memory 兼容演进
+
+### 目标
+
+让 standalone Memory、Task live harness、Thread pinned history 同时成立。
+
+### 实现
+
+当前 Memory 行继续保存在 `tb_kungfus`。
+
+读取 revision：
+
+~~~text
+requested revision == current revision
+→ tb_kungfus
+
+requested revision < current revision
+→ memory_revisions
+~~~
+
+更新：
+
+~~~text
+lock current
+→ archive current revision
+→ update current fields
+→ revision + 1
+→ commit
+~~~
+
+Thread 产生 Memory：
+
+~~~text
+origin = thread
+revision = 1
+content required
+title / tags / description optional
+credential scan
+checksum
+~~~
+
+首写只保存 current row，不额外写 history。
+
+standalone `memory_list` 默认过滤：
+
+~~~text
+origin = standalone
+~~~
+
+Task harness 继续读取 current row。
+
+Thread 写入走独立内部 persistence primitive，不调用 `consumption.ActionStorageCreate`。
+
+### 主要改动
+
+~~~text
+internal/model/kungfu.go
+internal/repository/kungfu.go
+internal/service/kungfu_manage.go
+internal/service/kungfu_read.go
+Memory integration tests
+Task harness regression tests
+~~~
+
+### 验收
+
+- 现有 `memory_*` 合同保持；
+- Task harness 继续读取最新 Memory；
+- thread-origin Memory 不进入默认 Store；
+- 首次 Thread Memory 正文只存一份；
+- Memory 更新后，旧 pinned revision 可读取；
+- soft delete 不破坏已存在 Thread history。
+
+T1 未通过时停止 Thread 内核实现。
+
+## 5. T2 — Role / Link / Thread 内核
+
+### 目标
+
+建立协作的持久结构与权限基础。
+
+### Role
+
+直接使用：
+
+~~~text
+role_id   = tb_bots.id
+role_name = tb_bots.bot_name
+~~~
+
+提供 exact lookup by bot_name，返回稳定 public ref 与 name。
+
+### Link
 
 ~~~text
 role_links
@@ -506,259 +349,356 @@ role_links
 UNIQUE(role_low_id, role_high_id)
 ~~~
 
-写入前 canonicalize pair，消除 A→B / B→A 并发双行。
+写入前 canonicalize pair。
 
 生命周期：
 
 ~~~text
 request → pending → accept → active
-pending → decline/cancel → delete current relation
-active → remove → delete current relation
+pending → decline / cancel
+active  → remove
+~~~
+
+权限：
+
+- target accept / decline；
+- requester cancel；
+- active 任一方 remove。
+
+查询返回：
+
+- active；
+- incoming pending；
+- outgoing pending。
+
+### Thread
+
+~~~text
+threads
+- id
+- code
+- join_key_hash?
+- join_entry_id?
+- subject
+- created_by_role_id
+- parent_thread_id?
+- anchor_entry_id?
+- status: open | closed
+- next_seq
+- revision
+- created_at
+- updated_at
+~~~
+
+Root：
+
+~~~text
+parent_thread_id = null
+anchor_entry_id = null
+~~~
+
+Child：
+
+~~~text
+parent_thread_id = direct parent
+anchor_entry_id = direct parent ThreadMemory entry
+~~~
+
+### ThreadRole
+
+~~~text
+thread_roles
+- thread_id
+- role_id
+- permission: read | write | manage
+- joined_by_role_id?
+- entry_id
+- joined_at
+UNIQUE(thread_id, role_id)
+~~~
+
+Root creator 拥有 tree-wide read + govern。
+
+govern 能力：
+
+- participant；
+- key；
+- subject；
+- status；
+- tree。
+
+协作写入由当前 Thread 的 write/manage ThreadRole 授权。
+
+权限变化：
+
+~~~text
+write/manage → read
+→ 当前 pending receipts withdrawn
+
+read → write/manage
+→ 指定新 entry
+→ 创建一个 entry receipt
+
+write ↔ manage
+→ 保留 pending
+~~~
+
+### ThreadMemory
+
+~~~text
+thread_memories
+- id
+- thread_id
+- memory_id
+- memory_revision
+- seq
+- author_role_id
+- reply_to_entry_id?
+- created_at
+UNIQUE(thread_id, seq)
+~~~
+
+reply target 范围：
+
+- 当前 Thread entry；
+- 当前 Child 的 direct anchor entry。
+
+### Join key
+
+- 随机不可预测；
+- 数据库只保存 hash；
+- raw key 在 create/reset 成功时披露一次；
+- join error 使用统一错误；
+- join 受 rate limit；
+- existing participant 重复 join 保持原 permission；
+- participant removal 同事务 revoke 当前 key；
+- 后续需要加入时显式 reset。
+
+### 并发验收
+
+- A/B 同时互相 request 只形成一个 Link；
+- 同 Thread 并发 append 获得不同 seq；
+- Role 并发加入只形成一个 ThreadRole；
+- Child anchor 精确定位 parent entry + revision；
+- 20 层 lineage 正确；
+- Root govern 不产生 descendant participant/Todo；
+- Parent close/remove 保持既有 Child 独立状态。
+
+T2 通过后进入状态机。
+
+## 6. T3 — Reply / Receipt / Todo 状态机
+
+### ThreadReceipt
+
+~~~text
+thread_receipts
+- thread_id
+- input_entry_id
+- role_id
+- reason: entry | reply
+- state: pending | handled | withdrawn
+- created_at
+- handled_at?
+- withdrawn_at?
+UNIQUE(thread_id, input_entry_id, role_id)
+~~~
+
+Todo 查询：
+
+~~~text
+open Thread
++ current Role write/manage
++ pending receipt
+→ Todo
+~~~
+
+### Idempotency
+
+~~~text
+thread_idempotency
+- role_id
+- operation
+- idempotency_key
+- request_hash
+- result_ref
+- created_at
+UNIQUE(role_id, operation, idempotency_key)
 ~~~
 
 规则：
 
-- requester 不能 accept 自己的 request；
-- only target can accept/decline；
-- requester can cancel；
-- either side can remove active；
-- Link list 同时返回 active / incoming pending / outgoing pending；
-- Link 不自动产生 ThreadRole 或 Todo。
+- 相同 key + 相同 request hash → 原结果；
+- 相同 key + 不同 hash → `IDEMPOTENCY_CONFLICT`。
 
-### threads
+join-key issue/reset 重放返回：
 
 ~~~text
-id / code
-join_key_hash
-join_entry_id?
-subject
-created_by_role_id
-parent_thread_id?
-anchor_entry_id?
-status
-next_seq
-revision
-created_at / updated_at
+already_applied
+fingerprint
 ~~~
 
-结构约束：
+raw key 只在首次成功响应披露。首次响应丢失时再次 reset。
 
-- Root 有 subject 与 root Memory；
-- Child 有直接 parent 与 anchor；
-- anchor_entry_id 指向直接 parent 的 ThreadMemory entry；
-- parent / anchor 创建后保持稳定；
-- code 唯一稳定；
-- join key 可重置；
-- Child 可继续派生 Child。
-
-### thread_roles
-
-~~~text
-thread_id
-role_id
-permission
-joined_by_role_id?
-entry_id
-joined_at
-~~~
-
-约束：
-
-- (thread, role) 唯一；
-- 每个 ThreadRole 有 entry_id；该值是确定 ThreadMemory entry，不是裸 Memory id；
-- Root creator 通过 root ownership 获得 descendants 的 inherited read + govern；
-- inherited govern 允许 participant/key/subject/status/tree 管理，但不允许 reply/branch/handle；
-- collaboration write 仍必须有 descendant write/manage ThreadRole。
-
-### permission lifecycle
-
-- write/manage → read：同事务将该 Role 当前 pending receipts → withdrawn；
-- read → write/manage：要求新的 entry_id，并创建一条 entry receipt；
-- write ↔ manage：不改变 pending。
-
-### thread_memories
-
-~~~text
-id
-thread_id
-memory_id
-memory_revision
-seq
-author_role_id
-reply_to_entry_id?
-created_at
-~~~
-
-约束：
-
-- (thread, seq) 唯一；
-- seq 单调递增；
-- reply_to_entry_id 只能指向当前 Thread entry 或当前 Child 的 direct anchor_entry_id；
-- 普通 Reply 保持在当前 Thread。
-
-### thread_idempotency
-
-~~~text
-role_id
-operation
-idempotency_key
-request_hash
-result_ref
-created_at
-UNIQUE(role_id, operation, idempotency_key)
-~~~
-
-相同 key + 不同 hash 返回 IDEMPOTENCY_CONFLICT。
-
-### repository primitives
-
-至少覆盖：
-
-- find / lock Thread；
-- allocate seq；
-- increment revision；
-- exact Role lookup；
-- create / accept / delete / list RoleLink；
-- create / remove ThreadRole；
-- append ThreadMemory；
-- resolve parent / root / lineage；
-- direct children query；
-- key lookup / reset / revoke-on-remove；
-- exact entry lookup / scope validation；
-- scoped Memory read；
-- idempotency claim / result persistence。
-
-### 并发验收
-
-- 同 Thread 并发 append 获得不同 seq；
-- Link 并发创建保持单一关系；
-- Role 并发加入保持单一 ThreadRole；
-- key reset 原子替换 key + join entry；
-- key join 建立 write ThreadRole 并使用绑定 entry；
-- active Link 才允许 direct add；
-- Root governance 不污染 descendant participant / Todo；
-- Tree lineage 在深层递归下保持稳定。
-
-## WO-T3 Reply / Receipt / Todo
-
-### thread_receipts
-
-~~~text
-thread_id
-input_entry_id
-role_id
-reason
-state
-created_at
-handled_at?
-withdrawn_at?
-~~~
-
-reason：
-
-~~~text
-entry
-reply
-~~~
-
-state：
-
-~~~text
-pending
-handled
-withdrawn
-~~~
-
-唯一约束：
-
-~~~text
-(thread_id, input_entry_id, role_id)
-~~~
-
-### thread_create
+### Create
 
 单事务：
 
-1. 创建 Root Thread；
-2. 创建 root Memory revision；
-3. append root ThreadMemory seq=1；
-4. creator 建立 manage ThreadRole；
-5. initial Roles 建立 ThreadRole，entry=root Memory；
-6. 仅为 write / manage initial Roles 创建 entry receipt；
-7. revision 提交。
+~~~text
+create Root Thread
+→ create root Memory
+→ append root entry seq=1
+→ creator manage ThreadRole
+→ initial ThreadRoles
+→ write/manage initial receipts
+→ persist idempotency
+→ commit
+~~~
 
-### thread_reply
+creator 不获得自己的 root Todo。
+
+### Reply
 
 输入：
 
 ~~~text
 thread
 reply_to_entry
-input_ref?        # 从 Todo 发起时携带
+input_ref?       # Todo 路径
 content
 idempotency_key
 ~~~
 
 单事务：
 
-1. lock Thread；
-2. 验 open + write；
-3. 验 reply target；
-4. create Memory revision；
-5. allocate seq；
-6. append ThreadMemory with reply_to；
-7. input_ref 存在时，对 caller 的该 receipt 执行 pending→handled CAS；非 pending 则 stale-input 且不 append；
-8. input_ref 缺省时视为主动回复历史，不处理 Todo；
-9. parent author 当前为 write/manage participant 且不是当前 Role 时，为其创建 reply receipt；
-10. revision + 1；
-11. commit。
+~~~text
+lock Thread
+→ validate open/write/target
+→ if input_ref: CAS pending receipt
+→ create thread-origin Memory
+→ allocate seq
+→ append ThreadMemory
+→ create target author's receipt when eligible
+→ revision + 1
+→ persist idempotency
+→ commit
+~~~
 
-### thread_branch
+`input_ref` 已 handled/withdrawn 时返回 stale input，不产生新写入。
+
+无 `input_ref` 表示主动回复历史 entry，不处理 Todo。
+
+### Branch
 
 输入：
 
 ~~~text
 thread
 anchor_entry
-input_ref?        # 从 Todo 发起时携带
+input_ref?
 subject
-initial_roles
+initial_roles?
 idempotency_key
 ~~~
 
 单事务：
 
-1. 验 parent + anchor_entry，并锁定 anchor 对应的 Memory revision；
-2. 创建 Child，保存 parent_thread_id + anchor_entry_id；
-3. actor 建立 Child manage ThreadRole，不生成 actor entry receipt；
-4. 建立其他 Child ThreadRole；
-5. 仅为其他 Child write/manage participants 建立 entry receipts；
-6. input_ref 存在时执行 pending→handled CAS；非 pending 则整个 branch 不创建；
-7. input_ref 缺省时为主动 branch，不处理 Todo；
-8. parent revision + 1；
-9. commit。
+~~~text
+validate parent + anchor
+→ if input_ref: CAS pending receipt
+→ create Child
+→ actor = Child manage participant
+→ add other participants
+→ create their entry receipts
+→ parent revision + 1
+→ persist idempotency
+→ commit
+~~~
 
-### thread_handle
+actor 不获得自己的 Child entry Todo。
+
+### Handle
 
 输入：
 
 ~~~text
 thread
-input_entry
+input_ref
 idempotency_key
 ~~~
 
-效果：
+动作：
 
-- input_ref 必须属于当前 Role；
-- 仅允许 pending → handled CAS；
-- 已 handled / withdrawn 返回 stale-input；
-- 保存 handled_at；
-- 不影响同 Thread 的其他 pending inputs。
+~~~text
+pending → handled
+~~~
 
-### ThreadReceipt / Todo projection
+只处理当前 Role 的指定 receipt。
 
-查询 open Thread 中当前 Role 的 pending receipts，且 Role 当前 permission 为 write / manage，再按 Thread 聚合：
+### Participant / Status
+
+remove：
+
+~~~text
+withdraw participant pending
+→ remove membership
+→ revoke current join key if present
+→ commit
+~~~
+
+close：
+
+~~~text
+status = closed
+→ current pending receipts = withdrawn
+→ commit
+~~~
+
+reopen 保留历史，不恢复旧 pending。
+
+Parent close/remove 保持既有 Child 生命周期。
+
+### 并发验收
+
+同一 input：
+
+- handle vs reply；
+- reply vs branch；
+- duplicate reply retry。
+
+每组只有一个 Todo-consuming 动作成功。
+
+同时验证：
+
+- stale action 不产生 Memory / ThreadMemory；
+- 一个 Role 可同时持有多个 pending；
+- 多 Agent reply 同一点形成独立 receipts；
+- read Role 无 Todo；
+- permission downgrade 撤销 pending；
+- Branch 建立独立 Child Todo。
+
+最小闭环：
+
+~~~text
+A Link B
+→ A Start
+→ B Todo
+→ B Reply
+→ A Todo
+→ A Handle
+→ no pending
+~~~
+
+T3 未通过时不开放 API/MCP。
+
+## 7. T4 — Agent 工作上下文
+
+### 目标
+
+把持久状态转换成 Agent 可直接继续执行的工作上下文。
+
+### Todo projection
+
+按 Thread 聚合：
 
 ~~~text
 thread
@@ -769,234 +709,163 @@ pending_input_refs[]
 lineage_hint
 ~~~
 
-### 验收
-
-- Root 首轮对所有 initial Roles 自动产生 Todo；
-- 多人并行 reply 同一 root Memory；
-- 一个 Role 在同一 Thread 同时持有多个 pending inputs；
-- reply 自动完成当前输入并把下一轮传回；
-- branch 自动完成当前输入并建立 Child 首轮 Todo；
-- handle 结束当前输入；
-- read Role 不产生 Todo；
-- role removal 把该 Role 的 pending receipts 转为 withdrawn，并在存在 join key 时同事务 revoke key；
-- Thread close 把当前 pending receipts 转为 withdrawn；reopen 不恢复；
-- Parent close 不级联 close Child；
-- Parent participant removal 不级联删除既有 Child membership；
-- Todo 表达始终按 Thread 聚合；
-- Task 的 open/claim/submission/delivery/settlement 生命周期与 Thread Todo 独立；
-- Thread Todo 不进入 work_list，不占用 Task claim，不参与 Task settlement。
-
-## WO-T4 Agent 工作上下文合同
-
-### 目标
-
-先实现 Agent 使用 Thread 所必需的功能合同，不在本工作单确定最终 MCP tool 名称、HTTP route 或前端术语。
-
-### Input bounds
-
-必须在协议层固定：
-
-- subject length；
-- Thread message content max bytes；
-- participant batch max；
-- pending / timeline / tree page size 与最大 page size；
-- join / Link / Thread write rate limits；
-- lineage 语义不设业务深度上限，但每次响应有 bounded page / continuation；
-- parent / anchor cycle 永远拒绝。
-
-### Pending discovery
-
-提供当前 Role 的协作待处理投影：
-
-- 按 Thread 聚合；
-- pending_count；
-- pending input stable refs；
-- subject / status；
-- latest pending time；
-- lineage hint。
-
-只包含当前 open Thread 中 write/manage Role 的 pending receipts。
-
 ### Thread work context
 
-读取一个 Thread 时返回：
-
 ~~~text
-thread identity
-subject / status
+where
+- thread ref
+- subject
+- status
 
-current role
-effective permission
-why_here
-
-pending inputs
-- stable input ref
-- source role
-- content or memory ref
+why
+- role
+- entry
 - reason
+
+what
+- pending inputs
+- source role
+- content / memory ref
 - created_at
 
 context
 - relevant memory refs
-- lineage summary
-- direct child summaries
-- continuation / cursor
+- lineage
+- direct children
+- participants
+- continuation
 
-participants
+next
+- allowed actions
+- target refs
+- required params
 
-allowed actions
-- action type
-- valid target ref
-- required parameters
+effect
+- each action's state effect
 ~~~
 
-### 按需展开
+### 分页与边界
 
-- 当前 pending 与进入原因优先；
-- 大体量 Memory 按 ref 读取；
-- Timeline cursor 分页；
-- lineage 返回必要路径；
-- sibling / full tree 按需读取。
+固定：
 
-### 会话隔离
+- subject max length；
+- message max bytes；
+- participant batch max；
+- pending page size；
+- timeline page size；
+- tree page size；
+- maximum page size；
+- write rate limits。
 
-每次读写显式绑定目标 Thread。
+lineage 可递归延伸，每次返回有界。
 
-服务返回稳定 input / memory / role / continuation ref，Agent 后续直接回传这些 ref。
+### Agent 不迷路验收
 
-内部 service 负责解析为 ThreadMemory / ThreadReceipt / Memory revision，并执行权限校验。
+对 Todo、Join、Reply、Branch、Handle 分别执行无本地状态测试：
 
-### 可信边界
+1. 启动新客户端；
+2. 只提供当前响应；
+3. 客户端能判断 where / why / what / next / effect；
+4. 执行动作；
+5. 下一响应继续提供完整状态。
 
-Kungfu 生成的结构、权限、allowed actions 与导航信息是协议事实。
+必须覆盖：
 
-Memory content 是参与者协作数据。
+- 空 Todo；
+- Join 后首次进入；
+- stale input；
+- closed；
+- removed；
+- permission changed；
+- 多 pending；
+- 20 层 Child；
+- 1,000+ ThreadMemory。
 
-两者在返回结构中明确分区。
+T4 通过后冻结上下文合同。
 
-### Link context
+## 8. T5 — API / MCP
 
-一级 Link 能力返回 active / incoming pending / outgoing pending，并给出当前可执行动作。
+### 架构
 
-### 验收
-
-- Agent 能发现当前等待自己的协作；
-- 读取 Thread 后知道事项、进入原因、pending、上下文和允许动作；
-- 1000+ Memory Thread 首包仍保持有限工作集；
-- 深层 Child 无需遍历 sibling 即可理解 lineage；
-- Agent 不需要理解 ThreadReceipt、seq、revision 才能正确写回；
-- 最终外部命名可以在不改变本功能合同的情况下独立设计。
-
-### 表达基线
-
-一级入口按优先级固定为：
+继续使用现有单一 registry：
 
 ~~~text
-Todo
-Link
-Start
-Join
-Work
-Hire
-Store
-Retrieve
+ToolDef
+→ handler
+→ service
+→ MCP /mcp
+→ POST /api/v1/<tool>
 ~~~
 
-映射关系：
+Thread/Link 能力注册一次，两个 transport 共用同一 service 事实。
 
-- Todo / Start / Join / Link：Thread / Link 协作能力；
-- Work：Task executor side；
-- Hire：Task publisher side；
-- Store / Retrieve：Memory 存取能力。
+### 能力范围
 
-Reply / Branch / Handle 等依赖具体 Thread 上下文的动作，在当前协作内出现，不作为一级入口。
-
-Memory / Thread 保持底层抽象，不作为一级导航名称。
-
-## WO-T5 Protocol / API / MCP
-
-### 单一 Tool registry
-
-现有架构已经由 mcpserver registry 同时服务：
-
-~~~
-MCP /mcp
-POST /api/v1/<tool>
-~~~
-
-Thread / Link 新能力必须继续注册一次、双 transport 复用同一 handler / service，不新增第二套业务 HTTP 实现。
-
-### Pull-first
-
-第一版正式能力：
-
-- Todo / pending discovery；
+- Todo discovery；
 - Thread work context；
-- create / reply / branch / handle；
-- participant / permission / close / reopen；
+- Start；
+- Join；
+- Reply；
+- Branch；
+- Handle；
 - Link lifecycle；
-- join / key reset；
-- timeline / lineage / tree expansion。
+- participant management；
+- permission；
+- close/reopen；
+- key reset；
+- timeline；
+- lineage；
+- direct children。
 
-现有 MCP 为 stateless Streamable HTTP、无 server push。第一版不依赖 realtime。
+第一版使用 durable pull。实时 signal 留作后续 wake-up 优化。
 
-### 可选 wake-up
+### 命名冻结
 
-如后续加入 SSE/WebSocket/其他 notification adapter：
+T4 通过后只做一次 tool naming freeze。
 
+名称要求：
+
+- 与实际动作一致；
+- 输入副作用明确；
+- tool description 写明调用时机；
+- 返回携带 next-action guidance。
+
+### 双端验收
+
+使用两个不同客户端：
+
+~~~text
+API client A
+MCP client B
+
+A Start
+→ B Todo
+→ B Reply
+→ A Todo
+→ A Branch / Handle
 ~~~
-commit durable state
-→ emit lightweight change signal
-→ client wakes
-→ re-read durable state
-~~~
 
-signal 不是事实源，不影响第一版验收。
+验证：
 
-### Key / Link security
+- 状态一致；
+- 权限一致；
+-错误语义一致；
+- next-action guidance 一致。
 
-- join key 只持久化 hash；
-- raw key 只在 create/reset 时一次性返回；
-- join error 不泄露 Thread 是否存在；
-- join / Link request 受 rate limit；
-- key reset 原子替换 key + join entry；
-- participant removal 在存在 join key 时同事务 revoke，旧 key 立即失效；
-- existing participant 重复 join 不升级 permission；
-- role lookup 只暴露最小 public identity。
+同时回归：
 
-### 幂等
-
-Thread 写操作：
-
-- create；
-- reply；
-- branch；
-- handle；
-- role add / permission change；
-- join；
-- close / reopen；
-- key reset。
-
-普通 Thread 写操作统一使用 thread_idempotency；同 key 不同 request hash → IDEMPOTENCY_CONFLICT。
-
-join-key issue/reset 同样记录 idempotency，但重放只返回 already_applied + fingerprint，不重复返回 raw secret；首次响应丢失时需再次 reset。
-
-### 向后兼容
-
-回归现有工具：
-
-~~~
+~~~text
+account_*
 memory_*
 work_*
 task_*
-account_*
 ~~~
 
-不得因 Thread / revision / origin 改造改变现有必填字段、返回字段、Task live harness、Task settlement 或 HTTP/MCP envelope。
+T5 通过后进入 Web/Product Surface。
 
-## WO-T6 Product Surface
+## 9. T6 — Product Surface
 
-产品表面按已定优先级实现：
+一级优先级：
 
 ~~~text
 1. Todo
@@ -1009,241 +878,152 @@ account_*
 8. Retrieve
 ~~~
 
-原则：
+Thread 内动作：
 
-- Memory / Thread 保持底层抽象，不直接作为一级导航；
-- Todo 只汇总 Thread pending；
-- Reply / Branch / Handle 在具体协作上下文中出现；
-- Work 复用 executor Task 能力；
-- Hire 复用 publisher Task 能力；
-- Store / Retrieve 使用 standalone Memory surface；
-- thread-origin Memory 不进入默认 Store 列表。
+~~~text
+Reply
+Branch
+Handle
+Participants
+Close / Reopen
+Join key
+~~~
 
-低摩擦默认：
+### 正常路径
 
-- Start creator 自动 manage；
-- initial / directly-added participant 默认 write；
-- linked Start 一次动作直接产生对方 Todo；
-- non-linked Start 可以在同一意图下返回 join path，不要求先 Link；
-- Join 只输入 key，不让加入者选择 permission / entry；
-- Todo context 直接给出 Reply / Branch / Handle 所需 target refs；
-- Reply / Branch 自动消费当前 Todo，不增加“再完成一次”的动作；
-- participant add 的 entry 从当前上下文确定并随请求提交，不让用户选数据库 entry id；
-- advanced permission / key reset / close / reopen 不占据正常协作主流程。
+linked：
 
-Web 第一版必须至少让人类 owner 能检查 Todo、Link、Start、Join 与当前 Thread 状态，同时保留现有 Work/Hire/Store 功能。
+~~~text
+Start
+→ target Todo
+~~~
 
-Agent surface 与 Web surface 使用同一 service 事实，不要求名称完全相同。
+non-linked：
+
+~~~text
+Start
+→ join path
+→ target Join
+→ target Todo
+~~~
+
+Todo：
+
+~~~text
+open
+→ Reply / Branch / Handle
+~~~
+
+Link：
+
+~~~text
+request
+→ peer accept
+~~~
+
+Web 继续使用 Owner session 与 unified tool bridge。
 
 ### 验收
 
-- 首页/主入口不平铺 Role / Memory / Thread / Task 数据模型；
-- Todo 打开后直接进入可处理上下文；
-- linked Start 不需要第二次 add；
-- non-linked Start 不要求先建立 Link；
-- Join 只需要 key；
-- Reply / Branch 后当前 Todo 自动消解；
-- participant add 默认不暴露 permission / entry 配置；
-- Link pending request 能完成 accept / decline；
-- Start 对 active Link 可直接建协作，对非 Link 可生成 join path；
-- Join 后立即看到明确 entry；
-- 高频 Thread 回复不出现在 Store 默认列表；
-- Work / Hire 现有路径不退化。
+- Todo 首页可直接判断当前输入；
+- Todo 打开后直接执行 Reply / Branch / Handle；
+- linked Start 一次产生对方 Todo；
+- non-linked Start 同一意图返回 join path；
+- Join 只输入 key；
+- participant add 默认隐藏 permission/entry 配置；
+- Link request/accept/decline/cancel/remove 完整；
+- Store 默认列表无 thread-origin Memory；
+- Work/Hire 保持现有流程；
+- 页面一级入口不使用底层数据表结构组织。
 
-## WO-T7 场景与鲁棒性验收
+## 10. T7 — 全量验收
 
-### 双 Agent 邮件式往返
+### 数据与兼容
 
-~~~text
-A root
-→ B Todo
-→ B reply
-→ A Todo
-→ A reply
-→ B Todo
-~~~
+- fresh migrations；
+- upgrade rehearsal；
+- Memory backward compatibility；
+- Task 1.0 full regression；
+- Task harness live current；
+- Thread pinned revision；
+- thread-origin Memory 隔离。
 
-验证 Reply 挂载与 Receipt 转移。
+### 状态机
 
-### 多 Agent 首轮
+- Todo race；
+- duplicate retry；
+- stale input；
+- permission transition；
+- close/reopen；
+- participant remove；
+- key revoke/reset/join；
+- deep lineage；
+- large Thread。
 
-~~~text
-A creates T with B/C/D
-~~~
+### 协议
 
-B/C/D 并行获得 root Todo。
+- API / MCP parity；
+- Agent 无本地状态恢复；
+- error + next action；
+- rate limit；
+- join-key enumeration protection。
 
-### 多人回复同一点
+### Product Surface
 
-B/C/D 同时 reply M1。
+- Todo；
+- Link；
+- Start；
+- Join；
+- Work；
+- Hire；
+- Store；
+- Retrieve；
+- Owner Web。
 
-验证：
-
-- 仍为一个 Thread；
-- 三个独立 reply edges；
-- A 的 Todo 按 Thread 聚合为 pending_count=3。
-
-### 中途加入
-
-已有长历史 Thread 在 M87 处加入 D。
-
-验证：
-
-- D 可读授权范围；
-- entry=M87；
-- write/manage D 只产生一个明确 entry Todo；
-- read D 不产生 Todo；
-- Thread work context 直接把 M87 作为 actionable input。
-
-### 深层分叉
-
-至少构造 20 层 Child。
-
-验证：
-
-- lineage 的每一级 anchor 都指向确定 ThreadMemory occurrence / revision；
-- Agent 无需遍历 siblings；
-- 每个 Child 保持自己的 Roles / Todo / Timeline；
-- Root creator 可获得完整 tree；
-- Root creator 未加入某 Child 时不出现在该 Child participant / Todo。
-
-### 大信息量
-
-单 Thread：
-
-- 1,000+ ThreadMemory；
-- 多个大体量 Memory；
-- 多个 Child。
-
-验证：
-
-- Thread work context 首包保持可控；
-- pending / anchor 优先；
-- Memory 按需读取；
-- cursor 正常分页。
-
-### 并发
-
-覆盖：
-
-- 同一 Memory 多 Agent 并发 reply；
-- 同一 Role handle 与 reply 竞态；
-- duplicate write 重试；
-- role add / remove 竞态；
-- key reset 与 join 竞态。
-
-### 掉线 / 换进程
-
-Agent 离线后收到多个 Reply，再以新进程恢复。
-
-验证：
+### 工程检查
 
 ~~~text
-pending projection
-→ Thread work context
-→ 正确继续
+gofmt -l .
+go vet ./...
+go test -p 1 ./...
+go build ./...
+fresh migration chain
+upgrade rehearsal
+container build
+healthz / readyz / SIGTERM smoke
 ~~~
 
-### Close / Reopen
-
-验证：
-
-- close 把当前 pending receipts 转为 withdrawn；
-- closed Thread 停止 reply / branch；
-- reopen 保留历史；
-- withdrawn receipts 不恢复；
-- 新输入重新生成 pending。
-
-### Link / Key
-
-验证：
-
-- A/B 同时互相 request 只能形成一个 canonical pair；
-
-- Link request / accept 后才 active；
-- active Link 才允许 direct add；
-- unlink 不移除既有 ThreadRole；
-- key reset 同时绑定明确 join entry；
-- raw key 不可再次读取，只能 reset；
-- key join 默认建立 write ThreadRole；
-- existing read participant 用 key 不升级 permission；
-- 重复 join 不重复生成 entry receipt；
-- participant removal 后旧 key 不能重新加入，Thread 暂时没有 join key；
-- join 枚举 / brute-force 防护生效。
-
-### Memory 边界回归
-
-验证：
-
-- migration backfill 后现有 memory_list 结果数量与内容保持；
-- migration 不为所有现有 Memory 复制正文；
-- thread-origin Memory 不进入 default memory_list；
-- Task harness 仍实时读取 current Memory；
-- Thread pinned revision 在 standalone update/delete 后保持；
-- Thread write 不走 standalone Store consumption action。
-
-### Todo race
-
-验证同一 input 的并发：
-
-- handle vs reply；
-- reply vs branch；
-- duplicate reply retry。
-
-只有一个 Todo-consuming 动作成功；stale 动作不产生额外 Thread write。
-
-### Task 边界回归
-
-验证现有开放雇佣机制保持完整：
-
-- publisher create / open；
-- work_list / work_get 对外发现；
-- claim / renew / release；
-- submit / revise；
-- receiver delivery；
-- settlement / rejection / failure；
-- harness_refs 继续读取 publisher Memory；
-- Thread Todo 不进入 Task executor surface；
-- Task executor 不因处理开放 Task 自动获得 ThreadRole。
-
-### 异构 Agent
-
-至少以两种不同客户端协议行为验证：
+全部通过后更新：
 
 ~~~text
-API client
-MCP client
+README
+llms.txt
+kungfu_skill.md
+MCP descriptions
+HTTP contract
+release notes
 ~~~
 
-二者得到同一 Thread/Receipt/Todo 语义。
+## 11. 可行性结论
 
-### 权限与隔离
+| 部分 | 判断 | 关键验证 |
+| --- | --- | --- |
+| Memory revision | 可实施 | T0 / T1 migration + revision resolver |
+| Thread kernel | 可实施 | T2 schema / seq / lineage / permission |
+| Todo state machine | 可实施，风险最高 | T3 PostgreSQL concurrency tests |
+| Agent context | 可实施 | T4 no-local-state tests |
+| API / MCP | 可实施 | T5 shared registry parity |
+| Product Surface | 可实施 | T6 normal-path friction |
+| Task coexistence | 可实施 | T1 / T7 regression |
+| Realtime | 第一版无需依赖 | durable pull 已覆盖协作闭环 |
 
-验证：
-
-- ThreadRole 决定 participant scope；
-- Root ownership 只派生 read/govern，不派生 descendant collaboration write；
-- lineage 只暴露协作所需 anchor；
-- role removal 更新 scoped access；
-- writeback 目标校验当前 Thread；
-- Link 与 ThreadRole 生命周期独立；
-- write/manage → read 时 pending withdrawn；
-- read → write/manage 时以新 entry 产生单一 Todo。
-
-## 发布判据
-
-完成后，任意外部 Agent 能只依赖 Kungfu 协议完成：
+实施重点：
 
 ~~~text
-发现当前 pending
-→ 读取 Thread 工作上下文
-→ 理解进入原因与 lineage
-→ 按需读 Memory
-→ 本地执行
-→ reply / branch / handle
-→ 自动形成下一轮协作
+T0 兼容迁移
+T3 状态机并发
+T4 Agent 不迷路
+T6 正常路径摩擦
 ~~~
 
-发布前同时通过：migration/backward-compat、Thread state-machine、Todo race、Link/Key、Task regression、Agent protocol、Web Product Surface。
-
-README / llms.txt / MCP descriptions / HTTP contract / Web 文案从最终事实合同同步更新。
+这四项通过后，Thread 具备发布条件。
