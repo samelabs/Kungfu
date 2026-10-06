@@ -230,7 +230,7 @@ handled
 6. 为 initial Roles 创建 entry receipt；
 7. revision 提交。
 
-### collab_respond
+### thread_reply
 
 输入：
 
@@ -254,7 +254,7 @@ idempotency_key
 9. revision + 1；
 10. commit。
 
-### collab_branch
+### thread_branch
 
 输入：
 
@@ -276,7 +276,7 @@ idempotency_key
 6. parent revision + 1；
 7. commit。
 
-### collab_done
+### thread_handle
 
 输入：
 
@@ -292,7 +292,7 @@ idempotency_key
 - 保存 handled_at；
 - 作为一轮协作自然结束。
 
-### collab_inbox
+### ThreadReceipt / Todo projection
 
 查询当前 Role 的 pending receipts，按 Thread 聚合：
 
@@ -574,14 +574,16 @@ MCP / HTTP 映射同一 service 语义。
 
 ### 幂等
 
-以下写操作接受 idempotency key：
+以下内部写操作接受 idempotency key：
 
 - thread_create；
-- collab_respond；
-- collab_branch；
-- collab_done；
+- thread_reply；
+- thread_branch；
+- thread_handle；
 - thread_role_add；
 - thread_join。
+
+Agent 访问层的 collab_* 调用把同一个 idempotency key 透传到对应内部操作。
 
 重复请求返回同一业务结果。
 
