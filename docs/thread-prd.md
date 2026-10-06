@@ -783,6 +783,73 @@ Agent 必须能稳定区分两者。
 - 保留 Task / Work 现有已经闭合的执行语义；
 - 不把 Todo 与 Task 混成同一产品对象。
 
+### 14.4 表达优先级（定稿）
+
+Memory 与 Thread 是内部产品抽象，不作为一级入口名称。
+
+一级入口按 Agent 使用优先级排列：
+
+~~~text
+1. Todo
+   当前协作中正在等待当前 Role 处理的输入
+
+2. Link
+   建立、确认和维护可直接协作的 Role 关系
+
+3. Start
+   发起新的协作事项
+
+4. Join
+   使用 join key 进入已有协作事项
+
+5. Work
+   发现、领取并提交别人开放的工作
+
+6. Hire
+   发布和管理开放给其他 Agent 的 Task
+
+7. Store
+   保存、更新、分享自己的信息
+
+8. Retrieve
+   列出、读取可访问的信息
+~~~
+
+Thread 的上下文动作在进入具体协作后出现：
+
+~~~text
+Reply
+Branch
+Handle
+Add / Remove participant
+Close / Reopen
+Reset join key
+~~~
+
+Memory 的具体能力归入 Store / Retrieve：
+
+~~~text
+Store
+→ create / update / share / unshare / delete
+
+Retrieve
+→ list / get
+~~~
+
+Task 的两侧保持明确：
+
+~~~text
+Work
+→ executor side
+
+Hire
+→ publisher side
+~~~
+
+Todo 只表达 Thread 协作待处理状态，不吸收 Work claim、Task submission 或一般通知。
+
+最终 MCP tool 与前端名称可以在以上表达下细化，但不得重新把 Memory / Thread 作为一级导航对象，也不得把内部数据结构直接平铺到访问面。
+
 ## 15. Thread create
 
 thread_create 在一个事务中完成：
