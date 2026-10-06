@@ -73,10 +73,11 @@ PRIMARY KEY (memory_id, revision)
 迁移：
 
 1. 全量现有 tb_kungfus 回填 origin=standalone、revision=1；
-2. 为现有记录生成 revision=1 快照；
-3. standalone update 在同一事务更新 current row + append revision；
+2. 不生成 revision=1 全量正文副本；
+3. standalone update 在同一事务执行 lock current → archive old revision → update current + revision+1；
 4. Task harness 查询路径继续读取 current row，不改现有 live semantics；
-5. ThreadMemory 保存 memory_id + revision 并读取历史快照。
+5. ThreadMemory 保存 memory_id + revision；
+6. revision resolver：requested=current 时读 tb_kungfus，requested<current 时读 memory_revisions。
 
 ### 创建 primitive
 
@@ -89,6 +90,7 @@ PRIMARY KEY (memory_id, revision)
 - credential scan；
 - checksum；
 - revision=1；
+- 不额外写 history row；
 - caller-owned transaction。
 
 standalone memory_put 继续保留现有 title / tags / content 合同，并 origin=standalone。
@@ -105,7 +107,8 @@ Thread-generated Memory 不调用 consumption.ActionStorageCreate。Store 定价
 - Task harness_refs 始终读取 Memory current/latest；
 - Thread pin revision 后不随 standalone update 改义；
 - standalone soft-delete 不破坏既有 Thread history；
-- Thread reply 创建 Memory revision 与 ThreadMemory 同事务；
+- Thread reply 创建 current Memory + ThreadMemory 同事务且正文只保存一次；
+- Memory 更新前的旧 current revision 能被原 Thread 正确读取；
 - 一个 Memory revision 可以进入多个 Thread。
 
 ## WO-T2 Role / Link / Thread 数据内核
@@ -157,7 +160,7 @@ active → remove → delete current relation
 ~~~text
 id / code
 join_key_hash
-join_entry_entry_id?
+join_entry_id?
 subject
 created_by_role_id
 parent_thread_id?
@@ -185,14 +188,14 @@ thread_id
 role_id
 permission
 joined_by_role_id?
-entry_entry_id
+entry_id
 joined_at
 ~~~
 
 约束：
 
 - (thread, role) 唯一；
-- 每个 ThreadRole 有 entry_entry_id；该值是确定 ThreadMemory entry，不是裸 Memory id；
+- 每个 ThreadRole 有 entry_id；该值是确定 ThreadMemory entry，不是裸 Memory id；
 - Root creator 通过 root ownership 获得 descendants 的 inherited read + govern；
 - inherited govern 允许 participant/key/subject/status/tree 管理，但不允许 reply/branch/handle；
 - collaboration write 仍必须有 descendant write/manage ThreadRole。
@@ -200,7 +203,7 @@ joined_at
 ### permission lifecycle
 
 - write/manage → read：同事务将该 Role 当前 pending receipts → withdrawn；
-- read → write/manage：要求新的 entry_entry_id，并创建一条 entry receipt；
+- read → write/manage：要求新的 entry_id，并创建一条 entry receipt；
 - write ↔ manage：不改变 pending。
 
 ### thread_memories
@@ -786,6 +789,7 @@ pending projection
 验证：
 
 - migration backfill 后现有 memory_list 结果数量与内容保持；
+- migration 不为所有现有 Memory 复制正文；
 - thread-origin Memory 不进入 default memory_list；
 - Task harness 仍实时读取 current Memory；
 - Thread pinned revision 在 standalone update/delete 后保持；
