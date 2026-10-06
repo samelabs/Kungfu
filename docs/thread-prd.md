@@ -277,7 +277,7 @@ key
 
 ## 7. Thread 结构
 
-### 6.1 Root Thread
+### 7.1 Root Thread
 
 Root Thread 创建时同时建立：
 
@@ -299,7 +299,7 @@ root Memory 是这个事项的起始输入。
 
 creator 对 Root 拥有 manage 权限。
 
-### 6.2 Child Thread
+### 7.2 Child Thread
 
 Child Thread 必须同时拥有：
 
@@ -322,7 +322,7 @@ Child 创建后：
 
 Child 的参与者可以读取当前 Child 完整内容，以及建立 lineage 所需的祖先 anchor 链。
 
-### 6.3 Tree 与 lineage
+### 7.3 Tree 与 lineage
 
 Thread 使用单 parent 形成树：
 
@@ -384,7 +384,7 @@ permission：
 
 entry_memory_id 是 Role 进入当前协作事项的明确挂载点。
 
-### 7.1 初始成员
+### 8.1 初始成员
 
 Root 创建时：
 
@@ -400,7 +400,7 @@ B/C/D 各自产生一条 pending ThreadReceipt。
 
 creator 自己的 root Memory不产生自己的 Todo。
 
-### 7.2 后续加入
+### 8.2 后续加入
 
 manage 将 Role 加入已有 Thread 时，同时指定 entry_memory_id。
 
@@ -444,7 +444,7 @@ reply_to_entry_id：
 - 表达对话挂载关系；
 - 不创建新的 Thread。
 
-### 8.1 稳定表达
+### 9.1 稳定表达
 
 Thread 中一次已经发生的表达保持稳定语义。
 
@@ -486,7 +486,7 @@ B Todo
 
 协作推进来自明确的挂载关系。
 
-### 9.1 多人并发回复
+### 10.1 多人并发回复
 
 ~~~
 M1 by A
@@ -533,7 +533,7 @@ thread_receipts
 (thread_id, input_entry_id, role_id)
 ~~~
 
-### 10.1 自动生成
+### 11.1 自动生成
 
 entry：
 
@@ -551,7 +551,7 @@ B replies to Memory authored by A
 
 receipt 只在目标 Role 当前属于该 Thread 时生成。
 
-### 10.2 自动消解
+### 11.2 自动消解
 
 当前 Role 针对 pending input 执行以下动作时，该 receipt 变为 handled：
 
@@ -567,7 +567,7 @@ branch 表达把当前输入展开为独立子事项。
 
 handle 表达该输入已处理，本轮在这里结束。
 
-### 10.3 Todo 视图
+### 11.3 Todo 视图
 
 Todo 由当前 Role 的 pending ThreadReceipt 按 Thread 聚合形成。
 
@@ -881,7 +881,7 @@ create 完成后，每个参与 Agent 都拥有明确事项、明确入口与明
 
 ## 17. Role 加入
 
-### 16.1 Link 直接加入
+### 17.1 Link 直接加入
 
 manage Role 与目标 Role 存在 Link：
 
@@ -892,16 +892,16 @@ thread_role_add(thread, target, entry_memory)
 → target immediately appears in collab_inbox
 ~~~
 
-### 16.2 Key 自主加入
+### 17.2 Key 自主加入
 
 ~~~
 thread_join(key)
 → establish ThreadRole
 → establish entry
-→ return Thread Context Envelope
+→ return Agent Context Envelope
 ~~~
 
-### 16.3 完整上下文
+### 17.3 完整上下文
 
 Role 成为 Thread participant 后，可以读取该 Thread 完整历史。
 
@@ -1116,7 +1116,7 @@ thread_receipts
 
 ## 24. 场景验收
 
-### 23.1 两 Agent 往返
+### 24.1 两 Agent 往返
 
 ~~~
 T
@@ -1133,7 +1133,7 @@ A reply M2 with M3
 
 持续往返不需要额外调度模型。
 
-### 23.2 多 Agent 首轮
+### 24.2 多 Agent 首轮
 
 ~~~
 A creates T with B/C/D
@@ -1146,7 +1146,7 @@ D Todo: M1
 
 B/C/D 可以并行响应，同一 Thread 保持一个事项表达。
 
-### 23.3 多人回复同一 Memory
+### 24.3 多人回复同一 Memory
 
 ~~~
 M1 A
@@ -1164,7 +1164,7 @@ pending_count = 3
 
 A 可以分别 reply / branch / handle。
 
-### 23.4 中途加入 Agent
+### 24.4 中途加入 Agent
 
 T 已有大量历史。
 
@@ -1177,7 +1177,7 @@ Receipt(D, M87) = pending
 
 D 获得完整 Thread 历史访问，同时 Agent Context Envelope 把 M87 作为当前工作入口。
 
-### 23.5 无限分叉
+### 24.5 无限分叉
 
 ~~~
 T0 / M8
@@ -1188,7 +1188,7 @@ T0 / M8
 
 T3 Agent 直接得到 lineage 与 anchors，并只加载当前工作集。
 
-### 23.6 无需回复
+### 24.6 无需回复
 
 A 收到一个 pending input，完成判断后执行：
 
@@ -1198,7 +1198,7 @@ collab_done(T, input)
 
 receipt 变 handled，该轮协作在 A 处结束。
 
-### 23.7 Branch 继续工作
+### 24.7 Branch 继续工作
 
 B 针对 pending M20 创建 Child：
 
@@ -1211,7 +1211,7 @@ collab_branch(T0, M20, ...)
 
 Child 形成独立会话隔离与 Todo。
 
-### 23.8 掉线恢复
+### 24.8 掉线恢复
 
 Agent 离线期间收到多个 Reply。
 
@@ -1226,7 +1226,7 @@ collab_inbox()
 
 无需恢复整段实时消息流即可继续工作。
 
-### 23.9 异构 Agent
+### 24.9 异构 Agent
 
 ~~~
 Codex
