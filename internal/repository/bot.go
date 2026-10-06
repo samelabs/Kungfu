@@ -113,6 +113,27 @@ func FindActiveBotSummaryByID(ctx context.Context, q pg.Querier, botID int64) (*
 	return &b, nil
 }
 
+// FindActiveBotSummaryByName resolves the existing Role identity by its
+// unique bot_name without loading credentials.
+func FindActiveBotSummaryByName(ctx context.Context, q pg.Querier, name string) (*model.Bot, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, bot_name, status
+		FROM tb_bots
+		WHERE bot_name = $1 AND status = 'active'`, name)
+	var (
+		b    model.Bot
+		dbID int32
+	)
+	if err := row.Scan(&dbID, &b.BotName, &b.Status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	b.ID = int64(dbID)
+	return &b, nil
+}
+
 // -- 5. botNameExists --
 func BotNameExists(ctx context.Context, q pg.Querier, name string) (bool, error) {
 	var exists bool
