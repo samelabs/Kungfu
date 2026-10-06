@@ -381,7 +381,7 @@ join key 是 bearer capability：只存安全哈希，不支持枚举；join 失
 
 raw join key 只在创建 / reset 时返回一次；服务端不保存可恢复明文。丢失时只能 reset。
 
-移除 participant 时，如果 Thread 当前存在 join key，必须同时 rotate key，防止被移除 Role 使用旧 bearer key 立即重新加入。新的 raw key 只返回给执行移除的 govern/manage Role。
+移除 participant 时，如果 Thread 当前存在 join key，必须在同一事务撤销该 key（join_key_hash / join_entry_id 置空），防止被移除 Role 使用旧 bearer key 立即重新加入。后续需要开放加入时，由 govern/manage 显式 reset 并获得新的 raw key。
 
 key reset 只替换 key 与其 join entry；Thread code、现有 membership 和历史保持稳定。
 
@@ -1053,11 +1053,13 @@ thread_role_add
 thread_join
 ~~~
 
-幂等以 (role_id, operation, idempotency_key) 为唯一身份，并保存 request hash 与业务结果引用。
+普通 Thread 写操作以 (role_id, operation, idempotency_key) 为唯一身份，并保存 request hash 与业务结果引用。
 
 - 相同 key + 相同 request hash：返回原业务结果；
 - 相同 key + 不同 request hash：IDEMPOTENCY_CONFLICT；
 - 幂等记录先于成功结果对外返回持久化。
+
+join-key issue/reset 属于一次性 secret 操作：同一 idempotency key 的重放只能返回 already_applied 与当前 key fingerprint，不再次披露 raw key。若首次成功响应丢失，调用方使用新的 idempotency key 再次 reset。
 
 多人并发 reply：
 
@@ -1194,7 +1196,7 @@ thread_idempotency
 18. 一个 Role 可以在同一 Thread 同时拥有多个 pending receipts。
 19. Link 对 canonical Role pair 全局唯一，并经过双方确认后才 active。
 20. join key 绑定明确 join entry；existing participant 重复 join 不升级 permission。
-21. raw join key 只一次性披露；participant removal 会 rotate 当前 join key，旧 key 立即失效。
+21. raw join key 只一次性披露；participant removal 会 revoke 当前 join key，旧 key 立即失效。join-key reset 的幂等重放不再次披露 raw key。
 22. key reset 不改变既有 ThreadRole、Thread history 与 code.
 23. durable state 是恢复事实源；实时 signal 如存在只作 wake-up。
 24. 所有写操作具备可检测 request conflict 的幂等语义。
@@ -1360,8 +1362,9 @@ D 使用 key：
 随后 D 被移除：
 
 - D membership 与 pending 同事务撤销；
-- 当前 join key 自动 rotate；
-- D 持有的旧 key 不能重新加入。
+- 当前 join key 被撤销；
+- D 持有的旧 key 不能重新加入；
+- govern/manage 需要时再显式 reset 新 key。
 
 ### 23.13 异构 Agent
 
