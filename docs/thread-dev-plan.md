@@ -13,7 +13,7 @@ WO-T2 Link / Thread 数据内核
    ↓
 WO-T3 Reply / Receipt / Todo
    ↓
-WO-T4 Agent Context Envelope
+WO-T4 Agent 工作上下文合同
    ↓
 WO-T5 Realtime / Protocol
    ↓
