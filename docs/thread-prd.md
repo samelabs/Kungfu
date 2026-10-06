@@ -64,7 +64,7 @@ Memory 是可独立使用的信息原子。
 - public share / unshare；
 - soft delete。
 
-Memory 更新形成新的 revision。默认读取当前 revision。
+Memory 当前行持有 revision。更新时先归档即将被覆盖的旧 revision，再生成新的 current revision；未发生更新的 Memory 不重复保存正文。
 
 不同产品使用 Memory 的方式保持不同：
 
@@ -480,7 +480,7 @@ thread_roles
 - role_id
 - permission: read | write | manage
 - joined_by_role_id?
-- entry_entry_id
+- entry_id
 - joined_at
 ~~~
 
@@ -492,7 +492,7 @@ permission：
 
 Root creator 的 tree-wide governance 由 Root ownership 派生，不依赖 descendant ThreadRole；govern 与 participant write 分离。
 
-entry_entry_id 表达 Role 进入这个协作事项的确定 ThreadMemory entry。Root / later-add 通常指向当前 Thread entry；Child 初始参与者可以指向该 Child 的 direct anchor_entry_id。
+entry_id 表达 Role 进入这个协作事项的确定 ThreadMemory entry。Root / later-add 通常指向当前 Thread entry；Child 初始参与者可以指向该 Child 的 direct anchor_entry_id。
 
 ### 8.1 可行动参与者
 
@@ -520,7 +520,7 @@ creator 自己产生 root M1，因此不为自己生成 root entry Todo。
 
 ### 8.3 后续加入
 
-manage Role 把其他 Role 加入已有 Thread 时同时指定 entry_entry_id。
+manage Role 把其他 Role 加入已有 Thread 时同时指定 entry_id。
 
 ~~~
 A adds D
@@ -954,7 +954,7 @@ thread_join(key)
 
 Role 成为 Thread participant 后，可以读取该 Thread 完整历史。
 
-entry_entry_id 决定当前进入工作的起点。
+entry_id 决定当前进入工作的起点。
 
 完整历史与当前待处理输入是两个独立维度。
 
@@ -1072,21 +1072,54 @@ join-key issue/reset 属于一次性 secret 操作：同一 idempotency key 的�
 
 ## 21. 最小持久结构
 
-### MemoryRevision
+### Memory current + revision
+
+现有 tb_kungfus 继续作为 current Memory row，并新增：
+
+~~~
+revision
+origin: standalone | thread
+~~~
+
+历史表只保存已经被覆盖的旧 revision：
 
 ~~~
 memory_revisions
 - memory_id
 - revision
-- title?
-- tags?
-- description?
+- title
+- tags
+- description
 - content
 - checksum
 - created_at
+PRIMARY KEY (memory_id, revision)
 ~~~
 
-Memory current object 指向最新 revision。Task harness 读取最新 revision；ThreadMemory pin 指定 revision。
+迁移时为现有 Memory 回填 origin=standalone、revision=1，不复制正文到 history。
+
+读取指定 revision：
+
+~~~
+requested revision == current revision
+→ read tb_kungfus current row
+
+requested revision < current revision
+→ read memory_revisions
+~~~
+
+更新 Memory：
+
+~~~
+lock current row
+→ archive current fields under current revision
+→ update current row
+→ revision + 1
+~~~
+
+因此 ThreadMemory 可以稳定 pin revision，同时一次写入后从未更新的 Thread Memory 只保存一份正文。
+
+Task harness 继续读取 tb_kungfus current row；standalone memory_list 默认过滤 origin=standalone。
 
 ### RoleLink
 
@@ -1108,7 +1141,7 @@ role_links
 threads
 - id / code
 - join_key_hash
-- join_entry_entry_id?
+- join_entry_id?
 - subject
 - created_by_role_id
 - parent_thread_id?
@@ -1128,7 +1161,7 @@ thread_roles
 - role_id
 - permission
 - joined_by_role_id?
-- entry_entry_id
+- entry_id
 - joined_at
 ~~~
 
@@ -1179,7 +1212,7 @@ thread_idempotency
 1. Role 复用现有 Agent account；不存在第二套身份事实源。
 2. Memory 可以独立存储、读取、public share / unshare、soft delete；Store 默认只枚举 standalone origin。
 3. Thread 生成的 Memory 不进入默认 Store 列表，也不调用 standalone Store 消费动作。
-4. Memory update 产生新 revision；Task harness 读取最新 revision；Thread pin 协作发生时 revision.
+4. Memory update 在覆盖前归档旧 revision，再推进 current revision；Task harness 读取 current；Thread pin 协作发生时 revision。
 5. 已进入 Thread 的 pinned Memory revision 在 standalone soft-delete 后仍作为既有协作历史可读。
 6. 每个 Root Thread 有 root Memory；每个 Child Thread 有直接 parent 与 anchor Memory。
 7. Child creator 是该 Child 的 manage participant；Root creator 的继承 govern 不等于 descendant participant write。
@@ -1391,7 +1424,7 @@ custom Agent
 - Start 可以在 active Link 下直接拉人，也可以创建后通过 join key 扩展参与者；
 - Join 带明确 entry，不把新 Agent 扔进无上下文的长历史；
 - Thread 每次 reply 可以很轻，不要求填写 standalone Memory 的 title / tags；
-- Thread 高频消息不会污染 Store 列表，也不会继承 Store 的消费策略；
+- Thread 高频消息不会污染 Store 列表，不继承 Store 的消费策略，也不会因为 revision 机制重复存储未修改正文；
 - Work / Hire 完整复用现有 Task 1.0，不因 Thread 改造破坏既有市场与结算；
 - Store / Retrieve 保持现有 Memory 用户合同向后兼容；
 - API / MCP 共用现有单一 Tool registry 与 service 事实源，不复制业务规则；
