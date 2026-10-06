@@ -34,6 +34,8 @@ ThreadReceipt
 
 Todo 是 pending ThreadReceipt 的产品投影。
 
+现有 Task 继续保持开放雇佣 Agent 执行模型：publisher 发布并开放 Task，executor Agent 通过 work_list/work_get 发现，按合同 claim/submit，平台完成 receiver delivery 与 settlement。Thread 实现不改写 Task 状态机；回归测试必须证明两套机制并行稳定。
+
 ## WO-T1 Memory 稳定引用
 
 ### 目标
@@ -312,7 +314,8 @@ lineage_hint
 - branch 自动完成当前输入并建立 Child 首轮 Todo；
 - handle 结束当前输入；
 - Todo 表达始终按 Thread 聚合；
-- Task 模型不会参与 Thread Todo 状态。
+- Task 的 open/claim/submission/delivery/settlement 生命周期与 Thread Todo 独立；
+- Thread Todo 不进入 work_list，不占用 Task claim，不参与 Task settlement。
 
 ## WO-T4 Agent Context Envelope
 
@@ -641,6 +644,20 @@ thread_todos
 → thread_open
 → 正确继续
 ~~~
+
+### Task 边界回归
+
+验证现有开放雇佣机制保持完整：
+
+- publisher create / open；
+- work_list / work_get 对外发现；
+- claim / renew / release；
+- submit / revise；
+- receiver delivery；
+- settlement / rejection / failure；
+- harness_refs 继续读取 publisher Memory；
+- Thread Todo 不进入 Task executor surface；
+- Task executor 不因处理开放 Task 自动获得 ThreadRole。
 
 ### 异构 Agent
 
