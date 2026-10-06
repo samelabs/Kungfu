@@ -166,6 +166,38 @@ func scanThread(row pgx.Row) (*model.Thread, error) {
 	return &t, nil
 }
 
+func FindOpenThreadByJoinKeyHash(ctx context.Context, q pg.Querier, keyHash []byte) (*model.Thread, error) {
+	return scanThread(q.QueryRow(ctx, threadSelect+`
+		WHERE join_key_hash = $1 AND status = 'open'`, keyHash))
+}
+
+func SetThreadJoinKey(ctx context.Context, q pg.Querier, threadID int64, keyHash []byte, entryID int64) error {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET join_key_hash = $2, join_entry_id = $3,
+		    revision = revision + 1, updated_at = NOW()
+		WHERE id = $1`, threadID, keyHash, entryID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func ClearThreadJoinKey(ctx context.Context, q pg.Querier, threadID int64) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET join_key_hash = NULL, join_entry_id = NULL,
+		    revision = revision + 1, updated_at = NOW()
+		WHERE id = $1 AND join_key_hash IS NOT NULL`, threadID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // AllocateThreadSeq atomically reserves the next timeline seq and advances the
 // shared Thread revision. Call it inside the transaction that inserts the
 // corresponding ThreadMemory.

@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"strings"
 
@@ -244,6 +247,13 @@ func addThreadRoleKernel(ctx context.Context, q pg.Querier, actorID, threadID, t
 		}
 		return false, err
 	}
+	linked, err := rolesHaveActiveLink(ctx, q, actorID, targetRoleID)
+	if err != nil {
+		return false, err
+	}
+	if !linked {
+		return false, errors.New("active Role Link required for direct participant add")
+	}
 
 	actorRole, err := repository.FindThreadRole(ctx, q, threadID, actorID)
 	if err != nil {
@@ -265,7 +275,133 @@ func addThreadRoleKernel(ctx context.Context, q pg.Querier, actorID, threadID, t
 		return false, errors.New("entry is outside thread scope")
 	}
 	joinedBy := actorID
-	return repository.InsertThreadRole(ctx, q, threadID, targetRoleID, permission, &joinedBy, entryID)
+	inserted, err := repository.InsertThreadRole(ctx, q, threadID, targetRoleID, permission, &joinedBy, entryID)
+	if err != nil || !inserted {
+		return inserted, err
+	}
+	if err := repository.BumpThreadRevision(ctx, q, threadID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func newThreadJoinKey() (raw string, hash []byte, err error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", nil, err
+	}
+	raw = base64.RawURLEncoding.EncodeToString(secret)
+	sum := sha256.Sum256([]byte(raw))
+	return raw, sum[:], nil
+}
+
+// resetThreadJoinKeyKernel replaces the bearer join capability and binds it
+// to one exact collaboration entry. Only the safe hash is persisted.
+func resetThreadJoinKeyKernel(ctx context.Context, q pg.Querier, actorID, threadID, entryID int64) (string, error) {
+	thread, err := repository.FindThreadByID(ctx, q, threadID)
+	if err != nil || thread == nil {
+		if err == nil {
+			err = errors.New("thread not found")
+		}
+		return "", err
+	}
+	if thread.Status != model.ThreadOpen {
+		return "", errors.New("thread is closed")
+	}
+	actorRole, err := repository.FindThreadRole(ctx, q, threadID, actorID)
+	if err != nil {
+		return "", err
+	}
+	canGovern, err := repository.RootCreatorCanGovernThread(ctx, q, threadID, actorID)
+	if err != nil {
+		return "", err
+	}
+	if (actorRole == nil || actorRole.Permission != model.ThreadManage) && !canGovern {
+		return "", errors.New("thread manage permission required")
+	}
+	allowed, err := repository.EntryAllowedInThreadScope(ctx, q, threadID, entryID)
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		return "", errors.New("join entry is outside thread scope")
+	}
+	raw, hash, err := newThreadJoinKey()
+	if err != nil {
+		return "", err
+	}
+	if err := repository.SetThreadJoinKey(ctx, q, threadID, hash, entryID); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func revokeThreadJoinKeyKernel(ctx context.Context, q pg.Querier, actorID, threadID int64) (bool, error) {
+	actorRole, err := repository.FindThreadRole(ctx, q, threadID, actorID)
+	if err != nil {
+		return false, err
+	}
+	canGovern, err := repository.RootCreatorCanGovernThread(ctx, q, threadID, actorID)
+	if err != nil {
+		return false, err
+	}
+	if (actorRole == nil || actorRole.Permission != model.ThreadManage) && !canGovern {
+		return false, errors.New("thread manage permission required")
+	}
+	return repository.ClearThreadJoinKey(ctx, q, threadID)
+}
+
+// joinThreadByKeyKernel establishes only the structural write membership.
+// T3 composes the entry receipt in the same outer transaction. Reusing a key
+// as an existing participant preserves the current permission and entry.
+func joinThreadByKeyKernel(ctx context.Context, q pg.Querier, roleID int64, rawKey string) (*model.Thread, *model.ThreadRole, bool, error) {
+	sum := sha256.Sum256([]byte(rawKey))
+	thread, err := repository.FindOpenThreadByJoinKeyHash(ctx, q, sum[:])
+	if err != nil || thread == nil || thread.JoinEntryID == nil {
+		if err == nil {
+			err = errors.New("join key is invalid")
+		}
+		return nil, nil, false, err
+	}
+	role, err := repository.FindActiveBotAccountByID(ctx, q, roleID)
+	if err != nil || role == nil {
+		if err == nil {
+			err = errors.New("role not found")
+		}
+		return nil, nil, false, err
+	}
+	existing, err := repository.FindThreadRole(ctx, q, thread.ID, roleID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if existing != nil {
+		return thread, existing, false, nil
+	}
+	inserted, err := repository.InsertThreadRole(ctx, q, thread.ID, roleID, model.ThreadWrite, nil, *thread.JoinEntryID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !inserted {
+		existing, err = repository.FindThreadRole(ctx, q, thread.ID, roleID)
+		if err != nil || existing == nil {
+			if err == nil {
+				err = errors.New("thread membership changed concurrently")
+			}
+			return nil, nil, false, err
+		}
+		return thread, existing, false, nil
+	}
+	if err := repository.BumpThreadRevision(ctx, q, thread.ID); err != nil {
+		return nil, nil, false, err
+	}
+	joined, err := repository.FindThreadRole(ctx, q, thread.ID, roleID)
+	if err != nil || joined == nil {
+		if err == nil {
+			err = errors.New("joined ThreadRole not found")
+		}
+		return nil, nil, false, err
+	}
+	return thread, joined, true, nil
 }
 
 // createChildThreadKernel creates only the structural Child and its creator

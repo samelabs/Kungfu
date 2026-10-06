@@ -21,6 +21,18 @@ func threadTestRoleName(t *testing.T, pool *pg.Pool, id int64) string {
 	return b.BotName
 }
 
+func threadTestActiveLink(t *testing.T, pool *pg.Pool, requesterID, targetID int64) {
+	t.Helper()
+	requesterName := threadTestRoleName(t, pool, requesterID)
+	targetName := threadTestRoleName(t, pool, targetID)
+	if _, _, err := requestRoleLink(context.Background(), pool, requesterID, targetName); err != nil {
+		t.Fatalf("request active Link: %v", err)
+	}
+	if _, err := acceptRoleLink(context.Background(), pool, targetID, requesterName); err != nil {
+		t.Fatalf("accept active Link: %v", err)
+	}
+}
+
 func TestRoleLookupAndLinkLifecycle(t *testing.T) {
 	pool := pubTestPool(t)
 	a := pubSeedBot(t, pool, 0)
@@ -128,6 +140,8 @@ func TestThreadKernelLineageGovernanceAndChildIndependence(t *testing.T) {
 	rootCreator := pubSeedBot(t, pool, 0)
 	worker := pubSeedBot(t, pool, 0)
 	observer := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, rootCreator, worker)
+	threadTestActiveLink(t, pool, rootCreator, observer)
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
@@ -261,11 +275,155 @@ func TestThreadKernelLineageGovernanceAndChildIndependence(t *testing.T) {
 	}
 }
 
+func TestThreadJoinKeyHashResetAndStructuralJoin(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	creator := pubSeedBot(t, pool, 0)
+	joiner := pubSeedBot(t, pool, 0)
+
+	tx, _ := pool.TxBegin(ctx)
+	root, entry, err := createRootThreadKernel(ctx, tx, creator, "Joinable", "root entry")
+	if err != nil {
+		_ = pg.Rollback(tx)
+		t.Fatal(err)
+	}
+	raw, err := resetThreadJoinKeyKernel(ctx, tx, creator, root.ID, entry.ID)
+	if err != nil {
+		_ = pg.Rollback(tx)
+		t.Fatalf("reset join key: %v", err)
+	}
+	if raw == "" {
+		_ = pg.Rollback(tx)
+		t.Fatal("raw join key is empty")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored []byte
+	var storedEntry int64
+	if err := pool.QueryRow(ctx,
+		`SELECT join_key_hash, join_entry_id FROM threads WHERE id=$1`, root.ID).Scan(&stored, &storedEntry); err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) == raw || storedEntry != entry.ID {
+		t.Fatalf("join key persistence leaked raw key or wrong entry")
+	}
+
+	tx, _ = pool.TxBegin(ctx)
+	joinedThread, role, inserted, err := joinThreadByKeyKernel(ctx, tx, joiner, raw)
+	if err != nil {
+		_ = pg.Rollback(tx)
+		t.Fatalf("join: %v", err)
+	}
+	if !inserted || joinedThread.ID != root.ID || role.Permission != model.ThreadWrite || role.EntryID != entry.ID {
+		_ = pg.Rollback(tx)
+		t.Fatalf("joined = thread %+v role %+v inserted=%v", joinedThread, role, inserted)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var receipts int64
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM thread_receipts WHERE thread_id=$1 AND role_id=$2`, root.ID, joiner).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 0 {
+		t.Fatalf("T2 structural join created %d receipts; T3 owns receipt creation", receipts)
+	}
+
+	// Reuse preserves an existing permission instead of upgrading it.
+	if _, err := pool.Exec(ctx,
+		`UPDATE thread_roles SET permission='read' WHERE thread_id=$1 AND role_id=$2`, root.ID, joiner); err != nil {
+		t.Fatal(err)
+	}
+	tx, _ = pool.TxBegin(ctx)
+	_, role, inserted, err = joinThreadByKeyKernel(ctx, tx, joiner, raw)
+	if err != nil {
+		_ = pg.Rollback(tx)
+		t.Fatalf("repeat join: %v", err)
+	}
+	if inserted || role.Permission != model.ThreadRead {
+		_ = pg.Rollback(tx)
+		t.Fatalf("repeat join changed membership: role=%+v inserted=%v", role, inserted)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, _ = pool.TxBegin(ctx)
+	raw2, err := resetThreadJoinKeyKernel(ctx, tx, creator, root.ID, entry.ID)
+	if err != nil || raw2 == raw {
+		_ = pg.Rollback(tx)
+		t.Fatalf("reset did not rotate key: equal=%v err=%v", raw2 == raw, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tx, _ = pool.TxBegin(ctx)
+	if _, _, _, err := joinThreadByKeyKernel(ctx, tx, pubSeedBot(t, pool, 0), raw); err == nil {
+		_ = pg.Rollback(tx)
+		t.Fatal("old join key remained valid after reset")
+	}
+	_ = pg.Rollback(tx)
+
+	tx, _ = pool.TxBegin(ctx)
+	revoked, err := revokeThreadJoinKeyKernel(ctx, tx, creator, root.ID)
+	if err != nil || !revoked {
+		_ = pg.Rollback(tx)
+		t.Fatalf("revoke: revoked=%v err=%v", revoked, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDirectParticipantAddRequiresActiveLinkAndBumpsRevision(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	creator := pubSeedBot(t, pool, 0)
+	target := pubSeedBot(t, pool, 0)
+
+	tx, _ := pool.TxBegin(ctx)
+	root, entry, err := createRootThreadKernel(ctx, tx, creator, "Link gate", "root")
+	if err != nil {
+		_ = pg.Rollback(tx)
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := repository.FindThreadByID(ctx, pool, root.ID)
+
+	tx, _ = pool.TxBegin(ctx)
+	if _, err := addThreadRoleKernel(ctx, tx, creator, root.ID, target, model.ThreadWrite, entry.ID); err == nil {
+		_ = pg.Rollback(tx)
+		t.Fatal("non-linked Role was directly added")
+	}
+	_ = pg.Rollback(tx)
+
+	threadTestActiveLink(t, pool, creator, target)
+	tx, _ = pool.TxBegin(ctx)
+	added, err := addThreadRoleKernel(ctx, tx, creator, root.ID, target, model.ThreadWrite, entry.ID)
+	if err != nil || !added {
+		_ = pg.Rollback(tx)
+		t.Fatalf("linked add: added=%v err=%v", added, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := repository.FindThreadByID(ctx, pool, root.ID)
+	if after.Revision != before.Revision+1 {
+		t.Fatalf("participant add revision = %d, want %d", after.Revision, before.Revision+1)
+	}
+}
+
 func TestThreadConcurrentSeqAndRoleJoinAreUnique(t *testing.T) {
 	pool := pubTestPool(t)
 	ctx := context.Background()
 	creator := pubSeedBot(t, pool, 0)
 	target := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, creator, target)
 
 	tx, _ := pool.TxBegin(ctx)
 	root, rootEntry, err := createRootThreadKernel(ctx, tx, creator, "Concurrency", "root")
