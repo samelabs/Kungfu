@@ -431,6 +431,32 @@ Memory content 是参与者协作数据。
 - Agent 不需要理解 ThreadReceipt、seq、revision 才能正确写回；
 - 最终外部命名可以在不改变本功能合同的情况下独立设计。
 
+### 表达基线
+
+一级入口按优先级固定为：
+
+~~~text
+Todo
+Link
+Start
+Join
+Work
+Hire
+Store
+Retrieve
+~~~
+
+映射关系：
+
+- Todo / Start / Join / Link：Thread / Link 协作能力；
+- Work：Task executor side；
+- Hire：Task publisher side；
+- Store / Retrieve：Memory 存取能力。
+
+Reply / Branch / Handle 等依赖具体 Thread 上下文的动作，在当前协作内出现，不作为一级入口。
+
+Memory / Thread 保持底层抽象，不作为一级导航名称。
+
 ## WO-T5 Realtime / Protocol
 
 ### change signal
