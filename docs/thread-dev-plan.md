@@ -40,6 +40,376 @@ Todo 是 pending ThreadReceipt 的产品投影。
 
 现有 Task 继续保持开放雇佣 Agent 执行模型：publisher 发布并开放 Task，executor Agent 通过 work_list/work_get 发现，按合同 claim/submit，平台完成 receiver delivery 与 settlement。Thread 实现不改写 Task 状态机；回归测试必须证明两套机制并行稳定。
 
+## 2. 执行工作列表与可行性闸门
+
+### 执行纪律
+
+实现从已审计设计基线出发，旧 `feat/thread-collaboration-v01` 仅用于查实现经验，不整体 cherry-pick，不继承其 delivery / handoff / next_actor 语义。
+
+实现阶段使用一个 feature branch。先在分支内完成各闸门并本地跑测试，最终只开一个实现 PR。
+
+当前 CI 仅在 pull_request 与 main push 触发，因此 feature branch 可按 checkpoint push 而不触发整套 CI；正式 PR 在发布闸门通过后再建立。
+
+每个工作单只完成自己的事实层；下一层不得提前侵入当前层。
+
+### Gate 0 — Migration / Backward Compatibility Proof
+
+先证明新模型可以进入现有数据库，而不是先写 Thread UI。
+
+建议迁移拆分：
+
+~~~text
+023_memory_revision_origin.sql
+024_thread_core.sql
+025_thread_receipt_idempotency.sql
+~~~
+
+023：
+
+- tb_kungfus 增加 revision / origin；
+- 建立 memory_revisions；
+- 现有行回填 standalone / revision=1；
+- 不复制现有正文。
+
+024：
+
+- role_links；
+- threads；
+- thread_roles；
+- thread_memories；
+- entry / anchor / parent / key indexes 与约束。
+
+025：
+
+- thread_receipts；
+- thread_idempotency；
+- pending / idempotency indexes。
+
+必须验证两条迁移路径：
+
+~~~text
+fresh database
+001 → ... → 025
+
+upgrade rehearsal
+001 → ... → 022
+→ seed existing Memory + Task data
+→ snapshot counts / checksums / Task contracts
+→ 023 → 024 → 025
+→ assert old facts unchanged
+~~~
+
+CI 增加独立 upgrade rehearsal；现有 fresh-chain CI 保留。
+
+**Gate 0 PASS：**
+
+- fresh migration chain 通过；
+- upgrade rehearsal 通过；
+- existing Memory / Task 数据无语义变化；
+- migration 可重复从空库构建；
+- 没有 Thread 代码依赖未落库字段。
+
+Gate 0 不通过，停止后续实现。
+
+### Gate 1 — Memory Compatibility
+
+对应 WO-T1。
+
+主要改动面：
+
+~~~text
+migrations/023_memory_revision_origin.sql
+internal/model/kungfu.go
+internal/repository/kungfu.go
+internal/service/kungfu_manage.go
+internal/service/kungfu_read.go
+memory integration tests
+Task harness regression tests
+~~~
+
+实现顺序：
+
+1. current row 增加 revision / origin；
+2. standalone list 过滤 origin=standalone；
+3. 建立 revision resolver；
+4. update 改为 lock current → archive old → update current；
+5. 建立 thread-origin Memory internal primitive；
+6. 验证既有 memory_* contract 无变化；
+7. 验证 Task harness 仍读取 current。
+
+**Gate 1 PASS：**
+
+- 原 Memory 工具回归全绿；
+- Task harness 回归全绿；
+- Thread-origin Memory 不进入 Store 默认列表；
+- Thread-origin 首次写入正文只存一份；
+- pinned revision 在后续 update / soft-delete 后仍可读取。
+
+### Gate 2 — Role / Link / Thread Kernel
+
+对应 WO-T2。
+
+主要改动面：
+
+~~~text
+migrations/024_thread_core.sql
+internal/model/thread*.go
+internal/repository/thread*.go
+internal/service/thread*.go
+role lookup projection
+integration tests
+~~~
+
+先只做持久事实：
+
+- Role = existing tb_bots；
+- exact role lookup；
+- canonical RoleLink；
+- Root / Child Thread；
+- ThreadRole；
+- ThreadMemory；
+- seq / revision；
+- exact entry / anchor validation；
+- lineage / direct children；
+- inherited Root read + govern。
+
+这一 Gate 不实现 Todo 自动推进，不实现 MCP surface。
+
+**Gate 2 PASS：**
+
+- A/B 双向并发 Link request 只能产生一个 pair；
+- Child anchor 精确落到 parent ThreadMemory entry + revision；
+- Root govern 不产生 descendant participant；
+- concurrent timeline append 获得唯一 seq；
+- 20 层 Child lineage 正确；
+- Parent close/remove 不级联破坏既有 Child。
+
+### Gate 3 — Collaboration State Machine
+
+对应 WO-T3，是最高风险 Gate。
+
+实现：
+
+~~~text
+migrations/025_thread_receipt_idempotency.sql
+thread_create
+thread_reply
+thread_branch
+thread_handle
+ThreadReceipt
+ThreadIdempotency
+permission transition
+close / reopen
+participant remove
+~~~
+
+核心事务路径：
+
+~~~text
+Todo action
+→ lock / CAS pending receipt
+→ validate target
+→ create Memory / Child if needed
+→ append structural fact
+→ create next receipts
+→ revision update
+→ persist idempotency result
+→ commit
+~~~
+
+必须先写 real PostgreSQL concurrency tests，再开放协议层。
+
+**Gate 3 PASS：**
+
+最小纵向闭环：
+
+~~~text
+A Link B
+→ A Start with B
+→ B gets Todo(root)
+→ B Reply
+→ A gets Todo(reply)
+→ A Handle
+→ no pending
+~~~
+
+再验证：
+
+- handle vs reply 只有一个成功；
+- reply vs branch 只有一个成功；
+- retry 不重复追加；
+- stale input 不产生新 Memory / ThreadMemory；
+- 主动回复历史 entry 不清 Todo；
+- branch creator 成为 Child manage participant；
+- read Role 不产生 Todo；
+- permission downgrade 撤销 pending；
+- participant removal 同事务撤销 pending + revoke join key；
+- close 撤销 pending，reopen 不复活旧 pending。
+
+Gate 3 不通过，不进入 MCP / Web。
+
+### Gate 4 — Read Model / Agent Context
+
+对应 WO-T4。
+
+实现只读投影：
+
+- Todo projection；
+- Thread work context；
+- why_here；
+- pending inputs；
+- participants；
+- allowed actions；
+- timeline cursor；
+- lineage；
+- direct children；
+- bounded Memory expansion。
+
+**Gate 4 PASS：**
+
+- Agent 不读 ThreadReceipt / seq / revision 内部结构即可处理 Todo；
+- 1,000+ ThreadMemory 首包大小受控；
+- 20 层 Child 可直接理解 lineage；
+- 多 pending 同 Thread 聚合正确；
+- read / write / manage / inherited govern 返回的 allowed actions 正确。
+
+### Gate 5 — API / MCP Vertical Slice
+
+对应 WO-T5。
+
+继续复用现有单一 `mcpserver` registry：
+
+~~~text
+tool definition
+→ one handler
+→ one service
+→ MCP /mcp
+→ POST /api/v1/<tool>
+~~~
+
+不新增独立 Thread HTTP business layer。
+
+在此 Gate 开始前只做一次窄范围 naming freeze：名称必须从已完成能力映射产生，不能反向改状态机。
+
+join-key secret 特例：
+
+- raw key 只首次成功响应披露；
+- idempotent replay 返回 already_applied + fingerprint；
+- 丢失 raw key 时再次 reset。
+
+**Gate 5 PASS：**
+
+使用两个不同客户端完成同一真实闭环：
+
+~~~text
+API client A
+MCP client B
+
+A Start
+→ B Todo
+→ B Reply
+→ A Todo
+→ A Branch / Handle
+~~~
+
+两端获得一致事实与错误语义。
+
+### Gate 6 — Product Surface
+
+对应 WO-T6。
+
+一级优先级：
+
+~~~text
+Todo
+Link
+Start
+Join
+Work
+Hire
+Store
+Retrieve
+~~~
+
+Web 复用现有 Owner session + unified tool registry；扩展 owner tool bridge/页面表达，不复制业务规则。
+
+上下文内动作：
+
+~~~text
+Reply
+Branch
+Handle
+participants
+close / reopen
+join-key management
+~~~
+
+**Gate 6 PASS：**
+
+- Todo 第一眼可以知道轮到自己什么；
+- Link 请求可完整 accept / decline / cancel / remove；
+- Start / Join 能真正建立可继续的协作；
+- Work / Hire 原路径无退化；
+- Store / Retrieve 不出现 Thread 高频 Memory；
+- 页面不把 Role / Memory / Thread / Task 数据表模型直接平铺成导航。
+
+### Gate 7 — Release Proof
+
+对应 WO-T7。
+
+必须一次性通过：
+
+~~~text
+gofmt -l .
+go vet ./...
+go test -p 1 ./...
+go build ./...
+fresh migration chain
+upgrade rehearsal
+container build
+healthz / readyz / SIGTERM smoke
+~~~
+
+额外产品回归：
+
+- Memory backward compatibility；
+- Task 1.0 full regression；
+- Todo race；
+- Link / Key security；
+- deep lineage；
+- large Thread；
+- API / MCP parity；
+- Owner Web Product Surface。
+
+通过后再同步：
+
+~~~text
+README
+llms.txt
+kungfu_skill.md
+MCP descriptions
+HTTP contract
+release notes
+~~~
+
+### 可行性判断
+
+基于当前 main 架构：
+
+| 部分 | 可行性 | 依据 | 主要风险 |
+| --- | --- | --- | --- |
+| Memory revision | 高 | tb_kungfus 已是稳定 current row；repository 使用 pg.Querier，可事务化升级 | migration / update 并发 |
+| Thread state machine | 高 | PostgreSQL + pgx transaction / row lock / unique constraint 足够表达 | Todo CAS 与 seq 并发 |
+| Link / Key | 高 | Role 直接复用 tb_bots；现有 auth 已稳定 | bearer key 撤销与枚举防护 |
+| API / MCP | 很高 | 当前两个 transport 已共用 mcpserver registry | 工具命名漂移 |
+| Task 共存 | 很高 | Task 1.0 已独立 service / repository / tests | Memory current 语义被误改 |
+| Web | 高 | Owner 已通过 unified tool bridge 调 publisher tools | 过早做 UI 导致模型反向漂移 |
+| Realtime | 非阻塞 | durable pull 已足够闭合异步协作 | 未来只作为 wake-up 优化 |
+
+**Go / No-Go：Go。**
+
+真正需要重点验证的不是“技术能不能做”，而是 Gate 1 的兼容迁移、Gate 3 的并发状态机、Gate 6 的产品表面。三处通过后，产品与工程两边都成立。
+
 ## WO-T1 Memory 兼容演进
 
 ### 目标
