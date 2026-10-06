@@ -1,35 +1,160 @@
 # Thread PRD
 
-> Thread 是 Kungfu 的私有通讯与协作模型。实现以本文定义的对象、关系、状态和通讯语义为准。
+> Thread 是 Kungfu 的 Agent-first 协作模型。它把 Role、Memory、Reply、Child Thread 与 Todo 组织成可持续、可恢复、可分叉的协作结构。
 
-## 1. 产品定义
+## 1. 产品定位
 
-Thread 表达一个持续存在的 private conversation / collaboration scope。
+Kungfu 是结构性的 Agent-first 应用。
 
-它统一承载：
-
-- 一对一对话；
-- 多人对话与群聊；
-- 有序时间线；
-- 围绕某条 Memory 展开的回复串；
-- 从父会话派生的新话题；
-- 多个并行子会话；
-- 人与 Agent 的持续协作；
-- 在线实时接收、离线恢复和提醒。
-
-Thread 的通讯内核是：
+Agent 可以来自任意运行环境，通过 API、MCP 或等价协议按需进入 Kungfu：
 
 ~~~
-Role sends Memory into Thread
-→ Memory enters ordered Timeline
-→ Thread state advances
-→ other Roles receive change signal
-→ clients consume incremental state
+发现待处理事项
+→ 打开一个隔离 Thread
+→ 按需读取 Memory
+→ 在本地执行
+→ reply / branch / handle
+→ 退出
 ~~~
 
-## 2. 业务形状
+Kungfu 提供持久协作状态，不承载 Agent runtime。
 
-业务原子：
+Memory、Thread、Task 各自保持清晰职责：
+
+~~~
+Memory
+= 独立的信息原子
+= 可单独存储、读取、分享
+
+Thread
+= 持续存在的协作事项
+= 会话隔离与协作脉络
+
+Task
+= 独立执行模型
+~~~
+
+Thread 会持续产生新的 Memory，并用结构关系把大量 Agent 信息组织成可寻址、可按需读取的上下文。
+
+## 2. 核心语义
+
+### 2.1 Role
+
+Role 是协作主体。
+
+Role 可以代表人或 Agent，并拥有稳定内部身份与可读寻址名：
+
+~~~
+Role
+- id
+- username
+- display_name
+~~~
+
+username 用于准确寻址。协作关系始终绑定稳定 role_id。
+
+### 2.2 Memory
+
+Memory 是一次可持久化的信息表达。
+
+它可以独立存在：
+
+~~~
+Role
+→ Memory
+→ store
+→ read
+→ share
+~~~
+
+也可以进入 Thread：
+
+~~~
+Role
+→ Memory
+→ Thread
+~~~
+
+Thread 保存 Memory 的结构关系；Memory 保持自己的 ownership、存储与分享能力。
+
+### 2.3 Thread
+
+Thread 表达一个持续存在的协作事项。
+
+一个 Thread 同时定义：
+
+- 当前事项；
+- 当前参与 Role；
+- 当前会话隔离边界；
+- Memory 时间线；
+- Reply 关系；
+- Child Thread；
+- 当前 Role 的协作 Todo；
+- Agent 进入该事项时所需的结构化上下文。
+
+Thread 的 subject 是稳定的事项标签。
+
+### 2.4 Reply
+
+Reply 是 Thread 内一个 Memory 对另一个 Memory 的回应关系。
+
+~~~
+M1 by A
+├─ M2 by B
+└─ M3 by C
+~~~
+
+M2、M3 仍属于同一个 Thread。
+
+Reply 表达一次协作往返的挂载点，并自然产生下一方的协作输入。
+
+### 2.5 Child Thread
+
+Child Thread 表达从当前事项中派生出的独立子事项。
+
+~~~
+T0
+├─ M1
+├─ M2
+│  └─ T1
+│     ├─ M5
+│     └─ M6
+│        └─ T2
+└─ M3
+~~~
+
+Child Thread 仍然是完整 Thread，可以继续派生 Child，因此协作脉络可以递归延伸。
+
+parent_thread_id 与 anchor_memory_id 共同回答：
+
+> 这个事项从哪里产生。
+
+### 2.6 Todo
+
+Todo 是 Thread 协作关系自然产生的待处理输入。
+
+Todo 属于 Thread 产品表达，不是独立 Task。
+
+它由机制自动生成，由处理动作自动消解。
+
+Todo 的两个来源：
+
+1. Role 被纳入一个 Thread，入口 Memory 成为该 Role 的首次协作输入；
+2. 其他 Role reply 到该 Role 创建的 Memory，该 Reply 成为新的协作输入。
+
+表达层按 Thread 聚合 Todo：
+
+~~~
+T7  2 个待处理输入
+T9  1 个待处理输入
+T12 首次进入
+~~~
+
+Agent 进入 Thread 后再读取具体挂载点。
+
+## 3. 业务结构
+
+核心业务原子：
 
 ~~~
 Role
@@ -37,80 +162,149 @@ Memory
 Thread
 ~~~
 
-核心关系：
+协作关系：
 
 ~~~
-Role   ─produces────> Memory
-Role   ─participates→ Thread
+Role ─produces──────> Memory
+Role ─participates──> Thread
 Thread ─contains────> Memory
+Memory ─reply_to────> Memory
 Thread ─parent──────> Thread
+Thread ─anchor──────> Memory
+Role ─link──────────> Role
 ~~~
 
-含义：
-
-- Role 是通讯与协作主体；
-- Memory 是一次信息表达；
-- Thread 是通讯空间；
-- Timeline 是 Memory 在 Thread 中的有序关系；
-- Child Thread 仍然是 Thread，用来表达局部会话和会话分支。
-
-thread_roles 与 thread_memories 是关系表。
-
-## 3. Thread 结构
-
-### 3.1 Root Thread
-
-Root Thread 是一条独立通讯主线：
+关系状态由以下结构承载：
 
 ~~~
-T0
-├─ Roles
-├─ Timeline
-└─ Child Threads
+RoleLink
+ThreadRole
+ThreadMemory
+ThreadReceipt
 ~~~
+
+其中 ThreadReceipt 是协作输入的处理关系；Todo 是 pending ThreadReceipt 的产品投影。
+
+## 4. Role Link
+
+Link 表达两个 Role 之间持续存在的协作信任。
+
+~~~
+Role A ↔ Link ↔ Role B
+~~~
+
+Link 建立后，双方可以低摩擦建立直接协作。
+
+Link 的核心效果：
+
+- 创建 A+B 的直接 Thread；
+- manage Role 可以把已 Link 的 Role 直接加入 Thread；
+- 现有 ThreadRole 保持自己的生命周期。
+
+Link 关系与 ThreadRole 分离：
+
+~~~
+Link
+= 是否具备直接建立协作的长期信任
+
+ThreadRole
+= 当前是否真实参与某个 Thread
+~~~
+
+Link 解除后，后续直接协作使用新的信任状态；已经形成的 ThreadRole 继续由 Thread 自身治理。
+
+## 5. Thread Key
+
+每个 Thread 拥有两类地址：
+
+~~~
+code
+= 稳定 Thread 身份
+
+key
+= 可分享、可重置的加入入口
+~~~
+
+key 使用不可预测随机值，并按安全哈希持久化。
+
+join(key)：
+
+~~~
+Role presents key
+→ resolve Thread
+→ establish ThreadRole
+→ establish entry point
+→ return Agent Context Envelope
+~~~
+
+key reset：
+
+~~~
+replace key
+→ previous key stops resolving
+→ Thread code and current ThreadRole remain stable
+~~~
+
+Link 与 key 提供两条不同的低摩擦路径：
+
+~~~
+Link
+→ 已有信任，直接建立参与关系
+
+key
+→ 持有入口，自主加入
+~~~
+
+## 6. Thread 结构
+
+### 6.1 Root Thread
+
+Root Thread 创建时同时建立：
+
+- subject；
+- creator；
+- initial Roles；
+- root Memory；
+- root ThreadRole 集合；
+- initial ThreadReceipt。
 
 Root：
 
-- parent_thread_id 为空；
-- anchor_memory_id 为空；
-- created_by_role_id 记录创建者；
-- 创建者在 Root 中为 manage。
-
-### 3.2 Child Thread
-
-Child Thread 必须有 parent，anchor 可选。
-
-两种形态：
-
 ~~~
-T0
-└─ T1
+parent_thread_id = null
+anchor_memory_id = null
 ~~~
 
-表示父会话下新开的局部会话 / 新话题。
+root Memory 是这个事项的起始输入。
+
+creator 对 Root 拥有 manage 权限。
+
+### 6.2 Child Thread
+
+Child Thread 必须同时拥有：
 
 ~~~
-T0
-└─ M3
-   └─ T1
+parent_thread_id
+anchor_memory_id
+subject
 ~~~
 
-表示围绕 M3 展开的局部讨论。
+anchor_memory_id 指向直接 parent 中可读取的 Memory。
 
-规则：
+Child 创建后：
 
-- parent_thread_id 必填；
-- anchor_memory_id 可空；
-- anchor 存在时，必须是直接 parent 中当前 active 的 Memory；
-- parent 与 anchor 创建后保持稳定；
-- 同一个 parent 可以拥有多个 Child；
-- 同一 Memory 可以派生多个 Child。
+- 拥有独立 Roles；
+- 拥有独立 Timeline；
+- 拥有独立 Todo；
+- 拥有独立 revision；
+- 继续支持 Child；
+- lineage 可以一直追溯到 Root。
 
-Child 的 timeline 只记录 Child 内产生或纳入的 Memory。anchor 通过 anchor_memory_id 作为上下文返回。
+Child 的参与者可以读取当前 Child 完整内容，以及建立 lineage 所需的祖先 anchor 链。
 
-### 3.3 Tree
+### 6.3 Tree 与 lineage
 
-Thread 通过单一 parent 形成树：
+Thread 使用单 parent 形成树：
 
 ~~~
 T0
@@ -120,78 +314,35 @@ T0
 └─ T2
 ~~~
 
-Root creator 掌握整棵 tree 的全景治理。创建 descendant 时，Root creator 在该 Thread 建立 manage 关系，因此权限、实时订阅和通讯游标都使用同一 ThreadRole 事实源。
-
-## 4. Timeline
-
-ThreadMemory 表达一条 Memory 进入 Thread 的事实：
+任意 Thread 都可以直接得到：
 
 ~~~
-thread_memories
-- thread_id
-- memory_id
-- seq
-- changed_revision
-- added_by_role_id
-- created_at
+root
+parent
+lineage[]
+anchors[]
+direct_children[]
 ~~~
 
-seq：
-
-- 在 Thread 内单调递增；
-- 在 Thread 内唯一；
-- 表示 Memory 进入该 Thread 的顺序；
-- 同一 Memory 在同一 Thread 中只有一个位置。
-
-ThreadMemory 建立后保持位置稳定。changed_revision 记录这条 timeline entry 最近一次对当前 Thread 可见内容发生变化时的 Thread revision；首次 append 时等于该次 append revision。
-
-Thread 对外暴露：
+Agent 打开 T4 时，不需要递归遍历整棵树即可理解来源：
 
 ~~~
-head_seq
-timeline(after_seq, limit)
+T0
+→ anchor M8
+→ T1
+→ anchor M21
+→ T4
 ~~~
 
-head_seq 表示当前 timeline 最新 seq。
+Root creator 掌握整棵 tree 的全景治理，并在 descendants 中拥有 manage 能力。
 
-## 5. Memory 在 Thread 中的语义
-
-Memory 的 owner 始终是产生它的 Role。
-
-同一 Memory 可以出现在多个 Thread：
-
-~~~
-Role A ─produces→ M1
-
-M1 ∈ T0
-M1 ∈ T1
-~~~
-
-Thread 保存关系，不复制 Memory 内容。
-
-Memory 使用活引用：
-
-- Memory 更新后，Thread 展示更新后的当前内容；对应 ThreadMemory.changed_revision 同步推进到该 Thread 的新 revision；
-- Memory soft-delete 后，原 timeline 位置展示 tombstone；
-- tombstone 保留 seq；
-- anchor 对应 Memory 删除后，已有 Child 继续保留该 anchor 关系。
-
-Memory update / delete 会影响两类 Thread：
-
-1. timeline 中包含该 Memory 的 Thread；
-2. 以该 Memory 作为 anchor 的 Child Thread。
-
-所有受影响 Thread 都推进 revision；同一 Thread 在一次 Memory mutation 中只推进一次。timeline 引用同时把对应 ThreadMemory.changed_revision 更新为该 Thread 的新 revision。
-
-## 6. ThreadRole
+## 7. ThreadRole
 
 ThreadRole 表达：
 
 ~~~
 Role ∈ Thread
 ~~~
-
-以及这个 Role 在 Thread 内的权限和通讯消费位置。
 
 持久字段：
 
@@ -200,157 +351,499 @@ thread_roles
 - thread_id
 - role_id
 - permission: read | write | manage
-- seen_seq
-- seen_revision
+- joined_by_role_id?
+- entry_memory_id
+- joined_at
 ~~~
 
 permission：
 
-- read：读取 Thread、anchor、timeline 和自己可进入的 Child；
-- write：包含 read，并可发送 Memory、纳入已有 Memory、创建 Child；
-- manage：包含 write，并可调整 Roles、权限和 Thread status。
+- read：读取当前 Thread、当前 Timeline 与 lineage anchor；
+- write：包含 read，并可 reply、产生 Memory、创建 Child；
+- manage：包含 write，并可管理 Role、Key、subject 与 status。
 
-两个通讯游标承担不同职责：
+entry_memory_id 是 Role 进入当前协作事项的明确挂载点。
 
-- seen_seq：已确认消费到的 timeline 位置；
-- seen_revision：已确认观察到的 Thread 共享状态版本。
+### 7.1 初始成员
 
-新 Role 加入已有 Thread 时：
+Root 创建时：
 
 ~~~
-seen_seq = current head_seq
-seen_revision = current revision
+creator creates root M1
+
+B joins with entry=M1
+C joins with entry=M1
+D joins with entry=M1
 ~~~
 
-这样历史仍可读取，提醒从加入后的变化开始。
+B/C/D 各自产生一条 pending ThreadReceipt。
 
-Role 自己完成 post / include 后：
+creator 自己的 root Memory不产生自己的 Todo。
 
-- seen_seq 至少推进到新 seq；
-- seen_revision 至少推进到该操作产生的 revision。
+### 7.2 后续加入
 
-Role 自己完成 role/status 等 Thread mutation 后，seen_revision 至少推进到该操作产生的 revision。
+manage 将 Role 加入已有 Thread 时，同时指定 entry_memory_id。
 
-## 7. Thread 共享状态
+~~~
+A adds D
+entry = M87
+→ D can read full Thread
+→ D first actionable input = M87
+~~~
 
-Thread 持久状态：
+历史访问权与当前工作入口因此保持分离。
+
+通过 key 自主加入时，Thread 返回明确 entry point；缺省入口使用该 Thread 的 root input。
+
+## 8. ThreadMemory
+
+ThreadMemory 表达 Memory 在 Thread 中的一次结构化出现。
+
+~~~
+thread_memories
+- id
+- thread_id
+- memory_id
+- memory_revision
+- seq
+- author_role_id
+- reply_to_entry_id?
+- created_at
+~~~
+
+seq：
+
+- 在 Thread 内唯一；
+- 单调递增；
+- 表达进入当前 Thread 的时间顺序。
+
+reply_to_entry_id：
+
+- 指向当前 Thread 中一个已有 ThreadMemory；
+- Child 的首轮 Reply 也可以指向当前 Thread 的 anchor；
+- 表达对话挂载关系；
+- 不创建新的 Thread。
+
+### 8.1 稳定表达
+
+Thread 中一次已经发生的表达保持稳定语义。
+
+ThreadMemory 引用确定的 Memory revision。
+
+Memory 可以继续作为独立存储对象演化；Thread 读取当时进入协作的确定版本。
+
+这样 Reply 链和协作历史始终具有稳定含义。
+
+## 9. Reply 驱动
+
+thread_reply 是 Thread 最核心的推进动作。
+
+~~~
+Role B
+→ reply to M1 by A
+→ create Memory M2 owned by B
+→ append M2 to same Thread
+→ reply_to = M1
+→ consume B pending receipt for M1 if present
+→ create pending receipt for A if A is current participant
+~~~
+
+因此正常往返自然形成：
+
+~~~
+A: M1
+   ↓
+B Todo
+
+B: M2 reply M1
+   ↓
+A Todo
+
+A: M3 reply M2
+   ↓
+B Todo
+~~~
+
+协作推进来自明确的挂载关系。
+
+### 9.1 多人并发回复
+
+~~~
+M1 by A
+├─ M2 by B
+├─ M3 by C
+└─ M4 by D
+~~~
+
+仍然属于一个 Thread。
+
+A 的产品表达：
+
+~~~
+Thread T
+3 个待处理输入
+~~~
+
+底层保持三个独立 Reply 关系。
+
+A 可以分别处理它们。
+
+## 10. ThreadReceipt 与 Todo
+
+ThreadReceipt 表达：
+
+> 一个具体协作输入当前是否仍等待某个 Role 处理。
+
+持久字段：
+
+~~~
+thread_receipts
+- thread_id
+- input_entry_id
+- role_id
+- reason: entry | reply
+- state: pending | handled
+- created_at
+- handled_at?
+~~~
+
+唯一约束：
+
+~~~
+(thread_id, input_entry_id, role_id)
+~~~
+
+### 10.1 自动生成
+
+entry：
+
+~~~
+Role enters Thread at M1
+→ pending receipt(Role, M1, entry)
+~~~
+
+reply：
+
+~~~
+B replies to Memory authored by A
+→ pending receipt(A, reply_entry, reply)
+~~~
+
+receipt 只在目标 Role 当前属于该 Thread 时生成。
+
+### 10.2 自动消解
+
+当前 Role 针对 pending input 执行以下动作时，该 receipt 变为 handled：
+
+~~~
+reply
+branch
+handle
+~~~
+
+reply 表达继续往返。
+
+branch 表达把当前输入展开为独立子事项。
+
+handle 表达该输入已处理，本轮在这里结束。
+
+### 10.3 Todo 视图
+
+thread_todos(role) 查询 pending receipts，并按 Thread 聚合。
+
+返回：
+
+~~~
+thread
+subject
+pending_count
+latest_pending_at
+pending_input_refs[]
+lineage_hint
+~~~
+
+Todo 没有独立创建、分配、关闭生命周期。
+
+它始终是 ThreadReceipt 的结构化投影。
+
+## 11. Branch 驱动
+
+thread_branch：
+
+~~~
+current Thread T
+anchor = Memory M
+→ create Child T1
+→ parent=T
+→ anchor=M
+→ establish Child Roles
+→ establish entry receipts
+~~~
+
+branch 只发生在事项需要独立上下文时。
+
+普通 reply 始终留在当前 Thread。
+
+因此：
+
+~~~
+reply
+= 当前事项内部继续协作
+
+branch
+= 形成新的子事项
+~~~
+
+Thread 可以无限下分，同时每个 Agent 执行上下文保持局部。
+
+## 12. 会话隔离
+
+Thread 是持久会话边界。
+
+每一次 Agent 工作都明确绑定：
+
+~~~
+current Role
++
+current Thread
+~~~
+
+所有读取与写入都携带 thread_code。
+
+Reply target 必须属于当前 Thread 可回应范围；Branch anchor 必须属于当前 Thread 可分叉范围。
+
+Agent 切换 Thread 时，通过新的 thread_open 建立新的上下文。
+
+跨 Thread 共享依赖显式 Memory 引用、分享或新的协作动作。
+
+因此 Agent 获得：
+
+> 有来源、有结构、有共享事实，同时保持当前工作集隔离。
+
+## 13. Agent Context Envelope
+
+Agent-first 接口返回结构化协作包，而不是裸数据库对象。
+
+统一 Envelope：
+
+~~~
+schema_version
+
+identity
+- current_role
+- thread_code
+- effective_permission
+
+matter
+- subject
+- status
+- creator
+- participants
+
+position
+- root
+- parent
+- anchor
+- lineage[]
+
+todos
+- pending inputs for current Role
+- reason
+- source author
+- reply target
+
+context
+- root / anchor Memory refs
+- relevant Timeline index
+- direct Child summaries
+- pagination / expansion refs
+
+capabilities
+- reply
+- branch
+- handle
+- add_role
+- remove_role
+- reset_key
+- close
+
+writeback
+- valid reply targets
+- valid branch anchors
+
+agent_guidance
+- current collaboration scope
+- current actionable inputs
+- expected writeback shape
+- available next actions
+~~~
+
+### 13.1 Guidance 可信边界
+
+agent_guidance 由 Kungfu 根据协议状态确定性生成。
+
+Memory content 作为 collaboration data 返回，与 guidance 分区。
+
+因此 Agent 可以稳定区分：
+
+~~~
+系统协作指引
+vs
+参与者写入的信息内容
+~~~
+
+### 13.2 按需读取
+
+Thread Context 先提供结构地图，再由 Agent 按需展开 Memory。
+
+高价值信息可以直接内联：
+
+- 当前 pending inputs；
+- 当前 anchor；
+- lineage anchor。
+
+大体量历史通过 Memory ref 与 timeline pagination 按需读取。
+
+Agent 的上下文成本因此与当前工作集相关，而不是与整个历史长度线性增长。
+
+## 14. Agent 操作面
+
+### 高频
+
+~~~
+thread_todos()
+thread_open(thread)
+thread_reply(thread, reply_to, content)
+thread_branch(thread, anchor, subject, roles)
+thread_handle(thread, input)
+~~~
+
+### 协作建立
+
+~~~
+thread_create(subject, initial_roles, content)
+thread_join(key)
+thread_role_add(thread, role, entry_memory)
+thread_role_remove(thread, role)
+~~~
+
+### 信任与寻址
+
+~~~
+role_find(username)
+role_link(...)
+role_unlink(...)
+thread_key_reset(thread)
+~~~
+
+### 结构读取
+
+~~~
+memory_get(memory)
+thread_lineage(thread)
+thread_tree(root)
+thread_timeline(thread, cursor)
+~~~
+
+所有入口共享同一 Thread service 规则。
+
+## 15. Thread create
+
+thread_create 在一个事务中完成：
+
+1. 验证 creator 与 initial Roles；
+2. 创建 Root Thread；
+3. 创建 root Memory；
+4. pin root Memory revision；
+5. append root ThreadMemory seq=1；
+6. creator 建立 manage ThreadRole；
+7. initial Roles 建立 ThreadRole，entry=root Memory；
+8. 为每个 initial Role 生成 entry receipt；
+9. revision 提交；
+10. 发送 thread_changed。
+
+create 完成后，每个参与 Agent 都拥有明确事项、明确入口与明确下一步。
+
+## 16. Role 加入
+
+### 16.1 Link 直接加入
+
+manage Role 与目标 Role 存在 Link：
+
+~~~
+thread_role_add(thread, target, entry_memory)
+→ establish ThreadRole
+→ create entry receipt
+→ target immediately appears in thread_todos
+~~~
+
+### 16.2 Key 自主加入
+
+~~~
+thread_join(key)
+→ establish ThreadRole
+→ establish entry
+→ return Thread Context Envelope
+~~~
+
+### 16.3 完整上下文
+
+Role 成为 Thread participant 后，可以读取该 Thread 完整历史。
+
+entry_memory_id 决定当前进入工作的起点。
+
+完整历史与当前待处理输入是两个独立维度。
+
+## 17. 权限与 scoped Memory access
+
+Role 对 Thread 有 read 时，可以读取：
+
+- 当前 Thread timeline 的 Memory revision；
+- 当前 Thread anchor；
+- lineage 所需祖先 anchors。
+
+形式：
+
+~~~
+can_read_in_thread(R, T, M) =
+  R has readable ThreadRole(T)
+  AND M is in T collaboration scope
+~~~
+
+Thread scoped access 保持 Memory ownership 与 standalone sharing 语义。
+
+Role 离开 Thread 后，当前 Thread 的 scoped access 与实时订阅同步更新。
+
+## 18. Thread 状态
+
+Thread 维护：
 
 ~~~
 open
 closed
 ~~~
 
-open 表示会话继续接收内容和结构变化。
+open：协作继续。
 
-closed 表示当前会话结束写入，历史保持可读，manage 可以重新打开。
+closed：当前事项完成并保留完整历史；manage 可以重新打开。
 
-Thread 的共享协作现场由以下事实组成：
+Thread revision 单调递增，用于表达共享协作结构变化。
 
-~~~
-status
-revision
-head_seq
-roles
-timeline
-children
-children.status
-~~~
+推进 revision 的事实包括：
 
-这些事实共同表达：
-
-- 主线推进；
-- 局部会话展开；
-- 局部会话结束；
-- 参与者变化；
-- 结果回流；
-- 当前会话是否继续。
-
-seen_seq / seen_revision 属于 Role 在该 Thread 中的个人消费状态，不属于共享 revision。
-
-## 8. revision：Thread 共享状态版本
-
-每个 Thread 维护单调递增 revision。
-
-新建 Thread 初始：
-
-~~~
-revision = 1
-head_seq = 0
-~~~
-
-revision 表示“这个 Thread 对参与者呈现的共享状态发生过一次变化”。
-
-以下动作推进对应 Thread revision：
-
-- timeline append；
-- timeline Memory 的 update / delete；
-- anchor Memory 的 update / delete；
-- Role 新增、权限调整、移除；
-- status 改变；
+- Timeline append；
+- Reply append；
+- ThreadRole 变化；
+- subject / status 变化；
+- key reset；
 - Child 创建；
-- 直接 Child 的 status 改变。
+- direct Child status 变化。
 
-timeline append 同时推进 head_seq 与 revision。
+ThreadReceipt 的个人 handled 变化不改变 Thread 共享 revision。
 
-结构或内容更新可以只推进 revision，例如：
+## 19. Realtime 与恢复
 
-~~~
-Memory M3 edited
-head_seq = 18
-revision 42 → 43
-~~~
-
-客户端因此可以区分：
-
-- head_seq 变化：出现新的 timeline entry；
-- revision 变化但 head_seq 不变：现有内容或 Thread 结构发生变化。
-
-thread_seen 只更新个人游标，不推进 Thread revision。
-
-## 9. 提醒状态
-
-提醒由两个维度组成。
-
-新内容：
-
-~~~
-has_unread = head_seq > seen_seq
-unread_count = head_seq - seen_seq
-~~~
-
-共享状态变化：
-
-~~~
-has_updates = revision > seen_revision
-~~~
-
-因此：
-
-- 新 Memory 会同时形成 has_unread 和 has_updates；
-- 旧 Memory 编辑、Child 状态变化、权限变化等只形成 has_updates；
-- thread_list 与 thread_get 返回 revision、head_seq、seen_revision、seen_seq、unread_count、has_updates。
-
-thread_seen 语义：
-
-~~~
-thread_seen(thread, seen_seq, seen_revision)
-~~~
-
-规则：
-
-- caller 可以读取该 Thread；
-- seen_seq 不超过当前 head_seq；
-- seen_revision 不超过当前 revision；
-- 两个游标都只向前推进；
-- 多设备并发分别取 max。
-
-thread_get 负责读取；thread_seen 负责确认消费。
-
-## 10. 实时通讯
-
-实时层传递轻量 change signal，数据库中的 Thread 状态是恢复依据。
-
-统一信号：
+实时层传递轻量 change signal：
 
 ~~~
 thread_changed
@@ -362,256 +855,83 @@ thread_changed
 流程：
 
 ~~~
-transaction commit
-→ durable Thread state 已更新
-→ emit thread_changed
-→ subscriber receives signal
-→ client reconciles with thread_get
+durable transaction commit
+→ thread_changed
+→ online Agent/client wakes
+→ thread_open / delta read
 ~~~
 
-signal 只表达“状态已变化”，不携带 Memory content。
+Todo 本身由 durable ThreadReceipt 支撑，因此掉线期间不会丢失。
 
-### 10.1 在线
-
-在线客户端订阅自己可读 Thread 的 change signal。
-
-收到：
+重新连接：
 
 ~~~
-thread_changed(T, revision=43, head_seq=18)
+thread_todos()
+→ discover current actionable Threads
+→ thread_open()
+→ continue
 ~~~
 
-客户端比较本地状态：
+Timeline 增量读取继续使用 seq cursor。
 
-- head_seq 前进：读取 after_seq 后的新 timeline entry；
-- revision 前进：同时请求 after_revision 后的 timeline delta 与当前 Thread metadata。
+Thread revision 用于判断结构变化。
 
-### 10.2 离线与重连
+实时通道负责低延迟，持久结构负责恢复。
 
-重连后：
+## 20. 并发与幂等
 
-1. thread_list 获取 revision、head_seq、seen_revision、seen_seq；
-2. 对需要恢复的 Thread 调 thread_get(after_seq=本地最后 seq, after_revision=本地最后 revision)；
-3. 消费完成后调用 thread_seen。
+同一 Thread 的 Timeline 使用原子 seq 分配。
 
-signal 可以重复，也可能在断线期间遗漏。revision + head_seq + timeline 保证恢复到当前事实。
-
-### 10.3 权限
-
-实时信号只送达当前可读该 Thread 的 Role。
-
-Role 被移出 Thread 后，其 scoped read 与后续 realtime signal 同时停止。
-
-不同接入协议可以使用各自合适的 push transport；不具备 server-push 的调用方使用 revision / seq 轮询恢复同一状态。
-
-## 11. Role 加入与会话边界
-
-manage 通过 ThreadRole 改变参与边界。
-
-加入或调权限：
+所有写操作支持 idempotency key：
 
 ~~~
-thread_role_set(Thread, Role, permission)
+thread_create
+thread_reply
+thread_branch
+thread_handle
+thread_role_add
+thread_join
 ~~~
 
-创建新 ThreadRole 时，seen_seq / seen_revision 初始化为该事务完成后的当前 head_seq / revision。
+相同 idempotency key 的重试返回同一业务结果。
 
-移除：
+多人并发 reply：
 
-~~~
-thread_role_remove(Thread, Role)
-~~~
+- 获得不同 seq；
+- 各自保持 reply_to；
+- 各自生成准确 receipt；
+- Todo 按 Thread 聚合。
 
-移除当前参与关系，同时撤销该 Thread 提供的 private Memory scoped access 和 realtime signal。
+并发 handle / reply 以 receipt 当前状态原子收敛到 handled。
 
-再次加入时建立新的当前 ThreadRole，并从新的 head_seq / revision 开始提醒。
+## 21. 最小持久结构
 
-Root creator 在每个 descendant 中保持显式 manage ThreadRole，以统一治理、实时订阅和通讯游标。
-
-## 12. Child Thread 的参与边界
-
-Child 使用独立 Role 集合。
-
-创建 Child 的 actor 至少需要 parent write。
-
-Child 初始 Role：
-
-- parent 中已有 Role 可以直接纳入；
-- parent 外 Role 的纳入由 parent manage 授权。
-
-Child 创建后继续加入 parent 外 Role 时，actor 同时具备：
-
-- Child manage；
-- 直接 parent manage。
-
-anchor 存在时，Child participant 可以通过 Child scope 读取该 anchor，即使其不是 parent participant。
-
-该授权覆盖 anchor 与 Child 自身 timeline。
-
-## 13. Private Memory scoped access
-
-Role 对 Thread 有 read 时，可以读取：
-
-- Thread timeline 中的 Memory；
-- Child Thread 的 anchor Memory。
-
-形式：
+### RoleLink
 
 ~~~
-can_read_in_thread(R, T, M) =
-    R can read T
-    AND (
-        M ∈ T.timeline
-        OR M = T.anchor
-    )
+role_links
+- role_a_id
+- role_b_id
+- status
+- created_at
 ~~~
-
-Thread scoped access：
-
-- 保持 Memory ownership；
-- 保持 Memory 全局 visibility；
-- 作用范围限定在该 Thread；
-- ThreadRole 移除后立即失效。
-
-## 14. 信息产生与传递
-
-### 14.1 Post
-
-thread_post：
-
-~~~
-Role writes content
-→ create Memory owned by Role
-→ append Memory to Thread timeline
-→ head_seq + 1
-→ revision + 1
-→ actor seen_seq / seen_revision advance
-→ commit
-→ emit thread_changed
-~~~
-
-Memory create 与 timeline append 在同一事务完成。
-
-### 14.2 Include
-
-thread_include 把已有 Memory 纳入目标 Thread。
-
-两种协作路径：
-
-owner inclusion：
-
-- actor owns Memory；
-- actor 对 target 有 write。
-
-tree result promotion：
-
-- Memory 已存在于 source descendant；
-- target 是 source ancestor；
-- actor manage source；
-- actor manage target。
-
-成功后：
-
-~~~
-append target timeline
-→ target head_seq + 1
-→ target revision + 1
-→ actor target seen_seq / seen_revision advance
-→ commit
-→ emit target thread_changed
-~~~
-
-### 14.3 Child
-
-thread_create 可以创建 Root 或 Child。
-
-Child：
-
-- parent 必填；
-- anchor 可选；
-- Child 初始 revision=1、head_seq=0；
-- creator 与 Root creator 建立 manage ThreadRole；
-- parent revision 推进；
-- commit 后 parent subscribers 收到 thread_changed；
-- Child 从自己的 revision / head_seq 开始独立通讯。
-
-## 15. 增量同步与 Memory mutation fan-out
-
-thread_get 支持双游标增量：
-
-~~~
-thread_get(
-  after_seq,
-  after_revision
-)
-~~~
-
-返回：
-
-- seq > after_seq 的新 timeline entry；
-- changed_revision > after_revision 的既有 timeline entry；
-- 当前 Thread metadata、roles、children、revision / head_seq。
-
-同一 entry 同时满足两类条件时只返回一次。
-
-这样客户端既能增量拿到新消息，也能拿到已经存在但内容后来发生变化的 Memory。
-
-## 16. Memory mutation 与 Thread fan-out
-
-Memory 继续使用现有 update / soft-delete 语义。
-
-Memory 发生 update / delete 时，在同一业务事务中解析受影响 Thread：
-
-~~~
-thread_memories.memory_id = M
-UNION
-threads.anchor_memory_id = M
-~~~
-
-对去重后的每个 Thread：
-
-- revision + 1；
-- head_seq 保持；
-- 若 Memory 位于该 Thread timeline，则对应 ThreadMemory.changed_revision = 新 revision；
-- commit 后各发一个 thread_changed。
-
-这样 Memory 活引用与实时通讯保持一致。
-
-## 17. 状态操作
-
-Thread 核心语义能力：
-
-- create：创建 Root / Child；
-- get：读取当前 Thread 与 timeline 增量；
-- list：发现可访问 Thread，并返回提醒状态；
-- post：产生新 Memory；
-- include：纳入已有 Memory；
-- role set：加入 Role 或调整权限；
-- role remove：移除 Role；
-- status set：open / closed；
-- seen：确认消费位置；
-- realtime subscribe：接收 thread_changed。
-
-协议层按现有 MCP / HTTP 能力组织这些语义，所有入口共享同一 service 规则。
-
-## 18. 最小持久结构
 
 ### Thread
 
 ~~~
 threads
 - id / code
+- join_key_hash
+- subject
 - created_by_role_id
 - parent_thread_id?
 - anchor_memory_id?
-- status: open | closed
+- status
 - next_seq
 - revision
 - created_at
 - updated_at
 ~~~
-
-head_seq 可由 next_seq 派生或由实现以等价方式维护，对外语义保持一致。
 
 ### ThreadRole
 
@@ -620,190 +940,227 @@ thread_roles
 - thread_id
 - role_id
 - permission
-- seen_seq
-- seen_revision
+- joined_by_role_id?
+- entry_memory_id
+- joined_at
 ~~~
 
 ### ThreadMemory
 
 ~~~
 thread_memories
+- id
 - thread_id
 - memory_id
+- memory_revision
 - seq
-- changed_revision
-- added_by_role_id
+- author_role_id
+- reply_to_entry_id?
 - created_at
 ~~~
 
-## 19. 通讯不变量
+### ThreadReceipt
 
-实现保持：
+~~~
+thread_receipts
+- thread_id
+- input_entry_id
+- role_id
+- reason
+- state
+- created_at
+- handled_at?
+~~~
 
-1. 同一 Thread 的 seq 唯一且单调；
-2. head_seq 与 timeline 最新 seq 一致；
-3. seen_seq 单调且不超过 head_seq；
-4. revision 单调递增；
-5. seen_revision 单调且不超过 revision；
-6. Thread 共享状态变化反映到 revision；
-7. timeline append 同时推进 head_seq 与 revision，并写入该 entry 的 changed_revision；
-8. Memory update / delete 对所有 timeline / anchor 引用 Thread 做去重 revision fan-out；
-9. timeline Memory update / delete 同时推进对应 ThreadMemory.changed_revision；
-10. thread_get(after_seq, after_revision) 能恢复新 entry 与已存在 entry 的后续变化；
-11. thread_post 的 Memory create 与 timeline append 原子提交;
-12. ThreadRole 是 scoped access、通讯游标与 realtime subscription 资格的统一事实源；
-13. Child 有 parent，anchor 可选；
-14. anchor 存在时属于直接 parent；
-15. Root creator 在每个 descendant 中保持 manage ThreadRole；
-16. role removal 立即撤销 scoped read 与 realtime signal；
-17. durable state commit 先于 thread_changed；
-18. signal 丢失或重复后，客户端仍可通过 revision + head_seq + timeline delta 恢复；
-19. thread_seen 只推进个人游标，不改变共享 revision。
+## 22. 核心不变量
 
-## 20. 场景验收
+1. 每个 Thread 代表一个稳定协作事项。
+2. Root Thread 有 root Memory。
+3. Child Thread 有直接 parent 与 anchor Memory。
+4. Thread 可以递归形成任意深度 lineage。
+5. 普通 Reply 保持在当前 Thread。
+6. Reply 通过 reply_to_entry_id 保留明确挂载关系。
+7. Thread 内一次表达引用确定 Memory revision。
+8. seq 在 Thread 内唯一且单调。
+9. ThreadRole 是当前参与关系与 scoped access 的事实源。
+10. 每个 ThreadRole 有明确 entry_memory_id。
+11. Todo 来源于 pending ThreadReceipt。
+12. 初始 / 后加入 Role 的入口自动产生 entry receipt。
+13. Reply 自动消解发送者针对父输入的 receipt，并为父输入作者生成新的 reply receipt。
+14. branch 自动消解当前输入，并为 Child 初始参与者建立新的 entry receipt。
+15. handle 只消解当前 Role 的指定 receipt。
+16. 一个 Role 可以在同一 Thread 同时拥有多个 pending receipts。
+17. 产品表达按 Thread 聚合 pending receipts。
+18. Link 表达长期直接协作信任；ThreadRole 表达当前实际参与。
+19. key 是可重置加入入口；code 是稳定 Thread 身份。
+20. durable state 先提交，realtime signal 后发送。
+21. Agent 的每次协作操作显式携带 Thread 身份。
+22. Agent Context Envelope 把协议 guidance 与 Memory content 分区。
+23. Root creator 对协作 tree 保持全景治理。
+24. 所有写操作具备幂等语义。
 
-### 私聊
+## 23. 场景验收
+
+### 23.1 两 Agent 往返
 
 ~~~
 T
-Roles: A, B
-Timeline: M1 → M2 → M3
+M1 A → B receipt
+
+B reply M1 with M2
+→ B receipt handled
+→ A receipt(M2)
+
+A reply M2 with M3
+→ A receipt handled
+→ B receipt(M3)
 ~~~
 
-双方可实时接收 signal；离线后按 revision / seq 恢复。
+持续往返不需要额外调度模型。
 
-### 群聊 / 多人对话
+### 23.2 多 Agent 首轮
+
+~~~
+A creates T with B/C/D
+root M1
+
+B Todo: M1
+C Todo: M1
+D Todo: M1
+~~~
+
+B/C/D 可以并行响应，同一 Thread 保持一个事项表达。
+
+### 23.3 多人回复同一 Memory
+
+~~~
+M1 A
+├─ M2 B
+├─ M3 C
+└─ M4 D
+~~~
+
+A 的 Todo 表达：
 
 ~~~
 T
-Roles: A, B, C, D
-Timeline: #1 ... #N
+pending_count = 3
 ~~~
 
-每个 Role 拥有独立 seen_seq / seen_revision。
+A 可以分别 reply / branch / handle。
 
-### 时间线消费
+### 23.4 中途加入 Agent
 
-Agent：
+T 已有大量历史。
 
-~~~
-thread_get(after_seq=120, after_revision=known_revision)
-→ consume new / changed entries
-→ thread_seen(seen_seq=head_seq, seen_revision=revision)
-~~~
-
-### 回复串
+A 在 M87 处加入 D：
 
 ~~~
-T0
-└─ M8
-   └─ T1
+ThreadRole(D).entry = M87
+Receipt(D, M87) = pending
 ~~~
 
-T1 participants 可以读取 M8 和 T1 timeline。
+D 获得完整 Thread 历史访问，同时 Agent Context Envelope 把 M87 作为当前工作入口。
 
-### 新话题
-
-~~~
-T0
-└─ T1
-~~~
-
-T1 有 parent、无 anchor，形成父会话下独立话题。
-
-### 并行协作
-
-同一 parent 同时拥有多个 Child，每个 Child 独立 Roles、timeline、revision 和通讯游标。
-
-### 外部协作者
-
-parent manage 将外部 Role 加入 Child。外部 Role 获得 Child scope。
-
-### 结果回主线
-
-Child Memory 经 tree result promotion 进入 ancestor timeline，ancestor head_seq / revision 前进并实时通知参与者。
-
-### 编辑提醒
-
-M5 已存在于 T0，owner 更新 M5：
+### 23.5 无限分叉
 
 ~~~
-T0 head_seq 保持
-T0 revision + 1
-participant seen_revision 保持
-has_updates = true
-emit thread_changed
+T0 / M8
+└─ T1 / M21
+   └─ T2 / M37
+      └─ T3
 ~~~
 
-### Child 状态提醒
+T3 Agent 直接得到 lineage 与 anchors，并只加载当前工作集。
 
-T1 从 open 变 closed：
+### 23.6 无需回复
 
-~~~
-T1 revision + 1
-T0 revision + 1
-~~~
-
-T1 participant 和可见 T0 participant 都能观察到状态变化。
-
-### 断线恢复
-
-客户端离线前：
+A 收到一个 pending input，完成判断后执行：
 
 ~~~
-local revision=40
-local seq=18
+thread_handle(T, input)
 ~~~
 
-服务器当前：
+receipt 变 handled，该轮协作在 A 处结束。
+
+### 23.7 Branch 继续工作
+
+B 针对 pending M20 创建 Child：
 
 ~~~
-revision=47
-head_seq=22
+thread_branch(T0, M20, ...)
+→ B receipt(M20) handled
+→ Child T1 established
+→ T1 initial Roles receive entry receipts
 ~~~
 
-重连后 thread_list 暴露差异，thread_get(after_seq, after_revision) 恢复新 entry、旧 entry 更新与 metadata，再由 thread_seen 确认。
+Child 形成独立会话隔离与 Todo。
 
-## 21. Memory 原子前置
+### 23.8 掉线恢复
 
-Thread post 以 Memory 作为内容原子，因此 Memory 输入契约调整为：
+Agent 离线期间收到多个 Reply。
 
-- content 必填，最少 1 个字符；
-- title 可选；
-- tags 可选；
-- description 可选；
-- owner、visibility、checksum、soft delete、update 保持现有语义。
+重新连接：
 
-Thread post 与 standalone memory_put 复用同一个 transaction-safe Memory create primitive。
+~~~
+thread_todos()
+→ 返回仍为 pending 的 Threads
+→ thread_open(T)
+→ 返回当前 pending inputs 与 lineage
+~~~
 
-Task 对 Memory 的 live-reference 行为保持一致。
+无需恢复整段实时消息流即可继续工作。
 
-## 22. 审计结论
+### 23.9 异构 Agent
 
-### 模型
+~~~
+Codex
+Claude Code
+ChatGPT
+local script
+custom Agent
+        ↕
+      API/MCP
+        ↕
+      Kungfu
+~~~
 
-Role / Memory / Thread 三个业务原子足以表达通讯与协作。ThreadRole、ThreadMemory 承担关系状态。
+所有 Agent 只依赖同一结构协议即可协作。
 
-### Timeline
+## 24. Agent-first 完成判据
 
-seq / head_seq 提供可靠有序的信息流，Child Thread 同时覆盖回复串、新话题和并行会话。
+Thread 第一版完成时，任意外部 Agent 应能在没有共享 runtime 的情况下完成：
 
-### Thread 状态
+~~~
+1. 发现属于自己的协作 Todo
+2. 准确知道当前事项
+3. 准确知道为什么进入该事项
+4. 准确知道哪些输入正在等待自己处理
+5. 按需读取必要 Memory
+6. 在隔离 Thread 中本地执行
+7. 用 reply / branch / handle 写回
+8. 让下一轮协作状态自动形成
+9. 断线、换进程、换 Agent 后继续恢复
+10. 沿 lineage 理解任意深度子事项
+~~~
 
-revision 是 Thread 共享状态的统一版本轴，覆盖新增内容、活引用变化、角色变化、状态变化和 Child 结构变化；ThreadMemory.changed_revision 把共享 revision 映射到具体 timeline entry。
+达到这一状态时，Thread 才形成完整 Agent 协作闭环。
 
-### 提醒
+## 25. 产品结论
 
-seen_seq 表达新内容消费位置；seen_revision 表达共享状态观测位置。两者共同形成跨设备、离线可恢复的提醒状态。
+Kungfu Thread 的核心表达：
 
-### 实时
+> Thread 是事项，Memory 是信息，Reply 是往返，Child Thread 是分解，Todo 是机制产生的下一步，Link 是直接协作的信任基础。
 
-thread_changed 只承担低延迟唤醒。事实先持久化，客户端依靠 revision + head_seq + changed_revision 恢复，因此实时链路和数据可靠性解耦。
+Agent 的核心循环：
 
-### 活引用
+~~~
+thread_todos
+→ thread_open
+→ memory_get as needed
+→ local work
+→ thread_reply / thread_branch / thread_handle
+→ next collaboration round
+~~~
 
-Memory update / delete 对 timeline 引用和 anchor 引用统一做 revision fan-out，活引用不会绕过 Thread 同步状态。
-
-### 场景
-
-私聊、群聊、多人对话、时间线、回复串、新话题、并行协作、外部协作者、结果回流、Agent 增量消费、实时客户端和断线恢复均由同一套 Thread 通讯逻辑表达。
+协作状态由 Kungfu 持久化，Agent 保持本地执行自由，任何符合协议的 Agent 都可以按需进入并继续工作。
