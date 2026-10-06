@@ -230,7 +230,7 @@ handled
 6. 为 initial Roles 创建 entry receipt；
 7. revision 提交。
 
-### thread_reply
+### collab_respond
 
 输入：
 
@@ -254,7 +254,7 @@ idempotency_key
 9. revision + 1；
 10. commit。
 
-### thread_branch
+### collab_branch
 
 输入：
 
@@ -276,7 +276,7 @@ idempotency_key
 6. parent revision + 1；
 7. commit。
 
-### thread_handle
+### collab_done
 
 输入：
 
@@ -292,7 +292,7 @@ idempotency_key
 - 保存 handled_at；
 - 作为一轮协作自然结束。
 
-### thread_todos
+### collab_inbox
 
 查询当前 Role 的 pending receipts，按 Thread 聚合：
 
@@ -317,64 +317,93 @@ lineage_hint
 - Task 的 open/claim/submission/delivery/settlement 生命周期与 Thread Todo 独立；
 - Thread Todo 不进入 work_list，不占用 Task claim，不参与 Task settlement。
 
-## WO-T4 Agent Context Envelope
+## WO-T4 Agent 访问面与 Context Envelope
 
-### thread_open
+### 访问层原则
 
-thread_open 是 Agent 进入协作事项的主要入口。
+对外协议表达 Agent 工作意图，内部 Thread 结构留在 service / repository。
+
+公开协作语义：
+
+~~~
+collab_inbox
+collab_open
+collab_respond
+collab_branch
+collab_done
+collab_start
+collab_join
+collab_invite
+collab_remove
+~~~
+
+外部参数和返回使用：
+
+~~~
+collaboration_ref
+input_ref
+memory_ref
+role_ref
+continuation_ref
+~~~
+
+这些 ref 由 service 解析到内部 Thread / ThreadMemory / ThreadReceipt / Memory revision。
+
+Agent 不需要构造内部关系键。
+
+### Context Envelope
+
+### collab_open
+
+collab_open 是 Agent 进入协作事项的主要入口。
 
 返回：
 
 ~~~text
 schema_version
 
+collaboration
+- ref
+- subject
+- status
+
 identity
 - current_role
 - thread_code
 - permission
 
-matter
-- subject
-- status
-- creator
-- participants
+why_here
+- entry reason
+- source
+- lineage summary
 
-position
-- root
-- parent
-- anchor
-- lineage
-
-todos
-- current Role pending inputs
-- source author
-- reason
-- reply target
+attention
+- pending inputs
+- input_ref
+- source role
+- content / memory_ref
 
 context
-- anchor refs
-- lineage anchor refs
-- relevant Timeline index
-- direct Child summaries
-- pagination refs
+- focused memory
+- relevant memory refs
+- lineage summary
+- related child summaries
+- continuation_ref
 
-capabilities
-- reply
+participants
+- relevant roles
+
+actions
+- respond
 - branch
-- handle
-- add_role
-- remove_role
-- reset_key
+- done
+- invite
 - close
 
-writeback
-- valid reply targets
-- valid branch anchors
-
-agent_guidance
-- collaboration scope
+guidance
+- current matter
 - actionable inputs
-- writeback contract
+- useful context
 - available next actions
 ~~~
 
@@ -404,9 +433,12 @@ Timeline 使用 cursor 分页。
 
 每次 Agent 操作显式携带 thread_code。
 
-thread_open(T1) 与 thread_open(T2) 形成两个独立工作上下文。
+collab_open(T1) 与 collab_open(T2) 形成两个独立工作上下文。
 
 写入校验：
+
+- Agent 使用 input_ref / collaboration_ref 直接写回；
+- service 解析 opaque ref 后执行内部关系校验；
 
 - reply target 属于当前 Thread 范围；
 - branch anchor 属于当前 Thread 范围；
@@ -414,10 +446,10 @@ thread_open(T1) 与 thread_open(T2) 形成两个独立工作上下文。
 
 ### 验收
 
-- Agent 只凭 thread_open 返回即可知道当前事项、来源、Todo 与写回位置；
+- Agent 只凭 collab_open 返回即可知道当前事项、进入原因、attention 与可执行 actions；
 - 深层 Child 直接返回 lineage；
 - 1000+ Memory Thread 仍可先读结构、再按需展开；
-- Memory 内自然语言不会进入 agent_guidance 控制区；
+- Memory 内自然语言不会进入 Kungfu guidance 控制区；
 - 切换 Thread 后所有 action 继续显式绑定目标 Thread。
 
 ## WO-T5 Realtime / Protocol
@@ -440,8 +472,8 @@ Todo 由 ThreadReceipt 持久化。
 Agent 重连：
 
 ~~~text
-thread_todos
-→ thread_open
+collab_inbox
+→ collab_open
 → continue
 ~~~
 
@@ -476,7 +508,7 @@ thread_role_add(thread, role, entry_memory)
 
 - 建立 ThreadRole；
 - 建立 entry receipt；
-- target 的 thread_todos 立即出现该事项。
+- target 的 collab_inbox 立即出现该事项。
 
 #### Key join
 
@@ -504,11 +536,11 @@ thread_key_reset(thread)
 高频：
 
 ~~~text
-thread_todos
-thread_open
-thread_reply
-thread_branch
-thread_handle
+collab_inbox
+collab_open
+collab_respond
+collab_branch
+collab_done
 ~~~
 
 协作建立：
@@ -545,9 +577,9 @@ MCP / HTTP 映射同一 service 语义。
 以下写操作接受 idempotency key：
 
 - thread_create；
-- thread_reply；
-- thread_branch；
-- thread_handle；
+- collab_respond；
+- collab_branch；
+- collab_done；
 - thread_role_add；
 - thread_join。
 
@@ -595,7 +627,7 @@ B/C/D 同时 reply M1。
 - D 可读完整 Thread；
 - entry=M87；
 - D 只产生一个明确 entry Todo；
-- thread_open 直接把 M87 作为 actionable input。
+- collab_open 直接把 M87 作为 actionable input。
 
 ### 深层分叉
 
@@ -618,7 +650,7 @@ B/C/D 同时 reply M1。
 
 验证：
 
-- thread_open 首包保持可控；
+- collab_open 首包保持可控；
 - pending / anchor 优先；
 - Memory 按需读取；
 - cursor 正常分页。
@@ -640,8 +672,8 @@ Agent 离线后收到多个 Reply，再以新进程恢复。
 验证：
 
 ~~~text
-thread_todos
-→ thread_open
+collab_inbox
+→ collab_open
 → 正确继续
 ~~~
 
