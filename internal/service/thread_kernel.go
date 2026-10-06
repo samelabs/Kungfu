@@ -356,7 +356,7 @@ func revokeThreadJoinKeyKernel(ctx context.Context, q pg.Querier, actorID, threa
 // as an existing participant preserves the current permission and entry.
 func joinThreadByKeyKernel(ctx context.Context, q pg.Querier, roleID int64, rawKey string) (*model.Thread, *model.ThreadRole, bool, error) {
 	sum := sha256.Sum256([]byte(rawKey))
-	thread, err := repository.FindOpenThreadByJoinKeyHash(ctx, q, sum[:])
+	thread, err := repository.FindOpenThreadByJoinKeyHashForUpdate(ctx, q, sum[:])
 	if err != nil || thread == nil || thread.JoinEntryID == nil {
 		if err == nil {
 			err = errors.New("join key is invalid")

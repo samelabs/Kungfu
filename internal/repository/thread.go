@@ -167,9 +167,10 @@ func scanThread(row pgx.Row) (*model.Thread, error) {
 	return &t, nil
 }
 
-func FindOpenThreadByJoinKeyHash(ctx context.Context, q pg.Querier, keyHash []byte) (*model.Thread, error) {
+func FindOpenThreadByJoinKeyHashForUpdate(ctx context.Context, q pg.Querier, keyHash []byte) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, threadSelect+`
-		WHERE join_key_hash = $1 AND status = 'open'`, keyHash))
+		WHERE join_key_hash = $1 AND status = 'open'
+		FOR UPDATE`, keyHash))
 }
 
 func SetThreadJoinKey(ctx context.Context, q pg.Querier, threadID int64, keyHash []byte, entryID int64) error {
@@ -398,7 +399,6 @@ func RootCreatorCanGovernThread(ctx context.Context, q pg.Querier, threadID, rol
 	return ok, err
 }
 
-
 // ---- T3 receipt / membership state ---------------------------------------
 
 func InsertPendingThreadReceipt(ctx context.Context, q pg.Querier, threadID, inputEntryID, roleID int64, reason string) (bool, error) {
@@ -412,6 +412,38 @@ func InsertPendingThreadReceipt(ctx context.Context, q pg.Querier, threadID, inp
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+func ListPendingThreadReceiptsForRole(ctx context.Context, q pg.Querier, roleID int64) ([]model.ThreadReceipt, error) {
+	rows, err := q.Query(ctx, `
+		SELECT r.thread_id, r.input_entry_id, r.role_id, r.reason, r.state,
+		       r.created_at, r.handled_at, r.withdrawn_at
+		FROM thread_receipts r
+		JOIN threads t ON t.id = r.thread_id
+		JOIN thread_roles tr
+		  ON tr.thread_id = r.thread_id AND tr.role_id = r.role_id
+		WHERE r.role_id = $1
+		  AND r.state = 'pending'
+		  AND t.status = 'open'
+		  AND tr.permission IN ('write', 'manage')
+		ORDER BY r.created_at, r.thread_id, r.input_entry_id`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]model.ThreadReceipt, 0)
+	for rows.Next() {
+		var r model.ThreadReceipt
+		if err := rows.Scan(
+			&r.ThreadID, &r.InputEntryID, &r.RoleID, &r.Reason, &r.State,
+			&r.CreatedAt, &r.HandledAt, &r.WithdrawnAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 func FindThreadReceipt(ctx context.Context, q pg.Querier, threadID, inputEntryID, roleID int64) (*model.ThreadReceipt, error) {

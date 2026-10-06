@@ -59,11 +59,11 @@ type ThreadCreateResult struct {
 }
 
 type ThreadReplyInput struct {
-	ThreadID        int64  `json:"thread_id"`
-	ReplyToEntryID  int64  `json:"reply_to_entry_id"`
-	InputEntryID    *int64 `json:"input_entry_id,omitempty"`
-	Content         string `json:"content"`
-	IdempotencyKey  string `json:"-"`
+	ThreadID       int64  `json:"thread_id"`
+	ReplyToEntryID int64  `json:"reply_to_entry_id"`
+	InputEntryID   *int64 `json:"input_entry_id,omitempty"`
+	Content        string `json:"content"`
+	IdempotencyKey string `json:"-"`
 }
 
 type ThreadReplyResult struct {
@@ -97,12 +97,12 @@ type ThreadJoinResult struct {
 }
 
 type threadIdempotencyRef struct {
-	ThreadID   int64  `json:"thread_id,omitempty"`
-	EntryID    int64  `json:"entry_id,omitempty"`
-	RoleID     int64  `json:"role_id,omitempty"`
-	InputID    int64  `json:"input_id,omitempty"`
+	ThreadID    int64  `json:"thread_id,omitempty"`
+	EntryID     int64  `json:"entry_id,omitempty"`
+	RoleID      int64  `json:"role_id,omitempty"`
+	InputID     int64  `json:"input_id,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
-	Changed    bool   `json:"changed,omitempty"`
+	Changed     bool   `json:"changed,omitempty"`
 }
 
 func threadRequestHash(v any) ([]byte, error) {
@@ -158,9 +158,16 @@ func completeThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, ope
 	return repository.CompleteThreadIdempotency(ctx, tx, roleID, operation, strings.TrimSpace(key), string(body))
 }
 
+func threadKeyHashFingerprint(hash []byte) string {
+	if len(hash) < 6 {
+		return ""
+	}
+	return hex.EncodeToString(hash[:6])
+}
+
 func threadKeyFingerprint(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:6])
+	return threadKeyHashFingerprint(sum[:])
 }
 
 func requireThreadManageOrGovern(ctx context.Context, q pg.Querier, actorID, threadID int64) error {
@@ -227,7 +234,7 @@ func CreateThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 		}
 		return &ThreadCreateResult{
 			Thread: thread, RootEntry: entry,
-			JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
+			JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
 		}, nil
 	}
 
@@ -392,7 +399,7 @@ func BranchThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 			return nil, errors.New("idempotent branch result not found")
 		}
 		return &ThreadBranchResult{
-			Thread: thread, JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
+			Thread: thread, JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
 		}, nil
 	}
 
@@ -649,6 +656,11 @@ func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadI
 		}
 		return nil, err
 	}
+	wasActionable := current.Permission == model.ThreadWrite || current.Permission == model.ThreadManage
+	willActionable := permission == model.ThreadWrite || permission == model.ThreadManage
+	if entryID != nil && !(!wasActionable && willActionable) && current.EntryID != *entryID {
+		return nil, errors.New("entry can only change when permission becomes actionable")
+	}
 	if current.Permission == permission && (entryID == nil || current.EntryID == *entryID) {
 		if err := completeThreadIdempotency(ctx, tx, actorID, threadOpPermission, idempotencyKey,
 			threadIdempotencyRef{ThreadID: threadID, RoleID: targetRoleID}); err != nil {
@@ -660,8 +672,6 @@ func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadI
 		return current, nil
 	}
 
-	wasActionable := current.Permission == model.ThreadWrite || current.Permission == model.ThreadManage
-	willActionable := permission == model.ThreadWrite || permission == model.ThreadManage
 	switch {
 	case wasActionable && !willActionable:
 		if _, err := repository.WithdrawPendingThreadReceiptsByRole(ctx, tx, threadID, targetRoleID); err != nil {
@@ -861,7 +871,7 @@ func ResetThreadJoinKeyState(ctx context.Context, pool *pg.Pool, actorID, thread
 	if !acquired {
 		thread, _ := repository.FindThreadByID(ctx, tx, replay.ThreadID)
 		return &ThreadKeyResetResult{
-			Thread: thread, JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
+			Thread: thread, JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
 		}, nil
 	}
 	if _, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID); err != nil {

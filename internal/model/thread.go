@@ -66,14 +66,14 @@ type ThreadMemory struct {
 }
 
 type ThreadReceipt struct {
-	ThreadID      int64
-	InputEntryID  int64
-	RoleID        int64
-	Reason        string
-	State         string
-	CreatedAt     time.Time
-	HandledAt     *time.Time
-	WithdrawnAt   *time.Time
+	ThreadID     int64
+	InputEntryID int64
+	RoleID       int64
+	Reason       string
+	State        string
+	CreatedAt    time.Time
+	HandledAt    *time.Time
+	WithdrawnAt  *time.Time
 }
 
 type ThreadIdempotency struct {

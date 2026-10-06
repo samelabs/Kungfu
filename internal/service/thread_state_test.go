@@ -20,10 +20,10 @@ func threadIdem(prefix string) string {
 func int64Ptr(v int64) *int64 { return &v }
 
 type threadPairFixture struct {
-	A     int64
-	B     int64
+	A      int64
+	B      int64
 	Thread *model.Thread
-	Root  *model.ThreadMemory
+	Root   *model.ThreadMemory
 }
 
 func threadPairWithPendingB(t *testing.T, pool *pg.Pool) threadPairFixture {
@@ -273,7 +273,7 @@ func TestMultiplePendingAndBranchChildTodo(t *testing.T) {
 
 	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
 		Subject: "Multi", Content: "root",
-		Participants: []ThreadParticipantSpec{{RoleID: b}, {RoleID: c}},
+		Participants:   []ThreadParticipantSpec{{RoleID: b}, {RoleID: c}},
 		IdempotencyKey: threadIdem("multi-create"),
 	})
 	if err != nil {
@@ -299,8 +299,8 @@ func TestMultiplePendingAndBranchChildTodo(t *testing.T) {
 	// Branch one specific pending input; the other remains pending.
 	child, err := BranchThreadState(ctx, pool, a, ThreadBranchInput{
 		ParentThreadID: root.Thread.ID, AnchorEntryID: bReply.Entry.ID, InputEntryID: int64Ptr(bReply.Entry.ID),
-		Subject: "Child work",
-		Participants: []ThreadParticipantSpec{{RoleID: c, Permission: model.ThreadWrite}},
+		Subject:        "Child work",
+		Participants:   []ThreadParticipantSpec{{RoleID: c, Permission: model.ThreadWrite}},
 		IdempotencyKey: threadIdem("multi-branch"),
 	})
 	if err != nil {
@@ -338,12 +338,23 @@ func TestPermissionCloseReopenAndReadRoleTodoRules(t *testing.T) {
 	if got := countReceipts(t, pool, root.Thread.ID, c, model.ThreadReceiptPending); got != 0 {
 		t.Fatalf("read Role got %d Todo receipts", got)
 	}
+	bTodo, err := repository.ListPendingThreadReceiptsForRole(ctx, pool, b)
+	if err != nil || len(bTodo) != 1 || bTodo[0].InputEntryID != root.RootEntry.ID {
+		t.Fatalf("B Todo facts = %+v err=%v", bTodo, err)
+	}
+	cTodo, err := repository.ListPendingThreadReceiptsForRole(ctx, pool, c)
+	if err != nil || len(cTodo) != 0 {
+		t.Fatalf("read Role leaked into Todo facts = %+v err=%v", cTodo, err)
+	}
 	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadRead, nil, threadIdem("downgrade")); err != nil {
 		t.Fatal(err)
 	}
 	r, _ := repository.FindThreadReceipt(ctx, pool, root.Thread.ID, root.RootEntry.ID, b)
 	if r == nil || r.State != model.ThreadReceiptWithdrawn {
 		t.Fatalf("downgraded receipt = %+v", r)
+	}
+	if todo, err := repository.ListPendingThreadReceiptsForRole(ctx, pool, b); err != nil || len(todo) != 0 {
+		t.Fatalf("downgraded Role remained in Todo facts = %+v err=%v", todo, err)
 	}
 
 	// Create a different current entry for B's new actionable entry.
@@ -361,12 +372,28 @@ func TestPermissionCloseReopenAndReadRoleTodoRules(t *testing.T) {
 	if got := countReceipts(t, pool, root.Thread.ID, b, model.ThreadReceiptPending); got != 1 {
 		t.Fatalf("upgraded B pending = %d, want 1", got)
 	}
+	if todo, err := repository.ListPendingThreadReceiptsForRole(ctx, pool, b); err != nil || len(todo) != 1 || todo[0].InputEntryID != proactive.Entry.ID {
+		t.Fatalf("upgraded Role Todo facts = %+v err=%v", todo, err)
+	}
+
+	beforeEntryGuard, _ := repository.FindThreadByID(ctx, pool, root.Thread.ID)
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadWrite,
+		int64Ptr(root.RootEntry.ID), threadIdem("same-permission-entry-change")); err == nil {
+		t.Fatal("same actionable permission silently accepted a different entry")
+	}
+	afterEntryGuard, _ := repository.FindThreadByID(ctx, pool, root.Thread.ID)
+	if afterEntryGuard.Revision != beforeEntryGuard.Revision {
+		t.Fatalf("rejected entry change bumped revision: %d -> %d", beforeEntryGuard.Revision, afterEntryGuard.Revision)
+	}
 
 	if _, err := CloseThreadState(ctx, pool, a, root.Thread.ID, threadIdem("close")); err != nil {
 		t.Fatal(err)
 	}
 	if got := countReceipts(t, pool, root.Thread.ID, b, model.ThreadReceiptPending); got != 0 {
 		t.Fatalf("close left %d pending", got)
+	}
+	if todo, err := repository.ListPendingThreadReceiptsForRole(ctx, pool, b); err != nil || len(todo) != 0 {
+		t.Fatalf("closed Thread leaked into Todo facts = %+v err=%v", todo, err)
 	}
 	if _, err := ReopenThreadState(ctx, pool, a, root.Thread.ID, threadIdem("reopen")); err != nil {
 		t.Fatal(err)
@@ -392,12 +419,16 @@ func TestParticipantRemovalRevokesJoinKeyButChildSurvives(t *testing.T) {
 	if err != nil || key.JoinKey == "" {
 		t.Fatalf("reset key: %+v err=%v", key, err)
 	}
+	oldKeyJoiner := pubSeedBot(t, pool, 0)
 	if _, err := RemoveThreadParticipant(ctx, pool, f.A, f.Thread.ID, f.B, threadIdem("remove")); err != nil {
 		t.Fatal(err)
 	}
 	parent, _ := repository.FindThreadByID(ctx, pool, f.Thread.ID)
 	if len(parent.JoinKeyHash) != 0 || parent.JoinEntryID != nil {
 		t.Fatalf("participant removal did not revoke join key: %+v", parent)
+	}
+	if _, err := JoinThreadState(ctx, pool, oldKeyJoiner, key.JoinKey, threadIdem("old-key-after-remove")); err == nil {
+		t.Fatal("revoked join key remained usable after participant removal")
 	}
 	if role, err := repository.FindThreadRole(ctx, pool, child.Thread.ID, f.B); err != nil || role == nil || role.Permission != model.ThreadManage {
 		t.Fatalf("Child participation was cascaded: role=%+v err=%v", role, err)
@@ -458,6 +489,25 @@ func TestCreateJoinAndKeyResetOneTimeDisclosure(t *testing.T) {
 	}
 	if !resetReplay.AlreadyApplied || resetReplay.JoinKey != "" || resetReplay.JoinKeyFingerprint != reset.JoinKeyFingerprint {
 		t.Fatalf("reset replay = %+v", resetReplay)
+	}
+
+	reset2, err := ResetThreadJoinKeyState(ctx, pool, a, first.Thread.ID, first.RootEntry.ID, threadIdem("reset-2"))
+	if err != nil || reset2.JoinKey == "" || reset2.JoinKeyFingerprint == reset.JoinKeyFingerprint {
+		t.Fatalf("second reset = %+v err=%v", reset2, err)
+	}
+	oldResetReplay, err := ResetThreadJoinKeyState(ctx, pool, a, first.Thread.ID, first.RootEntry.ID, resetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !oldResetReplay.AlreadyApplied || oldResetReplay.JoinKey != "" || oldResetReplay.JoinKeyFingerprint != reset2.JoinKeyFingerprint {
+		t.Fatalf("old reset replay did not return current fingerprint: %+v current=%+v", oldResetReplay, reset2)
+	}
+	createReplayAfterReset, err := CreateThreadState(ctx, pool, a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !createReplayAfterReset.AlreadyApplied || createReplayAfterReset.JoinKey != "" || createReplayAfterReset.JoinKeyFingerprint != reset2.JoinKeyFingerprint {
+		t.Fatalf("create replay did not return current fingerprint: %+v current=%+v", createReplayAfterReset, reset2)
 	}
 }
 
