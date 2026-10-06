@@ -778,7 +778,7 @@ lineage_hint
 - branch 自动完成当前输入并建立 Child 首轮 Todo；
 - handle 结束当前输入；
 - read Role 不产生 Todo；
-- role removal 把该 Role 的 pending receipts 转为 withdrawn，并在存在 join key 时同事务 rotate key；
+- role removal 把该 Role 的 pending receipts 转为 withdrawn，并在存在 join key 时同事务 revoke key；
 - Thread close 把当前 pending receipts 转为 withdrawn；reopen 不恢复；
 - Parent close 不级联 close Child；
 - Parent participant removal 不级联删除既有 Child membership；
