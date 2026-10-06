@@ -157,11 +157,11 @@ active → remove → delete current relation
 ~~~text
 id / code
 join_key_hash
-join_entry_memory_id?
+join_entry_entry_id?
 subject
 created_by_role_id
 parent_thread_id?
-anchor_memory_id?
+anchor_entry_id?
 status
 next_seq
 revision
@@ -172,7 +172,7 @@ created_at / updated_at
 
 - Root 有 subject 与 root Memory；
 - Child 有直接 parent 与 anchor；
-- anchor 属于直接 parent 的协作范围；
+- anchor_entry_id 指向直接 parent 的 ThreadMemory entry；
 - parent / anchor 创建后保持稳定；
 - code 唯一稳定；
 - join key 可重置；
@@ -185,14 +185,14 @@ thread_id
 role_id
 permission
 joined_by_role_id?
-entry_memory_id
+entry_entry_id
 joined_at
 ~~~
 
 约束：
 
 - (thread, role) 唯一；
-- 每个 ThreadRole 有 entry_memory_id；
+- 每个 ThreadRole 有 entry_entry_id；该值是确定 ThreadMemory entry，不是裸 Memory id；
 - Root creator 通过 root ownership 获得 descendants 的 inherited read + govern；
 - inherited govern 允许 participant/key/subject/status/tree 管理，但不允许 reply/branch/handle；
 - collaboration write 仍必须有 descendant write/manage ThreadRole。
@@ -200,7 +200,7 @@ joined_at
 ### permission lifecycle
 
 - write/manage → read：同事务将该 Role 当前 pending receipts → withdrawn；
-- read → write/manage：要求新的 entry_memory_id，并创建一条 entry receipt；
+- read → write/manage：要求新的 entry_entry_id，并创建一条 entry receipt；
 - write ↔ manage：不改变 pending。
 
 ### thread_memories
@@ -220,7 +220,7 @@ created_at
 
 - (thread, seq) 唯一；
 - seq 单调递增；
-- reply_to_entry_id 指向当前 Thread 可回应的 entry；
+- reply_to_entry_id 只能指向当前 Thread entry 或当前 Child 的 direct anchor_entry_id；
 - 普通 Reply 保持在当前 Thread。
 
 ### thread_idempotency
@@ -251,6 +251,7 @@ UNIQUE(role_id, operation, idempotency_key)
 - resolve parent / root / lineage；
 - direct children query；
 - key lookup / reset / rotate-on-remove；
+- exact entry lookup / scope validation；
 - scoped Memory read；
 - idempotency claim / result persistence。
 
@@ -354,8 +355,8 @@ idempotency_key
 
 单事务：
 
-1. 验 parent + anchor；
-2. 创建 Child；
+1. 验 parent + anchor_entry，并锁定 anchor 对应的 Memory revision；
+2. 创建 Child，保存 parent_thread_id + anchor_entry_id；
 3. actor 建立 Child manage ThreadRole，不生成 actor entry receipt；
 4. 建立其他 Child ThreadRole；
 5. 仅为其他 Child write/manage participants 建立 entry receipts；
@@ -708,7 +709,7 @@ B/C/D 同时 reply M1。
 
 验证：
 
-- lineage 正确；
+- lineage 的每一级 anchor 都指向确定 ThreadMemory occurrence / revision；
 - Agent 无需遍历 siblings；
 - 每个 Child 保持自己的 Roles / Todo / Timeline；
 - Root creator 可获得完整 tree；
