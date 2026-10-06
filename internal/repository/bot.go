@@ -180,7 +180,7 @@ func KungfuStatsByBotID(ctx context.Context, q pg.Querier, botID int64) (KungfuS
 		SELECT COUNT(*) AS total,
 		       COALESCE(SUM(CASE WHEN visibility = 'public' THEN 1 ELSE 0 END), 0) AS public_total
 		FROM tb_kungfus
-		WHERE bot_id = $1 AND status = 'active'`, botID).Scan(&stats.Total, &stats.PublicTotal)
+		WHERE bot_id = $1 AND status = 'active' AND origin = 'standalone'`, botID).Scan(&stats.Total, &stats.PublicTotal)
 	if err != nil {
 		return KungfuStats{}, err
 	}

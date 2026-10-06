@@ -22,7 +22,7 @@ func CountActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64) (
 	err := q.QueryRow(ctx, `
 		SELECT COUNT(*) AS total
 		FROM tb_kungfus
-		WHERE bot_id = $1 AND status = 'active'`, botID).Scan(&count)
+		WHERE bot_id = $1 AND status = 'active' AND origin = 'standalone'`, botID).Scan(&count)
 	return count, err
 }
 
@@ -42,7 +42,7 @@ func ListActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64, li
 	rows, err := q.Query(ctx, `
 		SELECT code, title, tags_json::text, description, visibility, created_at, updated_at
 		FROM tb_kungfus
-		WHERE bot_id = $1 AND status = 'active'
+		WHERE bot_id = $1 AND status = 'active' AND origin = 'standalone'
 		ORDER BY updated_at DESC, id DESC
 		LIMIT $2 OFFSET $3`, botID, limit, offset)
 	if err != nil {
@@ -72,7 +72,7 @@ func ListActiveKungfusByBotID(ctx context.Context, q pg.Querier, botID int64, li
 func FindActiveKungfuByCode(ctx context.Context, q pg.Querier, code string) (*model.Kungfu, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, tags_json::text, description, content, checksum,
-		       visibility, status, created_at, updated_at
+		       visibility, status, revision, origin, created_at, updated_at
 		FROM tb_kungfus
 		WHERE code = $1 AND status = 'active'`, code)
 	return scanKungfu(row)
@@ -82,9 +82,21 @@ func FindActiveKungfuByCode(ctx context.Context, q pg.Querier, code string) (*mo
 func FindOwnedActiveKungfuByCode(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Kungfu, error) {
 	row := q.QueryRow(ctx, `
 		SELECT id, code, bot_id, title, tags_json::text, description, content, checksum,
-		       visibility, status, created_at, updated_at
+		       visibility, status, revision, origin, created_at, updated_at
 		FROM tb_kungfus
 		WHERE code = $1 AND bot_id = $2 AND status = 'active'`, code, botID)
+	return scanKungfu(row)
+}
+
+// FindOwnedActiveKungfuByCodeForUpdate is the row-locking form used by
+// Memory update transactions before archiving the current revision.
+func FindOwnedActiveKungfuByCodeForUpdate(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Kungfu, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, title, tags_json::text, description, content, checksum,
+		       visibility, status, revision, origin, created_at, updated_at
+		FROM tb_kungfus
+		WHERE code = $1 AND bot_id = $2 AND status = 'active'
+		FOR UPDATE`, code, botID)
 	return scanKungfu(row)
 }
 
@@ -97,7 +109,8 @@ func scanKungfu(row pgx.Row) (*model.Kungfu, error) {
 		updatedAt time.Time
 	)
 	if err := row.Scan(&k.ID, &k.Code, &botID, &k.Title, &k.TagsJSON, &k.Description,
-		&k.Content, &k.Checksum, &k.Visibility, &k.Status, &createdAt, &updatedAt); err != nil {
+		&k.Content, &k.Checksum, &k.Visibility, &k.Status, &k.Revision, &k.Origin,
+		&createdAt, &updatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -126,16 +139,72 @@ func SoftDeleteKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
 	return err
 }
 
-// -- 7. updateContentById --
-// UpdateKungfuContentByID overwrites the editable content fields of a kungfu.
+// -- 7. revision/update --
+
+// ArchiveKungfuRevision persists the exact current editable fields under the
+// current revision. The caller must hold the current row lock and commit the
+// archive together with the replacement update.
+func ArchiveKungfuRevision(ctx context.Context, q pg.Querier, k *model.Kungfu) error {
+	_, err := q.Exec(ctx, `
+		INSERT INTO memory_revisions
+		    (memory_id, revision, title, tags_json, description, content, checksum)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		k.ID, k.Revision, k.Title, k.TagsJSON, k.Description, k.Content, k.Checksum)
+	return err
+}
+
+// UpdateKungfuContentByID replaces the current editable fields and advances
+// the current revision. Archiving is deliberately separate so service owns
+// the transaction containing lock → archive → update.
 func UpdateKungfuContentByID(ctx context.Context, q pg.Querier, id int64, title, tagsJSON, description, content, checksum string) error {
 	_, err := q.Exec(ctx, `
 		UPDATE tb_kungfus
 		SET title = $1, tags_json = $2, description = $3,
-		    content = $4, checksum = $5, updated_at = NOW()
+		    content = $4, checksum = $5, revision = revision + 1, updated_at = NOW()
 		WHERE id = $6`,
 		title, tagsJSON, description, content, checksum, id)
 	return err
+}
+
+// FindMemoryRevision resolves a pinned Memory revision. The current revision
+// is read from tb_kungfus even after soft-delete; older revisions come from
+// memory_revisions.
+func FindMemoryRevision(ctx context.Context, q pg.Querier, memoryID, revision int64) (*model.MemoryRevision, error) {
+	var current model.MemoryRevision
+	var currentRevision int64
+	err := q.QueryRow(ctx, `
+		SELECT id, revision, title, tags_json::text, description, content, checksum
+		FROM tb_kungfus WHERE id = $1`, memoryID).Scan(
+		&current.MemoryID, &currentRevision, &current.Title, &current.TagsJSON,
+		&current.Description, &current.Content, &current.Checksum)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if revision == currentRevision {
+		current.Revision = currentRevision
+		return &current, nil
+	}
+	if revision < 1 || revision > currentRevision {
+		return nil, nil
+	}
+
+	var historical model.MemoryRevision
+	err = q.QueryRow(ctx, `
+		SELECT memory_id, revision, title, tags_json::text, description, content, checksum
+		FROM memory_revisions
+		WHERE memory_id = $1 AND revision = $2`, memoryID, revision).Scan(
+		&historical.MemoryID, &historical.Revision, &historical.Title, &historical.TagsJSON,
+		&historical.Description, &historical.Content, &historical.Checksum)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &historical, nil
 }
 
 // -- 8. generateUniqueCode --
@@ -150,12 +219,26 @@ func GenerateUniqueKungfuCode(ctx context.Context, q pg.Querier) (string, error)
 }
 
 // -- 9. insertNewKungfu --
-// InsertNewKungfu inserts a new private, active kungfu row.
+// InsertNewKungfu inserts a standalone private, active current Memory row.
 func InsertNewKungfu(ctx context.Context, q pg.Querier, code string, botID int64, title, tagsJSON, description, content, checksum string) error {
-	_, err := q.Exec(ctx, `
-		INSERT INTO tb_kungfus
-		    (code, bot_id, title, tags_json, description, content, checksum, visibility, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'private', 'active', NOW(), NOW())`,
-		code, botID, title, tagsJSON, description, content, checksum)
+	_, err := insertKungfuWithOrigin(ctx, q, code, botID, title, tagsJSON, description, content, checksum, "standalone")
 	return err
+}
+
+// InsertThreadKungfu is the Thread-internal persistence primitive. It writes a
+// current Memory row directly with origin=thread and never invokes standalone
+// Store consumption policy.
+func InsertThreadKungfu(ctx context.Context, q pg.Querier, code string, botID int64, title, tagsJSON, description, content, checksum string) (int64, error) {
+	return insertKungfuWithOrigin(ctx, q, code, botID, title, tagsJSON, description, content, checksum, "thread")
+}
+
+func insertKungfuWithOrigin(ctx context.Context, q pg.Querier, code string, botID int64, title, tagsJSON, description, content, checksum, origin string) (int64, error) {
+	var id int64
+	err := q.QueryRow(ctx, `
+		INSERT INTO tb_kungfus
+		    (code, bot_id, title, tags_json, description, content, checksum, visibility, status, revision, origin, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'private', 'active', 1, $8, NOW(), NOW())
+		RETURNING id`,
+		code, botID, title, tagsJSON, description, content, checksum, origin).Scan(&id)
+	return id, err
 }

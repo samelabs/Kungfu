@@ -11,6 +11,18 @@ type Kungfu struct {
 	Checksum    string  `db:"checksum" json:"checksum"`
 	Visibility  string  `db:"visibility" json:"visibility"`
 	Status      string  `db:"status" json:"-"`
+	Revision    int64   `db:"revision" json:"-"`
+	Origin      string  `db:"origin" json:"-"`
 	CreatedAt   string  `db:"created_at" json:"created_at"`
 	UpdatedAt   string  `db:"updated_at" json:"updated_at"`
+}
+
+type MemoryRevision struct {
+	MemoryID    int64
+	Revision    int64
+	Title       string
+	TagsJSON    string
+	Description *string
+	Content     string
+	Checksum    string
 }

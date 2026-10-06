@@ -45,14 +45,26 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	}
 
 	if payload.Code != "" {
-		// Update existing
-		existing, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, botID, payload.Code)
+		tagsJSONBytes, err := json.Marshal(payload.Tags)
+		if err != nil {
+			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
+		}
+
+		tx, txErr := pool.TxBegin(ctx)
+		if txErr != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+		defer func() { _ = pg.Rollback(tx) }()
+
+		// Lock the current row before archiving it so concurrent updates
+		// serialize into a complete revision chain.
+		existing, err := repository.FindOwnedActiveKungfuByCodeForUpdate(ctx, tx, botID, payload.Code)
 		if err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
 		if existing == nil {
-			// Check if it exists but owned by someone else
-			any, err := repository.FindActiveKungfuByCode(ctx, pool, payload.Code)
+			// Resolve not-found vs not-owner inside the same transaction.
+			any, err := repository.FindActiveKungfuByCode(ctx, tx, payload.Code)
 			if err != nil {
 				return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 			}
@@ -62,12 +74,14 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			return nil, errors.New(403, "NOT_OWNER", "Only the creator can update this Kungfu")
 		}
 
-		tagsJSONBytes, err := json.Marshal(payload.Tags)
-		if err != nil {
-			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
+		if err := repository.ArchiveKungfuRevision(ctx, tx, existing); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
-		if err := repository.UpdateKungfuContentByID(ctx, pool, existing.ID,
+		if err := repository.UpdateKungfuContentByID(ctx, tx, existing.ID,
 			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+		if err := tx.Commit(ctx); err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
 
@@ -118,6 +132,45 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 		Code: code, Title: payload.Title, Action: "created",
 		Checksum: payload.Checksum, Visibility: "private",
 	}, nil
+}
+
+
+// persistThreadMemory writes one Thread-origin Memory into the caller's
+// transaction. Thread messages are not standalone Store publishes: title,
+// tags and description may be empty, content is required, credentials are
+// rejected, and no standalone consumption action is invoked.
+func persistThreadMemory(ctx context.Context, q pg.Querier, botID int64, title string, tags []string, description, content string) (*model.Kungfu, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, errors.New(400, "MISSING_FIELD", "Thread Memory content is required")
+	}
+	if security.ContainsCredentialValue(map[string]interface{}{
+		"title": title, "tags": tags, "description": description, "content": content,
+	}) {
+		return nil, errors.New(400, "SENSITIVE_CONTENT", "Thread Memory must not contain credential-shaped strings")
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error encoding Thread Memory")
+	}
+	h := sha256.Sum256([]byte(content))
+	checksum := hex.EncodeToString(h[:])
+
+	code, err := repository.GenerateUniqueKungfuCode(ctx, q)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error creating Thread Memory")
+	}
+	if _, err := repository.InsertThreadKungfu(ctx, q, code, botID,
+		title, string(tagsJSON), description, content, checksum); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error creating Thread Memory")
+	}
+	k, err := repository.FindActiveKungfuByCode(ctx, q, code)
+	if err != nil || k == nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error reading Thread Memory")
+	}
+	return k, nil
 }
 
 // Share makes a kungfu public.
