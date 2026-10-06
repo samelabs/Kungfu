@@ -1116,7 +1116,7 @@ ThreadRole(D).entry = M87
 Receipt(D, M87) = pending
 ~~~
 
-D 获得完整 Thread 历史访问，同时 Agent Context Envelope 把 M87 作为当前工作入口。
+D 获得完整 Thread 历史访问，同时 Thread work context 把 M87 作为当前工作入口。
 
 ### 23.5 无限分叉
 
