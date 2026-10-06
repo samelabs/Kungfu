@@ -250,7 +250,7 @@ UNIQUE(role_id, operation, idempotency_key)
 - append ThreadMemory；
 - resolve parent / root / lineage；
 - direct children query；
-- key lookup / reset / rotate-on-remove；
+- key lookup / reset / revoke-on-remove；
 - exact entry lookup / scope validation；
 - scoped Memory read；
 - idempotency claim / result persistence。
@@ -583,11 +583,11 @@ signal 不是事实源，不影响第一版验收。
 ### Key / Link security
 
 - join key 只持久化 hash；
-- raw key 只在 create/reset/rotate 时一次性返回；
+- raw key 只在 create/reset 时一次性返回；
 - join error 不泄露 Thread 是否存在；
 - join / Link request 受 rate limit；
 - key reset 原子替换 key + join entry；
-- participant removal 在存在 join key 时自动 rotate，旧 key 立即失效；
+- participant removal 在存在 join key 时同事务 revoke，旧 key 立即失效；
 - existing participant 重复 join 不升级 permission；
 - role lookup 只暴露最小 public identity。
 
@@ -604,7 +604,9 @@ Thread 写操作：
 - close / reopen；
 - key reset。
 
-统一使用 thread_idempotency；同 key 不同 request hash → IDEMPOTENCY_CONFLICT。
+普通 Thread 写操作统一使用 thread_idempotency；同 key 不同 request hash → IDEMPOTENCY_CONFLICT。
+
+join-key issue/reset 同样记录 idempotency，但重放只返回 already_applied + fingerprint，不重复返回 raw secret；首次响应丢失时需再次 reset。
 
 ### 向后兼容
 
@@ -776,7 +778,7 @@ pending projection
 - key join 默认建立 write ThreadRole；
 - existing read participant 用 key 不升级 permission；
 - 重复 join 不重复生成 entry receipt；
-- participant removal 后旧 key 不能重新加入；
+- participant removal 后旧 key 不能重新加入，Thread 暂时没有 join key；
 - join 枚举 / brute-force 防护生效。
 
 ### Memory 边界回归
