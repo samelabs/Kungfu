@@ -147,9 +147,11 @@ T0
 
 Child Thread 仍然是完整 Thread，可以继续派生 Child，因此协作脉络可以递归延伸。
 
-parent_thread_id 与 anchor_memory_id 共同回答：
+parent_thread_id 与 anchor_entry_id 共同回答：
 
 > 这个事项从哪里产生。
+
+anchor_entry_id 指向直接 parent 中一次确定的 ThreadMemory occurrence，因此同时确定 Memory、revision、author 与原始挂载位置。
 
 ### 2.6 Todo
 
@@ -361,7 +363,7 @@ join entry
 
 join key 以不可预测随机值生成，并按安全哈希持久化。
 
-manage Role 重置 key 时同时指定 join entry。join entry 必须位于当前 Thread 协作范围。
+manage/govern Role 重置 key 时同时指定 join entry。join entry 必须是当前 Thread timeline entry 或该 Thread 的 direct anchor_entry_id。
 
 持 key 加入：
 
@@ -400,7 +402,7 @@ Root：
 
 ~~~
 parent_thread_id = null
-anchor_memory_id = null
+anchor_entry_id = null
 ~~~
 
 root Memory 是这个事项的起始输入。
@@ -413,11 +415,11 @@ Child Thread 必须同时拥有：
 
 ~~~
 parent_thread_id
-anchor_memory_id
+anchor_entry_id
 subject
 ~~~
 
-anchor_memory_id 指向直接 parent 中可读取的 Memory。
+anchor_entry_id 指向直接 parent 中可读取的 ThreadMemory entry。
 
 Child 创建后：
 
@@ -478,7 +480,7 @@ thread_roles
 - role_id
 - permission: read | write | manage
 - joined_by_role_id?
-- entry_memory_id
+- entry_entry_id
 - joined_at
 ~~~
 
@@ -490,7 +492,7 @@ permission：
 
 Root creator 的 tree-wide governance 由 Root ownership 派生，不依赖 descendant ThreadRole；govern 与 participant write 分离。
 
-entry_memory_id 表达 Role 进入这个协作事项的位置。
+entry_entry_id 表达 Role 进入这个协作事项的确定 ThreadMemory entry。Root / later-add 通常指向当前 Thread entry；Child 初始参与者可以指向该 Child 的 direct anchor_entry_id。
 
 ### 8.1 可行动参与者
 
@@ -518,7 +520,7 @@ creator 自己产生 root M1，因此不为自己生成 root entry Todo。
 
 ### 8.3 后续加入
 
-manage Role 把其他 Role 加入已有 Thread 时同时指定 entry_memory_id。
+manage Role 把其他 Role 加入已有 Thread 时同时指定 entry_entry_id。
 
 ~~~
 A adds D
@@ -541,7 +543,7 @@ ThreadMemory 表达 Memory 在 Thread 中的一次结构化出现。
 
 ~~~
 thread_memories
-- id
+- id                  # global entry id
 - thread_id
 - memory_id
 - memory_revision
@@ -559,8 +561,9 @@ seq：
 
 reply_to_entry_id：
 
-- 指向当前 Thread 中一个已有 ThreadMemory；
-- Child 的首轮 Reply 也可以指向当前 Thread 的 anchor；
+- 指向当前 Thread 中一个已有 ThreadMemory entry；
+- Child 的 Reply 允许直接指向该 Child 的 direct anchor_entry_id；
+- 不能指向其他任意外部 entry；
 - 表达对话挂载关系；
 - 不创建新的 Thread。
 
@@ -951,7 +954,7 @@ thread_join(key)
 
 Role 成为 Thread participant 后，可以读取该 Thread 完整历史。
 
-entry_memory_id 决定当前进入工作的起点。
+entry_entry_id 决定当前进入工作的起点。
 
 完整历史与当前待处理输入是两个独立维度。
 
@@ -1103,11 +1106,11 @@ role_links
 threads
 - id / code
 - join_key_hash
-- join_entry_memory_id?
+- join_entry_entry_id?
 - subject
 - created_by_role_id
 - parent_thread_id?
-- anchor_memory_id?
+- anchor_entry_id?
 - status
 - next_seq
 - revision
@@ -1123,7 +1126,7 @@ thread_roles
 - role_id
 - permission
 - joined_by_role_id?
-- entry_memory_id
+- entry_entry_id
 - joined_at
 ~~~
 
