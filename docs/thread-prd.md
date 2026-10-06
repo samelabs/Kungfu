@@ -693,7 +693,7 @@ branch 表达把当前输入展开为独立子事项。
 
 handle 表达该输入已处理，本轮在这里结束。
 
-Role 被移出 Thread 时，其仍为 pending 的 receipts 进入 withdrawn；participant membership 删除与必要的 join-key rotation 在同一事务完成。
+Role 被移出 Thread 时，其仍为 pending 的 receipts 进入 withdrawn；participant membership 删除与必要的 join-key revocation 在同一事务完成。
 
 Thread close 时，当前 pending receipts 进入 withdrawn；reopen 不恢复旧 pending。后续新的 reply / entry 再形成新的 pending。
 
@@ -908,6 +908,75 @@ Hire
 
 Todo 只表达 Thread 协作待处理状态，不吸收 Work claim、Task submission 或一般通知。
 
+### 14.5 低摩擦默认合同
+
+底层机制完整，不等于访问面要求用户配置完整机制。正常协作路径必须使用强默认值：
+
+~~~text
+Start
+→ creator = manage
+→ initial participant default = write
+→ entry = root entry
+
+Join
+→ caller 只提供 join key
+→ permission = write
+→ entry = key-bound entry
+
+Reply from Todo
+→ context 已给出 reply target + input ref
+→ Reply 自动处理当前 Todo
+→ 不需要额外 Handle
+
+Branch from Todo
+→ context 已给出 anchor + input ref
+→ Branch 自动处理当前 Todo
+
+Handle
+→ 只在不需要 Reply / Branch 时显式使用
+~~~
+
+Link 不是 Start 的前置条件：
+
+- active Link：可以在一次 Start 中直接加入目标 Role；
+- 非 Link：Start 可以直接创建协作，并在同一用户意图下生成 join path；
+- 不要求先建立 Link 再开始一次性协作。
+
+entry / permission / revision / receipt / idempotency 都属于协议参数或内部事实：
+
+- Agent 从 allowed actions 获得可直接回传的 target / input refs；
+- Web 从当前上下文自动带出 entry；
+- 普通用户不手工选择 entry_id；
+- 普通加入默认 write；
+- read / manage、permission change、key reset、close / reopen 属于高级管理动作。
+
+participant add 的默认行为：
+
+- target 必须是 active Link；
+- permission 默认 write；
+- entry 默认使用发起 add 动作时的当前 context entry；
+- 服务端收到的是确定 entry ref，不在提交时重新猜“最新消息”。
+
+join key 默认按需产生，不作为每个 Thread 的必备状态；participant removal 自动 revoke 当前 key，不要求用户再做一次安全操作。
+
+正常路径的摩擦预算：
+
+~~~text
+linked Start:
+Start → target Todo
+
+non-linked Start:
+Start + join path → target Join → target Todo
+
+Todo:
+open → Reply / Branch / Handle
+
+Link:
+request → peer accept
+~~~
+
+机制正确性不得增加额外的确认、配置或收尾动作。
+
 最终 MCP tool 与前端名称可以在以上表达下细化，但不得重新把 Memory / Thread 作为一级导航对象，也不得把内部数据结构直接平铺到访问面。
 
 ## 15. Thread create
@@ -922,8 +991,8 @@ thread_create 在一个事务中完成：
 6. creator 在 Root 建立 manage ThreadRole；
 7. initial Roles 建立 ThreadRole，entry=root Memory；
 8. 为其中 write / manage Role 生成 entry receipt；
-9. revision 提交；
-10. 发送 thread_changed。
+9. commit durable state；
+10. 若配置了 wake-up adapter，再发送 lightweight thread_changed signal。
 
 create 完成后，每个参与 Agent 都拥有明确事项、明确入口与明确下一步。
 
@@ -934,7 +1003,8 @@ create 完成后，每个参与 Agent 都拥有明确事项、明确入口与明
 manage Role 与目标 Role 存在 Link：
 
 ~~~
-thread_role_add(thread, target, entry_memory, permission)
+thread_role_add(thread, target, entry, permission=write)
+→ entry comes from current work context unless advanced caller overrides it
 → establish ThreadRole
 → write/manage: create entry receipt
 → read: establish observer context
