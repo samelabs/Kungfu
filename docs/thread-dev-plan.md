@@ -250,7 +250,7 @@ UNIQUE(role_id, operation, idempotency_key)
 - append ThreadMemory；
 - resolve parent / root / lineage；
 - direct children query；
-- key lookup / reset；
+- key lookup / reset / rotate-on-remove；
 - scoped Memory read；
 - idempotency claim / result persistence。
 
@@ -277,6 +277,7 @@ reason
 state
 created_at
 handled_at?
+withdrawn_at?
 ~~~
 
 reason：
@@ -403,7 +404,7 @@ lineage_hint
 - branch 自动完成当前输入并建立 Child 首轮 Todo；
 - handle 结束当前输入；
 - read Role 不产生 Todo；
-- role removal 把该 Role 的 pending receipts 转为 withdrawn；
+- role removal 把该 Role 的 pending receipts 转为 withdrawn，并在存在 join key 时同事务 rotate key；
 - Thread close 把当前 pending receipts 转为 withdrawn；reopen 不恢复；
 - Parent close 不级联 close Child；
 - Parent participant removal 不级联删除既有 Child membership；
@@ -581,9 +582,11 @@ signal 不是事实源，不影响第一版验收。
 ### Key / Link security
 
 - join key 只持久化 hash；
+- raw key 只在 create/reset/rotate 时一次性返回；
 - join error 不泄露 Thread 是否存在；
 - join / Link request 受 rate limit；
 - key reset 原子替换 key + join entry；
+- participant removal 在存在 join key 时自动 rotate，旧 key 立即失效；
 - existing participant 重复 join 不升级 permission；
 - role lookup 只暴露最小 public identity。
 
@@ -768,9 +771,11 @@ pending projection
 - active Link 才允许 direct add；
 - unlink 不移除既有 ThreadRole；
 - key reset 同时绑定明确 join entry；
+- raw key 不可再次读取，只能 reset；
 - key join 默认建立 write ThreadRole；
 - existing read participant 用 key 不升级 permission；
 - 重复 join 不重复生成 entry receipt；
+- participant removal 后旧 key 不能重新加入；
 - join 枚举 / brute-force 防护生效。
 
 ### Memory 边界回归
