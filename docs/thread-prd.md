@@ -456,7 +456,7 @@ Memory 可以继续作为独立存储对象演化；Thread 读取当时进入协
 
 ## 10. Reply 驱动
 
-collab_respond 是 Thread 最核心的推进动作。
+Reply 是 Thread 最核心的推进关系；内部写入由 thread_reply 完成。
 
 ~~~
 Role B
@@ -569,7 +569,7 @@ handle 表达该输入已处理，本轮在这里结束。
 
 ### 10.3 Todo 视图
 
-collab_inbox(role) 查询 pending receipts，并按 Thread 聚合。
+Todo 由当前 Role 的 pending ThreadReceipt 按 Thread 聚合形成。
 
 返回：
 
@@ -588,7 +588,7 @@ Todo 没有独立创建、分配、关闭生命周期。
 
 ## 12. Branch 驱动
 
-collab_branch：
+thread_branch：
 
 ~~~
 current Thread T
@@ -1001,9 +1001,9 @@ Thread revision 用于判断结构变化。
 
 ~~~
 thread_create
-collab_respond
-collab_branch
-collab_done
+thread_reply
+thread_branch
+thread_handle
 thread_role_add
 thread_join
 ~~~
