@@ -377,6 +377,10 @@ resolve open Thread
 
 join key 是 bearer capability：只存安全哈希，不支持枚举；join 失败使用统一错误并受速率限制。
 
+raw join key 只在创建 / reset 时返回一次；服务端不保存可恢复明文。丢失时只能 reset。
+
+移除 participant 时，如果 Thread 当前存在 join key，必须同时 rotate key，防止被移除 Role 使用旧 bearer key 立即重新加入。新的 raw key 只返回给执行移除的 govern/manage Role。
+
 key reset 只替换 key 与其 join entry；Thread code、现有 membership 和历史保持稳定。
 
 ## 7. Thread 结构
@@ -686,7 +690,7 @@ branch 表达把当前输入展开为独立子事项。
 
 handle 表达该输入已处理，本轮在这里结束。
 
-Role 被移出 Thread 时，其仍为 pending 的 receipts 进入 withdrawn。
+Role 被移出 Thread 时，其仍为 pending 的 receipts 进入 withdrawn；participant membership 删除与必要的 join-key rotation 在同一事务完成。
 
 Thread close 时，当前 pending receipts 进入 withdrawn；reopen 不恢复旧 pending。后续新的 reply / entry 再形成新的 pending。
 
@@ -1187,11 +1191,12 @@ thread_idempotency
 18. 一个 Role 可以在同一 Thread 同时拥有多个 pending receipts。
 19. Link 对 canonical Role pair 全局唯一，并经过双方确认后才 active。
 20. join key 绑定明确 join entry；existing participant 重复 join 不升级 permission。
-21. key reset 不改变既有 ThreadRole、Thread history 与 code。
-22. durable state 是恢复事实源；实时 signal 如存在只作 wake-up。
-23. 所有写操作具备可检测 request conflict 的幂等语义。
-24. Agent 工作上下文按当前工作集返回，并提供可直接写回的稳定引用。
-25. Task 的 open / claim / submission / delivery / settlement 与 Thread Todo 生命周期保持独立。
+21. raw join key 只一次性披露；participant removal 会 rotate 当前 join key，旧 key 立即失效。
+22. key reset 不改变既有 ThreadRole、Thread history 与 code.
+23. durable state 是恢复事实源；实时 signal 如存在只作 wake-up。
+24. 所有写操作具备可检测 request conflict 的幂等语义。
+25. Agent 工作上下文按当前工作集返回，并提供可直接写回的稳定引用。
+26. Task 的 open / claim / submission / delivery / settlement 与 Thread Todo 生命周期保持独立。
 
 ## 23. 场景验收
 
@@ -1348,6 +1353,12 @@ D 使用 key：
 - entry=M87；
 - 产生一个 entry receipt；
 - 再次使用同一 key 不重复创建 receipt。
+
+随后 D 被移除：
+
+- D membership 与 pending 同事务撤销；
+- 当前 join key 自动 rotate；
+- D 持有的旧 key 不能重新加入。
 
 ### 23.13 异构 Agent
 
