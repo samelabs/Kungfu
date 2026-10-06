@@ -40,42 +40,58 @@ Todo 是 pending ThreadReceipt 的产品投影。
 
 ### 目标
 
-让 Memory 同时满足：
+统一 Memory 的独立存储、Task live harness 与 Thread 稳定历史语义。
 
-- 可独立存储；
-- 可独立读取；
-- 可独立分享；
-- 可进入多个 Thread；
-- Thread 内一次已经发生的表达保持稳定语义。
+### Memory revision
 
-### 契约
-
-ThreadMemory 引用：
+新增可寻址 revision：
 
 ~~~text
-memory_id
-memory_revision
+memory_revisions
+- memory_id
+- revision
+- title?
+- tags?
+- description?
+- content
+- checksum
+- created_at
 ~~~
 
-Memory 的独立更新产生新的可寻址版本。
+Memory 当前对象指向 latest revision。
 
-Thread 读取固定 revision。
+规则：
 
-Thread 产生新表达时：
+- standalone update 创建新 revision；
+- memory_get 默认读取 latest；
+- Task harness 继续读取 latest；
+- ThreadMemory pin 指定 revision；
+- standalone soft-delete 后，新的 Task harness 不再取得该 Memory；
+- 已经进入 Thread 的 pinned revision 继续作为既有协作历史可读。
 
-~~~text
-create Memory revision
-→ append ThreadMemory
-→ pin revision
-~~~
+### 创建 primitive
+
+Memory 基础创建 primitive 支持：
+
+- owner；
+- content 必填；
+- title / tags / description 可选；
+- credential scan；
+- checksum；
+- transaction 由调用方控制。
+
+现有 standalone memory_put 的 title / tags / content 长度等产品合同继续保留在其入口层。
+
+Thread root / reply 使用基础 primitive，因此短协作内容不被 standalone Memory 表单约束。
 
 ### 验收
 
-- standalone Memory 正常存储与分享；
-- 一个 Memory revision 可以被多个 Thread 引用；
-- Memory 后续产生新 revision 后，已有 Thread 表达保持原语义；
-- Thread reply 创建 Memory 与 ThreadMemory 在同一事务完成；
-- 大体量 Memory 可以通过 ref 按需读取。
+- standalone memory_list/get/put/share/unshare/delete 行为保持；
+- Task harness_refs 始终读取 Memory latest revision；
+- Thread pin revision 后不随 standalone update 改义；
+- standalone soft-delete 不破坏既有 Thread history；
+- Thread reply 创建 Memory revision 与 ThreadMemory 同事务；
+- 一个 Memory revision 可以进入多个 Thread。
 
 ## WO-T2 Link / Thread 数据内核
 
@@ -83,27 +99,31 @@ create Memory revision
 
 ~~~text
 role_links
-- role_a_id
-- role_b_id
-- status
+- requester_role_id
+- target_role_id
+- status: pending | active
 - created_at
+- accepted_at?
 ~~~
 
-约束：
+生命周期：
 
-- Role pair 唯一；
-- active Link 表达双方直接协作信任。
+~~~text
+request → pending → accept → active
+pending → decline / cancel
+active → remove
+~~~
 
-能力：
+只有 active Link 允许双方直接建立 Thread participation。
 
-- 直接建立双人 Thread；
-- manage Role 将已 Link Role 直接加入 Thread。
+Link 不自动产生 ThreadRole 或 Todo。
 
 ### threads
 
 ~~~text
 id / code
 join_key_hash
+join_entry_memory_id?
 subject
 created_by_role_id
 parent_thread_id?
@@ -139,7 +159,8 @@ joined_at
 
 - (thread, role) 唯一；
 - 每个 ThreadRole 有 entry_memory_id；
-- Root creator 在 descendants 中保持 manage 能力。
+- Root creator 通过 root ownership 获得 descendants 的继承式 read/manage；
+- 继承治理权不自动创建 descendant ThreadRole。
 
 ### thread_memories
 
@@ -181,7 +202,10 @@ created_at
 - 同 Thread 并发 append 获得不同 seq；
 - Link 并发创建保持单一关系；
 - Role 并发加入保持单一 ThreadRole；
-- key reset 原子替换；
+- key reset 原子替换 key + join entry；
+- key join 建立 write ThreadRole 并使用绑定 entry；
+- active Link 才允许 direct add；
+- Root governance 不污染 descendant participant / Todo；
 - Tree lineage 在深层递归下保持稳定。
 
 ## WO-T3 Reply / Receipt / Todo
@@ -210,6 +234,7 @@ state：
 ~~~text
 pending
 handled
+withdrawn
 ~~~
 
 唯一约束：
@@ -227,7 +252,7 @@ handled
 3. append root ThreadMemory seq=1；
 4. creator 建立 manage ThreadRole；
 5. initial Roles 建立 ThreadRole，entry=root Memory；
-6. 为 initial Roles 创建 entry receipt；
+6. 仅为 write / manage initial Roles 创建 entry receipt；
 7. revision 提交。
 
 ### thread_reply
@@ -249,8 +274,8 @@ idempotency_key
 4. create Memory revision；
 5. allocate seq；
 6. append ThreadMemory with reply_to；
-7. 当前 Role 针对 parent input 的 pending receipt 收敛为 handled；
-8. parent author 当前仍在 Thread 时，为其创建 reply receipt；
+7. 当前 Role 只把 reply_to 对应的 pending receipt 收敛为 handled；
+8. parent author 当前为 write/manage participant 且不是当前 Role 时，为其创建 reply receipt；
 9. revision + 1；
 10. commit。
 
@@ -271,8 +296,8 @@ idempotency_key
 1. 验 parent + anchor；
 2. 创建 Child；
 3. 建立 Child ThreadRole；
-4. 建立 Child entry receipts；
-5. 当前 Role 针对 anchor 的 pending receipt 收敛为 handled；
+4. 仅为 Child write/manage participants 建立 entry receipts；
+5. 当前 Role 只把 anchor 对应的 pending receipt 收敛为 handled；
 6. parent revision + 1；
 7. commit。
 
@@ -288,13 +313,14 @@ idempotency_key
 
 效果：
 
-- 当前 Role 的指定 pending receipt 原子变为 handled；
+- 仅允许处理当前 Role 自己的指定 pending receipt；
+- pending → handled；
 - 保存 handled_at；
-- 作为一轮协作自然结束。
+- 不影响同 Thread 的其他 pending inputs。
 
 ### ThreadReceipt / Todo projection
 
-查询当前 Role 的 pending receipts，按 Thread 聚合：
+查询 open Thread 中当前 Role 的 pending receipts，且 Role 当前 permission 为 write / manage，再按 Thread 聚合：
 
 ~~~text
 thread
@@ -313,144 +339,97 @@ lineage_hint
 - reply 自动完成当前输入并把下一轮传回；
 - branch 自动完成当前输入并建立 Child 首轮 Todo；
 - handle 结束当前输入；
+- read Role 不产生 Todo；
+- role removal 把该 Role 的 pending receipts 转为 withdrawn；
+- Thread close 把当前 pending receipts 转为 withdrawn；reopen 不恢复；
 - Todo 表达始终按 Thread 聚合；
 - Task 的 open/claim/submission/delivery/settlement 生命周期与 Thread Todo 独立；
 - Thread Todo 不进入 work_list，不占用 Task claim，不参与 Task settlement。
 
-## WO-T4 Agent 访问面与 Context Envelope
+## WO-T4 Agent 工作上下文合同
 
-### 访问层原则
+### 目标
 
-对外协议表达 Agent 工作意图，内部 Thread 结构留在 service / repository。
+先实现 Agent 使用 Thread 所必需的功能合同，不在本工作单确定最终 MCP tool 名称、HTTP route 或前端术语。
 
-公开协作语义：
+### Pending discovery
 
-~~~
-collab_inbox
-collab_open
-collab_respond
-collab_branch
-collab_done
-collab_start
-collab_join
-collab_invite
-collab_remove
-~~~
+提供当前 Role 的协作待处理投影：
 
-外部参数和返回使用：
+- 按 Thread 聚合；
+- pending_count；
+- pending input stable refs；
+- subject / status；
+- latest pending time；
+- lineage hint。
 
-~~~
-collaboration_ref
-input_ref
-memory_ref
-role_ref
-continuation_ref
-~~~
+只包含当前 open Thread 中 write/manage Role 的 pending receipts。
 
-这些 ref 由 service 解析到内部 Thread / ThreadMemory / ThreadReceipt / Memory revision。
+### Thread work context
 
-Agent 不需要构造内部关系键。
-
-### Context Envelope
-
-### collab_open
-
-collab_open 是 Agent 进入协作事项的主要入口。
-
-返回：
+读取一个 Thread 时返回：
 
 ~~~text
-schema_version
+thread identity
+subject / status
 
-collaboration
-- ref
-- subject
-- status
-
-identity
-- current_role
-- thread_code
-- permission
-
+current role
+effective permission
 why_here
-- entry reason
-- source
-- lineage summary
 
-attention
-- pending inputs
-- input_ref
+pending inputs
+- stable input ref
 - source role
-- content / memory_ref
+- content or memory ref
+- reason
+- created_at
 
 context
-- focused memory
 - relevant memory refs
 - lineage summary
-- related child summaries
-- continuation_ref
+- direct child summaries
+- continuation / cursor
 
 participants
-- relevant roles
 
-actions
-- respond
-- branch
-- done
-- invite
-- close
-
-guidance
-- current matter
-- actionable inputs
-- useful context
-- available next actions
+allowed actions
+- action type
+- valid target ref
+- required parameters
 ~~~
-
-### Guidance contract
-
-agent_guidance：
-
-- 由 Kungfu 根据当前协议状态确定性生成；
-- 使用固定 schema/version；
-- 与 Memory content 分区；
-- 明确当前 Role、Thread、Todo 与可执行动作。
 
 ### 按需展开
 
-默认直接提供：
-
-- 当前 pending input；
-- 当前 anchor；
-- lineage anchor；
-- 当前 Thread 的结构索引。
-
-大体量 Memory 通过 memory_get(ref) 展开。
-
-Timeline 使用 cursor 分页。
+- 当前 pending 与进入原因优先；
+- 大体量 Memory 按 ref 读取；
+- Timeline cursor 分页；
+- lineage 返回必要路径；
+- sibling / full tree 按需读取。
 
 ### 会话隔离
 
-每次 Agent 操作显式携带 thread_code。
+每次读写显式绑定目标 Thread。
 
-collab_open(T1) 与 collab_open(T2) 形成两个独立工作上下文。
+服务返回稳定 input / memory / role / continuation ref，Agent 后续直接回传这些 ref。
 
-写入校验：
+内部 service 负责解析为 ThreadMemory / ThreadReceipt / Memory revision，并执行权限校验。
 
-- Agent 使用 input_ref / collaboration_ref 直接写回；
-- service 解析 opaque ref 后执行内部关系校验；
+### 可信边界
 
-- reply target 属于当前 Thread 范围；
-- branch anchor 属于当前 Thread 范围；
-- Role 权限来自当前 ThreadRole。
+Kungfu 生成的结构、权限、allowed actions 与导航信息是协议事实。
+
+Memory content 是参与者协作数据。
+
+两者在返回结构中明确分区。
 
 ### 验收
 
-- Agent 只凭 collab_open 返回即可知道当前事项、进入原因、attention 与可执行 actions；
-- 深层 Child 直接返回 lineage；
-- 1000+ Memory Thread 仍可先读结构、再按需展开；
-- Memory 内自然语言不会进入 Kungfu guidance 控制区；
-- 切换 Thread 后所有 action 继续显式绑定目标 Thread。
+- Agent 能发现当前等待自己的协作；
+- 读取 Thread 后知道事项、进入原因、pending、上下文和允许动作；
+- 1000+ Memory Thread 首包仍保持有限工作集；
+- 深层 Child 无需遍历 sibling 即可理解 lineage；
+- Agent 不需要理解 ThreadReceipt、seq、revision 才能正确写回；
+- 最终外部命名可以在不改变本功能合同的情况下独立设计。
 
 ## WO-T5 Realtime / Protocol
 
@@ -472,8 +451,9 @@ Todo 由 ThreadReceipt 持久化。
 Agent 重连：
 
 ~~~text
-collab_inbox
-→ collab_open
+query pending projection
+→ select Thread
+→ read current Thread work context
 → continue
 ~~~
 
@@ -507,8 +487,8 @@ thread_role_add(thread, role, entry_memory)
 成功：
 
 - 建立 ThreadRole；
-- 建立 entry receipt；
-- target 的 collab_inbox 立即出现该事项。
+- permission=write/manage 时建立 entry receipt；
+- pending projection 随 durable state 更新。
 
 #### Key join
 
@@ -518,10 +498,11 @@ thread_join(key)
 
 成功：
 
-- resolve Thread；
-- 建立 ThreadRole；
-- 建立 entry；
-- 返回 Thread Context Envelope。
+- resolve open Thread；
+- 建立 write ThreadRole；
+- entry 使用 key 绑定的 join entry；
+- 建立 entry receipt；
+- 返回当前 Thread work context。
 
 #### Key reset
 
@@ -529,48 +510,22 @@ thread_join(key)
 thread_key_reset(thread)
 ~~~
 
-更新 join_key_hash 并推进 revision。
+原子更新 join_key_hash + join_entry_memory_id 并推进 revision。
 
-### 对外操作面
+### Protocol 映射
 
-高频：
+MCP / HTTP 最终命名在功能 PRD 审核通过后确定。
 
-~~~text
-collab_inbox
-collab_open
-collab_respond
-collab_branch
-collab_done
-~~~
+协议层必须覆盖：
 
-协作建立：
+- pending discovery；
+- Thread work context；
+- create / reply / branch / handle；
+- join / participant management / key reset；
+- lineage / tree / timeline expansion；
+- realtime change signal。
 
-~~~text
-thread_create
-thread_join
-thread_role_add
-thread_role_remove
-~~~
-
-信任与寻址：
-
-~~~text
-role_find
-role_link
-role_unlink
-thread_key_reset
-~~~
-
-结构读取：
-
-~~~text
-memory_get
-thread_lineage
-thread_tree
-thread_timeline
-~~~
-
-MCP / HTTP 映射同一 service 语义。
+所有 transport 共享同一 service 事实。
 
 ### 幂等
 
@@ -583,7 +538,7 @@ MCP / HTTP 映射同一 service 语义。
 - thread_role_add；
 - thread_join。
 
-Agent 访问层的 collab_* 调用把同一个 idempotency key 透传到对应内部操作。
+外部协议将同一个 idempotency key 透传到对应内部操作。
 
 重复请求返回同一业务结果。
 
@@ -626,10 +581,11 @@ B/C/D 同时 reply M1。
 
 验证：
 
-- D 可读完整 Thread；
+- D 可读授权范围；
 - entry=M87；
-- D 只产生一个明确 entry Todo；
-- collab_open 直接把 M87 作为 actionable input。
+- write/manage D 只产生一个明确 entry Todo；
+- read D 不产生 Todo；
+- Thread work context 直接把 M87 作为 actionable input。
 
 ### 深层分叉
 
@@ -640,7 +596,8 @@ B/C/D 同时 reply M1。
 - lineage 正确；
 - Agent 无需遍历 siblings；
 - 每个 Child 保持自己的 Roles / Todo / Timeline；
-- Root creator 可获得完整 tree。
+- Root creator 可获得完整 tree；
+- Root creator 未加入某 Child 时不出现在该 Child participant / Todo。
 
 ### 大信息量
 
@@ -652,7 +609,7 @@ B/C/D 同时 reply M1。
 
 验证：
 
-- collab_open 首包保持可控；
+- Thread work context 首包保持可控；
 - pending / anchor 优先；
 - Memory 按需读取；
 - cursor 正常分页。
@@ -674,10 +631,31 @@ Agent 离线后收到多个 Reply，再以新进程恢复。
 验证：
 
 ~~~text
-collab_inbox
-→ collab_open
+pending projection
+→ Thread work context
 → 正确继续
 ~~~
+
+### Close / Reopen
+
+验证：
+
+- close 把当前 pending receipts 转为 withdrawn；
+- closed Thread 停止 reply / branch；
+- reopen 保留历史；
+- withdrawn receipts 不恢复；
+- 新输入重新生成 pending。
+
+### Link / Key
+
+验证：
+
+- Link request / accept 后才 active；
+- active Link 才允许 direct add；
+- unlink 不移除既有 ThreadRole；
+- key reset 同时绑定明确 join entry；
+- key join 默认建立 write ThreadRole；
+- 重复 join 不重复生成 entry receipt。
 
 ### Task 边界回归
 
@@ -719,13 +697,13 @@ MCP client
 完成后，任意外部 Agent 能只依赖 Kungfu 协议完成：
 
 ~~~text
-发现 Todo
-→ 打开事项
-→ 理解 lineage
+发现当前 pending
+→ 读取 Thread 工作上下文
+→ 理解进入原因与 lineage
 → 按需读 Memory
 → 本地执行
 → reply / branch / handle
 → 自动形成下一轮协作
 ~~~
 
-产品文档、MCP 描述、HTTP contract、README 与版本说明都从最终实现契约生成。
+产品命名、MCP tool、HTTP contract、前端表达、README 与版本说明都从审核通过的功能合同生成。
