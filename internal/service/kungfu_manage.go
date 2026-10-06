@@ -134,7 +134,6 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	}, nil
 }
 
-
 // persistThreadMemory writes one Thread-origin Memory into the caller's
 // transaction. Thread messages are not standalone Store publishes: title,
 // tags and description may be empty, content is required, credentials are
