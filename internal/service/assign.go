@@ -95,24 +95,13 @@ func loadAssignmentRoom(ctx context.Context, tx pgx.Tx, assignID, botID int64) (
 }
 
 // deadlinePassed reports whether the assign's current clock already
-// ran out. The inline guard REJECTS the in-flight action (L4: expiry
-// beats it) but does not materialize the terminal state — the whole
-// rejected transaction rolls back with the idempotency seam, and the
-// RecoverAssigns sweeper lands the terminal fact on its cadence
-// (D-014).
+// ran out, evaluated on the DATABASE clock — the same clock the
+// RecoverAssigns sweeper uses, so the L4 boundary is deterministic
+// (residue audit #9). The inline guard REJECTS the in-flight action
+// without materializing; the sweeper lands the terminal fact (D-014).
 func deadlinePassed(ctx context.Context, tx pgx.Tx, a *repository.AssignmentRow) bool {
-	if a.State == "taken" {
-		return dueExpired(a.DeliverDueAt)
-	}
-	if a.State == "delivered" {
-		var judgeDue string
-		if err := tx.QueryRow(ctx,
-			`SELECT to_char(judge_due_at, 'YYYY-MM-DD HH24:MI:SS') FROM assign_deliveries WHERE assign_id = $1`,
-			a.ID).Scan(&judgeDue); err == nil {
-			return dueExpired(&judgeDue)
-		}
-	}
-	return false
+	passed, err := repository.AssignmentDeadlinePassed(ctx, tx, a.ID, a.State)
+	return err == nil && passed
 }
 
 func dueExpired(houseClock *string) bool {
@@ -210,7 +199,7 @@ func AssignTake(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
 					"Assignment is not open (state: "+a.State+")")
 			}
-			ok, err := repository.TakeAssignmentCAS(ctx, tx, a.ID, botID)
+			ok, deliverDue, err := repository.TakeAssignmentCAS(ctx, tx, a.ID, botID)
 			if err != nil || !ok {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE", "Assignment is not open")
 			}
@@ -220,6 +209,7 @@ func AssignTake(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error ending receipt")
 			}
 			a.State = "taken"
+			takeFacts := map[string]any{"deliver_due_at": deliverDue}
 			var judgeDue any
 			if payload != "" || strings.TrimSpace(memories) != "" {
 				if err := assignPayloadCheck(a.OutputSchema, payload); err != nil {
@@ -238,6 +228,9 @@ func AssignTake(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				enqueueNotify(ctx, tx, a.CreatorID, "judge", 1)
 			}
 			facts := assignmentFacts(code, a)
+			for k, v := range takeFacts {
+				facts[k] = v
+			}
 			if judgeDue != nil {
 				facts["judge_due_at"] = judgeDue
 			}
@@ -417,39 +410,51 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 var RecoverAssigns = repository.RecoverAssigns
 
 // TodoList is the account-level turn projection (§8, D5): every open
-// obligation across all rooms, oldest first, cursor-paged. Pure read
-// of receipts/assignments — nothing is ever written here (§8).
-func TodoList(ctx context.Context, pool *pg.Pool, botID int64, cursor string) (map[string]any, error) {
-	before := 0
+// obligation across all rooms, oldest first, with a stable keyset
+// cursor. Pure read of receipts/assignments — nothing is ever
+// written here. threadID > 0 scopes to one room (the workset slice).
+func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, cursor string) (map[string]any, error) {
+	cursorProduced := ""
+	var cursorBranch, cursorID int64
 	if strings.TrimSpace(cursor) != "" {
-		v, err := strconv.Atoi(strings.TrimSpace(cursor))
-		if err != nil || v < 0 {
+		parts := strings.Split(strings.TrimSpace(cursor), "|")
+		if len(parts) != 3 {
 			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
 		}
-		before = v
+		cursorProduced = parts[0]
+		var b, i int
+		var err1, err2 error
+		b, err1 = strconv.Atoi(parts[1])
+		i, err2 = strconv.Atoi(parts[2])
+		if err1 != nil || err2 != nil || b < 1 || b > 3 || i < 0 || cursorProduced == "" {
+			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
+		}
+		cursorBranch, cursorID = int64(b), int64(i)
 	}
-	items, err := repository.TodoItemsForAccount(ctx, pool, botID, int64(before), 51)
+	items, err := repository.TodoItemsForAccount(ctx, pool, botID, threadID, cursorProduced, cursorBranch, cursorID, 51)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading turns")
 	}
 	nextCursor := any(nil)
 	if len(items) > 50 {
+		last := items[49]
 		items = items[:50]
-		nextCursor = strconv.Itoa(before + 50)
+		nextCursor = last.ProducedAt + "|" + strconv.FormatInt(last.Branch, 10) + "|" + strconv.FormatInt(last.RowID, 10)
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
-		next := map[string]string{"kind": it.Kind, "thread": it.Thread}
 		row := map[string]any{
 			"kind":        it.Kind,
 			"thread":      it.Thread,
 			"author":      it.Author,
 			"summary":     it.Summary,
 			"next_action": map[string]string{"reply": "respond", "deliver": "deliver", "judge": "judge"}[it.Kind],
-			"next_kind":   next,
 		}
 		if it.EntryID != nil {
 			row["entry"] = *it.EntryID
+		}
+		if it.AssignID != nil {
+			row["assign"] = *it.AssignID
 		}
 		if it.Seq != nil {
 			row["seq"] = *it.Seq

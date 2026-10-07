@@ -818,19 +818,42 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading timeline")
 	}
+	pageEntryIDs := make([]int64, 0, len(items))
+	for _, it := range items {
+		pageEntryIDs = append(pageEntryIDs, it.ID)
+	}
+	receiptStates, rErr := repository.ReceiptStatesForEntries(ctx, pool, th.ID, pageEntryIDs)
+	if rErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading response states")
+	}
+	statesByEntry := map[int64][]map[string]any{}
+	for _, r := range receiptStates {
+		row := map[string]any{"account": r.AccountID, "state": r.State}
+		if r.Resolution != nil {
+			row["resolution"] = *r.Resolution
+		}
+		if r.Note != nil {
+			row["note"] = *r.Note
+		}
+		statesByEntry[r.EntryID] = append(statesByEntry[r.EntryID], row)
+	}
 	timeline := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		row := map[string]any{
-			"entry":   it.ID,
-			"seq":     it.Seq,
-			"author":  it.Author,
-			"summary": it.Summary,
-			"asked":   it.Asked,
-			"assign":  it.HasAssign,
-			"at":      it.CreatedAt,
+			"entry":    it.ID,
+			"seq":      it.Seq,
+			"author":   it.Author,
+			"summary":  it.Summary,
+			"asked":    it.Asked,
+			"receipts": statesByEntry[it.ID],
+			"at":       it.CreatedAt,
 		}
-		if it.ReplyTo != nil {
-			row["reply_to"] = *it.ReplyTo
+		if it.ReplyToID != nil {
+			row["reply_to"] = *it.ReplyToID
+			row["reply_to_seq"] = *it.ReplyToSeq
+		}
+		if it.AssignID != nil {
+			row["assign"] = map[string]any{"id": *it.AssignID, "state": *it.AssignState}
 		}
 		timeline = append(timeline, row)
 	}
@@ -839,20 +862,14 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		nextCursor = strconv.FormatInt(items[len(items)-1].Seq, 10)
 	}
 
-	// my open obligations in this room (the room slice of the turn
-	// list; the account-wide todo_list is D5)
-	pending, err := repository.MyPendingThreadReceipts(ctx, pool, th.ID, botID)
+	// my open obligations in this room — the room slice of the turn
+	// list, all three kinds (the account-wide todo_list pages the same
+	// projection)
+	slice, err := TodoList(ctx, pool, botID, th.ID, "")
 	if err != nil {
-		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading open items")
+		return nil, err
 	}
-	todos := make([]map[string]any, 0, len(pending))
-	for _, pd := range pending {
-		todos = append(todos, map[string]any{
-			"kind": "reply", "entry": pd.EntryID, "seq": pd.Seq,
-			"author": pd.Author, "summary": pd.Summary,
-			"next_action": "respond",
-		})
-	}
+	todos := slice["todos"]
 
 	// full payloads on demand (§8): entries=[…]
 	expanded := []any{}
@@ -885,6 +902,59 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	if th.Subject != nil {
 		room["subject"] = *th.Subject
 	}
+	// the assignments section (§9: assignments, deliveries and
+	// judgments are room content) — requirements, deadlines, state
+	// machine, payload, verdict and reject reason all readable here
+	assignRows, err := repository.ListThreadAssignments(ctx, pool, th.ID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")
+	}
+	assignments := make([]map[string]any, 0, len(assignRows))
+	for _, a := range assignRows {
+		row := map[string]any{
+			"assign":        a.ID,
+			"entry":         a.EntryID,
+			"creator":       a.CreatorID,
+			"to":            a.AssigneeID,
+			"requirements":  a.Requirements,
+			"deliver_due_s": a.DeliverDueS,
+			"judge_due_s":   a.JudgeDueS,
+			"state":         a.State,
+			"at":            a.CreatedAt,
+		}
+		if a.OutputSchema != nil {
+			row["output_schema"] = *a.OutputSchema
+		}
+		if a.TakenAt != nil {
+			row["taken_at"] = *a.TakenAt
+		}
+		if a.DeliverDueAt != nil {
+			row["deliver_due_at"] = *a.DeliverDueAt
+		}
+		if a.Payload != nil {
+			row["payload"] = *a.Payload
+		}
+		if a.MemoriesJSON != nil {
+			row["memories"] = *a.MemoriesJSON
+		}
+		if a.SubmittedAt != nil {
+			row["submitted_at"] = *a.SubmittedAt
+		}
+		if a.JudgeDueAt != nil {
+			row["judge_due_at"] = *a.JudgeDueAt
+		}
+		if a.Verdict != nil {
+			row["verdict"] = *a.Verdict
+		}
+		if a.Reason != nil {
+			row["reason"] = *a.Reason
+		}
+		if a.JudgedAt != nil {
+			row["judged_at"] = *a.JudgedAt
+		}
+		assignments = append(assignments, row)
+	}
+
 	return map[string]any{
 		"thread":      room,
 		"role":        me.Role,
@@ -893,6 +963,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		"timeline":    timeline,
 		"next_cursor": nextCursor,
 		"entries":     expanded,
+		"assignments": assignments,
 		"todos":       todos,
 		"next":        threadNextActions(th, me.Role, int64(len(rows)), governors),
 	}, nil
@@ -925,6 +996,10 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 		nextCursor = strconv.FormatInt(rows[threadPageSize-1].ID, 10)
 		rows = rows[:threadPageSize]
 	}
+	openItems, err2 := repository.ThreadOpenItemsCounts(ctx, pool, botID)
+	if err2 != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading open item counts")
+	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		room := map[string]any{"code": r.Code, "status": r.Status}
@@ -935,7 +1010,7 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 			"thread":     room,
 			"role":       r.Role,
 			"joined_at":  r.JoinedAt,
-			"open_items": 0, // D5 turn projection
+			"open_items": openItems[r.ID],
 		})
 	}
 	return map[string]any{

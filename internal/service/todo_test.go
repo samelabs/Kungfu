@@ -54,7 +54,7 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 	}
 	askEntry := askRes["entry"].(int64)
 
-	res, err := TodoList(ctx, pool, a, "")
+	res, err := TodoList(ctx, pool, a, 0, "")
 	if err != nil {
 		t.Fatalf("todo: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 	if _, err := AssignSubmit(ctx, pool, a, s1, `{"v":1}`, "", "sm1"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	ownerTodo, err := TodoList(ctx, pool, owner, "")
+	ownerTodo, err := TodoList(ctx, pool, owner, 0, "")
 	if err != nil {
 		t.Fatalf("owner todo: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 	if _, err := ThreadPost(ctx, pool, a, code2, "here", "", "", &askEntry, nil, nil, "rp1"); err != nil {
 		t.Fatalf("reply: %v", err)
 	}
-	after, err := TodoList(ctx, pool, a, "")
+	after, err := TodoList(ctx, pool, a, 0, "")
 	if err != nil {
 		t.Fatalf("after: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 
 	// A18 recovery: a brand-new "session" is the same query — the
 	// list is identical because it is a projection of stored facts
-	again, err := TodoList(ctx, pool, a, "")
+	again, err := TodoList(ctx, pool, a, 0, "")
 	if err != nil {
 		t.Fatalf("again: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 	// empty account: wait + retry_after (§8) — a FRESH account owes
 	// nothing (b itself owes the reply a's re-ask just created)
 	fresh, _, _ := a7TestBot(t, pool, 5)
-	empty, err := TodoList(ctx, pool, fresh, "")
+	empty, err := TodoList(ctx, pool, fresh, 0, "")
 	if err != nil {
 		t.Fatalf("empty: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestTodoListCursorPages(t *testing.T) {
 	seen := 0
 	cursor := ""
 	for {
-		res, err := TodoList(ctx, pool, a, cursor)
+		res, err := TodoList(ctx, pool, a, 0, cursor)
 		if err != nil {
 			t.Fatalf("todo page: %v", err)
 		}

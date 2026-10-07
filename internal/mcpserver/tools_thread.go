@@ -548,7 +548,7 @@ func handleTodoList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	if !deps.limiter().CheckAgent(agent.ID, "thread_read") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_read").RetryAfter)
 	}
-	res, err := service.TodoList(ctx, deps.Pool, agent.ID, in.Cursor)
+	res, err := service.TodoList(ctx, deps.Pool, agent.ID, 0, in.Cursor)
 	if err != nil {
 		return threadErrResult(err)
 	}

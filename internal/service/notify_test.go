@@ -77,7 +77,7 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 		t.Fatalf("post: %v", err)
 	}
 	// A21 loss: do NOT dispatch — the turn list still has the item
-	todo, err := TodoList(ctx, pool, a, "")
+	todo, err := TodoList(ctx, pool, a, 0, "")
 	if err != nil {
 		t.Fatalf("todo: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 		t.Fatalf("deleted endpoint still received: %d", len(payloads))
 	}
 	mu.Unlock()
-	todo2, err := TodoList(ctx, pool, a, "")
+	todo2, err := TodoList(ctx, pool, a, 0, "")
 	if err != nil {
 		t.Fatalf("todo2: %v", err)
 	}

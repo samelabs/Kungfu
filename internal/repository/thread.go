@@ -631,15 +631,17 @@ func CountThreadSpeechCapable(ctx context.Context, q pg.Querier, threadID int64)
 // ThreadTimelineItem is one digest row of the summary timeline (§8:
 // bounded reads, digest first).
 type ThreadTimelineItem struct {
-	ID        int64
-	Seq       int64
-	AuthorID  int64
-	Author    string
-	Summary   string
-	ReplyTo   *int64 // seq of the replied entry, when present
-	Asked     []int64
-	HasAssign bool
-	CreatedAt string
+	ID          int64
+	Seq         int64
+	AuthorID    int64
+	Author      string
+	Summary     string
+	ReplyToID   *int64 // entry id of the reply target (the input space)
+	ReplyToSeq  *int64 // its seq, for human reading
+	Asked       []int64
+	AssignID    *int64
+	AssignState *string
+	CreatedAt   string
 }
 
 // ThreadTimeline pages the digest newest-first with a keyset cursor
@@ -647,10 +649,13 @@ type ThreadTimelineItem struct {
 func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq int64, limit int) ([]ThreadTimelineItem, error) {
 	rows, err := q.Query(ctx, `
 		SELECT e.id, e.seq, e.author_id, b.bot_name,
-		       COALESCE(e.summary, ''), (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json,
-		       e.assign_id IS NOT NULL, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
+		       COALESCE(e.summary, ''),
+		       (SELECT r.id FROM thread_entries r WHERE r.id = e.reply_to_id),
+		       (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id),
+		       e.asked_json, a.id, a.state, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM thread_entries e
 		JOIN tb_bots b ON b.id = e.author_id
+		LEFT JOIN assigns a ON a.entry_id = e.id
 		WHERE e.thread_id = $1 AND ($2 = 0 OR e.seq < $2)
 		ORDER BY e.seq DESC
 		LIMIT $3`, threadID, beforeSeq, limit)
@@ -663,7 +668,8 @@ func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq
 		var it ThreadTimelineItem
 		var asked []byte
 		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
-			&it.Summary, &it.ReplyTo, &asked, &it.HasAssign, &it.CreatedAt); err != nil {
+			&it.Summary, &it.ReplyToID, &it.ReplyToSeq,
+			&asked, &it.AssignID, &it.AssignState, &it.CreatedAt); err != nil {
 			return nil, err
 		}
 		it.Asked = parseAskedJSON(asked)
@@ -840,16 +846,25 @@ func LockAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow
 
 // TakeAssignmentCAS moves open→taken and stamps the deadline clock
 // (deliver deadline runs from take, §6.4).
-func TakeAssignmentCAS(ctx context.Context, q pg.Querier, id, assigneeID int64) (bool, error) {
+func TakeAssignmentCAS(ctx context.Context, q pg.Querier, id, assigneeID int64) (bool, string, error) {
+	var due string
 	tag, err := q.Exec(ctx, `
 		UPDATE assigns
 		SET state = 'taken', taken_at = NOW(),
 		    deliver_due_at = NOW() + make_interval(secs => deliver_due_s)
 		WHERE id = $1 AND assignee_id = $2 AND state = 'open'`, id, assigneeID)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() != 1 {
+		return false, "", nil
+	}
+	if err := q.QueryRow(ctx,
+		`SELECT to_char(deliver_due_at, 'YYYY-MM-DD HH24:MI:SS') FROM assigns WHERE id = $1`,
+		id).Scan(&due); err != nil {
+		return true, "", err
+	}
+	return true, due, nil
 }
 
 // InsertAssignmentDelivery writes the single immutable delivery and
@@ -1000,37 +1015,44 @@ type TodoItem struct {
 	Kind       string // reply | deliver | judge
 	Thread     string
 	EntryID    *int64
-	AssignID   *int64
+	AssignID   *int64 // the action handle for deliver/judge items
 	Seq        *int64
 	Author     string
 	Summary    string
 	DueAt      *string
 	ProducedAt string
+	Branch     int64 // cursor component
+	RowID      int64 // cursor component
 }
 
 // TodoItemsForAccount pages the account's open obligations, oldest
-// first (§8: ordered by production time). Judge items only appear
-// while the creator is still a member (R-18).
-func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, before int64, limit int) ([]TodoItem, error) {
+// first, with a stable (produced, branch, id) keyset cursor — an
+// obligation settling between pages never skips or dups its
+// neighbours. threadID > 0 scopes the projection to one room (the
+// room's working-set slice); judge items only appear while the
+// creator is still a member (R-18). The assign id rides deliver and
+// judge items: it is the handle the next action needs.
+func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
 	rows, err := q.Query(ctx, `
-		(SELECT 'reply' AS kind, t.code AS thread, e.id AS entry_id,
-		        e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
+		SELECT * FROM (
+		(SELECT 1 AS branch, 'reply' AS kind, t.code AS thread, e.id AS entry_id,
+		        r.id AS row_id, e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
 		        NULL::text AS due, to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS produced
 		 FROM thread_receipts r
 		 JOIN thread_entries e ON e.id = r.entry_id
 		 JOIN tb_bots b ON b.id = e.author_id
 		 JOIN threads t ON t.id = r.thread_id
-		 WHERE r.account_id = $1 AND r.state = 'pending')
+		 WHERE r.account_id = $1 AND r.state = 'pending' AND ($2 = 0 OR r.thread_id = $2))
 		UNION ALL
-		(SELECT 'deliver', t.code, a.entry_id, e.seq, b.bot_name,
+		(SELECT 2, 'deliver', t.code, a.entry_id, a.id, e.seq, b.bot_name,
 		        COALESCE(e.summary, ''), to_char(a.deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(a.taken_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM assigns a
 		 JOIN threads t ON t.id = a.thread_id
 		 JOIN thread_entries e ON e.id = a.entry_id
 		 JOIN tb_bots b ON b.id = a.creator_id
-		 WHERE a.assignee_id = $1 AND a.state = 'taken')
+		 WHERE a.assignee_id = $1 AND a.state = 'taken' AND ($2 = 0 OR a.thread_id = $2))
 		UNION ALL
-		(SELECT 'judge', t.code, a.entry_id, e.seq, b.bot_name,
+		(SELECT 3, 'judge', t.code, a.entry_id, a.id, e.seq, b.bot_name,
 		        COALESCE(e.summary, ''), to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM assigns a
 		 JOIN assign_deliveries d ON d.assign_id = a.id
@@ -1038,9 +1060,11 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, bef
 		 JOIN thread_entries e ON e.id = a.entry_id
 		 JOIN tb_bots b ON b.id = a.assignee_id
 		 JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
-		 WHERE a.creator_id = $1 AND a.state = 'delivered')
-		ORDER BY produced ASC
-		LIMIT $3 OFFSET $2`, accountID, before, limit)
+		 WHERE a.creator_id = $1 AND a.state = 'delivered' AND ($2 = 0 OR a.thread_id = $2))
+		) items
+		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
+		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
+		LIMIT $6`, accountID, threadID, cursorProduced, cursorBranch, cursorID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,9 +1072,17 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, bef
 	var out []TodoItem
 	for rows.Next() {
 		var it TodoItem
-		if err := rows.Scan(&it.Kind, &it.Thread, &it.EntryID, &it.Seq,
-			&it.Author, &it.Summary, &it.DueAt, &it.ProducedAt); err != nil {
+		var branch int64
+		var rowID int64
+		if err := rows.Scan(&branch, &it.Kind, &it.Thread, &it.EntryID, &rowID,
+			&it.Seq, &it.Author, &it.Summary, &it.DueAt, &it.ProducedAt); err != nil {
 			return nil, err
+		}
+		it.Branch = branch
+		it.RowID = rowID
+		if it.Kind != "reply" {
+			id := rowID
+			it.AssignID = &id
 		}
 		out = append(out, it)
 	}
@@ -1132,4 +1164,148 @@ func MarkOutboxSent(ctx context.Context, q pg.Querier, id int64, sent bool) erro
 	}
 	_, err := q.Exec(ctx, `UPDATE notify_outbox SET attempts = attempts + 1 WHERE id = $1`, id)
 	return err
+}
+
+// AssignmentFullRow is the member-facing read of one assignment and
+// its delivery (§9: assignments, deliveries and judgments are room
+// content — this is the surface the write path never had).
+type AssignmentFullRow struct {
+	ID           int64
+	EntryID      int64
+	CreatorID    int64
+	AssigneeID   int64
+	Requirements string
+	OutputSchema *string
+	DeliverDueS  int64
+	JudgeDueS    int64
+	State        string
+	TakenAt      *string
+	DeliverDueAt *string
+	CreatedAt    string
+	Payload      *string
+	MemoriesJSON *string
+	SubmittedAt  *string
+	JudgeDueAt   *string
+	Verdict      *string
+	Reason       *string
+	JudgedAt     *string
+}
+
+// ListThreadAssignments returns every assignment of a room with its
+// delivery and verdict, oldest first — the workset's progress view.
+func ListThreadAssignments(ctx context.Context, q pg.Querier, threadID int64) ([]AssignmentFullRow, error) {
+	rows, err := q.Query(ctx, `
+		SELECT a.id, a.entry_id, a.creator_id, a.assignee_id, a.requirements,
+		       a.output_schema::text, a.deliver_due_s, a.judge_due_s, a.state,
+		       to_char(a.taken_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(a.deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(a.created_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       d.payload::text, d.memories_json::text,
+		       to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       d.verdict, d.reason, to_char(d.judged_at, 'YYYY-MM-DD HH24:MI:SS')
+		FROM assigns a
+		LEFT JOIN assign_deliveries d ON d.assign_id = a.id
+		WHERE a.thread_id = $1
+		ORDER BY a.id ASC`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AssignmentFullRow
+	for rows.Next() {
+		var r AssignmentFullRow
+		if err := rows.Scan(&r.ID, &r.EntryID, &r.CreatorID, &r.AssigneeID, &r.Requirements,
+			&r.OutputSchema, &r.DeliverDueS, &r.JudgeDueS, &r.State,
+			&r.TakenAt, &r.DeliverDueAt, &r.CreatedAt,
+			&r.Payload, &r.MemoriesJSON, &r.SubmittedAt, &r.JudgeDueAt,
+			&r.Verdict, &r.Reason, &r.JudgedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ReceiptStateRow is one asked member's obligation state on an entry.
+type ReceiptStateRow struct {
+	EntryID    int64
+	AccountID  int64
+	State      string
+	Resolution *string
+	Note       *string
+}
+
+// ReceiptStatesForEntries loads the response states (and handle
+// notes) of the given entries — the timeline's "who has responded"
+// layer.
+func ReceiptStatesForEntries(ctx context.Context, q pg.Querier, threadID int64, entryIDs []int64) ([]ReceiptStateRow, error) {
+	rows, err := q.Query(ctx, `
+		SELECT entry_id, account_id, state, resolution, note
+		FROM thread_receipts
+		WHERE thread_id = $1 AND entry_id = ANY($2)
+		ORDER BY entry_id, account_id`, threadID, entryIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReceiptStateRow
+	for rows.Next() {
+		var r ReceiptStateRow
+		if err := rows.Scan(&r.EntryID, &r.AccountID, &r.State, &r.Resolution, &r.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ThreadOpenItemsCounts counts the account's open obligations per
+// room (reply + deliver + judge), keyed by thread id — the
+// thread_list enrichment.
+func ThreadOpenItemsCounts(ctx context.Context, q pg.Querier, accountID int64) (map[int64]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT thread_id, COUNT(*) FROM (
+		    SELECT r.thread_id FROM thread_receipts r
+		    WHERE r.account_id = $1 AND r.state = 'pending'
+		    UNION ALL
+		    SELECT a.thread_id FROM assigns a
+		    WHERE a.assignee_id = $1 AND a.state = 'taken'
+		    UNION ALL
+		    SELECT a.thread_id FROM assigns a
+		    JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
+		    WHERE a.creator_id = $1 AND a.state = 'delivered'
+		) t GROUP BY thread_id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var id, n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// AssignmentDeadlinePassed evaluates expiry on the DATABASE clock —
+// one clock for the inline guard and the sweeper (L4 determinism).
+func AssignmentDeadlinePassed(ctx context.Context, q pg.Querier, assignID int64, state string) (bool, error) {
+	var passed bool
+	var err error
+	if state == "taken" {
+		err = q.QueryRow(ctx,
+			`SELECT deliver_due_at <= NOW() FROM assigns WHERE id = $1`, assignID).Scan(&passed)
+	} else {
+		err = q.QueryRow(ctx, `
+			SELECT d.judge_due_at <= NOW() FROM assign_deliveries d
+			WHERE d.assign_id = $1`, assignID).Scan(&passed)
+	}
+	if err != nil {
+		return false, err
+	}
+	return passed, nil
 }

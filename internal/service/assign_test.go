@@ -418,8 +418,22 @@ func TestAssignIdempotencyAndRaces(t *testing.T) {
 	go func() { defer wg.Done(); _, err := AssignVoid(ctx, pool, owner, s2, "rk2"); voided = err == nil }()
 	wg.Wait()
 	st := assignState(t, pool, s2)
-	if took == voided || (st != "taken" && st != "voided") {
-		t.Fatalf("take/void race: took=%v voided=%v state=%s", took, voided, st)
+	// legal serial orders: take→void (both succeed, terminal voided);
+	// take only (void rejected on… no — void of taken is legal, so
+	// the take-only order arises when void ran first and failed);
+	// void first (take then rejected). At least one succeeds, and the
+	// state always tells which side won last.
+	if !took && !voided {
+		t.Fatalf("take/void race: both failed")
+	}
+	if took && voided && st != "voided" {
+		t.Fatalf("take→void order ended in %s", st)
+	}
+	if took && !voided && st != "taken" {
+		t.Fatalf("take-only order ended in %s", st)
+	}
+	if !took && voided && st != "voided" {
+		t.Fatalf("void-first order ended in %s", st)
 	}
 
 	// take vs take: one winner, the other sees INVALID_STATE
