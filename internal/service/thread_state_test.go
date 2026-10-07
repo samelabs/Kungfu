@@ -499,15 +499,253 @@ func TestCreateJoinAndKeyResetOneTimeDisclosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !oldResetReplay.AlreadyApplied || oldResetReplay.JoinKey != "" || oldResetReplay.JoinKeyFingerprint != reset2.JoinKeyFingerprint {
-		t.Fatalf("old reset replay did not return current fingerprint: %+v current=%+v", oldResetReplay, reset2)
+	if !oldResetReplay.AlreadyApplied || oldResetReplay.JoinKey != "" || oldResetReplay.JoinKeyFingerprint != reset.JoinKeyFingerprint {
+		t.Fatalf("old reset replay drifted from original fingerprint: %+v original=%+v current=%+v", oldResetReplay, reset, reset2)
 	}
 	createReplayAfterReset, err := CreateThreadState(ctx, pool, a, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !createReplayAfterReset.AlreadyApplied || createReplayAfterReset.JoinKey != "" || createReplayAfterReset.JoinKeyFingerprint != reset2.JoinKeyFingerprint {
-		t.Fatalf("create replay did not return current fingerprint: %+v current=%+v", createReplayAfterReset, reset2)
+	if !createReplayAfterReset.AlreadyApplied || createReplayAfterReset.JoinKey != "" || createReplayAfterReset.JoinKeyFingerprint != first.JoinKeyFingerprint {
+		t.Fatalf("create replay drifted from original fingerprint: %+v original=%+v current=%+v", createReplayAfterReset, first, reset2)
+	}
+}
+
+func TestIdempotentCreateAndReplySnapshotsDoNotDrift(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+
+	createKey := threadIdem("snapshot-create")
+	createIn := ThreadCreateInput{
+		Subject: "original subject", Content: "root",
+		Participants: []ThreadParticipantSpec{{RoleID: b}},
+		IdempotencyKey: createKey,
+	}
+	created, err := CreateThreadState(ctx, pool, a, createIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateThreadSubjectState(ctx, pool, a, created.Thread.ID, "changed subject", threadIdem("snapshot-create-subject")); err != nil {
+		t.Fatal(err)
+	}
+	createReplay, err := CreateThreadState(ctx, pool, a, createIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !createReplay.AlreadyApplied || createReplay.Thread.Subject != "original subject" {
+		t.Fatalf("create replay drifted: %+v", createReplay)
+	}
+	if createReplay.Thread.Revision != created.Thread.Revision {
+		t.Fatalf("create replay revision drifted: got %d want %d", createReplay.Thread.Revision, created.Thread.Revision)
+	}
+
+	replyKey := threadIdem("snapshot-reply")
+	replyIn := ThreadReplyInput{
+		ThreadID: created.Thread.ID, ReplyToEntryID: created.RootEntry.ID, InputEntryID: int64Ptr(created.RootEntry.ID),
+		Content: "B response", IdempotencyKey: replyKey,
+	}
+	reply, err := ReplyThreadState(ctx, pool, b, replyIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateThreadSubjectState(ctx, pool, a, created.Thread.ID, "changed after reply", threadIdem("snapshot-reply-subject")); err != nil {
+		t.Fatal(err)
+	}
+	replyReplay, err := ReplyThreadState(ctx, pool, b, replyIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replyReplay.AlreadyApplied || replyReplay.Entry.ID != reply.Entry.ID {
+		t.Fatalf("reply replay lost original entry: %+v first=%+v", replyReplay, reply)
+	}
+	if replyReplay.Thread.Subject != reply.Thread.Subject || replyReplay.Thread.Revision != reply.Thread.Revision {
+		t.Fatalf("reply replay drifted: replay=%+v first=%+v", replyReplay.Thread, reply.Thread)
+	}
+}
+
+func TestIdempotentMembershipSnapshotsDoNotDrift(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	c := pubSeedBot(t, pool, 0)
+	d := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+	threadTestActiveLink(t, pool, a, c)
+
+	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
+		Subject: "membership snapshots", Content: "root",
+		Participants: []ThreadParticipantSpec{{RoleID: b}},
+		IdempotencyKey: threadIdem("snapshot-membership-create"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addKey := threadIdem("snapshot-add")
+	added, changed, err := AddThreadParticipant(ctx, pool, a, root.Thread.ID,
+		ThreadParticipantSpec{RoleID: c, Permission: model.ThreadWrite}, root.RootEntry.ID, addKey)
+	if err != nil || !changed {
+		t.Fatalf("add: role=%+v changed=%v err=%v", added, changed, err)
+	}
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, c, model.ThreadRead, nil, threadIdem("snapshot-add-mutate")); err != nil {
+		t.Fatal(err)
+	}
+	addReplay, replayChanged, err := AddThreadParticipant(ctx, pool, a, root.Thread.ID,
+		ThreadParticipantSpec{RoleID: c, Permission: model.ThreadWrite}, root.RootEntry.ID, addKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayChanged || addReplay.Permission != model.ThreadWrite || addReplay.JoinedAt != added.JoinedAt {
+		t.Fatalf("add replay drifted: replay=%+v changed=%v first=%+v", addReplay, replayChanged, added)
+	}
+
+	permKey := threadIdem("snapshot-permission")
+	permFirst, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadRead, nil, permKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadWrite,
+		int64Ptr(root.RootEntry.ID), threadIdem("snapshot-permission-mutate")); err != nil {
+		t.Fatal(err)
+	}
+	permReplay, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, b, model.ThreadRead, nil, permKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permReplay.Permission != permFirst.Permission || permReplay.EntryID != permFirst.EntryID {
+		t.Fatalf("permission replay drifted: replay=%+v first=%+v", permReplay, permFirst)
+	}
+
+	key, err := ResetThreadJoinKeyState(ctx, pool, a, root.Thread.ID, root.RootEntry.ID, threadIdem("snapshot-join-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinKey := threadIdem("snapshot-join")
+	joined, err := JoinThreadState(ctx, pool, d, key.JoinKey, joinKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ChangeThreadPermission(ctx, pool, a, root.Thread.ID, d, model.ThreadRead, nil, threadIdem("snapshot-join-mutate")); err != nil {
+		t.Fatal(err)
+	}
+	joinReplay, err := JoinThreadState(ctx, pool, d, key.JoinKey, joinKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !joinReplay.AlreadyApplied || !joinReplay.Joined || joinReplay.Role.Permission != joined.Role.Permission ||
+		joinReplay.Role.EntryID != joined.Role.EntryID || joinReplay.Thread.Revision != joined.Thread.Revision {
+		t.Fatalf("join replay drifted: replay=%+v first=%+v", joinReplay, joined)
+	}
+}
+
+func TestIdempotentThreadStateSnapshotsDoNotDrift(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
+		Subject: "state snapshots", Content: "root", IdempotencyKey: threadIdem("snapshot-state-create"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	subjectKey := threadIdem("snapshot-subject")
+	subjectFirst, err := UpdateThreadSubjectState(ctx, pool, a, root.Thread.ID, "subject B", subjectKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateThreadSubjectState(ctx, pool, a, root.Thread.ID, "subject C", threadIdem("snapshot-subject-mutate")); err != nil {
+		t.Fatal(err)
+	}
+	subjectReplay, err := UpdateThreadSubjectState(ctx, pool, a, root.Thread.ID, "subject B", subjectKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subjectReplay.Subject != subjectFirst.Subject || subjectReplay.Revision != subjectFirst.Revision {
+		t.Fatalf("subject replay drifted: replay=%+v first=%+v", subjectReplay, subjectFirst)
+	}
+
+	closeKey := threadIdem("snapshot-close")
+	closed, err := CloseThreadState(ctx, pool, a, root.Thread.ID, closeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenKey := threadIdem("snapshot-reopen")
+	reopened, err := ReopenThreadState(ctx, pool, a, root.Thread.ID, reopenKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeReplay, err := CloseThreadState(ctx, pool, a, root.Thread.ID, closeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeReplay.Status != model.ThreadClosed || closeReplay.Revision != closed.Revision {
+		t.Fatalf("close replay drifted: replay=%+v first=%+v current=%+v", closeReplay, closed, reopened)
+	}
+
+	if _, err := CloseThreadState(ctx, pool, a, root.Thread.ID, threadIdem("snapshot-reopen-mutate")); err != nil {
+		t.Fatal(err)
+	}
+	reopenReplay, err := ReopenThreadState(ctx, pool, a, root.Thread.ID, reopenKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopenReplay.Status != model.ThreadOpen || reopenReplay.Revision != reopened.Revision {
+		t.Fatalf("reopen replay drifted: replay=%+v first=%+v", reopenReplay, reopened)
+	}
+}
+
+func TestIdempotentBranchSnapshotDoesNotDriftOrRediscloseKey(t *testing.T) {
+	pool := pubTestPool(t)
+	ctx := context.Background()
+	a := pubSeedBot(t, pool, 0)
+	b := pubSeedBot(t, pool, 0)
+	threadTestActiveLink(t, pool, a, b)
+
+	root, err := CreateThreadState(ctx, pool, a, ThreadCreateInput{
+		Subject: "branch parent", Content: "root",
+		Participants: []ThreadParticipantSpec{{RoleID: b}},
+		IdempotencyKey: threadIdem("snapshot-branch-parent"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchKey := threadIdem("snapshot-branch")
+	in := ThreadBranchInput{
+		ParentThreadID: root.Thread.ID, AnchorEntryID: root.RootEntry.ID, InputEntryID: int64Ptr(root.RootEntry.ID),
+		Subject: "branch original", IssueJoinKey: true, IdempotencyKey: branchKey,
+	}
+	first, err := BranchThreadState(ctx, pool, b, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.JoinKey == "" || first.JoinKeyFingerprint == "" {
+		t.Fatalf("branch did not return first-use key: %+v", first)
+	}
+	if _, err := UpdateThreadSubjectState(ctx, pool, b, first.Thread.ID, "branch changed", threadIdem("snapshot-branch-subject")); err != nil {
+		t.Fatal(err)
+	}
+	secondKey, err := ResetThreadJoinKeyState(ctx, pool, b, first.Thread.ID, root.RootEntry.ID, threadIdem("snapshot-branch-key-mutate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondKey.JoinKeyFingerprint == first.JoinKeyFingerprint {
+		t.Fatal("branch key mutation did not change fingerprint")
+	}
+	replay, err := BranchThreadState(ctx, pool, b, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replay.AlreadyApplied || replay.JoinKey != "" {
+		t.Fatalf("branch replay re-disclosed key: %+v", replay)
+	}
+	if replay.JoinKeyFingerprint != first.JoinKeyFingerprint || replay.Thread.Subject != first.Thread.Subject ||
+		replay.Thread.Revision != first.Thread.Revision {
+		t.Fatalf("branch replay drifted: replay=%+v first=%+v currentKey=%+v", replay, first, secondKey)
 	}
 }
 
