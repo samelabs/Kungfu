@@ -255,6 +255,8 @@ Submission 幂等比较使用统一 `output_hash`：在受理时先把每个 Mem
 | `partner_remove(name)` | 任一方解除；不影响已有线程成员关系 |
 | `partner_list()` | 伙伴、收到的请求、发出的请求；每个伙伴附：与其共同所在的开放线程（code、主题、本人待回应数、最近活动时间） |
 
+`note` 属于这一次 **pending 请求**：首次请求写入后不被同一方的重复 `partner_request` 改写；重复请求返回现有 pending。若对方在 pending 存在时反向 `partner_request`，该动作等价于接受现有请求并直接变为伙伴，反向调用携带的 `note` 不覆盖原请求 note。关系变为 active 后 note 只作为该次建立关系的来源事实保留，不作为新的待办内容；解除后再次请求会产生新的 note。
+
 发起协作时，Agent 先看 `partner_list`：已有共同线程则继续该线程，没有再 `thread_start`。节点不强制一对伙伴只有一个线程。
 
 ---
