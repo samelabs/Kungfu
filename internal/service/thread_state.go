@@ -96,13 +96,13 @@ type ThreadJoinResult struct {
 	AlreadyApplied bool
 }
 
-type threadIdempotencyRef struct {
-	ThreadID    int64  `json:"thread_id,omitempty"`
-	EntryID     int64  `json:"entry_id,omitempty"`
-	RoleID      int64  `json:"role_id,omitempty"`
-	InputID     int64  `json:"input_id,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Changed     bool   `json:"changed,omitempty"`
+type threadIdempotencyResult struct {
+	Thread      *model.Thread       `json:"thread,omitempty"`
+	Entry       *model.ThreadMemory `json:"entry,omitempty"`
+	Role        *model.ThreadRole   `json:"role,omitempty"`
+	Fingerprint string              `json:"fingerprint,omitempty"`
+	Changed     bool                `json:"changed,omitempty"`
+	Joined      bool                `json:"joined,omitempty"`
 }
 
 func threadRequestHash(v any) ([]byte, error) {
@@ -114,7 +114,7 @@ func threadRequestHash(v any) ([]byte, error) {
 	return sum[:], nil
 }
 
-func beginThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, operation, key string, request any) (*threadIdempotencyRef, bool, error) {
+func beginThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, operation, key string, request any) (*threadIdempotencyResult, bool, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil, false, errors.New("idempotency key is required")
@@ -143,15 +143,15 @@ func beginThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, operat
 	if existing.ResultRef == "" {
 		return nil, false, errors.New("idempotency result is incomplete")
 	}
-	var ref threadIdempotencyRef
-	if err := json.Unmarshal([]byte(existing.ResultRef), &ref); err != nil {
+	var result threadIdempotencyResult
+	if err := json.Unmarshal([]byte(existing.ResultRef), &result); err != nil {
 		return nil, false, err
 	}
-	return &ref, false, nil
+	return &result, false, nil
 }
 
-func completeThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, operation, key string, ref threadIdempotencyRef) error {
-	body, err := json.Marshal(ref)
+func completeThreadIdempotency(ctx context.Context, tx pgx.Tx, roleID int64, operation, key string, result threadIdempotencyResult) error {
+	body, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
@@ -224,17 +224,12 @@ func CreateThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 		return nil, err
 	}
 	if !acquired {
-		thread, err := repository.FindThreadByID(ctx, tx, replay.ThreadID)
-		if err != nil || thread == nil {
-			return nil, errors.New("idempotent Thread result not found")
-		}
-		entry, err := repository.FindThreadMemoryByID(ctx, tx, replay.EntryID)
-		if err != nil || entry == nil {
-			return nil, errors.New("idempotent root entry not found")
+		if replay.Thread == nil || replay.Entry == nil {
+			return nil, errors.New("idempotent Thread result snapshot is incomplete")
 		}
 		return &ThreadCreateResult{
-			Thread: thread, RootEntry: entry,
-			JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
+			Thread: replay.Thread, RootEntry: replay.Entry,
+			JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
 		}, nil
 	}
 
@@ -277,15 +272,22 @@ func CreateThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 		result.JoinKey = raw
 		result.JoinKeyFingerprint = threadKeyFingerprint(raw)
 	}
-	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpCreate, in.IdempotencyKey, threadIdempotencyRef{
-		ThreadID: thread.ID, EntryID: entry.ID, Fingerprint: result.JoinKeyFingerprint,
+	finalThread, err := repository.FindThreadByID(ctx, tx, thread.ID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("created thread result not found")
+		}
+		return nil, err
+	}
+	result.Thread = finalThread
+	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpCreate, in.IdempotencyKey, threadIdempotencyResult{
+		Thread: result.Thread, Entry: result.RootEntry, Fingerprint: result.JoinKeyFingerprint,
 	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	result.Thread, _ = repository.FindThreadByID(ctx, pool, thread.ID)
 	return result, nil
 }
 
@@ -307,12 +309,10 @@ func ReplyThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thre
 		return nil, err
 	}
 	if !acquired {
-		entry, err := repository.FindThreadMemoryByID(ctx, tx, replay.EntryID)
-		if err != nil || entry == nil {
-			return nil, errors.New("idempotent reply result not found")
+		if replay.Thread == nil || replay.Entry == nil {
+			return nil, errors.New("idempotent reply result snapshot is incomplete")
 		}
-		thread, _ := repository.FindThreadByID(ctx, tx, replay.ThreadID)
-		return &ThreadReplyResult{Thread: thread, Entry: entry, AlreadyApplied: true}, nil
+		return &ThreadReplyResult{Thread: replay.Thread, Entry: replay.Entry, AlreadyApplied: true}, nil
 	}
 
 	if _, err := repository.FindThreadByIDForUpdate(ctx, tx, in.ThreadID); err != nil {
@@ -363,15 +363,22 @@ func ReplyThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thre
 			}
 		}
 	}
+	finalThread, err := repository.FindThreadByID(ctx, tx, in.ThreadID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("reply thread result not found")
+		}
+		return nil, err
+	}
+	result := &ThreadReplyResult{Thread: finalThread, Entry: entry}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpReply, in.IdempotencyKey,
-		threadIdempotencyRef{ThreadID: in.ThreadID, EntryID: entry.ID}); err != nil {
+		threadIdempotencyResult{Thread: result.Thread, Entry: result.Entry}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	thread, _ := repository.FindThreadByID(ctx, pool, in.ThreadID)
-	return &ThreadReplyResult{Thread: thread, Entry: entry}, nil
+	return result, nil
 }
 
 func BranchThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in ThreadBranchInput) (*ThreadBranchResult, error) {
@@ -394,12 +401,11 @@ func BranchThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 		return nil, err
 	}
 	if !acquired {
-		thread, err := repository.FindThreadByID(ctx, tx, replay.ThreadID)
-		if err != nil || thread == nil {
-			return nil, errors.New("idempotent branch result not found")
+		if replay.Thread == nil {
+			return nil, errors.New("idempotent branch result snapshot is incomplete")
 		}
 		return &ThreadBranchResult{
-			Thread: thread, JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
+			Thread: replay.Thread, JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
 		}, nil
 	}
 
@@ -461,14 +467,21 @@ func BranchThreadState(ctx context.Context, pool *pg.Pool, actorID int64, in Thr
 		result.JoinKey = raw
 		result.JoinKeyFingerprint = threadKeyFingerprint(raw)
 	}
+	finalThread, err := repository.FindThreadByID(ctx, tx, child.ID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("branch thread result not found")
+		}
+		return nil, err
+	}
+	result.Thread = finalThread
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpBranch, in.IdempotencyKey,
-		threadIdempotencyRef{ThreadID: child.ID, Fingerprint: result.JoinKeyFingerprint}); err != nil {
+		threadIdempotencyResult{Thread: result.Thread, Fingerprint: result.JoinKeyFingerprint}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	result.Thread, _ = repository.FindThreadByID(ctx, pool, child.ID)
 	return result, nil
 }
 
@@ -504,7 +517,7 @@ func HandleThreadInput(ctx context.Context, pool *pg.Pool, actorID, threadID, in
 		return false, ErrThreadStaleInput
 	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpHandle, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, InputID: inputEntryID, Changed: true}); err != nil {
+		threadIdempotencyResult{Changed: true}); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -535,8 +548,10 @@ func AddThreadParticipant(ctx context.Context, pool *pg.Pool, actorID, threadID 
 		return nil, false, err
 	}
 	if !acquired {
-		role, err := repository.FindThreadRole(ctx, tx, replay.ThreadID, replay.RoleID)
-		return role, false, err
+		if replay.Role == nil {
+			return nil, false, errors.New("idempotent participant result snapshot is incomplete")
+		}
+		return replay.Role, replay.Changed, nil
 	}
 	thread, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID)
 	if err != nil || thread == nil {
@@ -561,15 +576,21 @@ func AddThreadParticipant(ctx context.Context, pool *pg.Pool, actorID, threadID 
 			return nil, false, errors.New("participant entry receipt already exists")
 		}
 	}
+	finalRole, err := repository.FindThreadRole(ctx, tx, threadID, p.RoleID)
+	if err != nil || finalRole == nil {
+		if err == nil {
+			err = errors.New("participant result not found")
+		}
+		return nil, false, err
+	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpRoleAdd, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, RoleID: p.RoleID, Changed: true}); err != nil {
+		threadIdempotencyResult{Role: finalRole, Changed: true}); err != nil {
 		return nil, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, err
 	}
-	role, err := repository.FindThreadRole(ctx, pool, threadID, p.RoleID)
-	return role, true, err
+	return finalRole, true, nil
 }
 
 func JoinThreadState(ctx context.Context, pool *pg.Pool, roleID int64, rawKey, idempotencyKey string) (*ThreadJoinResult, error) {
@@ -587,9 +608,10 @@ func JoinThreadState(ctx context.Context, pool *pg.Pool, roleID int64, rawKey, i
 		return nil, err
 	}
 	if !acquired {
-		thread, _ := repository.FindThreadByID(ctx, tx, replay.ThreadID)
-		role, err := repository.FindThreadRole(ctx, tx, replay.ThreadID, roleID)
-		return &ThreadJoinResult{Thread: thread, Role: role, Joined: replay.Changed, AlreadyApplied: true}, err
+		if replay.Thread == nil || replay.Role == nil {
+			return nil, errors.New("idempotent join result snapshot is incomplete")
+		}
+		return &ThreadJoinResult{Thread: replay.Thread, Role: replay.Role, Joined: replay.Joined, AlreadyApplied: true}, nil
 	}
 	thread, role, joined, err := joinThreadByKeyKernel(ctx, tx, roleID, rawKey)
 	if err != nil {
@@ -604,16 +626,29 @@ func JoinThreadState(ctx context.Context, pool *pg.Pool, roleID int64, rawKey, i
 			return nil, errors.New("join entry receipt already exists")
 		}
 	}
+	finalThread, err := repository.FindThreadByID(ctx, tx, thread.ID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("joined thread result not found")
+		}
+		return nil, err
+	}
+	finalRole, err := repository.FindThreadRole(ctx, tx, thread.ID, roleID)
+	if err != nil || finalRole == nil {
+		if err == nil {
+			err = errors.New("joined role result not found")
+		}
+		return nil, err
+	}
+	result := &ThreadJoinResult{Thread: finalThread, Role: finalRole, Joined: joined}
 	if err := completeThreadIdempotency(ctx, tx, roleID, threadOpJoin, idempotencyKey,
-		threadIdempotencyRef{ThreadID: thread.ID, RoleID: roleID, Changed: joined}); err != nil {
+		threadIdempotencyResult{Thread: result.Thread, Role: result.Role, Joined: result.Joined}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	thread, _ = repository.FindThreadByID(ctx, pool, thread.ID)
-	role, err = repository.FindThreadRole(ctx, pool, thread.ID, roleID)
-	return &ThreadJoinResult{Thread: thread, Role: role, Joined: joined}, err
+	return result, nil
 }
 
 func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadID, targetRoleID int64, permission string, entryID *int64, idempotencyKey string) (*model.ThreadRole, error) {
@@ -637,7 +672,10 @@ func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadI
 		return nil, err
 	}
 	if !acquired {
-		return repository.FindThreadRole(ctx, tx, replay.ThreadID, replay.RoleID)
+		if replay.Role == nil {
+			return nil, errors.New("idempotent permission result snapshot is incomplete")
+		}
+		return replay.Role, nil
 	}
 	thread, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID)
 	if err != nil || thread == nil {
@@ -663,7 +701,7 @@ func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadI
 	}
 	if current.Permission == permission && (entryID == nil || current.EntryID == *entryID) {
 		if err := completeThreadIdempotency(ctx, tx, actorID, threadOpPermission, idempotencyKey,
-			threadIdempotencyRef{ThreadID: threadID, RoleID: targetRoleID}); err != nil {
+			threadIdempotencyResult{Role: current}); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -709,14 +747,21 @@ func ChangeThreadPermission(ctx context.Context, pool *pg.Pool, actorID, threadI
 	if err := repository.BumpThreadRevision(ctx, tx, threadID); err != nil {
 		return nil, err
 	}
+	finalRole, err := repository.FindThreadRole(ctx, tx, threadID, targetRoleID)
+	if err != nil || finalRole == nil {
+		if err == nil {
+			err = errors.New("permission result not found")
+		}
+		return nil, err
+	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpPermission, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, RoleID: targetRoleID, Changed: true}); err != nil {
+		threadIdempotencyResult{Role: finalRole, Changed: true}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return repository.FindThreadRole(ctx, pool, threadID, targetRoleID)
+	return finalRole, nil
 }
 
 func RemoveThreadParticipant(ctx context.Context, pool *pg.Pool, actorID, threadID, targetRoleID int64, idempotencyKey string) (bool, error) {
@@ -763,7 +808,7 @@ func RemoveThreadParticipant(ctx context.Context, pool *pg.Pool, actorID, thread
 		return false, err
 	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpRoleRemove, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, RoleID: targetRoleID, Changed: true}); err != nil {
+		threadIdempotencyResult{Changed: true}); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -793,7 +838,10 @@ func setThreadOpenState(ctx context.Context, pool *pg.Pool, actorID, threadID in
 		return nil, err
 	}
 	if !acquired {
-		return repository.FindThreadByID(ctx, tx, replay.ThreadID)
+		if replay.Thread == nil {
+			return nil, errors.New("idempotent thread-state result snapshot is incomplete")
+		}
+		return replay.Thread, nil
 	}
 	thread, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID)
 	if err != nil || thread == nil {
@@ -804,7 +852,7 @@ func setThreadOpenState(ctx context.Context, pool *pg.Pool, actorID, threadID in
 	}
 	if thread.Status == to {
 		if err := completeThreadIdempotency(ctx, tx, actorID, operation, idempotencyKey,
-			threadIdempotencyRef{ThreadID: threadID}); err != nil {
+			threadIdempotencyResult{Thread: thread}); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -828,14 +876,21 @@ func setThreadOpenState(ctx context.Context, pool *pg.Pool, actorID, threadID in
 			return nil, err
 		}
 	}
+	finalThread, err := repository.FindThreadByID(ctx, tx, threadID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("thread-state result not found")
+		}
+		return nil, err
+	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, operation, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, Changed: true}); err != nil {
+		threadIdempotencyResult{Thread: finalThread, Changed: true}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return repository.FindThreadByID(ctx, pool, threadID)
+	return finalThread, nil
 }
 
 func CloseThreadState(ctx context.Context, pool *pg.Pool, actorID, threadID int64, idempotencyKey string) (*model.Thread, error) {
@@ -869,9 +924,11 @@ func ResetThreadJoinKeyState(ctx context.Context, pool *pg.Pool, actorID, thread
 		return nil, err
 	}
 	if !acquired {
-		thread, _ := repository.FindThreadByID(ctx, tx, replay.ThreadID)
+		if replay.Thread == nil {
+			return nil, errors.New("idempotent key-reset result snapshot is incomplete")
+		}
 		return &ThreadKeyResetResult{
-			Thread: thread, JoinKeyFingerprint: threadKeyHashFingerprint(thread.JoinKeyHash), AlreadyApplied: true,
+			Thread: replay.Thread, JoinKeyFingerprint: replay.Fingerprint, AlreadyApplied: true,
 		}, nil
 	}
 	if _, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID); err != nil {
@@ -882,15 +939,21 @@ func ResetThreadJoinKeyState(ctx context.Context, pool *pg.Pool, actorID, thread
 		return nil, err
 	}
 	fingerprint := threadKeyFingerprint(raw)
+	finalThread, err := repository.FindThreadByID(ctx, tx, threadID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("key-reset thread result not found")
+		}
+		return nil, err
+	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpKeyReset, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, Fingerprint: fingerprint, Changed: true}); err != nil {
+		threadIdempotencyResult{Thread: finalThread, Fingerprint: fingerprint, Changed: true}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	thread, _ := repository.FindThreadByID(ctx, pool, threadID)
-	return &ThreadKeyResetResult{Thread: thread, JoinKey: raw, JoinKeyFingerprint: fingerprint}, nil
+	return &ThreadKeyResetResult{Thread: finalThread, JoinKey: raw, JoinKeyFingerprint: fingerprint}, nil
 }
 
 func RevokeThreadJoinKeyState(ctx context.Context, pool *pg.Pool, actorID, threadID int64, idempotencyKey string) (bool, error) {
@@ -917,7 +980,7 @@ func RevokeThreadJoinKeyState(ctx context.Context, pool *pg.Pool, actorID, threa
 		return false, err
 	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpKeyRevoke, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, Changed: changed}); err != nil {
+		threadIdempotencyResult{Changed: changed}); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -945,7 +1008,10 @@ func UpdateThreadSubjectState(ctx context.Context, pool *pg.Pool, actorID, threa
 		return nil, err
 	}
 	if !acquired {
-		return repository.FindThreadByID(ctx, tx, replay.ThreadID)
+		if replay.Thread == nil {
+			return nil, errors.New("idempotent subject result snapshot is incomplete")
+		}
+		return replay.Thread, nil
 	}
 	thread, err := repository.FindThreadByIDForUpdate(ctx, tx, threadID)
 	if err != nil || thread == nil {
@@ -960,12 +1026,19 @@ func UpdateThreadSubjectState(ctx context.Context, pool *pg.Pool, actorID, threa
 			return nil, err
 		}
 	}
+	finalThread, err := repository.FindThreadByID(ctx, tx, threadID)
+	if err != nil || finalThread == nil {
+		if err == nil {
+			err = errors.New("subject result not found")
+		}
+		return nil, err
+	}
 	if err := completeThreadIdempotency(ctx, tx, actorID, threadOpSubject, idempotencyKey,
-		threadIdempotencyRef{ThreadID: threadID, Changed: changed}); err != nil {
+		threadIdempotencyResult{Thread: finalThread, Changed: changed}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return repository.FindThreadByID(ctx, pool, threadID)
+	return finalThread, nil
 }
