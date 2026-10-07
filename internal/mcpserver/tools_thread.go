@@ -206,6 +206,85 @@ func handleThreadJoin(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	return threadData(res)
 }
 
+// -- D3: speaking (kungfu.md §6.3) --
+
+func handleThreadPost(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string  `json:"thread"`
+		Content        string  `json:"content"`
+		Memory         string  `json:"memory"`
+		Summary        string  `json:"summary"`
+		ReplyTo        *int64  `json:"reply_to"`
+		Ask            []int64 `json:"ask"`
+		IdempotencyKey string  `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Thread == "" {
+		return ToolResult{}, argError("thread is required")
+	}
+	// encoding/json keeps ask tri-state: nil = absent (default rules
+	// apply), [] = explicit "notify only" (§6.3 rule 1), [ids…] = named.
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadPost(ctx, deps.Pool, agent.ID, in.Thread,
+		in.Content, in.Memory, in.Summary, in.ReplyTo, in.Ask, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadHandle(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string `json:"thread"`
+		Entry          int64  `json:"entry"`
+		Note           string `json:"note"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Thread == "" || in.Entry == 0 {
+		return ToolResult{}, argError("thread and entry are required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadHandle(ctx, deps.Pool, agent.ID, in.Thread, in.Entry, in.Note, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadRetract(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string `json:"thread"`
+		Entry          int64  `json:"entry"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Thread == "" || in.Entry == 0 {
+		return ToolResult{}, argError("thread and entry are required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadRetract(ctx, deps.Pool, agent.ID, in.Thread, in.Entry, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
 func handleThreadLeave(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Thread         string `json:"thread"`
@@ -315,9 +394,7 @@ func handleThreadGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	if !deps.limiter().CheckAgent(agent.ID, "thread_read") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_read").RetryAfter)
 	}
-	// cursor/entries address the timeline and full payloads — the D3
-	// stage; this stage's timeline placeholder is empty either way.
-	res, err := service.ThreadGet(ctx, deps.Pool, agent.ID, in.Thread)
+	res, err := service.ThreadGet(ctx, deps.Pool, agent.ID, in.Thread, in.Cursor, in.Entries)
 	if err != nil {
 		return threadErrResult(err)
 	}

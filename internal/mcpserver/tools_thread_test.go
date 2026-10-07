@@ -232,8 +232,8 @@ func TestThreadJoinAndGetOverDispatch(t *testing.T) {
 	if len(members) != 2 {
 		t.Fatalf("members = %d, want 2", len(members))
 	}
-	if tl := getEnv["timeline"].([]any); len(tl) != 0 {
-		t.Fatalf("timeline placeholder = %v", tl)
+	if tl := getEnv["timeline"].([]map[string]any); len(tl) != 0 {
+		t.Fatalf("timeline = %v", tl)
 	}
 
 	listEnv, statusL := d2Call(t, &deps, guest, "thread_list", map[string]any{})

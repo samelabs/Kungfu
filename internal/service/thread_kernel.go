@@ -548,11 +548,17 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 						"An open thread must keep at least one governor; hand over or close first")
 				}
 			}
+			// §6.2: membership ends — my pending receipts collect
+			// (resolution=leave) in the same transaction.
+			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, botID, "leave")
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
+			}
 			if _, err := repository.DeleteThreadMember(ctx, tx, th.ID, botID); err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "left": true},
+				Facts: map[string]any{"thread": th.Code, "left": true, "receipts_collected": collected},
 				View:  threadView([]string{}),
 			}, nil
 		})
@@ -571,11 +577,17 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 			if err != nil {
 				return threadActionOutcome{}, err
 			}
+			// §6.2: removal collects the target's pending receipts
+			// (resolution=remove) in the same transaction.
+			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, member, "remove")
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
+			}
 			if _, err := repository.DeleteThreadMember(ctx, tx, th.ID, member); err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true},
+				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true, "receipts_collected": collected},
 				View:  threadView(threadGovernorNextAfter(ctx, tx, th)),
 			}, nil
 		})
@@ -600,11 +612,21 @@ func ThreadSetRole(ctx context.Context, pool *pg.Pool, botID int64, code string,
 			if err != nil {
 				return threadActionOutcome{}, err
 			}
+			// §6.2: demotion to observer collects the member's
+			// pending receipts (resolution=role_change); governor→
+			// speaker keeps speech, receipts stay.
+			var collected int64
+			if role == repository.ThreadRoleObserver {
+				collected, err = repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, member, "role_change")
+				if err != nil {
+					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_set_role")
+				}
+			}
 			if err := repository.SetThreadMemberRole(ctx, tx, th.ID, member, role); err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_set_role")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "member": member, "role": role},
+				Facts: map[string]any{"thread": th.Code, "member": member, "role": role, "receipts_collected": collected},
 				View:  threadView(threadGovernorNextAfter(ctx, tx, th)),
 			}, nil
 		})
@@ -690,6 +712,12 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			if th.Status != repository.ThreadStatusOpen {
 				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is already closed")
 			}
+			// §6.5: closing collects every pending receipt in the
+			// room (resolution=close) in the same transaction.
+			collected, err := repository.WithdrawAllThreadReceipts(ctx, tx, th.ID, "close")
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_close")
+			}
 			ok, err := repository.CloseThreadByID(ctx, tx, th.ID)
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_close")
@@ -698,8 +726,9 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is already closed")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "status": repository.ThreadStatusClosed},
-				View:  threadView([]string{"thread_leave"}),
+				Facts: map[string]any{"thread": th.Code, "status": repository.ThreadStatusClosed,
+					"receipts_collected": collected},
+				View: threadView([]string{"thread_leave"}),
 			}, nil
 		})
 }
@@ -710,7 +739,7 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 // structure, own role, the member table, key facts (§9), the D2
 // action list — and empty placeholders for the timeline and open
 // items (D3/D5 fill those).
-func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string) (map[string]any, error) {
+func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64) (map[string]any, error) {
 	th, err := repository.FindThreadByCode(ctx, pool, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading thread")
@@ -760,18 +789,96 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string) (ma
 		}
 	}
 
+	// timeline: digest rows, keyset cursor on seq (§8 bounded reads)
+	beforeSeq := int64(0)
+	if strings.TrimSpace(cursor) != "" {
+		v, err := strconv.ParseInt(strings.TrimSpace(cursor), 10, 64)
+		if err != nil || v < 0 {
+			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
+		}
+		beforeSeq = v
+	}
+	items, err := repository.ThreadTimeline(ctx, pool, th.ID, beforeSeq, threadPageSize)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading timeline")
+	}
+	timeline := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		row := map[string]any{
+			"entry":   it.ID,
+			"seq":     it.Seq,
+			"author":  it.Author,
+			"summary": it.Summary,
+			"asked":   it.Asked,
+			"assign":  it.HasAssign,
+			"at":      it.CreatedAt,
+		}
+		if it.ReplyTo != nil {
+			row["reply_to"] = *it.ReplyTo
+		}
+		timeline = append(timeline, row)
+	}
+	var nextCursor any
+	if len(items) == threadPageSize {
+		nextCursor = strconv.FormatInt(items[len(items)-1].Seq, 10)
+	}
+
+	// my open obligations in this room (the room slice of the turn
+	// list; the account-wide todo_list is D5)
+	pending, err := repository.MyPendingThreadReceipts(ctx, pool, th.ID, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading open items")
+	}
+	todos := make([]map[string]any, 0, len(pending))
+	for _, pd := range pending {
+		todos = append(todos, map[string]any{
+			"kind": "reply", "entry": pd.EntryID, "seq": pd.Seq,
+			"author": pd.Author, "summary": pd.Summary,
+			"next_action": "respond",
+		})
+	}
+
+	// full payloads on demand (§8): entries=[…]
+	expanded := []any{}
+	if len(entryIDs) > 0 {
+		if len(entryIDs) > threadPageSize {
+			return nil, errors.New(422, "VALIDATION_FAILED", "entries exceeds 50 ids")
+		}
+		full, err := repository.ExpandThreadEntries(ctx, pool, th.ID, entryIDs)
+		if err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error loading entries")
+		}
+		for _, f := range full {
+			row := map[string]any{
+				"entry": f.ID, "seq": f.Seq, "author": f.Author,
+				"memory": f.Memory, "revision": f.Revision,
+				"summary": f.Summary, "asked": f.Asked, "at": f.CreatedAt,
+				"readable": f.Readable,
+			}
+			if f.ReplyTo != nil {
+				row["reply_to"] = *f.ReplyTo
+			}
+			if f.Content != nil {
+				row["content"] = *f.Content
+			}
+			expanded = append(expanded, row)
+		}
+	}
+
 	room := map[string]any{"code": th.Code, "status": th.Status}
 	if th.Subject != nil {
 		room["subject"] = *th.Subject
 	}
 	return map[string]any{
-		"thread":   room,
-		"role":     me.Role,
-		"members":  members,
-		"key":      keyFacts,
-		"timeline": []any{}, // D3 stage
-		"todos":    []any{}, // D5 stage
-		"next":     threadNextActions(th, me.Role, int64(len(rows)), governors),
+		"thread":      room,
+		"role":        me.Role,
+		"members":     members,
+		"key":         keyFacts,
+		"timeline":    timeline,
+		"next_cursor": nextCursor,
+		"entries":     expanded,
+		"todos":       todos,
+		"next":        threadNextActions(th, me.Role, int64(len(rows)), governors),
 	}, nil
 }
 

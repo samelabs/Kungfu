@@ -222,7 +222,7 @@ func TestThreadLastManagerThreePaths(t *testing.T) {
 	if n := threadMemberCount(t, pool, code); n != 2 {
 		t.Fatalf("members = %d, want 2 (no effect)", n)
 	}
-	view, err := ThreadGet(ctx, pool, owner, code)
+	view, err := ThreadGet(ctx, pool, owner, code, "", nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestThreadGovernanceAuthorization(t *testing.T) {
 	}
 
 	// the observer reads the room (read-only member view)
-	obsView, err := ThreadGet(ctx, pool, observer, code)
+	obsView, err := ThreadGet(ctx, pool, observer, code, "", nil)
 	if err != nil {
 		t.Fatalf("observer thread_get: %v", err)
 	}
@@ -304,12 +304,12 @@ func TestThreadGovernanceAuthorization(t *testing.T) {
 	}
 
 	// a non-member neither reads nor leaves
-	_, err = ThreadGet(ctx, pool, outsider, code)
+	_, err = ThreadGet(ctx, pool, outsider, code, "", nil)
 	threadErrIs(t, err, 403, "NOT_MEMBER")
 	_, err = ThreadLeave(ctx, pool, outsider, code, "")
 	threadErrIs(t, err, 403, "NOT_MEMBER")
 	// unknown room
-	_, err = ThreadGet(ctx, pool, owner, "0000000000aa")
+	_, err = ThreadGet(ctx, pool, owner, "0000000000aa", "", nil)
 	threadErrIs(t, err, 404, "THREAD_NOT_FOUND")
 }
 
@@ -341,7 +341,7 @@ func TestThreadCloseSemantics(t *testing.T) {
 		threadErrIs(t, err, 409, "THREAD_CLOSED")
 	}
 	// members are kept and can still read and leave — even the last governor
-	view, err := ThreadGet(ctx, pool, guest, code)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil)
 	if err != nil {
 		t.Fatalf("member read on closed room: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestThreadDeactivationCascade(t *testing.T) {
 	}
 
 	// the room closed in the same fact; the guest membership survived
-	view, err := ThreadGet(ctx, pool, guest, code)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil)
 	if err != nil {
 		t.Fatalf("guest read after cascade: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestThreadConcurrencyJoinAndClose(t *testing.T) {
 		t.Fatalf("concurrent close failed: %v", err)
 	}
 	jErr := <-joinErr
-	view, err := ThreadGet(ctx, pool, owner, code)
+	view, err := ThreadGet(ctx, pool, owner, code, "", nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -731,7 +731,7 @@ func TestThreadListAndGetProjections(t *testing.T) {
 		t.Fatalf("join: %v", err)
 	}
 
-	view, err := ThreadGet(ctx, pool, guest, code)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -760,12 +760,12 @@ func TestThreadListAndGetProjections(t *testing.T) {
 	if keyFacts["active"] != true || keyFacts["role"] != repository.ThreadRoleSpeaker {
 		t.Fatalf("key facts = %v", keyFacts)
 	}
-	// D3/D5 placeholders
-	if tl := view["timeline"].([]any); len(tl) != 0 {
-		t.Fatalf("timeline placeholder = %v", tl)
+	// empty room: timeline and todos are live typed slices now (D3)
+	if tl := view["timeline"].([]map[string]any); len(tl) != 0 {
+		t.Fatalf("timeline = %v", tl)
 	}
-	if td := view["todos"].([]any); len(td) != 0 {
-		t.Fatalf("todos placeholder = %v", td)
+	if td := view["todos"].([]map[string]any); len(td) != 0 {
+		t.Fatalf("todos = %v", td)
 	}
 
 	// list: newest first, status filter, cursor pagination. 52 open

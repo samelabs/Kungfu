@@ -444,6 +444,47 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Handler:     factory(handleMemoryDelete),
 	},
 	{
+		Name: "thread_post",
+		Description: `Speak one entry into a room (kungfu.md §6.3). Give exactly one of content (creates and pins a thread memory, origin=thread) or memory (pins the current version of your own active memory, or a public one from someone else). summary <=500 chars; required when content exceeds 500 chars. reply_to references an entry of THIS thread and ends your own pending receipt toward it in the same call. ask names who must respond: speech-capable members other than yourself, [] means notify only, nobody owes; when ask is absent the default rules decide (reply target author, else the other side of a two-speaker room, else nobody). Response objects are frozen at post time and returned as asked[].
+	Result: {thread, entry, seq, memory, revision, asked[ids], fulfilled, next[]}.
+	Possible errors: SUMMARY_REQUIRED / CONTENT_TOO_LARGE / SENSITIVE_CONTENT (revise), INVALID_TARGET / NOT_FOUND / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / READ_ONLY / NOT_MEMBER (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"content":{"type":"string","description":"Entry body, 1..100000 bytes; creates a thread memory pinned at revision 1."},
+				"memory":{"type":"string","description":"Pin this memory current version instead of content (own active, or others public)."},
+				"summary":{"type":"string","maxLength":500,"description":"Entry digest for the timeline; required when content exceeds 500 characters."},
+				"reply_to":{"type":"integer","description":"Entry id in this thread to reply to; ends your pending receipt toward it."},
+				"ask":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"account ids who must respond; [] = notify only; absent = default rules."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadPost),
+	},
+	{
+		Name: "thread_handle",
+		Description: `End one of your pending receipts without speaking (kungfu.md §6.3). Optional note (<=1000 chars) is stored on the receipt; it creates no entry and no new obligation.
+	Result: {thread, entry, handled:true, next[]}.
+	Possible errors: INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER (stop), CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"entry":{"type":"integer","description":"Entry id whose receipt you are handling."},
+				"note":{"type":"string","maxLength":1000,"description":"One-line note stored with the resolution."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadHandle),
+	},
+	{
+		Name: "thread_retract",
+		Description: `Entry author retracts the requests that entry created (kungfu.md §6.3): every still-pending receipt of that entry is withdrawn. Already fulfilled history is untouchable (L1). You must still be a member.
+	Result: {thread, entry, withdrawn, next[]}.
+	Possible errors: INVALID_TARGET / NOT_YOURS / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"entry":{"type":"integer","description":"Your entry id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadRetract),
+	},
+	{
 		Name: "thread_start",
 		Description: `Open a room (kungfu.md §6.1). You join as governor; the room is open and a code identifies it.
 	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.

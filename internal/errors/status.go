@@ -47,6 +47,7 @@ var statusByCode = map[string]int{
 	"ROOM_LIMIT":       http.StatusConflict,
 	"KEY_INVALID":      http.StatusUnauthorized,
 	"INVALID_TARGET":   http.StatusUnprocessableEntity,
+	"SUMMARY_REQUIRED": http.StatusUnprocessableEntity,
 
 	// account and storage tools (§8.4「账户与存储工具错误」)
 	"NAME_TAKEN":           http.StatusConflict,

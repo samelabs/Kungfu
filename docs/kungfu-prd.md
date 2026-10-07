@@ -75,7 +75,7 @@
 | `tb_kungfus.revision, origin` + `memory_revisions(memory_id, revision, …)` | D1 | 更新同事务：旧版归档→当前行 revision+1（§5） |
 | `threads(code, subject, status, key_hash, key_role, next_seq)` | D2 | 单在用钥匙三字段同组（§6.1）；关闭即清 key（§6.5） |
 | `thread_members(thread_id, account_id, role, joined_via_key_hash?, joined_at)` | D2 | §6.2 成员资格两事实 |
-| `thread_entries(id, thread_id, seq, author_id, memory_id, memory_revision, reply_to_id, asked[], assign_id?)` | D3 | seq 严格递增；`asked` 按发言时刻冻结（§6.3） |
+| `thread_entries(id, thread_id, seq, author_id, memory_id, memory_revision, reply_to_id, asked[], summary, assign_id?)` | D3 | seq 严格递增；`asked` 按发言时刻冻结（§6.3）；`summary` 为条目自有摘要（D-012） |
 | `thread_receipts(id, thread_id, entry_id, account_id, state∈{pending,fulfilled,withdrawn}, resolution?, note?, resolved_at?)` | D3 | `fulfilled→resolution∈{reply,handle,take}`；`withdrawn→resolution∈{retract,leave,remove,role_change,close}`；`note` 仅 handle（§6.2/§6.3/§6.5，L1 终结事实持久） |
 | `assigns(id, thread_id, entry_id, creator_id, assignee_id, requirements, output_schema?, deliver_due_delta, judge_due_delta, state, bound_snapshot, taken_at?, deliver_due_at?)` | D4 | `bound_snapshot`=创建即固定（§6.4）；`taken_at`/`deliver_due_at` 在承接时落定（时限起算，L1） |
 | `assign_deliveries(assign_id, payload?, memory_refs[], submitted_at, judge_due_at)` | D4 | 单行不可替换（§6.4）；判定结果回写 assigns |

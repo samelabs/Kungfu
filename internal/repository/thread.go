@@ -9,6 +9,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -437,4 +438,303 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 		return nil, err
 	}
 	return closed, nil
+}
+
+// -- D3: entries, receipts and the timeline (kungfu.md §6.3) --
+
+// NextThreadSeq allocates the next in-thread entry number atomically;
+// callers hold the thread row lock, so concurrent posts serialize and
+// seq is strictly increasing with no gaps handed out twice.
+func NextThreadSeq(ctx context.Context, q pg.Querier, threadID int64) (int64, error) {
+	row := q.QueryRow(ctx,
+		`UPDATE threads SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq`, threadID)
+	var seq int64
+	if err := row.Scan(&seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+// CreateThreadKungfu inserts a thread-origin memory (origin='thread',
+// revision 1) inside the caller's post transaction. It bypasses the
+// standalone consumption path entirely — thread payloads are not
+// standalone storage (§5, D-002 KEEP).
+func CreateThreadKungfu(ctx context.Context, q pg.Querier, botID int64,
+	title, description, content, checksum string) (int64, string, error) {
+	code, err := GenerateUniqueKungfuCode(ctx, q)
+	if err != nil {
+		return 0, "", err
+	}
+	var id int64
+	err = q.QueryRow(ctx, `
+		INSERT INTO tb_kungfus
+		    (code, bot_id, title, tags_json, description, content, checksum,
+		     visibility, status, revision, origin, created_at, updated_at)
+		VALUES ($1, $2, $3, '[]', $4, $5, $6, 'private', 'active', 1, 'thread', NOW(), NOW())
+		RETURNING id`,
+		code, botID, title, description, content, checksum).Scan(&id)
+	if err != nil {
+		return 0, "", err
+	}
+	return id, code, nil
+}
+
+// ThreadEntryCore is the authorative frozen part of an entry.
+type ThreadEntryCore struct {
+	ID       int64
+	Seq      int64
+	AuthorID int64
+	Asked    []int64
+}
+
+// FindThreadEntry loads an entry strictly within one thread (the
+// composite scope is enforced by the query, not by trust).
+func FindThreadEntry(ctx context.Context, q pg.Querier, threadID, entryID int64) (*ThreadEntryCore, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, seq, author_id, asked_json FROM thread_entries
+		WHERE thread_id = $1 AND id = $2`, threadID, entryID)
+	var e ThreadEntryCore
+	var asked []byte
+	if err := row.Scan(&e.ID, &e.Seq, &e.AuthorID, &asked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	e.Asked = parseAskedJSON(asked)
+	return &e, nil
+}
+
+func parseAskedJSON(raw []byte) []int64 {
+	var ids []int64
+	_ = json.Unmarshal(raw, &ids)
+	if ids == nil {
+		ids = []int64{}
+	}
+	return ids
+}
+
+// InsertThreadEntry writes the immutable entry; askedJSON is the
+// frozen response-object set decided by the posting rules (§6.3).
+func InsertThreadEntry(ctx context.Context, q pg.Querier,
+	threadID int64, seq, authorID, memoryID, memoryRevision int64,
+	replyToID *int64, askedJSON, summary string) (int64, error) {
+	var id int64
+	err := q.QueryRow(ctx, `
+		INSERT INTO thread_entries
+		    (thread_id, seq, author_id, memory_id, memory_revision,
+		     reply_to_id, asked_json, summary)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+		RETURNING id`,
+		threadID, seq, authorID, memoryID, memoryRevision, replyToID, askedJSON, summary).Scan(&id)
+	return id, err
+}
+
+// InsertThreadReceipt creates the single pending obligation of one
+// member toward one entry (UNIQUE(entry_id, account_id) backs the
+// "at most one" rule at the DB level).
+func InsertThreadReceipt(ctx context.Context, q pg.Querier, threadID, entryID, accountID int64) error {
+	_, err := q.Exec(ctx, `
+		INSERT INTO thread_receipts (thread_id, entry_id, account_id, state)
+		VALUES ($1, $2, $3, 'pending')`, threadID, entryID, accountID)
+	return err
+}
+
+// FulfillThreadReceipt is the single CAS that ends a pending
+// obligation exactly once (L5): only a pending row moves, and only
+// one mover wins.
+func FulfillThreadReceipt(ctx context.Context, q pg.Querier,
+	entryID, accountID int64, resolution string, note *string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state = 'fulfilled', resolution = $3, note = $4, resolved_at = NOW()
+		WHERE entry_id = $1 AND account_id = $2 AND state = 'pending'`,
+		entryID, accountID, resolution, note)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// WithdrawThreadReceiptsByEntry retracts every still-pending receipt
+// of one entry (author retract; withdrawal never touches fulfilled
+// rows — L1).
+func WithdrawThreadReceiptsByEntry(ctx context.Context, q pg.Querier, entryID int64, resolution string) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state = 'withdrawn', resolution = $2, resolved_at = NOW()
+		WHERE entry_id = $1 AND state = 'pending'`, entryID, resolution)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// WithdrawThreadReceiptsByMember collects the pending receipts a
+// member owes inside one thread (leave / remove / role demotion).
+func WithdrawThreadReceiptsByMember(ctx context.Context, q pg.Querier,
+	threadID, accountID int64, resolution string) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state = 'withdrawn', resolution = $3, resolved_at = NOW()
+		WHERE thread_id = $1 AND account_id = $2 AND state = 'pending'`,
+		threadID, accountID, resolution)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// WithdrawAllThreadReceipts closes every pending obligation in a
+// thread (thread close, §6.5).
+func WithdrawAllThreadReceipts(ctx context.Context, q pg.Querier, threadID int64, resolution string) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE thread_receipts
+		SET state = 'withdrawn', resolution = $2, resolved_at = NOW()
+		WHERE thread_id = $1 AND state = 'pending'`, threadID, resolution)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// CountThreadSpeechCapable counts governor + speaker members (the
+// "has speech" set, §6.2).
+func CountThreadSpeechCapable(ctx context.Context, q pg.Querier, threadID int64) (int64, error) {
+	row := q.QueryRow(ctx, `
+		SELECT COUNT(*) FROM thread_members
+		WHERE thread_id = $1 AND role IN ('governor', 'speaker')`, threadID)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// ThreadTimelineItem is one digest row of the summary timeline (§8:
+// bounded reads, digest first).
+type ThreadTimelineItem struct {
+	ID        int64
+	Seq       int64
+	AuthorID  int64
+	Author    string
+	Summary   string
+	ReplyTo   *int64 // seq of the replied entry, when present
+	Asked     []int64
+	HasAssign bool
+	CreatedAt string
+}
+
+// ThreadTimeline pages the digest newest-first with a keyset cursor
+// on seq (beforeSeq 0 = first page).
+func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq int64, limit int) ([]ThreadTimelineItem, error) {
+	rows, err := q.Query(ctx, `
+		SELECT e.id, e.seq, e.author_id, b.bot_name,
+		       COALESCE(e.summary, ''), (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json,
+		       e.assign_id IS NOT NULL, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
+		FROM thread_entries e
+		JOIN tb_bots b ON b.id = e.author_id
+		WHERE e.thread_id = $1 AND ($2 = 0 OR e.seq < $2)
+		ORDER BY e.seq DESC
+		LIMIT $3`, threadID, beforeSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ThreadTimelineItem
+	for rows.Next() {
+		var it ThreadTimelineItem
+		var asked []byte
+		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
+			&it.Summary, &it.ReplyTo, &asked, &it.HasAssign, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		it.Asked = parseAskedJSON(asked)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// ThreadEntryFull is the expanded entry payload; Content is served
+// only when the pinned version is readable to members per §5/§9
+// (own pin: always; others' public pin: while public and valid).
+type ThreadEntryFull struct {
+	ID        int64
+	Seq       int64
+	AuthorID  int64
+	Author    string
+	Memory    string
+	Revision  int64
+	Readable  bool
+	Content   *string
+	Summary   string
+	ReplyTo   *int64
+	Asked     []int64
+	CreatedAt string
+}
+
+// ExpandThreadEntries loads full entries by id within one thread.
+func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids []int64) ([]ThreadEntryFull, error) {
+	rows, err := q.Query(ctx, `
+		SELECT e.id, e.seq, e.author_id, b.bot_name,
+		       k.code, e.memory_revision,
+		       (k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')),
+		       CASE WHEN k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')
+		            THEN k.content END,
+		       COALESCE(e.summary, ''), (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
+		FROM thread_entries e
+		JOIN tb_bots b ON b.id = e.author_id
+		JOIN tb_kungfus k ON k.id = e.memory_id
+		WHERE e.thread_id = $1 AND e.id = ANY($2)
+		ORDER BY e.seq DESC`, threadID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ThreadEntryFull
+	for rows.Next() {
+		var it ThreadEntryFull
+		var asked []byte
+		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
+			&it.Memory, &it.Revision, &it.Readable, &it.Content,
+			&it.Summary, &it.ReplyTo, &asked, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		it.Asked = parseAskedJSON(asked)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// ThreadPendingItem is one of my open obligations inside a thread.
+type ThreadPendingItem struct {
+	EntryID int64
+	Seq     int64
+	Author  string
+	Summary string
+}
+
+// MyPendingThreadReceipts lists the member's pending receipts in one
+// thread, oldest first.
+func MyPendingThreadReceipts(ctx context.Context, q pg.Querier, threadID, accountID int64) ([]ThreadPendingItem, error) {
+	rows, err := q.Query(ctx, `
+		SELECT r.entry_id, e.seq, b.bot_name, COALESCE(e.summary, '')
+		FROM thread_receipts r
+		JOIN thread_entries e ON e.id = r.entry_id
+		JOIN tb_bots b ON b.id = e.author_id
+		WHERE r.thread_id = $1 AND r.account_id = $2 AND r.state = 'pending'
+		ORDER BY e.seq ASC`, threadID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ThreadPendingItem
+	for rows.Next() {
+		var it ThreadPendingItem
+		if err := rows.Scan(&it.EntryID, &it.Seq, &it.Author, &it.Summary); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
 }
