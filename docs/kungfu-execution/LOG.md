@@ -34,7 +34,8 @@
 |---|---|---|---|---|
 | S0 | 协议自审（一致性+完备性）→ 修订 → 冻结 | 候选 5d186a0 → 修订 d4c36a0 | 用户批准 | **已关闭**（blob d20ffa3 冻结） |
 | S1 | PRD v1 房间面 | 协议冻结+R15..17 | 验收逐条有协议引用；场景适配裁定 D-005 | **已关闭**（b44b961） |
-| D1 | Memory 版本化 | 工单 D1.md（BASE feat/room-face） | dev.sh test 全绿 | 工单就绪待执行 |
+| D1 | Memory 版本化 | 工单 D1.md → ccac236 | dev.sh test 全绿（监督者独立复跑 PASS）+ diff 零越界 | **已关闭** |
+| D2 | 房间骨架+幂等设施 | 工单 D2.md（BASE ccac236） | dev.sh test 全绿 | 工单就绪待执行 |
 | D1 | Memory 版本化 | — | CI + I1/I3 负测 | 未开始 |
 | D2 | 房间骨架 | — | CI + 越权矩阵 | 未开始 |
 | D3 | 条目与义务 + 幂等快照 | — | CI + 并发 CAS 负测 | 未开始 |
@@ -77,3 +78,8 @@
 | D-005 | 场景适配审计三发现裁定：邀约机制**否决**（A20 靠「致」闭环，未致分派由 D7 增量读覆盖，无实证不 added 机制）；返回结构表保留（PRD 分内）；跨房引用降级为 §6.5 措辞修正（R-17，无新机制）。**修订门槛确立：frozen 文档默认不改，仅场景阻断级 P1 可重开；其余进 backlog** | 用户纠偏 | 2026-10-07 |
 
 | D-006 | 分支策略：代码线 `feat/room-face` 自 main 起，首提交并入 docs 分支；D1..D8 逐阶段提交，每阶段 CI 绿为 gate；每阶段开工前依模板生成工单（D1.md 已建） | 纵向闭合纪律 | 2026-10-07 |
+
+| D-007 | 撤回后作者读取：带 revision 可读（§5 作者恒可读任何版本），不带 revision 维持现网 404——版本级权限在，表面路径保持现网行为；subagent 停机报告裁定 | D1 | 2026-10-07 |
+| D-008 | thread_idempotency 表从 D3 提前到 D2 落地（D2 起全部 thread 写工具接入；机械调整，PRD schema 阶段列已同步） | 工单 D2 | 2026-10-07 |
+
+Backlog（不进当前周期）：unify_test.go `TestAccountMemoryToolsBothChannels` 既有 flaky——`assertJSONEqual` volatileKeys 缺 `updated_at`（D1 agent 已证明与 D1 无关，base 提交可复现；修法一行，属该测试文件维护）。

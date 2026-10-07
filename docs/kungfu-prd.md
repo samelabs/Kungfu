@@ -10,7 +10,7 @@
 
 | 工具 | 协议 | 何时用 |
 |---|---|---|
-| `memory_put` `memory_get` `memory_list` `memory_delete` | §5 | 写读列举撤回；`memory_get(code, revision?)`（作者可读任一版本）；`memory_put` 更新即新版本 |
+| `memory_put` `memory_get` `memory_list` `memory_delete` | §5 | 写读列举撤回；`memory_get(code, revision?)`（作者可读任一版本）；`memory_put` 更新即新版本。撤回后：作者带 `revision` 可读（§5），不带 `revision` 维持现网 404（裁决 D-007） |
 | `memory_share(code)` `memory_unshare(code)` | §5 | 公开 / 取消公开 |
 | `thread_start(subject?, key?)` | §6.1 | 开房间；`key=true` 原子组合签发首把钥匙（L2） |
 | `thread_key(thread, role?)` / `thread_key_revoke(thread)` | §6.1 | 签发（作废旧钥；role 缺省发言）/ 作废 |
@@ -79,7 +79,7 @@
 | `thread_receipts(id, thread_id, entry_id, account_id, state∈{pending,fulfilled,withdrawn}, resolution?, note?, resolved_at?)` | D3 | `fulfilled→resolution∈{reply,handle,take}`；`withdrawn→resolution∈{retract,leave,remove,role_change,close}`；`note` 仅 handle（§6.2/§6.3/§6.5，L1 终结事实持久） |
 | `assigns(id, thread_id, entry_id, creator_id, assignee_id, requirements, output_schema?, deliver_due_delta, judge_due_delta, state, bound_snapshot, taken_at?, deliver_due_at?)` | D4 | `bound_snapshot`=创建即固定（§6.4）；`taken_at`/`deliver_due_at` 在承接时落定（时限起算，L1） |
 | `assign_deliveries(assign_id, payload?, memory_refs[], submitted_at, judge_due_at)` | D4 | 单行不可替换（§6.4）；判定结果回写 assigns |
-| `thread_idempotency(account_id, tool, key, request_hash, result_snapshot)` | D3 | `result_snapshot` 只存该次结果的协议事实字段（L3） |
+| `thread_idempotency(account_id, tool, key, request_hash, result_snapshot)` | D2 | `result_snapshot` 只存该次结果的协议事实字段（L3）；D2 起全部 thread 写工具接入 |
 | 轮次投影 | D5 | 无表：由 receipts/assigns/成员资格实时计算（§8） |
 | `account_notify(account_id, url, secret, verified_at?)` | D7 | 验签 challenge；触发即 `{account, kind, count}` |
 
