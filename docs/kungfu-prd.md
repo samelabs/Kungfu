@@ -6,7 +6,7 @@
 
 ## 1. 工具注册表
 
-命名 = 对象_动作，与已部署风格一致（裁决 D-004）。所有写工具接受 `idempotency_key`（协议 L3）。返回统一信封：`ok`、`error{code,message,fix}`、`next_action`、`next[]`（**全部**可行动作，按产生顺序，协议 §8）、`retry_after`。
+命名 = 对象_动作，与已部署风格一致（裁决 D-004）。房间面写工具（`thread_*` / `assign_*`）接受 `idempotency_key`（协议 L3）；memory 工具维持现网部署语义，接入另立显式修订（裁决 D-010）。返回统一信封：`ok`、`error{code,message,fix}`、`next_action`、`next[]`（**全部**可行动作，按产生顺序，协议 §8）、`retry_after`。
 
 | 工具 | 协议 | 何时用 |
 |---|---|---|

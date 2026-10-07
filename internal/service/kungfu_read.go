@@ -93,14 +93,20 @@ func GetKungfuRevisionForBot(ctx context.Context, pool *pg.Pool, botID int64, co
 	}
 
 	if k.BotID != botID {
-		// Non-author: a valid memory still never serves a specific
-		// revision to others; a withdrawn one is not readable at all
-		// (no existence leak — same answer the current-version path
-		// gives).
+		// Non-author: the current version of a valid PUBLIC memory is
+		// readable by everyone (§9 row 1) — an explicit revision that
+		// equals it serves the same bytes. Anything else (historical
+		// revision, private, or withdrawn) is refused; withdrawn keeps
+		// the 404 of the current-version path so existence does not leak.
 		if k.Status != "active" {
 			return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
 		}
-		return nil, errors.New(403, "NOT_OWNER", "Only the creator can read a specific revision")
+		if k.Visibility != "public" || revision != k.Revision {
+			return nil, errors.New(403, "NOT_OWNER", "Only the creator can read a specific revision")
+		}
+		logOperation(ctx, pool, &botID, "get", strPtr("kungfu"), &code,
+			map[string]interface{}{"title": k.Title, "owner": false, "revision": revision}, true)
+		return kungfuDetailFromModel(k), nil
 	}
 
 	// Author: the requested revision is the current one → the row

@@ -263,6 +263,9 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string
 			if err := requireActiveAccount(ctx, tx, botID); err != nil {
 				return threadActionOutcome{}, err
 			}
+			if err := repository.LockAccountRow(ctx, tx, botID); err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_start")
+			}
 			open, err := repository.CountOpenThreadMembershipsByAccount(ctx, tx, botID)
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_start")
@@ -472,6 +475,9 @@ func ThreadJoin(ctx context.Context, pool *pg.Pool, botID int64, rawKey, idemKey
 			if members >= threadMaxMembers {
 				return threadActionOutcome{}, errors.New(409, "MEMBER_LIMIT",
 					"Thread already has 50 members")
+			}
+			if err := repository.LockAccountRow(ctx, tx, botID); err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_join")
 			}
 			open, err := repository.CountOpenThreadMembershipsByAccount(ctx, tx, botID)
 			if err != nil {

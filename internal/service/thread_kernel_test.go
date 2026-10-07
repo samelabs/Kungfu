@@ -768,33 +768,50 @@ func TestThreadListAndGetProjections(t *testing.T) {
 		t.Fatalf("todos placeholder = %v", td)
 	}
 
-	// list: newest first, status filter, cursor pagination
-	for i := 0; i < 2; i++ {
-		c, _ := threadStart(t, pool, guest, "", false, "")
-		defer threadCleanup(t, pool, nil, c)
+	// list: newest first, status filter, cursor pagination. 52 open
+	// rooms forces a real multi-page keyset walk (audit H: the cursor
+	// must actually be consumed, not re-read page one).
+	defer func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM thread_members WHERE thread_id IN (SELECT id FROM threads WHERE subject = 'page-walk')`)
+		_, _ = pool.Exec(ctx, `DELETE FROM threads WHERE subject = 'page-walk'`)
+	}()
+	for i := 0; i < 51; i++ {
+		threadStart(t, pool, guest, "page-walk", false, "")
 	}
 	list, err := ThreadList(ctx, pool, guest, repository.ThreadStatusOpen, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	items := list["threads"].([]map[string]any)
-	if len(items) != 3 {
-		t.Fatalf("open rooms = %d, want 3", len(items))
+	if n := len(list["threads"].([]map[string]any)); n != 50 {
+		t.Fatalf("page 1 = %d rooms, want a full 50-row page", n)
 	}
-	page1, err := ThreadList(ctx, pool, guest, repository.ThreadStatusOpen, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// page through with a 2-step cursor walk using next_cursor against the raw ids
-	one := page1["threads"].([]map[string]any)
-	var cursorCode string
-	for _, it := range one {
-		if it["thread"].(map[string]any)["code"] == code {
-			cursorCode = code
+	seen := map[string]bool{}
+	var collect = func(page map[string]any) int {
+		items := page["threads"].([]map[string]any)
+		for _, it := range items {
+			c := it["thread"].(map[string]any)["code"].(string)
+			if seen[c] {
+				t.Fatalf("room %s repeated across pages", c)
+			}
+			seen[c] = true
 		}
+		return len(items)
 	}
-	if cursorCode == "" {
-		t.Fatal("joined room missing from thread_list")
+	total := collect(list)
+	nc, _ := list["next_cursor"].(string)
+	for nc != "" {
+		page, err := ThreadList(ctx, pool, guest, repository.ThreadStatusOpen, nc)
+		if err != nil {
+			t.Fatalf("list cursor walk: %v", err)
+		}
+		total += collect(page)
+		nc, _ = page["next_cursor"].(string)
+	}
+	if total != 52 {
+		t.Fatalf("cursor walk covered %d rooms, want 52 (1 joined + 51 created)", total)
+	}
+	if !seen[code] {
+		t.Fatal("joined room missing from thread_list walk")
 	}
 	closed, err := ThreadList(ctx, pool, guest, repository.ThreadStatusClosed, "")
 	if err != nil {

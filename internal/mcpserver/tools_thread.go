@@ -8,14 +8,6 @@ package mcpserver
 // failure limiter (§2: 20 failures / 15 min, surfaced uniformly as
 // KEY_INVALID) is a package-local window in the tool layer.
 //
-// NOTE (D2 finding, reported to the supervisor): the thread error
-// codes (THREAD_NOT_FOUND, NOT_MEMBER, NOT_GOVERNOR, THREAD_CLOSED,
-// KEY_INVALID, MEMBER_LIMIT, ROOM_LIMIT, LAST_MANAGER, INVALID_TARGET)
-// are not yet in internal/errors.statusByCode, so normalizeToolError
-// masks them as INTERNAL_ERROR on the wire even though next_action
-// below is correct. Registering them in that table is outside this
-// stage's whitelist.
-
 import (
 	"context"
 	"encoding/json"

@@ -150,20 +150,23 @@ func TestRevisionNonAuthorAccess(t *testing.T) {
 		}
 	}
 
-	// public memory: the current version stays readable without
-	// revision; pinning ANY revision — historical or current — is a
-	// permission error
+	// public memory: the current version is readable without revision
+	// AND with an explicit revision that equals it (§9 row 1 — the same
+	// bytes, not a historical pin); an explicit HISTORICAL revision
+	// stays a permission error
 	if _, err := Share(ctx, pool, owner, created.Code); err != nil {
 		t.Fatalf("share: %v", err)
 	}
 	if _, err := GetKungfuForBot(ctx, pool, reader, created.Code); err != nil {
 		t.Fatalf("public current read: %v", err)
 	}
-	for _, rev := range []int64{1, 2} {
-		_, err := GetKungfuRevisionForBot(ctx, pool, reader, created.Code, rev)
-		if ae, ok := apperrIs(err); !ok || ae.HTTPCode != 403 {
-			t.Fatalf("public revision %d: want 403 (permission), got %v", rev, err)
-		}
+	if _, err := GetKungfuRevisionForBot(ctx, pool, reader, created.Code, 2); err != nil {
+		t.Fatalf("public current revision read (D-011): %v", err)
+	}
+	if _, err := GetKungfuRevisionForBot(ctx, pool, reader, created.Code, 1); err == nil {
+		t.Fatal("public historical revision read must be rejected")
+	} else if ae, ok := apperrIs(err); !ok || ae.HTTPCode != 403 {
+		t.Fatalf("public revision 1: want 403 (permission), got %v", err)
 	}
 }
 

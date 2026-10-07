@@ -375,7 +375,38 @@ func InsertThreadIdempotency(ctx context.Context, q pg.Querier, accountID int64,
 // left with no governor closes in the same transaction with the
 // §6.5 effects (key group cleared, members kept read-only). Returns
 // the codes of the rooms closed by this cascade.
+// LockAccountRow serializes room-count checks (thread_start / thread_join
+// open-room limit) on the acting account: two concurrent starts otherwise
+// both count <100 and both commit, overshooting the cap (audit P1-B).
+func LockAccountRow(ctx context.Context, q pg.Querier, botID int64) error {
+	_, err := q.Exec(ctx, `SELECT id FROM tb_bots WHERE id = $1 FOR UPDATE`, botID)
+	return err
+}
+
 func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID int64) ([]string, error) {
+	// Serialize concurrent cascades on the same rooms (audit P1-E): two
+	// admins disabling the last two governors of one thread otherwise both
+	// see "another governor remains" and neither closes it. The lock runs
+	// as its own statement so the decision UPDATE below takes a fresh
+	// snapshot and sees the memberships the transaction we waited on
+	// already deleted.
+	lockRows, err := q.Query(ctx, `
+		SELECT t.id FROM threads t
+		WHERE t.status = 'open'
+		  AND EXISTS (SELECT 1 FROM thread_members g
+		              WHERE g.thread_id = t.id AND g.account_id = $1 AND g.role = 'governor')
+		FOR UPDATE`, botID)
+	if err != nil {
+		return nil, err
+	}
+	for lockRows.Next() {
+	}
+	if err := lockRows.Err(); err != nil {
+		lockRows.Close()
+		return nil, err
+	}
+	lockRows.Close()
+
 	rows, err := q.Query(ctx, `
 		UPDATE threads t
 		SET status = 'closed', closed_at = NOW(),
