@@ -35,7 +35,7 @@
 | S0 | 协议自审（一致性+完备性）→ 修订 → 冻结 | 候选 5d186a0 → 修订 d4c36a0 | 用户批准 | **已关闭**（blob d20ffa3 冻结） |
 | S1 | PRD v1 房间面 | 协议冻结+R15..17 | 验收逐条有协议引用；场景适配裁定 D-005 | **已关闭**（b44b961） |
 | D1 | Memory 版本化 | 工单 D1.md → ccac236 | dev.sh test 全绿（监督者独立复跑 PASS）+ diff 零越界 | **已关闭** |
-| D2 | 房间骨架+幂等设施 | 工单 D2.md（BASE ccac236） | dev.sh test 全绿 | 工单就绪待执行 |
+| D2 | 房间骨架+幂等设施 | 工单 D2.md → 本提交 | dev.sh test 全绿（监督者复跑 PASS，D-009 修正后）+ diff 白名单+裁定三文件 | **已关闭** |
 | D3 | 条目与义务 + 幂等快照 | — | CI + 并发 CAS 负测 | 未开始 |
 | D4 | 分派 | — | CI + L4 出口负测 | 未开始 |
 | D5 | 轮次投影 | — | CI + 恢复测试 | 未开始 |
@@ -81,3 +81,5 @@
 | D-008 | thread_idempotency 表从 D3 提前到 D2 落地（D2 起全部 thread 写工具接入；机械调整，PRD schema 阶段列已同步） | 工单 D2 | 2026-10-07 |
 
 Backlog（不进当前周期）：unify_test.go `TestAccountMemoryToolsBothChannels` 既有 flaky——`assertJSONEqual` volatileKeys 缺 `updated_at`（D1 agent 已证明与 D1 无关，base 提交可复现；修法一行，属该测试文件维护）。
+
+| D-009 | D2 工单缺陷裁定（监督者修正）：白名单补 `internal/errors/status.go`（9 线程码→HTTP 机械映射）、`unify_test.go`（28→38 计数钉两处）、`public_text_test.go`（thread 工具 llms.txt 豁免表，D6 移除）；agent 停机报告正确——注册（Required）与 gate 全绿在原白名单内矛盾。次级发现归 D6：config.go 频率桶（thread_write 120/min、thread_start 30/h、thread_read 600/min）+ llms.txt 文档 + 移除豁免表 | D2 停机报告 | 2026-10-07 |
