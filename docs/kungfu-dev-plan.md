@@ -13,7 +13,7 @@
 | 层 | 文件 | 冻结版本 |
 |---|---|---|
 | 范式 | kungfu.md | blob f48c2f90908197b47247ecc0ccc6511399939a77 |
-| 产品 | docs/kungfu-prd.md | blob 77a13ceeaabdf5ab99acf92c2ba3feddd0e65640 |
+| 产品 | docs/kungfu-prd.md | blob c674b8b69f1f8a31e0bfdc7e8e4bf9c4e3939172 |
 | 恢复计划 | 本文件 | 以执行分支实际落入的 commit 为准 |
 
 语义来源只有上表。旧 docs/thread-prd.md、docs/thread-dev-plan.md 不再是 authority；实现分支进入恢复工作时删除或明确移出执行面，不能与新文档并列解释行为。
@@ -45,7 +45,8 @@
 
 因此恢复阶段按一个语义切片同时修改其 schema + repository + service + tests：
 
-C0 Partner/Membership/Key/Governance
+I0 Idempotent result snapshot
+→ C0 Partner/Membership/Key/Governance
 → C1 Child/local-entry boundary
 → C2 thread_post/obligation
 → M1 Memory read
@@ -54,8 +55,8 @@ C0 Partner/Membership/Key/Governance
 → T6 Surface
 → T7 Acceptance
 
-只有 C0 可以直接从当前 repair 文档移交 HEAD 生成实施工单。
-C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工单，并重新列允许修改文件。
+只有 I0 可以直接从当前 repair 文档移交 HEAD 生成实施工单。
+C0 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工单，并重新列允许修改文件。
 
 ### 1.2 实现没有产品设计权
 
@@ -146,15 +147,71 @@ KEEP 不代表当前文件原样不动；只表示上述机制不能因恢复工
 
 ---
 
-## 3. C0 — Partner / Membership / Key / Governance 闭合
+## 3. I0 — 幂等结果快照闭合
 
-这是唯一允许立即生成代码工单的阶段。
+这是当前唯一允许立即生成代码工单的阶段。
 
-### 3.1 目标
+### 3.1 为什么先做 I0
+
+现有 thread_idempotency 已经能以 (role, operation, key) + request_hash 排除同 key 异请求，但 result_ref 只保存 ThreadID / EntryID / RoleID 等引用。多数 replay 随后重新读取当前 Thread / ThreadRole，所以对象后续变化会改写旧 key 的返回值。这违反范式 A3 与 PRD §8.3 / §12 I2。
+
+现有 result_ref 是 TEXT，足以保存 JSON 快照；I0 不增加 migration。
+
+### 3.2 允许范围
+
+只允许修改：
+
+- internal/service/thread_state.go
+- internal/service/thread_state_test.go
+
+如现有 state test 无法覆盖某个操作，可新增同目录专用 idempotency test。
+
+不得修改：
+
+- migrations
+- model / repository schema
+- Thread 权限、成员、branch、receipt、reply 业务规则
+- Task / Memory / MCP / HTTP
+
+### 3.3 必须落地
+
+- beginThreadIdempotency 继续用 request_hash 判同/异请求。
+- completeThreadIdempotency 保存“首次成功动作的 replay-safe 业务结果快照”，而不是只保存对象引用。
+- replay 直接反序列化该快照；不得重新读取当前 Thread / ThreadRole / Entry 来构造业务结果。
+- 覆盖当前所有 thread_state 写操作：Create、Reply、Branch、Handle、Add、Join、Permission、Remove、Close、Reopen、Key reset/revoke、Subject。
+- 一次性 secret 不进入 replay 快照：
+  - Create/Branch/Key reset 首次可返回 raw join key；
+  - replay raw key 必为空；
+  - fingerprint 与其他非秘密业务字段仍取首次结果，不随之后 reset 漂移。
+- AlreadyApplied 等“这是重放”的元信息可以反映 replay；业务对象快照不得漂移。
+- 失败事务不得留下 completed idempotency result；现有事务 rollback 语义保持。
+
+### 3.4 I0 Gate
+
+至少证明：
+
+- Create 后改 subject，再 replay Create：返回首次 Create 的 Thread 快照，而不是新 subject。
+- Add 后改 permission，再 replay Add：返回首次 Add 的 Role 快照。
+- Close 后 Reopen，再 replay Close：返回首次 Close 的 closed Thread 快照。
+- Key reset K1 → reset K2 → replay K1：fingerprint = K1，raw key 不返回。
+- 同 key 异 request 仍 IDEMPOTENCY_CONFLICT，零业务副作用。
+- 现有非 replay 业务测试全部不变通过。
+- 代码审计：所有 !acquired replay path 不再用 repository 当前投影重构业务结果。
+- exact-SHA CI success。
+
+I0 收口后，以其 new HEAD 生成 C0 工单；不得把 C0 内容并入 I0。
+
+---
+
+## 4. C0 — Partner / Membership / Key / Governance 闭合
+
+I0 完成并通过 exact-SHA gate 后，本阶段才可生成工单。
+
+### 4.1 目标
 
 只收口“谁能建立伙伴、谁能进入 Thread、以什么角色进入、谁能治理、如何退出、key 生命周期”。本阶段不改 Child 的父 anchor 模型，不改 recipient 规则，不把 receipt 切到最终 resolution 模型。
 
-### 3.2 允许范围
+### 4.2 允许范围
 
 C0 工单允许修改：
 
@@ -177,7 +234,7 @@ C0 工单允许修改：
 - Child local-first-entry 结构
 - thread_post recipient 规则
 
-### 3.3 必须落地
+### 4.3 必须落地
 
 Partner：
 - role_links 增加 note。
@@ -215,14 +272,14 @@ Role change：
 - read → write/manage 的 entry 可选；指定时记录新入口并在当前旧 receipt 模型下机械创建入口 pending，未指定则不创建。
 - write/manage → read 撤销其当前 pending（receipt 的最终 resolution 语义留 C2）。
 
-### 3.4 C0 不得顺手修
+### 4.4 C0 不得顺手修
 
 - Branch 仍可能使用父 anchor；到 C1 一次性修。
 - receipt 仍可暂用当前 pending/handled/withdrawn；到 C2 与 thread_post 一起切换，避免中间态伪造 resolution。
 - ReplyThreadState 的旧语义不在 C0 改。
 - EntryAllowedInThreadScope 的 parent-anchor 行为不在 C0 改。
 
-### 3.5 C0 Gate
+### 4.5 C0 Gate
 
 必须新增/修订测试证明：
 
@@ -244,13 +301,13 @@ C0 完成后先做语义 diff 审计，再生成 C1 工单。
 
 ---
 
-## 4. C1 — Child / local-entry boundary 闭合
+## 5. C1 — Child / local-entry boundary 闭合
 
-### 4.1 目标
+### 5.1 目标
 
 把 Child 从“父 anchor 的可写延伸”纠正为独立 Thread；同时落下同线程 DB 约束。这个阶段必须 schema + service 一起改，不能先加 FK 再留旧 Child 行为。
 
-### 4.2 必须落地
+### 5.2 必须落地
 
 Branch：
 - thread_branch(thread, anchor, subject, content, summary?, members?) 创建 Child 自己的 seq=1 首条 entry。
@@ -273,13 +330,13 @@ DB：
 - reply_to 使用同线程 FK。
 - parent anchor 继续用 (parent_thread_id, anchor_entry_id) 指向直接父 Thread entry。
 
-### 4.3 明确不做
+### 5.3 明确不做
 
 - receipt state/resolution 不在 C1 切最终模型。
 - generic thread_post / ask 不在 C1。
 - Task / Todo 不动。
 
-### 4.4 C1 Gate
+### 5.4 C1 Gate
 
 - 四类 cross-thread write reference SQL 负测全部失败。
 - Child seq=1 entry 属于 Child。
@@ -291,13 +348,13 @@ DB：
 
 ---
 
-## 5. C2 — thread_post / obligation 闭合
+## 6. C2 — thread_post / obligation 闭合
 
-### 5.1 目标
+### 6.1 目标
 
 一次性切换发言语义和待回应持久状态；receipt schema 与 service 同阶段完成，避免“最终 schema + 旧业务”中间态。
 
-### 5.2 Schema / model
+### 6.2 Schema / model
 
 - thread_memories 增加 asked、task_id。
 - thread_receipts：
@@ -309,7 +366,7 @@ DB：
   - resolved_at
 - 旧 handled 语义删除，不做 compatibility 状态。
 
-### 5.3 thread_post
+### 6.3 thread_post
 
 按 PRD §4.2 唯一实现：
 
@@ -322,7 +379,7 @@ DB：
 - recipient precedence：ask → reply author → pair → none。
 - 返回 asked、my_pending、next_action。
 
-### 5.4 obligation
+### 6.4 obligation
 
 - source reason 与 resolution 分离。
 - reply 本身履行本人对 reply target 的 pending obligation；不依赖 input_ref。
@@ -333,13 +390,13 @@ DB：
 - 同一 obligation 的终结 CAS 至多一次。
 - input_ref stale 必须零副作用。
 
-### 5.5 旧 ReplyThreadState
+### 6.5 旧 ReplyThreadState
 
 产品语义必须只有 thread_post 一套。
 
 可保留内部兼容 wrapper 以缩小代码扰动，但 wrapper 只能调用同一 transition；不得继续有第二套 recipient/receipt 规则。旧“input 必须等于 reply target”必须删除。
 
-### 5.6 C2 Gate
+### 6.6 C2 Gate
 
 覆盖 PRD §12.2 相关并发和 §12.3 场景 1–7 的 Thread 部分：
 
@@ -354,7 +411,7 @@ DB：
 
 ---
 
-## 6. M1 — Memory 读取闭合
+## 7. M1 — Memory 读取闭合
 
 这是 T4 前的独立小阶段。
 
@@ -369,7 +426,7 @@ Gate：current/historical、soft-delete pinned、public unshare、非 owner hist
 
 ---
 
-## 7. T4 — Task 按范式修正
+## 8. T4 — Task 按范式修正
 
 T4 只有在 C0–C2 + M1 全部 exact-SHA gate 完成后才能生成具体工单；不得现在锁未来代码 BASE。
 
@@ -411,7 +468,7 @@ T4 只有在 C0–C2 + M1 全部 exact-SHA gate 完成后才能生成具体工�
 
 ---
 
-## 8. T5 — Todo / Work Context / 可恢复性
+## 9. T5 — Todo / Work Context / 可恢复性
 
 Todo 只由持久状态计算：
 
@@ -439,7 +496,7 @@ Gate：清除进程/会话局部状态，只凭 todo → work context 恢复并�
 
 ---
 
-## 9. T6 — MCP / HTTP / Product Surface
+## 10. T6 — MCP / HTTP / Product Surface
 
 - 工具名、参数、next_action 只来自 PRD §8。
 - 所有写工具同一 envelope / error / idempotency。
@@ -451,7 +508,7 @@ Gate：MCP / HTTP 等价；核心场景不依赖 UI。
 
 ---
 
-## 10. T7 — 全量合规验收
+## 11. T7 — 全量合规验收
 
 最终同时通过：
 
@@ -467,7 +524,7 @@ Gate：MCP / HTTP 等价；核心场景不依赖 UI。
 
 ---
 
-## 11. 每阶段工单固定模板
+## 12. 每阶段工单固定模板
 
 每个执行工单必须含：
 
@@ -487,11 +544,11 @@ Gate：MCP / HTTP 等价；核心场景不依赖 UI。
 
 ---
 
-## 12. 第一个可执行工单边界
+## 13. 第一个可执行工单边界
 
-本计划完成后，只生成 C0：Partner / Membership / Key / Governance。
+本计划完成后，只生成 I0：幂等结果快照。
 
-不提前加 final receipt CHECK/FK，不提前修 Child，不提前写 generic thread_post。
-C0 收口并审计后，再基于它的 new HEAD 生成 C1。
+I0 不改 SQL、不改权限、不修 Child、不改 receipt/reply 语义。
+I0 收口并审计后，再基于它的 new HEAD 生成 C0；C0 之后仍逐阶段重新出工单。
 
 这是防止第三次中断的硬控制点，不是进度建议。
