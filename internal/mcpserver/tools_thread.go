@@ -208,15 +208,134 @@ func handleThreadJoin(ctx context.Context, deps *Deps, agent *model.Bot, args js
 
 // -- D3: speaking (kungfu.md §6.3) --
 
+// -- D4: assignments (kungfu.md §6.4) --
+
+func handleAssignTake(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Assign         int64  `json:"assign"`
+		Payload        string `json:"payload"`
+		Memories       string `json:"memories"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Assign == 0 {
+		return ToolResult{}, argError("assign is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.AssignTake(ctx, deps.Pool, agent.ID, in.Assign, in.Payload, in.Memories, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleAssignSubmit(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Assign         int64  `json:"assign"`
+		Payload        string `json:"payload"`
+		Memories       string `json:"memories"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Assign == 0 {
+		return ToolResult{}, argError("assign is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.AssignSubmit(ctx, deps.Pool, agent.ID, in.Assign, in.Payload, in.Memories, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleAssignJudge(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Assign         int64  `json:"assign"`
+		Verdict        string `json:"verdict"`
+		Reason         string `json:"reason"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Assign == 0 {
+		return ToolResult{}, argError("assign is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.AssignJudge(ctx, deps.Pool, agent.ID, in.Assign, in.Verdict, in.Reason, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleAssignDrop(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Assign         int64  `json:"assign"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Assign == 0 {
+		return ToolResult{}, argError("assign is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.AssignDrop(ctx, deps.Pool, agent.ID, in.Assign, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleAssignVoid(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Assign         int64  `json:"assign"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Assign == 0 {
+		return ToolResult{}, argError("assign is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.AssignVoid(ctx, deps.Pool, agent.ID, in.Assign, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
 func handleThreadPost(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Thread         string  `json:"thread"`
-		Content        string  `json:"content"`
-		Memory         string  `json:"memory"`
-		Summary        string  `json:"summary"`
-		ReplyTo        *int64  `json:"reply_to"`
-		Ask            []int64 `json:"ask"`
-		IdempotencyKey string  `json:"idempotency_key"`
+		Thread         string              `json:"thread"`
+		Content        string              `json:"content"`
+		Memory         string              `json:"memory"`
+		Summary        string              `json:"summary"`
+		ReplyTo        *int64              `json:"reply_to"`
+		Ask            []int64             `json:"ask"`
+		Assign         *service.AssignSpec `json:"assign"`
+		IdempotencyKey string              `json:"idempotency_key"`
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Thread == "" {
 		return ToolResult{}, argError("thread is required")
@@ -231,7 +350,7 @@ func handleThreadPost(ctx context.Context, deps *Deps, agent *model.Bot, args js
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
 	}
 	res, err := service.ThreadPost(ctx, deps.Pool, agent.ID, in.Thread,
-		in.Content, in.Memory, in.Summary, in.ReplyTo, in.Ask, idemKey)
+		in.Content, in.Memory, in.Summary, in.ReplyTo, in.Ask, in.Assign, idemKey)
 	if err != nil {
 		return threadErrResult(err)
 	}

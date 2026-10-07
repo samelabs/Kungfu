@@ -548,8 +548,13 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 						"An open thread must keep at least one governor; hand over or close first")
 				}
 			}
-			// §6.2: membership ends — my pending receipts collect
-			// (resolution=leave) in the same transaction.
+			// §6.2 + R-18: membership ends — my pending receipts
+			// collect, and my undelivered assigns void on both
+			// sides (assignee and creator).
+			voided, err := repository.VoidUndeliveredAssignsForMember(ctx, tx, th.ID, botID)
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
+			}
 			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, botID, "leave")
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
@@ -558,8 +563,9 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "left": true, "receipts_collected": collected},
-				View:  threadView([]string{}),
+				Facts: map[string]any{"thread": th.Code, "left": true, "receipts_collected": collected,
+					"assigns_voided": len(voided)},
+				View: threadView([]string{}),
 			}, nil
 		})
 }
@@ -577,8 +583,12 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 			if err != nil {
 				return threadActionOutcome{}, err
 			}
-			// §6.2: removal collects the target's pending receipts
-			// (resolution=remove) in the same transaction.
+			// §6.2 + R-18: removal collects the target's receipts and
+			// voids their undelivered assigns on both sides.
+			voided, err := repository.VoidUndeliveredAssignsForMember(ctx, tx, th.ID, member)
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
+			}
 			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, member, "remove")
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
@@ -587,8 +597,9 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
 			}
 			return threadActionOutcome{
-				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true, "receipts_collected": collected},
-				View:  threadView(threadGovernorNextAfter(ctx, tx, th)),
+				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true,
+					"receipts_collected": collected, "assigns_voided": len(voided)},
+				View: threadView(threadGovernorNextAfter(ctx, tx, th)),
 			}, nil
 		})
 }
@@ -712,8 +723,13 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			if th.Status != repository.ThreadStatusOpen {
 				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is already closed")
 			}
-			// §6.5: closing collects every pending receipt in the
-			// room (resolution=close) in the same transaction.
+			// §6.5: closing collects every pending receipt and voids
+			// every undelivered assign; delivered work keeps its
+			// judgment clock (resolution=close in the same tx).
+			voidedAssigns, err := repository.VoidUndeliveredAssigns(ctx, tx, th.ID)
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_close")
+			}
 			collected, err := repository.WithdrawAllThreadReceipts(ctx, tx, th.ID, "close")
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_close")
@@ -727,7 +743,7 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "status": repository.ThreadStatusClosed,
-					"receipts_collected": collected},
+					"receipts_collected": collected, "assigns_voided": len(voidedAssigns)},
 				View: threadView([]string{"thread_leave"}),
 			}, nil
 		})

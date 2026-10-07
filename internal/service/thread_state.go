@@ -38,7 +38,7 @@ func speechRight(role string) bool {
 // and — when it replies — the CAS that ends the speaker's own pending
 // receipt toward the replied entry in the same transaction.
 func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode string,
-	content, memoryCode, summary string, replyTo *int64, ask []int64, idemKey string) (map[string]any, error) {
+	content, memoryCode, summary string, replyTo *int64, ask []int64, assign *AssignSpec, idemKey string) (map[string]any, error) {
 
 	// The replay identity covers every semantic input; ask presence
 	// (nil vs explicit empty) is part of it — ask:[] is "notify only",
@@ -56,9 +56,16 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 	if replyTo != nil {
 		replyMarker = numStr(*replyTo)
 	}
+	assignForHash := "none"
+	if assign != nil {
+		assignForHash = strings.Join([]string{
+			strconv.FormatInt(assign.To, 10), assign.Requirements, assign.OutputSchema,
+			strconv.FormatInt(assign.DeliverDueS, 10), strconv.FormatInt(assign.JudgeDueS, 10),
+		}, ",")
+	}
 	requestHash := sha256Hex(strings.Join([]string{
 		"v1", threadCode, content, memoryCode, summary, replyMarker, askMarker,
-		numsJoin(askForHash),
+		numsJoin(askForHash), assignForHash,
 	}, "\x1f"))
 
 	return runThreadAction(ctx, pool, botID, "thread_post", idemKey, requestHash,
@@ -230,6 +237,50 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 				}
 			}
 
+			// atomic assignment creation rides the same entry (§6.4,
+			// L2): content fixed here, deadlines normalized, the
+			// assignee must hold speech right at this moment.
+			var assignID int64
+			if assign != nil {
+				if strings.TrimSpace(assign.Requirements) == "" ||
+					len(assign.Requirements) > assignMaxRequirements {
+					return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
+						"assign.requirements is required (max 16KB)")
+				}
+				if assign.To == botID {
+					// self-assignment is legal (§6.4); the author
+					// already holds speech right here
+				} else {
+					m, err := repository.FindThreadMember(ctx, tx, th.ID, assign.To)
+					if err != nil {
+						return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error loading member")
+					}
+					if m == nil || !speechRight(m.Role) {
+						return threadActionOutcome{}, errors.New(422, "INVALID_TARGET",
+							"assign.to must be a speech-capable member of this thread")
+					}
+				}
+				assign.DeliverDueS = normalizeDue(assign.DeliverDueS)
+				assign.JudgeDueS = normalizeDue(assign.JudgeDueS)
+				if !assignDueValid(assign.DeliverDueS) || !assignDueValid(assign.JudgeDueS) {
+					return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
+						"assign deadlines must be 60..604800 seconds")
+				}
+				if assign.OutputSchema != "" && !json.Valid([]byte(assign.OutputSchema)) {
+					return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
+						"assign.output_schema must be valid JSON")
+				}
+				assignID, err = repository.InsertAssignment(ctx, tx, th.ID, entryID, botID,
+					assign.To, assign.Requirements, assign.OutputSchema,
+					assign.DeliverDueS, assign.JudgeDueS)
+				if err != nil {
+					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error storing assignment")
+				}
+				if err := repository.LinkEntryAssignment(ctx, tx, entryID, assignID); err != nil {
+					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error linking assignment")
+				}
+			}
+
 			// replying ends my own pending toward the target — even
 			// without one, the reply is legal (§6.3)
 			fulfilledReply := false
@@ -251,6 +302,9 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 				"revision":  memoryRevision,
 				"asked":     asked,
 				"fulfilled": fulfilledReply,
+			}
+			if assignID != 0 {
+				facts["assign"] = assignID
 			}
 			return threadActionOutcome{Facts: facts, View: facts}, nil
 		})

@@ -111,7 +111,8 @@ func TestLlmsTxtDocumentsEveryTool(t *testing.T) {
 		"thread_join": true, "thread_leave": true, "thread_remove": true,
 		"thread_set_role": true, "thread_close": true, "thread_get": true,
 		"thread_list": true, "thread_post": true, "thread_handle": true,
-		"thread_retract": true,
+		"thread_retract": true, "assign_take": true, "assign_submit": true,
+		"assign_judge": true, "assign_drop": true, "assign_void": true,
 	}
 	for _, name := range ToolNames() {
 		if d6Pending[name] {

@@ -433,6 +433,15 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// R-18: the disabled member's undelivered assignments void across
+	// ALL rooms (both as assignee and as creator); delivered ones keep
+	// their judgment clock and settle as undecided at the deadline.
+	if _, err := q.Exec(ctx, `
+		UPDATE assigns SET state = 'voided', closed_at = NOW()
+		WHERE state IN ('open', 'taken') AND (assignee_id = $1 OR creator_id = $1)`,
+		botID); err != nil {
+		return nil, err
+	}
 	if _, err := q.Exec(ctx,
 		`DELETE FROM thread_members WHERE account_id = $1`, botID); err != nil {
 		return nil, err
@@ -737,4 +746,237 @@ func MyPendingThreadReceipts(ctx context.Context, q pg.Querier, threadID, accoun
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// -- D4: assignments (kungfu.md §6.4, R-18) --
+
+// InsertAssignment creates the contracted work unit bound to its
+// carrying entry; content columns are written once and never updated.
+func InsertAssignment(ctx context.Context, q pg.Querier,
+	threadID, entryID, creatorID, assigneeID int64,
+	requirements, outputSchema string, deliverDueS, judgeDueS int64) (int64, error) {
+	var id int64
+	err := q.QueryRow(ctx, `
+		INSERT INTO assigns
+		    (thread_id, entry_id, creator_id, assignee_id, requirements,
+		     output_schema, deliver_due_s, judge_due_s, state)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::jsonb, $7, $8, 'open')
+		RETURNING id`,
+		threadID, entryID, creatorID, assigneeID, requirements,
+		outputSchema, deliverDueS, judgeDueS).Scan(&id)
+	return id, err
+}
+
+// AssignmentRow is the full assign fact set.
+type AssignmentRow struct {
+	ID           int64
+	ThreadID     int64
+	EntryID      int64
+	CreatorID    int64
+	AssigneeID   int64
+	Requirements string
+	OutputSchema *string
+	DeliverDueS  int64
+	JudgeDueS    int64
+	State        string
+	TakenAt      *string
+	DeliverDueAt *string
+	CreatedAt    string
+}
+
+// FindAssignment loads one assign (any state) by id.
+func FindAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, thread_id, entry_id, creator_id, assignee_id, requirements,
+		       output_schema::text, deliver_due_s, judge_due_s, state,
+		       to_char(taken_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS')
+		FROM assigns WHERE id = $1`, id)
+	var a AssignmentRow
+	if err := row.Scan(&a.ID, &a.ThreadID, &a.EntryID, &a.CreatorID, &a.AssigneeID,
+		&a.Requirements, &a.OutputSchema, &a.DeliverDueS, &a.JudgeDueS, &a.State,
+		&a.TakenAt, &a.DeliverDueAt, &a.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+// LockAssignment takes the assign row lock inside the room
+// transaction — take/void/drop races serialize here (L5).
+func LockAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, thread_id, entry_id, creator_id, assignee_id, requirements,
+		       output_schema::text, deliver_due_s, judge_due_s, state,
+		       to_char(taken_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS')
+		FROM assigns WHERE id = $1 FOR UPDATE`, id)
+	var a AssignmentRow
+	if err := row.Scan(&a.ID, &a.ThreadID, &a.EntryID, &a.CreatorID, &a.AssigneeID,
+		&a.Requirements, &a.OutputSchema, &a.DeliverDueS, &a.JudgeDueS, &a.State,
+		&a.TakenAt, &a.DeliverDueAt, &a.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+// TakeAssignmentCAS moves open→taken and stamps the deadline clock
+// (deliver deadline runs from take, §6.4).
+func TakeAssignmentCAS(ctx context.Context, q pg.Querier, id, assigneeID int64) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE assigns
+		SET state = 'taken', taken_at = NOW(),
+		    deliver_due_at = NOW() + make_interval(secs => deliver_due_s)
+		WHERE id = $1 AND assignee_id = $2 AND state = 'open'`, id, assigneeID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// InsertAssignmentDelivery writes the single immutable delivery and
+// moves taken→delivered; judge_due_at runs from this moment.
+func InsertAssignmentDelivery(ctx context.Context, q pg.Querier,
+	assignID int64, payload string, memoriesJSON string) (string, error) {
+	var due string
+	err := q.QueryRow(ctx, `
+		INSERT INTO assign_deliveries (assign_id, payload, memories_json, judge_due_at)
+		VALUES ($1, NULLIF($2,'')::jsonb, $3::jsonb,
+		        NOW() + make_interval(secs => (SELECT judge_due_s FROM assigns WHERE id = $1)))
+		RETURNING to_char(judge_due_at, 'YYYY-MM-DD HH24:MI:SS')`,
+		assignID, payload, memoriesJSON).Scan(&due)
+	if err != nil {
+		return "", err
+	}
+	tag, err := q.Exec(ctx,
+		`UPDATE assigns SET state = 'delivered' WHERE id = $1 AND state = 'taken'`, assignID)
+	if err != nil {
+		return "", err
+	}
+	if tag.RowsAffected() != 1 {
+		return "", pgx.ErrNoRows
+	}
+	return due, nil
+}
+
+// JudgeAssignmentCAS writes the verdict on a delivered assign and
+// mirrors it onto the delivery row.
+func JudgeAssignmentCAS(ctx context.Context, q pg.Querier,
+	assignID, creatorID int64, verdict, reason string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE assigns SET state = $3, closed_at = NOW()
+		WHERE id = $1 AND creator_id = $2 AND state = 'delivered'`,
+		assignID, creatorID, map[string]string{"adopt": "adopted", "reject": "rejected"}[verdict])
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() != 1 {
+		return false, nil
+	}
+	if verdict == "reject" {
+		_, err = q.Exec(ctx,
+			`UPDATE assign_deliveries SET verdict='reject', reason=$2, judged_at=NOW() WHERE assign_id=$1`,
+			assignID, reason)
+	} else {
+		_, err = q.Exec(ctx,
+			`UPDATE assign_deliveries SET verdict='adopt', judged_at=NOW() WHERE assign_id=$1`, assignID)
+	}
+	return err == nil, err
+}
+
+// SetAssignmentStateCAS is the generic single-transition move used by
+// drop / void / expiry materialization.
+func SetAssignmentStateCAS(ctx context.Context, q pg.Querier, id int64, from, to string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE assigns SET state = $3, closed_at = NOW()
+		WHERE id = $1 AND state = $2`, id, from, to)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// VoidUndeliveredAssignsForMember voids the pre-delivery assigns of a
+// departing member — both sides (§6.2, R-18: as assignee AND as
+// creator). Returns the ids voided.
+func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID, accountID int64) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		UPDATE assigns SET state = 'voided', closed_at = NOW()
+		WHERE thread_id = $1 AND state IN ('open', 'taken')
+		  AND (assignee_id = $2 OR creator_id = $2)
+		RETURNING id`, threadID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// VoidUndeliveredAssigns closes every pre-delivery assign of a room
+// (thread close, §6.5).
+func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		UPDATE assigns SET state = 'voided', closed_at = NOW()
+		WHERE thread_id = $1 AND state IN ('open', 'taken')
+		RETURNING id`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// RecoverAssigns materializes deadline outcomes (L4: expiry beats
+// in-flight handling; the inline guards mirror these transitions).
+func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (int, error) {
+	tag, err := pool.Exec(context.Background(), `
+		UPDATE assigns SET state = 'timed_out', closed_at = NOW()
+		WHERE id IN (
+		    SELECT id FROM assigns WHERE state = 'taken' AND deliver_due_at <= NOW()
+		    LIMIT $1 FOR UPDATE SKIP LOCKED)`, batch)
+	if err != nil {
+		return 0, err
+	}
+	n := int(tag.RowsAffected())
+	tag, err = pool.Exec(context.Background(), `
+		UPDATE assigns SET state = 'undecided', closed_at = NOW()
+		WHERE id IN (
+		    SELECT a.id FROM assigns a
+		    JOIN assign_deliveries d ON d.assign_id = a.id
+		    WHERE a.state = 'delivered' AND d.judge_due_at <= NOW()
+		    LIMIT $1 FOR UPDATE SKIP LOCKED)`, batch)
+	if err != nil {
+		return n, err
+	}
+	return n + int(tag.RowsAffected()), nil
+}
+
+// LinkEntryAssignment back-fills the entry's assign_id pointer.
+func LinkEntryAssignment(ctx context.Context, q pg.Querier, entryID, assignID int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE thread_entries SET assign_id = $2 WHERE id = $1`, entryID, assignID)
+	return err
 }

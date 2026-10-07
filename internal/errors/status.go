@@ -37,6 +37,7 @@ var statusByCode = map[string]int{
 
 	// room-face thread tools (kungfu.md §6; D-009)
 	"THREAD_NOT_FOUND": http.StatusNotFound,
+	"ASSIGN_NOT_FOUND": http.StatusNotFound,
 	"NOT_MEMBER":       http.StatusForbidden,
 	"NOT_GOVERNOR":     http.StatusForbidden,
 	"NOT_YOURS":        http.StatusForbidden,

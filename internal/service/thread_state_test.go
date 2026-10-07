@@ -29,7 +29,7 @@ func stateReceipt(t *testing.T, pool *pg.Pool, entryID, accountID int64) (state 
 
 func statePost(t *testing.T, pool *pg.Pool, bot int64, thread, content, summary string, replyTo *int64, ask []int64, idem string) map[string]any {
 	t.Helper()
-	res, err := ThreadPost(context.Background(), pool, bot, thread, content, "", summary, replyTo, ask, idem)
+	res, err := ThreadPost(context.Background(), pool, bot, thread, content, "", summary, replyTo, ask, nil, idem)
 	if err != nil {
 		t.Fatalf("thread_post: %v", err)
 	}
@@ -38,7 +38,7 @@ func statePost(t *testing.T, pool *pg.Pool, bot int64, thread, content, summary 
 
 func statePostMem(t *testing.T, pool *pg.Pool, bot int64, thread, memory, summary string, replyTo *int64, ask []int64, idem string) map[string]any {
 	t.Helper()
-	res, err := ThreadPost(context.Background(), pool, bot, thread, "", memory, summary, replyTo, ask, idem)
+	res, err := ThreadPost(context.Background(), pool, bot, thread, "", memory, summary, replyTo, ask, nil, idem)
 	if err != nil {
 		t.Fatalf("thread_post(memory): %v", err)
 	}
@@ -135,12 +135,12 @@ func TestResponseObjectRules(t *testing.T) {
 	}
 
 	// ask discipline: self and non-members rejected (R-15, §6.2)
-	if _, err := ThreadPost(ctx, pool, owner, code, "note", "", "", nil, []int64{owner}, "p8"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "note", "", "", nil, []int64{owner}, nil, "p8"); err == nil {
 		t.Fatal("ask including the author must be rejected")
 	} else {
 		threadErrIs(t, err, 422, "INVALID_TARGET")
 	}
-	if _, err := ThreadPost(ctx, pool, owner, code, "note", "", "", nil, []int64{999}, "p9"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "note", "", "", nil, []int64{999}, nil, "p9"); err == nil {
 		t.Fatal("ask of a non-member must be rejected")
 	} else {
 		threadErrIs(t, err, 422, "INVALID_TARGET")
@@ -226,7 +226,7 @@ func TestPostGuards(t *testing.T) {
 	}
 
 	// observer cannot speak (§6.2)
-	if _, err := ThreadPost(ctx, pool, obs, code, "hi", "", "", nil, nil, "g1"); err == nil {
+	if _, err := ThreadPost(ctx, pool, obs, code, "hi", "", "", nil, nil, nil, "g1"); err == nil {
 		t.Fatal("observer post must be rejected")
 	} else {
 		threadErrIs(t, err, 403, "READ_ONLY")
@@ -234,7 +234,7 @@ func TestPostGuards(t *testing.T) {
 
 	// content over 500 chars without a summary steers revise (§2)
 	long := strings.Repeat("字", 501)
-	if _, err := ThreadPost(ctx, pool, owner, code, long, "", "", nil, nil, "g2"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, long, "", "", nil, nil, nil, "g2"); err == nil {
 		t.Fatal("long content without summary must be rejected")
 	} else {
 		threadErrIs(t, err, 422, "SUMMARY_REQUIRED")
@@ -247,7 +247,7 @@ func TestPostGuards(t *testing.T) {
 	if _, err := ThreadClose(ctx, pool, owner, code, "g5"); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if _, err := ThreadPost(ctx, pool, owner, code, "after close", "", "", nil, nil, "g6"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "after close", "", "", nil, nil, nil, "g6"); err == nil {
 		t.Fatal("post after close must be rejected")
 	} else {
 		threadErrIs(t, err, 409, "THREAD_CLOSED")
@@ -330,7 +330,7 @@ func TestMemoryPinning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("push other: %v", err)
 	}
-	if _, err := ThreadPost(ctx, pool, owner, code, "", priv.Code, "ref other", nil, nil, "m3"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "", priv.Code, "ref other", nil, nil, nil, "m3"); err == nil {
 		t.Fatal("reference to a private foreign memory must be rejected")
 	} else {
 		threadErrIs(t, err, 404, "NOT_FOUND")
@@ -474,7 +474,7 @@ func TestPostIdempotency(t *testing.T) {
 	}
 
 	// the snapshot survives later room changes
-	if _, err := ThreadPost(ctx, pool, owner, code, "another", "", "", nil, nil, "other-key"); err != nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "another", "", "", nil, nil, nil, "other-key"); err != nil {
 		t.Fatalf("post2: %v", err)
 	}
 	r3 := statePost(t, pool, owner, code, "first", "", nil, []int64{a}, "same-key")
@@ -484,7 +484,7 @@ func TestPostIdempotency(t *testing.T) {
 
 	// same key, different request: conflict, zero side effects
 	before := stateCountEntries(t, pool, code)
-	if _, err := ThreadPost(ctx, pool, owner, code, "DIFFERENT", "", "", nil, []int64{a}, "same-key"); err == nil {
+	if _, err := ThreadPost(ctx, pool, owner, code, "DIFFERENT", "", "", nil, []int64{a}, nil, "same-key"); err == nil {
 		t.Fatal("same key different request must conflict")
 	} else {
 		threadErrIs(t, err, 409, "IDEMPOTENCY_CONFLICT")
@@ -536,7 +536,7 @@ func TestPostConcurrency(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, _ = ThreadPost(ctx, pool, a, code, "reply", "", "", ptrOf(target), nil, "race-reply")
+		_, _ = ThreadPost(ctx, pool, a, code, "reply", "", "", ptrOf(target), nil, nil, "race-reply")
 	}()
 	go func() { defer wg.Done(); _, _ = ThreadHandle(ctx, pool, a, code, target, "", "race-handle") }()
 	wg.Wait()
@@ -556,7 +556,7 @@ func TestPostConcurrency(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			_, _ = ThreadPost(ctx, pool, owner, code, fmt.Sprintf("c%d", i), "", "", nil, nil, fmt.Sprintf("cp-%d", i))
+			_, _ = ThreadPost(ctx, pool, owner, code, fmt.Sprintf("c%d", i), "", "", nil, nil, nil, fmt.Sprintf("cp-%d", i))
 		}(i)
 	}
 	wg.Wait()

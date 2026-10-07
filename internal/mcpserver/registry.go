@@ -444,6 +444,67 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Handler:     factory(handleMemoryDelete),
 	},
 	{
+		Name: "assign_take",
+		Description: `Claim an open assignment (kungfu.md §6.4; membership is enough, R-18). Taking ends your pending receipt toward the carrying entry. With payload and/or memories present this is take+submit in one atomic action.
+	Result: {thread, assign, entry, state: taken|delivered, judge_due_at?, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS / INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"payload":{"type":"string","description":"JSON object output; max 256KB; checked against output_schema when one is bound."},
+				"memories":{"type":"string","description":"JSON array [{name, code}] of your own active memories; revisions pinned at take."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignTake),
+	},
+	{
+		Name: "assign_submit",
+		Description: `Deliver on a taken assignment (kungfu.md §6.4). The delivery is immutable — redo is a NEW assignment referencing this one. Deadline beats in-flight: a submit past deliver_due settles the assign as timed_out instead.
+	Result: {thread, assign, entry, state: delivered, judge_due_at, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"payload":{"type":"string","description":"JSON object output; max 256KB."},
+				"memories":{"type":"string","description":"JSON array [{name, code}] of your own active memories; revisions pinned at submit."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignSubmit),
+	},
+	{
+		Name: "assign_judge",
+		Description: `Settle a delivered assignment (kungfu.md §6.4): adopt, or reject with a reason the assignee reads. Works in a CLOSED room too — delivered work keeps its judgment clock (§6.5) — and only while you are still a member (R-18). Judge deadline beats in-flight judgment.
+	Result: {thread, assign, entry, state: adopted|rejected, verdict, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), VALIDATION_FAILED / CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign","verdict"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"verdict":{"type":"string","enum":["adopt","reject"],"description":"adopt = accepted; reject needs a reason."},
+				"reason":{"type":"string","maxLength":4000,"description":"Required on reject; returned to the assignee verbatim."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignJudge),
+	},
+	{
+		Name: "assign_drop",
+		Description: `Assignee abandons a taken assignment before delivery (kungfu.md §6.4) — the unilateral exit; no delivery exists.
+	Result: {thread, assign, entry, state: dropped, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignDrop),
+	},
+	{
+		Name: "assign_void",
+		Description: `Creator kills an undelivered assignment (kungfu.md §6.4) — unaccepted or in progress, either way nothing is delivered. Changing requirements means void + create a new assignment (content is fixed at creation).
+	Result: {thread, assign, entry, state: voided, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignVoid),
+	},
+	{
 		Name: "thread_post",
 		Description: `Speak one entry into a room (kungfu.md §6.3). Give exactly one of content (creates and pins a thread memory, origin=thread) or memory (pins the current version of your own active memory, or a public one from someone else). summary <=500 chars; required when content exceeds 500 chars. reply_to references an entry of THIS thread and ends your own pending receipt toward it in the same call. ask names who must respond: speech-capable members other than yourself, [] means notify only, nobody owes; when ask is absent the default rules decide (reply target author, else the other side of a two-speaker room, else nobody). Response objects are frozen at post time and returned as asked[].
 	Result: {thread, entry, seq, memory, revision, asked[ids], fulfilled, next[]}.
@@ -455,6 +516,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 				"summary":{"type":"string","maxLength":500,"description":"Entry digest for the timeline; required when content exceeds 500 characters."},
 				"reply_to":{"type":"integer","description":"Entry id in this thread to reply to; ends your pending receipt toward it."},
 				"ask":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"account ids who must respond; [] = notify only; absent = default rules."},
+				"assign":{"type":"object","description":"Create an assignment riding this entry (§6.4, atomic): {to, requirements, output_schema?, deliver_due?, judge_due?} — to = speech-capable member (self allowed), dues in seconds 60..604800, default 86400."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
 			},"additionalProperties":false}`,
 		Handler: factory(handleThreadPost),
