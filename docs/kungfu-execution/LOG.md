@@ -36,7 +36,8 @@
 | S1 | PRD v1 房间面 | 协议冻结+R15..17 | 验收逐条有协议引用；场景适配裁定 D-005 | **已关闭**（b44b961） |
 | D1 | Memory 版本化 | 工单 D1.md → ccac236 | dev.sh test 全绿（监督者独立复跑 PASS）+ diff 零越界 | **已关闭** |
 | D2 | 房间骨架+幂等设施 | 工单 D2.md → 本提交 | dev.sh test 全绿（监督者复跑 PASS，D-009 修正后）+ diff 白名单+裁定三文件 | **已关闭** |
-| D3 | 条目与义务 + 幂等快照 | 025 迁移 → 本提交 | dev.sh test 全绿（7 测试组全过：四规则/收束四路径/幂等同形/并发 CAS/引用权限）+ 自我审计 D-012/D-013 | **已关闭** |
+| D3 | 条目与义务 + 幂等快照 | 025 迁移 → e8bd908 | dev.sh test 全绿（7 测试组全过）+ 自我审计 D-012/D-013 | **已关闭** |
+| D4 | 分派（§6.4 全生命周期 + 到期 + R-18） | 026 迁移 → 本提交 | dev.sh test 全绿（6 测试组：lifecycle/departure/deadlines/closed-room/races/output）+ D-014 裁定 | **已关闭** |
 | D4 | 分派 | — | CI + L4 出口负测 | 未开始 |
 | D5 | 轮次投影 | — | CI + 恢复测试 | 未开始 |
 | D6 | 暴露面 | — | 双通道等价 | 未开始 |
@@ -97,3 +98,9 @@ D3 白名单修正（同 D-009 类别，机械钉子）：`internal/errors/statu
 Backlog 追加：D2 工具 View=Facts 同形扫尾（D8 前）。
 
 | R-18 | §6.2/§6.4 | ①承接加入"只要求成员资格"清单，创建时发言权约束只管创建；②创建者成员资格终止后不得判定，其待判定分派按判定时限收束为不决；③补第三缺口：创建者离席的**未交付**分派一并作废（原文本只写了承接者侧，创建者侧悬置） | 前瞻审计裁定，D4 开工前落 | 2026-10-07 |
+
+| D-014 | D4 到期机制裁定：内联守卫只**拒绝**不物化（拒绝随幂等接缝整体回滚，物化会被吞掉），终态由 `RecoverAssigns` sweep（30s 节奏，挂 server ticker）落库；L4"到期优先"体现为提交者被拒，不依赖物化时机 | 实现期发现 | 2026-10-07 |
+
+D4 白名单修正（机械）：`internal/errors/status.go`（+ASSIGN_NOT_FOUND）、`internal/mcpserver/public_text_test.go`（豁免 +5）、`cmd/server/main.go`（sweep 挂点）、`unify_test.go`（计数 46）。
+
+Backlog 追加：repository `task_v1_test.go` 硬编码 `publisher_id=1`，依赖前序测试泄漏 bot 不清理的隐含假设（乱序运行会 FK 失败；dev.sh 包序下无影响；修法：seed 真实 bot 并引用其 id）。
