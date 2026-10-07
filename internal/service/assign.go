@@ -235,6 +235,7 @@ func AssignTake(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				}
 				a.State = "delivered"
 				judgeDue = due
+				enqueueNotify(ctx, tx, a.CreatorID, "judge", 1)
 			}
 			facts := assignmentFacts(code, a)
 			if judgeDue != nil {
@@ -288,6 +289,7 @@ func AssignSubmit(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error storing delivery")
 			}
 			a.State = "delivered"
+			enqueueNotify(ctx, tx, a.CreatorID, "judge", 1)
 			facts := assignmentFacts(code, a)
 			facts["judge_due_at"] = due
 			return threadActionOutcome{Facts: facts, View: facts}, nil

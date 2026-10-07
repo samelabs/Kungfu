@@ -236,6 +236,9 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error creating receipts")
 				}
 			}
+			for _, id := range asked {
+				enqueueNotify(ctx, tx, id, "reply", 1)
+			}
 
 			// atomic assignment creation rides the same entry (§6.4,
 			// L2): content fixed here, deadlines normalized, the

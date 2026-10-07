@@ -1045,3 +1045,80 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, bef
 	}
 	return out, rows.Err()
 }
+
+// -- D7: notify endpoints and outbox --
+
+func UpsertAccountNotify(ctx context.Context, q pg.Querier, accountID int64, url, secret string) error {
+	_, err := q.Exec(ctx, `
+		INSERT INTO account_notify (account_id, url, secret, verified_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (account_id) DO UPDATE
+		    SET url = $2, secret = $3, verified_at = NOW()`, accountID, url, secret)
+	return err
+}
+
+func DeleteAccountNotify(ctx context.Context, q pg.Querier, accountID int64) (bool, error) {
+	tag, err := q.Exec(ctx, `DELETE FROM account_notify WHERE account_id = $1`, accountID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func FindAccountNotify(ctx context.Context, q pg.Querier, accountID int64) (url, secret string, ok bool, err error) {
+	row := q.QueryRow(ctx, `SELECT url, secret FROM account_notify WHERE account_id = $1`, accountID)
+	if err := row.Scan(&url, &secret); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	return url, secret, true, nil
+}
+
+// InsertNotifyOutbox queues a content-free signal in the same
+// transaction as the facts that caused it.
+func InsertNotifyOutbox(ctx context.Context, q pg.Querier, accountID int64, kind string, count int) error {
+	_, err := q.Exec(ctx,
+		`INSERT INTO notify_outbox (account_id, kind, count) VALUES ($1, $2, $3)`,
+		accountID, kind, count)
+	return err
+}
+
+type OutboxRow struct {
+	ID        int64
+	AccountID int64
+	Kind      string
+	Count     int
+}
+
+// ListUnsentOutbox pages undelivered notifications (best effort,
+// at-least-once; the ticker owns delivery).
+func ListUnsentOutbox(ctx context.Context, q pg.Querier, limit int) ([]OutboxRow, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id, account_id, kind, count FROM notify_outbox
+		WHERE sent_at IS NULL AND attempts < 5
+		ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OutboxRow
+	for rows.Next() {
+		var r OutboxRow
+		if err := rows.Scan(&r.ID, &r.AccountID, &r.Kind, &r.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func MarkOutboxSent(ctx context.Context, q pg.Querier, id int64, sent bool) error {
+	if sent {
+		_, err := q.Exec(ctx, `UPDATE notify_outbox SET sent_at = NOW() WHERE id = $1`, id)
+		return err
+	}
+	_, err := q.Exec(ctx, `UPDATE notify_outbox SET attempts = attempts + 1 WHERE id = $1`, id)
+	return err
+}

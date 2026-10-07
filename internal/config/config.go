@@ -178,9 +178,10 @@ func defaultRateLimits() map[string]RateLimitConfig {
 		"task_create":      {Window: 3600, Limit: 20, Enabled: &t},
 		"payment_checkout": {Window: 3600, Limit: 20, Enabled: &t},
 		// room face (kungfu PRD §2)
-		"thread_write": {Window: 60, Limit: 120, Enabled: &t},
-		"thread_start": {Window: 3600, Limit: 30, Enabled: &t},
-		"thread_read":  {Window: 60, Limit: 600, Enabled: &t},
+		"thread_write":    {Window: 60, Limit: 120, Enabled: &t},
+		"thread_start":    {Window: 3600, Limit: 30, Enabled: &t},
+		"thread_read":     {Window: 60, Limit: 600, Enabled: &t},
+		"notify_register": {Window: 3600, Limit: 5, Enabled: &t},
 	}
 }
 

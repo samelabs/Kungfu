@@ -1,6 +1,6 @@
 package mcpserver
 
-// WO-7d protocol unification tests: the complete 41-tool registry (28 + 10 thread + 3 speak + 5 assign + todo, D2–D5),
+// WO-7d protocol unification tests: the complete 41-tool registry (28 + 10 thread + 3 speak + 5 assign + todo + 2 notify, D2–D7),
 // account/memory tools on both channels with identical envelopes,
 // anonymous behavior driven by ToolDef.Public, and the error-catalog
 // closure over internal/errors.StatusFor.
@@ -45,11 +45,11 @@ func TestRegistryComplete(t *testing.T) {
 		"thread_remove", "thread_set_role", "thread_close", "thread_get", "thread_list",
 		"thread_post", "thread_handle", "thread_retract",
 		"assign_take", "assign_submit", "assign_judge", "assign_drop", "assign_void",
-		"todo_list",
+		"todo_list", "notify_register", "notify_delete",
 	}
 	got := ToolNames()
-	if len(got) != 47 || len(want) != 47 {
-		t.Fatalf("registry = %d tools, want 47", len(got))
+	if len(got) != 49 || len(want) != 49 {
+		t.Fatalf("registry = %d tools, want 49", len(got))
 	}
 	sorted := append([]string(nil), got...)
 	sort.Strings(sorted)
@@ -89,8 +89,8 @@ func TestRegistryMCPToolsListMatches(t *testing.T) {
 	if err := json.Unmarshal([]byte(extractJSON(body)), &rpc); err != nil {
 		t.Fatalf("parse: %v (%s)", err, body)
 	}
-	if len(rpc.Result.Tools) != 47 {
-		t.Fatalf("tools/list = %d, want 47", len(rpc.Result.Tools))
+	if len(rpc.Result.Tools) != 49 {
+		t.Fatalf("tools/list = %d, want 49", len(rpc.Result.Tools))
 	}
 	got := ToolNames()
 	for _, tl := range rpc.Result.Tools {

@@ -554,3 +554,31 @@ func handleTodoList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	}
 	return threadData(res)
 }
+
+func handleNotifyRegister(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		URL string `json:"url"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.URL == "" {
+		return ToolResult{}, argError("url is required")
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "notify_register") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "notify_register").RetryAfter)
+	}
+	res, err := service.NotifyRegister(ctx, deps.Pool, agent.ID, in.URL)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleNotifyDelete(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.NotifyDelete(ctx, deps.Pool, agent.ID)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}

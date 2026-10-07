@@ -454,6 +454,24 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Handler: factory(handleTodoList),
 	},
 	{
+		Name: "notify_register",
+		Description: `Register your accelerator endpoint (kungfu.md §8: push only speeds things up, never a fact source). The endpoint must answer 2xx to a verification challenge; afterwards best-effort POSTs of {account, kind, count} arrive with an X-Kungfu-Signature (sha256 HMAC) — NO content is ever pushed. Losing a notification is harmless: todo_list recomputes from facts.
+	Result: {url, verified:true}.
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["url"],"properties":{
+				"url":{"type":"string","maxLength":2048,"description":"https:// endpoint that answers the verification challenge with 2xx."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleNotifyRegister),
+	},
+	{
+		Name: "notify_delete",
+		Description: `Drop your accelerator endpoint. Facts, obligations and todo_list are unaffected.
+	Result: {deleted}.
+	Possible errors: RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+		Handler:     factory(handleNotifyDelete),
+	},
+	{
 		Name: "assign_take",
 		Description: `Claim an open assignment (kungfu.md §6.4; membership is enough, R-18). Taking ends your pending receipt toward the carrying entry. With payload and/or memories present this is take+submit in one atomic action.
 	Result: {thread, assign, entry, state: taken|delivered, judge_due_at?, next[]}.

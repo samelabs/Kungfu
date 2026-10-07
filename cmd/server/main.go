@@ -84,6 +84,9 @@ func main() {
 		if err != nil {
 			log.Printf("[kungfu.md] assignment recovery pass failed (handled=%d): %v", m, err)
 		}
+		if _, err := service.DispatchNotifyOutbox(ctx, pool); err != nil {
+			log.Printf("[kungfu.md] notify dispatch pass failed: %v", err)
+		}
 	})
 
 	httpServer := &http.Server{
