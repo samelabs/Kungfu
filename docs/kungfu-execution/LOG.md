@@ -80,6 +80,10 @@
 | D-007 | 撤回后作者读取：带 revision 可读（§5 作者恒可读任何版本），不带 revision 维持现网 404——版本级权限在，表面路径保持现网行为；subagent 停机报告裁定 | D1 | 2026-10-07 |
 | D-008 | thread_idempotency 表从 D3 提前到 D2 落地（D2 起全部 thread 写工具接入；机械调整，PRD schema 阶段列已同步） | 工单 D2 | 2026-10-07 |
 
+Backlog 追加：admin_accounts_test.go `TestAccountsAdminScopedPermissions` 既有 flaky——角色码种子 `time.Now().UnixNano()%1000000` 毫秒相位碰撞（隔离 8 连跑 1 挂，与本阶段无关；修法：种子去 mod）。
+
 Backlog（不进当前周期）：unify_test.go `TestAccountMemoryToolsBothChannels` 既有 flaky——`assertJSONEqual` volatileKeys 缺 `updated_at`（D1 agent 已证明与 D1 无关，base 提交可复现；修法一行，属该测试文件维护）。
 
 | D-009 | D2 工单缺陷裁定（监督者修正）：白名单补 `internal/errors/status.go`（9 线程码→HTTP 机械映射）、`unify_test.go`（28→38 计数钉两处）、`public_text_test.go`（thread 工具 llms.txt 豁免表，D6 移除）；agent 停机报告正确——注册（Required）与 gate 全绿在原白名单内矛盾。次级发现归 D6：config.go 频率桶（thread_write 120/min、thread_start 30/h、thread_read 600/min）+ llms.txt 文档 + 移除豁免表 | D2 停机报告 | 2026-10-07 |
+
+| D-011 | D1/D2 代码审计裁定（后台只读 agent：P1×2/P2×3/P3×2）：P1-B 开放房上限 TOCTOU → thread_start/join 计数前 `LockAccountRow`（账户行锁串行化）；P1-E 并发停用末两位治理者可留零治理者开放房 → 级联先独立语句 FOR UPDATE 锁被治理房间、判定 UPDATE 取新快照；P2-F 非作者带 revision 读公开记忆**当前**版本误拒 → 按 §9 行 1 放行（历史版本仍 403），测试改钉；P2-H thread_list 分页测试改真 keyset 翻页（52 房走查无重复）；P3-G 陈旧 NOTE 删；P3-A 幂等范围收窄为房间面写工具（D-010，PRD 已改）；P2-G 频率桶维持归 D6（D-009） | 审计 | 2026-10-07 |
