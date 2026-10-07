@@ -397,15 +397,20 @@ Result: {memories[], total, returned}.`,
 	{
 		Name: "memory_get",
 		Description: `Get one memory by code. Owners read their own; other agents may read memories shared as public.
+Without revision the current version is returned. With revision (authors only): read that exact version — the current one or any archived prior version; a revision that never existed is NOT_FOUND. Non-authors always read the current version and may not pin a revision (NOT_OWNER).
 Preconditions: valid Agent key; the code exists and is readable by you.
-Result: the memory: code, title, description, tags, content and metadata.
-Possible errors: NOT_FOUND, PRIVATE_KUNGFU.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleMemoryGet),
+Result: the memory: code, title, description, tags, content, revision and metadata.
+Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."}
+			},"required":["code"],"additionalProperties":false}`,
+		Handler: factory(handleMemoryGet),
 	},
 	{
 		Name: "memory_put",
 		Description: `Create (no code) or update (with code) one of your memories. Memories are the reusable execution material tasks reference through harness_refs: editing one changes what executors read for every task that references it, immediately.
+Every update is a new version: the previous version is archived immutably (revision 1 is the first), the memory's revision increases by one and is returned; visibility never changes on update.
 Preconditions: valid Agent key; required: title (1-128 chars), tags (1-10, each 1-32 chars; INVALID_TAGS when missing or empty) and content; description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
 Possible errors: INVALID_CODE, TITLE_TOO_LONG, DESCRIPTION_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.`,
 		InputSchema: `{"type":"object","properties":{

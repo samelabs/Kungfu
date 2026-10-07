@@ -22,6 +22,8 @@ type MemoryItem struct {
 	Tags        []string `json:"tags"`
 	Description *string  `json:"description"`
 	Visibility  string   `json:"visibility"`
+	Revision    int      `json:"revision"`
+	Origin      string   `json:"origin"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
 }
@@ -36,8 +38,9 @@ type MemoryListOutput struct {
 	HasMore  bool         `json:"has_more"`
 }
 
-// MemoryGetOutput projects service.GetKungfuForBot (detail, has
-// content+checksum).
+// MemoryGetOutput projects service.GetKungfuForBot and
+// service.GetKungfuRevisionForBot (detail, has content+checksum;
+// revision identifies which version was served).
 type MemoryGetOutput struct {
 	Code        string   `json:"code"`
 	Title       string   `json:"title"`
@@ -46,6 +49,7 @@ type MemoryGetOutput struct {
 	Content     string   `json:"content"`
 	Checksum    string   `json:"checksum"`
 	Visibility  string   `json:"visibility"`
+	Revision    int      `json:"revision"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
 }
@@ -57,6 +61,7 @@ type MemoryPutOutput struct {
 	Action     string `json:"action"`
 	Checksum   string `json:"checksum"`
 	Visibility string `json:"visibility"`
+	Revision   int    `json:"revision"`
 }
 
 // MemoryVisibilityOutput projects service.Share / service.Unshare.
@@ -177,12 +182,22 @@ func projectMemoryList(result map[string]interface{}) (MemoryListOutput, error) 
 		if err != nil {
 			return MemoryItem{}, err
 		}
+		revision, err := reqInt(m, "revision")
+		if err != nil {
+			return MemoryItem{}, err
+		}
+		origin, err := reqString(m, "origin")
+		if err != nil {
+			return MemoryItem{}, err
+		}
 		return MemoryItem{
 			Code:        code,
 			Title:       title,
 			Tags:        tags,
 			Description: optStringPtr(m, "description"),
 			Visibility:  visibility,
+			Revision:    revision,
+			Origin:      origin,
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
 		}, nil
@@ -262,6 +277,9 @@ func projectMemoryGet(result map[string]interface{}) (MemoryGetOutput, error) {
 		return out, err
 	}
 	if out.UpdatedAt, err = reqString(result, "updated_at"); err != nil {
+		return out, err
+	}
+	if out.Revision, err = reqInt(result, "revision"); err != nil {
 		return out, err
 	}
 	out.Description = optStringPtr(result, "description")

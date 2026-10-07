@@ -113,15 +113,28 @@ func handleMemoryList(ctx context.Context, deps *Deps, agent *model.Bot, args js
 
 func handleMemoryGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Code string `json:"code"`
+		Code     string `json:"code"`
+		Revision int64  `json:"revision"`
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
+	if in.Revision < 0 {
+		return ToolResult{}, argError("revision must be a positive integer")
+	}
 	if !deps.limiter().CheckAgent(agent.ID, "get") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "get").RetryAfter)
 	}
-	result, err := service.GetKungfuForBot(ctx, deps.Pool, agent.ID, in.Code)
+	// revision absent → the current-version path, identical to the
+	// pre-versioning behavior; revision present → the versioned read
+	// (authors only).
+	var result map[string]interface{}
+	var err error
+	if in.Revision == 0 {
+		result, err = service.GetKungfuForBot(ctx, deps.Pool, agent.ID, in.Code)
+	} else {
+		result, err = service.GetKungfuRevisionForBot(ctx, deps.Pool, agent.ID, in.Code, in.Revision)
+	}
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -171,6 +184,7 @@ func handleMemoryPut(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 		"action":     result.Action,
 		"checksum":   result.Checksum,
 		"visibility": result.Visibility,
+		"revision":   result.Revision,
 	})
 }
 

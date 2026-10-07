@@ -33,6 +33,9 @@ type KungfuPushResult struct {
 	Action     string `json:"action"`
 	Checksum   string `json:"checksum"`
 	Visibility string `json:"visibility"`
+	// Revision is the memory's version after this push: 1 on
+	// creation, previous + 1 on update (kungfu.md §5).
+	Revision int64 `json:"revision"`
 }
 
 // Push creates or updates a kungfu.
@@ -66,8 +69,38 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 		if err != nil {
 			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
 		}
-		if err := repository.UpdateKungfuContentByID(ctx, pool, existing.ID,
-			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum); err != nil {
+
+		// The versioned update runs in ONE transaction (kungfu.md §5):
+		// row lock → archive the old version into memory_revisions →
+		// content update + revision bump. Concurrent updates of the
+		// same memory serialize on the row lock; each produces
+		// exactly one new version, and a withdrawn memory (status
+		// no longer active) can never be updated again.
+		tx, txErr := pool.TxBegin(ctx)
+		if txErr != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+		defer func() { _ = pg.Rollback(tx) }()
+
+		locked, lockErr := repository.LockOwnedActiveKungfuByID(ctx, tx, existing.ID, botID)
+		if lockErr != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+		if locked == nil {
+			return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+		}
+
+		if err := repository.ArchiveKungfuRevision(ctx, tx, locked.ID); err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+
+		newRevision, updErr := repository.UpdateKungfuContentWithRevision(ctx, tx, locked.ID,
+			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum)
+		if updErr != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+
+		if err := tx.Commit(ctx); err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
 		}
 
@@ -77,6 +110,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 		return &KungfuPushResult{
 			Code: existing.Code, Title: payload.Title, Action: "updated",
 			Checksum: payload.Checksum, Visibility: existing.Visibility,
+			Revision: newRevision,
 		}, nil
 	}
 
@@ -117,6 +151,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	return &KungfuPushResult{
 		Code: code, Title: payload.Title, Action: "created",
 		Checksum: payload.Checksum, Visibility: "private",
+		Revision: 1, // creation is the first version; no history row
 	}, nil
 }
 
