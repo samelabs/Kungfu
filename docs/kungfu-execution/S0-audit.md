@@ -51,3 +51,21 @@
 ## Gate
 
 修订版已提交（见 LOG.md BASE）。待用户批准后登记 blob 冻结，S0 关闭，S1 开工。
+
+---
+
+# S1 PRD 审计追记（2026-10-07）
+
+- 对象：docs/kungfu-prd.md 初稿；双 subagent 并行（A 纪律 / B 覆盖）
+- A：P1×11 / P2×2 / P3×5；B：P1×1 / P2×17 / P3×6
+- 裁定要点：
+  - 两条属协议缺口 → R-15（致不含本人）、R-16（L4 恢复频率容量条款）
+  - next[]≤3 与 §8 冲突 → 改为全部列出
+  - R-xx 直接引用 → 清除，仅用 §/L；LOG 增引用规则
+  - memory_unshare 缺失、thread_post 的 assign/memory 参数结构、thread_start key 参数 → 注册表补全
+  - receipts 收束方式枚举不全 → withdrawn 细分 {retract,leave,remove,role_change,close}
+  - assigns 缺 taken_at/deliver_due_at → 补
+  - 出口无场景（drop/void/移出路径/停用承接者/创建者离席判定）→ A10/A12/A15 扩展 + A23
+  - §10.1/§10.2 无直接断言、上限触发 → A24；Memory 面（版本演进/撤回/越权）→ A25
+  - 数值补全：全部工具频率、note/subject 尺寸、列举分页、错误码→next_action 映射表
+  - 范围声明澄清：分派无容量记账（§6.4）≠ 服务防护上限（L4 授权应用数值）
