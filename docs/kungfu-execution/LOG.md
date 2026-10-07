@@ -108,3 +108,5 @@ Backlog 追加：D2 工具 View=Facts 同形扫尾（D8 前）。
 D4 白名单修正（机械）：`internal/errors/status.go`（+ASSIGN_NOT_FOUND）、`internal/mcpserver/public_text_test.go`（豁免 +5）、`cmd/server/main.go`（sweep 挂点）、`unify_test.go`（计数 46）。
 
 Backlog 追加：repository `task_v1_test.go` 硬编码 `publisher_id=1`，依赖前序测试泄漏 bot 不清理的隐含假设（乱序运行会 FK 失败；dev.sh 包序下无影响；修法：seed 真实 bot 并引用其 id）。
+
+| D-015 | 打磨期（P1）启动：范围=已实现协作面的机制鲁棒性/逻辑完备/场景贴合与颗粒度/阶段残留分叉/逻辑缝隙错位；多审计、不急上线；Task 面挂起 | 用户指令 | 2026-10-08 |
