@@ -537,3 +537,20 @@ func handleThreadList(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	}
 	return threadData(res)
 }
+
+func handleTodoList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Cursor string `json:"cursor"`
+	}
+	if err := decodeArgs(args, &in); err != nil {
+		return ToolResult{}, argError("arguments must match the tool schema")
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_read") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_read").RetryAfter)
+	}
+	res, err := service.TodoList(ctx, deps.Pool, agent.ID, in.Cursor)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}

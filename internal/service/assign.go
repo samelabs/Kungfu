@@ -413,3 +413,54 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 // RecoverAssigns is the deadline sweeper (L4 materialization); wired
 // next to RecoverSubmissions in cmd/server.
 var RecoverAssigns = repository.RecoverAssigns
+
+// TodoList is the account-level turn projection (§8, D5): every open
+// obligation across all rooms, oldest first, cursor-paged. Pure read
+// of receipts/assignments — nothing is ever written here (§8).
+func TodoList(ctx context.Context, pool *pg.Pool, botID int64, cursor string) (map[string]any, error) {
+	before := 0
+	if strings.TrimSpace(cursor) != "" {
+		v, err := strconv.Atoi(strings.TrimSpace(cursor))
+		if err != nil || v < 0 {
+			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
+		}
+		before = v
+	}
+	items, err := repository.TodoItemsForAccount(ctx, pool, botID, int64(before), 51)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading turns")
+	}
+	nextCursor := any(nil)
+	if len(items) > 50 {
+		items = items[:50]
+		nextCursor = strconv.Itoa(before + 50)
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		next := map[string]string{"kind": it.Kind, "thread": it.Thread}
+		row := map[string]any{
+			"kind":        it.Kind,
+			"thread":      it.Thread,
+			"author":      it.Author,
+			"summary":     it.Summary,
+			"next_action": map[string]string{"reply": "respond", "deliver": "deliver", "judge": "judge"}[it.Kind],
+			"next_kind":   next,
+		}
+		if it.EntryID != nil {
+			row["entry"] = *it.EntryID
+		}
+		if it.Seq != nil {
+			row["seq"] = *it.Seq
+		}
+		if it.DueAt != nil {
+			row["due_at"] = *it.DueAt
+		}
+		out = append(out, row)
+	}
+	res := map[string]any{"todos": out, "next_cursor": nextCursor}
+	if len(out) == 0 {
+		res["next_action"] = "wait"
+		res["retry_after"] = 60
+	}
+	return res, nil
+}

@@ -980,3 +980,68 @@ func LinkEntryAssignment(ctx context.Context, q pg.Querier, entryID, assignID in
 		`UPDATE thread_entries SET assign_id = $2 WHERE id = $1`, entryID, assignID)
 	return err
 }
+
+// -- D5: the account-level turn list (kungfu.md §8) --
+
+// TodoItem is one open obligation of an account, whatever room it
+// lives in (§8: turns are a projection, never written).
+type TodoItem struct {
+	Kind       string // reply | deliver | judge
+	Thread     string
+	EntryID    *int64
+	AssignID   *int64
+	Seq        *int64
+	Author     string
+	Summary    string
+	DueAt      *string
+	ProducedAt string
+}
+
+// TodoItemsForAccount pages the account's open obligations, oldest
+// first (§8: ordered by production time). Judge items only appear
+// while the creator is still a member (R-18).
+func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, before int64, limit int) ([]TodoItem, error) {
+	rows, err := q.Query(ctx, `
+		(SELECT 'reply' AS kind, t.code AS thread, e.id AS entry_id,
+		        e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
+		        NULL::text AS due, to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS produced
+		 FROM thread_receipts r
+		 JOIN thread_entries e ON e.id = r.entry_id
+		 JOIN tb_bots b ON b.id = e.author_id
+		 JOIN threads t ON t.id = r.thread_id
+		 WHERE r.account_id = $1 AND r.state = 'pending')
+		UNION ALL
+		(SELECT 'deliver', t.code, a.entry_id, e.seq, b.bot_name,
+		        COALESCE(e.summary, ''), to_char(a.deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(a.taken_at, 'YYYY-MM-DD HH24:MI:SS')
+		 FROM assigns a
+		 JOIN threads t ON t.id = a.thread_id
+		 JOIN thread_entries e ON e.id = a.entry_id
+		 JOIN tb_bots b ON b.id = a.creator_id
+		 WHERE a.assignee_id = $1 AND a.state = 'taken')
+		UNION ALL
+		(SELECT 'judge', t.code, a.entry_id, e.seq, b.bot_name,
+		        COALESCE(e.summary, ''), to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS')
+		 FROM assigns a
+		 JOIN assign_deliveries d ON d.assign_id = a.id
+		 JOIN threads t ON t.id = a.thread_id
+		 JOIN thread_entries e ON e.id = a.entry_id
+		 JOIN tb_bots b ON b.id = a.assignee_id
+		 JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
+		 WHERE a.creator_id = $1 AND a.state = 'delivered')
+		ORDER BY produced ASC
+		LIMIT $3 OFFSET $2`, accountID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TodoItem
+	for rows.Next() {
+		var it TodoItem
+		if err := rows.Scan(&it.Kind, &it.Thread, &it.EntryID, &it.Seq,
+			&it.Author, &it.Summary, &it.DueAt, &it.ProducedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}

@@ -113,6 +113,7 @@ func TestLlmsTxtDocumentsEveryTool(t *testing.T) {
 		"thread_list": true, "thread_post": true, "thread_handle": true,
 		"thread_retract": true, "assign_take": true, "assign_submit": true,
 		"assign_judge": true, "assign_drop": true, "assign_void": true,
+		"todo_list": true,
 	}
 	for _, name := range ToolNames() {
 		if d6Pending[name] {

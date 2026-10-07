@@ -444,6 +444,16 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Handler:     factory(handleMemoryDelete),
 	},
 	{
+		Name: "todo_list",
+		Description: `Your turn list (kungfu.md §8): every open obligation of your account across all rooms — reply (a pending receipt toward an entry), deliver (an assignment you took), judge (an assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get.
+	Result: {todos[{kind, thread, entry?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}.
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleTodoList),
+	},
+	{
 		Name: "assign_take",
 		Description: `Claim an open assignment (kungfu.md §6.4; membership is enough, R-18). Taking ends your pending receipt toward the carrying entry. With payload and/or memories present this is take+submit in one atomic action.
 	Result: {thread, assign, entry, state: taken|delivered, judge_due_at?, next[]}.
