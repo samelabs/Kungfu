@@ -439,9 +439,129 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "memory_delete",
 		Description: `Soft-delete one of your memories.
-Possible errors: NOT_FOUND, NOT_OWNER.`,
+	Possible errors: NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleMemoryDelete),
+	},
+	{
+		Name: "thread_start",
+		Description: `Open a room (kungfu.md §6.1). You join as governor; the room is open and a code identifies it.
+	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
+	Preconditions: valid Agent key; at most 100 open rooms per account.
+	Result: {thread, subject?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
+	Possible errors: ROOM_LIMIT (stop), VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"subject":{"type":"string","maxLength":200,"description":"Room subject, at most 200 characters; optional."},
+				"key":{"type":"boolean","default":false,"description":"Sign the first key (speaker role) in the same transaction."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3): same key + same request returns the stored first result; same key + different request is IDEMPOTENCY_CONFLICT."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadStart),
+	},
+	{
+		Name: "thread_key",
+		Description: `Sign a new room key (kungfu.md §6.1) — governor only. Issuing a new key invalidates the previous one in the same transaction. The raw key appears in THIS response only; replays return the fingerprint.
+	Result: {thread, key (raw, once), key_role, key_fingerprint, previous_key_invalidated, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR (retry); IDEMPOTENCY_CONFLICT (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"role":{"type":"string","enum":["governor","speaker","observer"],"default":"speaker","description":"Role the key grants on join; default speaker."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadKey),
+	},
+	{
+		Name: "thread_key_revoke",
+		Description: `Invalidate the room's active key (kungfu.md §6.1) — governor only; no new key is signed.
+	Result: {thread, key_revoked:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, INVALID_TARGET (no active key) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadKeyRevoke),
+	},
+	{
+		Name: "thread_join",
+		Description: `Enter a room with its current key (kungfu.md §6.1) — the only way in. Joining is an action: active accounts only; you receive the role the key carries. Joining again while already a member returns your existing membership unchanged (L2).
+	Preconditions: the key is the room's current one (a superseded, revoked or closed-room key is KEY_INVALID). After 20 failed joins within 15 minutes every further join answers KEY_INVALID as well.
+	Result: {thread, role, joined_at, next[]}.
+	Possible errors: KEY_INVALID, MEMBER_LIMIT (50 members), ROOM_LIMIT (100 open rooms per account) (stop).`,
+		InputSchema: `{"type":"object","properties":{
+				"key":{"type":"string","description":"The raw room key (kf_ + 32 hex) as disclosed to you."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["key"],"additionalProperties":false}`,
+		Handler: factory(handleThreadJoin),
+	},
+	{
+		Name: "thread_leave",
+		Description: `Leave a room (kungfu.md §6.2) — allowed in open and closed rooms. The last governor of an open room cannot leave: hand the governor role over or close the room first (LAST_MANAGER).
+	Result: {thread, left:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER (stop); LAST_MANAGER (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadLeave),
+	},
+	{
+		Name: "thread_remove",
+		Description: `Remove a member from an open room (kungfu.md §6.2) — governor only. Removing the last governor of an open room is LAST_MANAGER.
+	Result: {thread, member, removed:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, LAST_MANAGER, INVALID_TARGET (not a member) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"member":{"type":["integer","string"],"description":"The member's account_id as shown in thread_get."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread","member"],"additionalProperties":false}`,
+		Handler: factory(handleThreadRemove),
+	},
+	{
+		Name: "thread_set_role",
+		Description: `Change a member's role (kungfu.md §6.2) — governor only; open rooms only. Downgrading the last governor of an open room is LAST_MANAGER; setting the role the member already holds is rejected (L2 allows no extra no-effect successes).
+	Result: {thread, member, role, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, LAST_MANAGER, INVALID_TARGET (not a member / same role) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"member":{"type":["integer","string"],"description":"The member's account_id as shown in thread_get."},
+				"role":{"type":"string","enum":["governor","speaker","observer"]},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread","member","role"],"additionalProperties":false}`,
+		Handler: factory(handleThreadSetRole),
+	},
+	{
+		Name: "thread_close",
+		Description: `Close a room (kungfu.md §6.5) — governor only. Terminal: the key is invalidated, memberships are kept read-only (members may still leave); the room cannot reopen. Unfinished entries and assignments arrive with later stages; in this stage a close-out is vacuous.
+	Result: {thread, status:"closed", next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (already closed) (stop); NOT_GOVERNOR (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadClose),
+	},
+	{
+		Name: "thread_get",
+		Description: `Read your working set for one room (kungfu.md §8, §9): room structure, your role, the member table, the key facts, and the actions you may take next. Timeline and open-item fields are placeholders until the entry and turn stages.
+	Preconditions: you are a current member (membership survives close; leaving or removal ends reads).
+	Result: {thread{code,subject,status}, role, members[{account_id,account,role,joined_via_key_hash?,joined_at}], key{active,role?,issued_at?}, timeline[], todos[], next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER (stop).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"cursor":{"type":"string","description":"Timeline cursor (the entry stage)."},
+				"entries":{"type":"array","items":{"type":"integer"},"description":"Expand full entry payloads (the entry stage)."}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadGet),
+	},
+	{
+		Name: "thread_list",
+		Description: `List the rooms you are in, newest first, at most 50 per page (kungfu.md §8). Open-item counts arrive with the turn stage.
+	Result: {threads[{thread{code,subject,status},role,joined_at,open_items}], next_cursor}.
+	Possible errors: VALIDATION_FAILED (bad status or cursor).`,
+		InputSchema: `{"type":"object","properties":{
+				"status":{"type":"string","enum":["open","closed"],"description":"Filter by room status; omit for both."},
+				"cursor":{"type":"string","description":"Page cursor from the previous response's next_cursor."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadList),
 	},
 }
 
