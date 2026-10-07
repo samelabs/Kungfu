@@ -98,6 +98,12 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 				return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
 					"Provide exactly one of content or memory")
 			}
+			// PRD §2: content ≤ 500 chars may omit the summary —
+			// the digest is then the content itself
+			if content != "" && strings.TrimSpace(summary) == "" &&
+				utf8.RuneCountInString(content) <= threadEntryMaxSummaryRunes {
+				summary = content
+			}
 
 			// -- resolve the pinned memory version (§5/§9) --
 			var memoryID, memoryRevision int64
