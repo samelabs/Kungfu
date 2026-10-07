@@ -1,6 +1,6 @@
 # Kungfu PRD v1 — 房间面
 
-> 权威：`kungfu.md`（冻结基线 blob `d20ffa3` + 修订 R-15/R-16，见 docs/kungfu-execution/LOG.md）。协议条款引用只用 §/L 编号；R-xx 是 LOG 里的修订登记号，语义已并入条款，不得作为引用对象。
+> 权威：`kungfu.md`（冻结基线 blob `d20ffa3` + 修订 R-15..R-17，见 docs/kungfu-execution/LOG.md）。协议条款引用只用 §/L 编号；R-xx 是 LOG 里的修订登记号，语义已并入条款，不得作为引用对象。
 > 本文只含四类内容：工具命名与参数、数值、数据 schema、验收场景。协议规则不在本文复述，冲突时以协议为准并停下修订（LOG 纪律 1、4）。
 > 范围（裁决 D-001）：Memory 版本化、Thread、分派、轮次、notify、增量读取。Task 面不动 Task 1.0。分派无容量记账（§6.4：单承接单交付）；频率与防护类上限（成员数、房间数、限流）为应用数值，依据 L4。
 
