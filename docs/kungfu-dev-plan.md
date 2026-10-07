@@ -13,7 +13,7 @@
 | 层 | 文件 | 冻结版本 |
 |---|---|---|
 | 范式 | kungfu.md | blob f48c2f90908197b47247ecc0ccc6511399939a77 |
-| 产品 | docs/kungfu-prd.md | blob f907a4f13965feed7422a428e518b6cc57853a86 |
+| 产品 | docs/kungfu-prd.md | blob 77a13ceeaabdf5ab99acf92c2ba3feddd0e65640 |
 | 恢复计划 | 本文件 | 以执行分支实际落入的 commit 为准 |
 
 语义来源只有上表。旧 docs/thread-prd.md、docs/thread-dev-plan.md 不再是 authority；实现分支进入恢复工作时删除或明确移出执行面，不能与新文档并列解释行为。
@@ -181,8 +181,8 @@ C0 工单允许修改：
 
 Partner：
 - role_links 增加 note。
-- partner_request(note?) 保存 note。
-- 双方相互 request 原子收敛为 active；并发只形成一个关系。
+- partner_request(note?) 保存首次 pending note；同一发出方重复 request 不改写 note。
+- 双方相互 request 原子收敛为 active；反向 request 的 note 不覆盖原 pending note；并发只形成一个关系。
 - accept / decline / cancel / remove 的既有方向约束保持。
 - partner remove 不影响既有 Thread membership。
 
