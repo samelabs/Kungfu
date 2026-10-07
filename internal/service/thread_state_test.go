@@ -599,7 +599,7 @@ func TestIdempotentMembershipSnapshotsDoNotDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !replayChanged || addReplay.Permission != model.ThreadWrite || addReplay.JoinedAt != added.JoinedAt {
+	if !replayChanged || addReplay.Permission != model.ThreadWrite || !addReplay.JoinedAt.Equal(added.JoinedAt) {
 		t.Fatalf("add replay drifted: replay=%+v changed=%v first=%+v", addReplay, replayChanged, added)
 	}
 
