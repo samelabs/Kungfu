@@ -32,6 +32,12 @@
 
 `next_action` token 映射协议 §8 封闭集：`respond / deliver / judge / revise / retry / wait / done / stop`。
 
+### 1.1 返回结构
+
+`todo_list` 每项：`kind∈{reply, deliver, judge}`、对象（`thread`/`assign` 及 code）、来源条目 `summary`（reply 类）、到期时刻（deliver/judge 类）、`next_action`、`next[]`；按产生时间升序，cursor 分页。
+
+`thread_get` 工作集：房间 `code/subject/status`、本人 `role`、成员表（account、role）、摘要时间线（`entry/seq/作者/summary/reply_to/asked/是否携带分派`，≤50/页，cursor）、本人未了事项（同 todo 项结构）、可执行动作列表。`entries=[…]` 展开载荷全文与分派明细。
+
 ## 2. 数值
 
 | 项 | 值 | 依据 |
