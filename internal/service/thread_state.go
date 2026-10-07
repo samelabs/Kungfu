@@ -80,15 +80,18 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 			if th == nil {
 				return threadActionOutcome{}, errors.New(404, "THREAD_NOT_FOUND", "Thread not found")
 			}
-			if th.Status != repository.ThreadStatusOpen {
-				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is closed")
-			}
 			me, err := repository.FindThreadMember(ctx, tx, th.ID, botID)
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error loading membership")
 			}
 			if me == nil {
 				return threadActionOutcome{}, errors.New(403, "NOT_MEMBER", "You are not a member of this thread")
+			}
+			// guard order unified with handle/retract: existence →
+			// membership → closed → role (no closed-state leak to
+			// non-members)
+			if th.Status != repository.ThreadStatusOpen {
+				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is closed")
 			}
 			if !speechRight(me.Role) {
 				return threadActionOutcome{}, errors.New(403, "READ_ONLY", "Observers cannot post")
@@ -417,6 +420,13 @@ func ThreadRetract(ctx context.Context, pool *pg.Pool, botID int64, threadCode s
 			n, err := repository.WithdrawThreadReceiptsByEntry(ctx, tx, entryID, "retract")
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error withdrawing receipts")
+			}
+			if n == 0 {
+				// L2 admits exactly two no-new-effect successes
+				// (join, Task claim); retracting an entry with no
+				// pending receipts is not one of them
+				return threadActionOutcome{}, errors.New(422, "INVALID_TARGET",
+					"No pending receipts on this entry")
 			}
 			facts := map[string]any{"thread": th.Code, "entry": entryID, "withdrawn": n}
 			return threadActionOutcome{Facts: facts, View: facts}, nil

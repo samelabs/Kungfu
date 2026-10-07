@@ -490,3 +490,81 @@ func TestAssignOutputValidation(t *testing.T) {
 		t.Fatalf("memory pin missing revision: %s", pinned)
 	}
 }
+
+// TestDeactivationCollectsReceipts (residue audit #2): disabling an
+// account collects their pending receipts — no ghost obligations
+// survive to resurrect on reactivation.
+func TestDeactivationCollectsReceipts(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "deact", true, "")
+	defer threadCleanup(t, pool, []int64{owner, a}, code)
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	e := statePost(t, pool, owner, code, "a owes this", "", nil, []int64{a}, "dc1")
+	// disable via the admin path (the cascade entry point)
+	if _, err := pool.Exec(ctx, `UPDATE tb_bots SET status='disabled' WHERE id=$1`, a); err != nil {
+		t.Fatal(err)
+	}
+	// the cascade is invoked by AdminSetBotStatus; call the repository
+	// directly to assert the collection itself
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.TerminateAccountThreadMemberships(ctx, tx, a); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("cascade: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st, res, _ := stateReceipt(t, pool, e["entry"].(int64), a)
+	if st != "withdrawn" || res == nil || *res != "remove" {
+		t.Fatalf("ghost receipt survived deactivation: %s %v", st, res)
+	}
+}
+
+// TestExpandedEntryServesPinnedRevision (residue audit #3): after the
+// author updates the memory, an entry pinned at the old revision
+// serves the OLD content under the OLD revision label (§5, L1).
+func TestExpandedEntryServesPinnedRevision(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "pinned", true, "")
+	defer threadCleanup(t, pool, []int64{owner, a}, code)
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	mem, err := Push(ctx, pool, owner, map[string]interface{}{
+		"title": "doc", "tags": []interface{}{"t"}, "content": strings.Repeat("v1-", 30),
+	}, 128, 10, 24, 500, 102400)
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	r := statePostMem(t, pool, owner, code, mem.Code, "pinned v1", nil, nil, "pv1")
+	if r["revision"].(int64) != 1 {
+		t.Fatalf("pin revision = %v", r["revision"])
+	}
+	// author updates the memory twice — the entry must still serve v1
+	for _, v := range []string{strings.Repeat("v2-", 30), strings.Repeat("v3-", 30)} {
+		if _, err := Push(ctx, pool, owner, map[string]interface{}{
+			"title": "doc", "tags": []interface{}{"t"}, "content": v, "code": mem.Code,
+		}, 128, 10, 24, 500, 102400); err != nil {
+			t.Fatalf("push update: %v", err)
+		}
+	}
+	view, err := ThreadGet(ctx, pool, a, code, "", []int64{r["entry"].(int64)})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	row := view["entries"].([]any)[0].(map[string]any)
+	if row["revision"].(int64) != 1 || !strings.Contains(row["content"].(string), "v1-") {
+		t.Fatalf("pinned entry drifted: rev=%v content=%v", row["revision"], row["content"])
+	}
+}

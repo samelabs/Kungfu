@@ -206,6 +206,14 @@ func TestHandleAndRetract(t *testing.T) {
 	if st != "fulfilled" || *res != "handle" {
 		t.Fatalf("fulfilled history rewritten: %s %v", st, res)
 	}
+
+	// retract with nothing left pending is rejected (L2: only join
+	// and Task claim are no-effect successes)
+	if _, err := ThreadRetract(ctx, pool, owner, code, entryID, "rz"); err == nil {
+		t.Fatal("retract with zero pending receipts must be rejected")
+	} else {
+		threadErrIs(t, err, 422, "INVALID_TARGET")
+	}
 }
 
 // TestPostGuards: closed rooms reject post/handle/retract with

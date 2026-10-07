@@ -433,6 +433,14 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// §4 + §6.2: membership ends — pending receipts collect. Rooms
+	// closed above already collected everything (resolution=close);
+	// the member's receipts in surviving rooms collect as remove.
+	if _, err := q.Exec(ctx, `
+		UPDATE thread_receipts SET state = 'withdrawn', resolution = 'remove', resolved_at = NOW()
+		WHERE account_id = $1 AND state = 'pending'`, botID); err != nil {
+		return nil, err
+	}
 	// R-18: the disabled member's undelivered assignments void across
 	// ALL rooms (both as assignee and as creator); delivered ones keep
 	// their judgment clock and settle as undecided at the deadline.
@@ -689,11 +697,14 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		       k.code, e.memory_revision,
 		       (k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')),
 		       CASE WHEN k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')
-		            THEN k.content END,
+		            THEN CASE WHEN e.memory_revision = k.revision
+		                 THEN k.content ELSE mr.content END END,
 		       COALESCE(e.summary, ''), (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM thread_entries e
 		JOIN tb_bots b ON b.id = e.author_id
 		JOIN tb_kungfus k ON k.id = e.memory_id
+		LEFT JOIN memory_revisions mr
+		       ON mr.memory_id = e.memory_id AND mr.revision = e.memory_revision
 		WHERE e.thread_id = $1 AND e.id = ANY($2)
 		ORDER BY e.seq DESC`, threadID, ids)
 	if err != nil {
