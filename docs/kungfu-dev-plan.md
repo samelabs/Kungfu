@@ -24,7 +24,7 @@
 - 待修实现 BASE：c404e9634efeef6518e56944aeefda766e3cb32f
 - c404e96 相对 main：8 commits ahead；当前 CI run 37478106143 = success。
 - success 只证明旧规则内部一致，不构成新 PRD 合规证明。
-- migrations 023–025 只存在于未合并实现分支，main 仍停在 022。因此恢复阶段直接修正 024/025 的未发布 schema，不再叠一层 026 兼容补丁来掩盖错误结构；023 Memory foundation 原则上保留。
+- migrations 023–025 只存在于未合并实现分支，main 仍停在 022。因此恢复阶段允许直接修正 024/025 的未发布 schema，不再叠一层兼容 migration 来掩盖错误结构；023 Memory foundation 原则上保留。
 
 ### 0.3 开工前文档移交
 
@@ -39,11 +39,22 @@
 
 ## 1. 执行纪律
 
-### 1.1 一个阶段只跨一个语义边界
+### 1.1 阶段必须纵向闭合
 
-禁止再把 T2–T5 交给一个 Agent 长跑。阶段按本文件 C0 → C1 → C2 → C3 → M1 → T4 → T5 → T6 → T7 串行推进。
+此前“先把最终 schema 全改完、service 以后再跟”的拆法不可用：当前 service 仍会写旧 receipt 状态，Child 仍会引用父 anchor；若先加最终 CHECK/FK，该阶段必然无法独立通过。
 
-只有 C0 可以直接以 c404e96 为代码 BASE 生成实施工单。
+因此恢复阶段按一个语义切片同时修改其 schema + repository + service + tests：
+
+C0 Partner/Membership/Key/Governance
+→ C1 Child/local-entry boundary
+→ C2 thread_post/obligation
+→ M1 Memory read
+→ T4 Task
+→ T5 Todo/Work Context
+→ T6 Surface
+→ T7 Acceptance
+
+只有 C0 可以直接从当前 repair 文档移交 HEAD 生成实施工单。
 C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工单，并重新列允许修改文件。
 
 ### 1.2 实现没有产品设计权
@@ -62,8 +73,8 @@ C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工
 
 阶段完成必须同时满足：
 
-1. 语义 gate：所有新增/修改行为可逐条映射到 PRD；没有新增隐式规则。
-2. 回归 gate：未列入该阶段的既有行为不变；Task 1.0 在 T4 前不得被顺带改。
+1. 语义 gate：本阶段触及的行为全部映射到 PRD；没有新增隐式规则。
+2. 回归 gate：未列入该阶段的既有行为不被顺手改；已知后续偏差可以继续存在到它所属阶段，但不能被扩大或固化成新接口。
 3. 工程 gate：测试、构建、migration rehearsal、exact-SHA CI 全绿。
 
 “测试绿”不能替代前两项。
@@ -79,8 +90,6 @@ C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工
 
 ### 2.1 KEEP — 可保留的已验证资产
 
-以下机制方向与新 PRD 一致，除为兼容新 schema 做机械适配外不重写：
-
 - 023：Memory revision / origin、memory_revisions 基础。
 - Memory 更新 row lock → archive current revision → update current row 同事务。
 - 现有数据回填 revision=1, origin=standalone，首版本不重复写历史表。
@@ -89,7 +98,7 @@ C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工
 - root Thread 拥有本线程自己的 root entry，creator 是本线程 manage。
 - Thread seq 原子分配的基本方向。
 - join key 只持久化安全 hash，raw secret 仅首次成功响应披露。
-- 新 key 替换旧 key；成员重复 join 不改变其既有 membership / permission。
+- 新 key 替换旧 key；成员重复 join 不改变既有 membership / permission。
 - 直接把伙伴拉入 Thread 时要求 active Partner/Link。
 - 移除成员会撤销当前 join key。
 - 子线程创建后生命周期和成员关系不随父线程关闭/移除而级联。
@@ -100,8 +109,6 @@ C1 及以后必须在前一阶段 exact HEAD + exact CI 成功后重新生成工
 KEEP 不代表当前文件原样不动；只表示上述机制不能因恢复工作被重设计。
 
 ### 2.2 REWORK — 已确认与新 PRD 不一致
-
-必须定向修正：
 
 - root creator 跨整棵树继承 govern。
 - Child 无本线程首条 entry，成员入口 / receipt / key 指向父 anchor。
@@ -128,8 +135,6 @@ KEEP 不代表当前文件原样不动；只表示上述机制不能因恢复工
 
 ### 2.3 DROP — 明确删除而不是兼容
 
-以下规则本身是旧设计偏差，不保留 compatibility path：
-
 - RootCreatorCanGovernThread 及所有“root creator 可治理任意 descendant”的判断与测试。
 - “父 anchor 属于 child 可写 / reply / join-entry scope”。
 - “Child 直接拿父 anchor 作为自己成员入口和 receipt input”。
@@ -141,164 +146,215 @@ KEEP 不代表当前文件原样不动；只表示上述机制不能因恢复工
 
 ---
 
-## 3. C0 — 持久结构对齐
+## 3. C0 — Partner / Membership / Key / Governance 闭合
 
 这是唯一允许立即生成代码工单的阶段。
 
-### 目标
+### 3.1 目标
 
-只修正 T0 schema / model / repository primitive，使数据库能够表达最新版 PRD；不改变 service 对外行为。
+只收口“谁能建立伙伴、谁能进入 Thread、以什么角色进入、谁能治理、如何退出、key 生命周期”。本阶段不改 Child 的父 anchor 模型，不改 recipient 规则，不把 receipt 切到最终 resolution 模型。
 
-### 允许范围
+### 3.2 允许范围
 
-首个 C0 工单只允许修改：
+C0 工单允许修改：
 
 - migrations/024_thread_core.sql
-- migrations/025_thread_receipt_idempotency.sql
 - internal/model/thread.go
 - internal/repository/thread.go
+- internal/service/thread_kernel.go
+- internal/service/thread_state.go
 - internal/repository/migration_thread_t0_test.go
-- 如必须增加 repository-only 测试，可新增同目录测试文件
+- internal/service/thread_kernel_test.go
+- internal/service/thread_state_test.go
+- 如测试需要，可新增同目录专用测试
 
-不得改 thread_kernel.go / thread_state.go / API / MCP / Task。
+不得修改：
 
-### 必须落地
+- migrations/025_thread_receipt_idempotency.sql 的 receipt state 模型
+- Task 文件
+- MCP / HTTP / Web
+- Memory 023 / revision 机制
+- Child local-first-entry 结构
+- thread_post recipient 规则
 
-1. role_links.note。
-2. threads.join_role，合法值与 Thread permission 一致。
-3. thread_roles.join_source ∈ {creator, partner, key, branch}；保留必要 joined_by_role_id。
-4. thread_memories.asked、task_id。
-5. thread_receipts：
-   - source reason ∈ {entry, ask, reply, pair}
-   - state pending / fulfilled / withdrawn
-   - resolution 封闭集合
-   - resolution_note
-   - resolved_at
-6. 本线程 entry 归属由 DB 结构保证：
-   - join entry
-   - ThreadRole entry
-   - receipt input
-   - reply target
-   均不能指向别的 Thread 的 entry。
-7. 现有 idempotency 持久结构能够保存“首次动作原非秘密业务结果”，不能要求 replay 时从当前对象状态重新推导。
-8. 023 不因 C0 被重写。
+### 3.3 必须落地
 
-### C0 验收
+Partner：
+- role_links 增加 note。
+- partner_request(note?) 保存 note。
+- 双方相互 request 原子收敛为 active；并发只形成一个关系。
+- accept / decline / cancel / remove 的既有方向约束保持。
+- partner remove 不影响既有 Thread membership。
 
-- fresh DB：001 → revised 025 成功。
-- upgrade rehearsal：main 001–022 → revised 023–025 成功。
-- 既有 main 数据不合成 Partner / Thread / receipt。
-- SQL 负测：四类 cross-thread entry reference 全部被 DB 拒绝。
-- schema enum / CHECK 覆盖 PRD 封闭集合。
-- 不调用任何 service 业务动作。
-- exact-SHA CI。
+Membership provenance：
+- thread_roles 增加 join_source ∈ {creator, partner, key, branch}。
+- root creator = creator。
+- direct add / thread_start 的伙伴成员 = partner。
+- key join = key。
+- 当前 branch creator / branch members 即使其其余 branch 语义要到 C1 修，membership source 也必须准确记为 branch。
+- joined_by_role_id 保留直接拉入者 / 派生者事实。
 
-C0 完成后先审 diff，确认没有 service 行为变化，再允许生成 C1 工单。
+Governance：
+- 删除 root inherited governance。
+- manage 权限只来自当前 Thread membership。
+- thread_leave 可用；本人随时离开。
+- open Thread 的 leave / remove / demote 任何一个会导致 manage=0 时返回 LAST_MANAGER。
+- closed Thread 不受“必须至少一个 manage”约束；leave 仍可用。
+- Partner remove 不回收 Thread 权限。
+
+Key：
+- threads 增加 join_role，与 key hash / join_entry 成同一组状态。
+- role ∈ {read, write, manage}，默认 write。
+- entry 缺省当前 Thread 最新 entry。
+- key join 按绑定 role 加入；existing member 不升级、不重复加入。
+- remove participant 和 close 都在同事务撤销当前 key；reopen 不恢复旧 key。
+- reset/revoke 只有当前 Thread manage 可做。
+- 幂等 replay 返回首次成功动作保存的原非秘密结果，raw key 永不重放；后续 reset 不得改变旧幂等结果的 fingerprint。
+
+Role change：
+- read → write/manage 的 entry 可选；指定时记录新入口并在当前旧 receipt 模型下机械创建入口 pending，未指定则不创建。
+- write/manage → read 撤销其当前 pending（receipt 的最终 resolution 语义留 C2）。
+
+### 3.4 C0 不得顺手修
+
+- Branch 仍可能使用父 anchor；到 C1 一次性修。
+- receipt 仍可暂用当前 pending/handled/withdrawn；到 C2 与 thread_post 一起切换，避免中间态伪造 resolution。
+- ReplyThreadState 的旧语义不在 C0 改。
+- EntryAllowedInThreadScope 的 parent-anchor 行为不在 C0 改。
+
+### 3.5 C0 Gate
+
+必须新增/修订测试证明：
+
+- mutual partner request → one active relation；concurrent opposite request 亦如此。
+- note 持久化。
+- non-member root creator 不能治理 Child。
+- direct add 仍要求 active partner。
+- key role = read/write/manage 各自正确；默认 write。
+- existing member join 不升级。
+- raw key 一次披露；旧 idempotency replay 的 fingerprint 不随后续 reset 漂移。
+- remove / close 使旧 key 立即失效；reopen 不恢复。
+- LAST_MANAGER 覆盖 leave/remove/demote 三条路径。
+- closed Thread member 可 leave。
+- partner removal 不改变已有 membership。
+- fresh + main(001–022) → current 023–025 migration rehearsal。
+- exact-SHA CI success。
+
+C0 完成后先做语义 diff 审计，再生成 C1 工单。
 
 ---
 
-## 4. C1 — Partner / Membership / Key / Governance
+## 4. C1 — Child / local-entry boundary 闭合
 
-### 目标
+### 4.1 目标
 
-修正“谁能进入、谁能治理、凭什么同意、如何退出”，不碰发言 recipient 规则。
+把 Child 从“父 anchor 的可写延伸”纠正为独立 Thread；同时落下同线程 DB 约束。这个阶段必须 schema + service 一起改，不能先加 FK 再留旧 Child 行为。
 
-### 语义范围
+### 4.2 必须落地
 
-- partner_request(note?) 持久化 note。
-- 双方互相 request：同一 canonical relation 原子收敛为 active。
-- direct add 仍要求 active partner；角色缺省 write。
-- membership 写入稳定 join_source。
-- 删除 root inherited governance；治理只看本 Thread 的 manage membership。
-- key 持久化 join_role；role 缺省 write；entry 缺省本线程最新 entry。
-- key join 按绑定 role 加入；read 不产生入口待回应，write/manage 后续由 C3 receipt 语义接上。
-- key 幂等 replay 返回首次成功的原 fingerprint，永不重放 raw key。
-- thread_leave。
-- open Thread 的 leave/remove/demote 都执行 LAST_MANAGER guard。
-- remove 同事务撤销当前 key。
-- close 同事务撤销当前 key；reopen 不恢复旧 key。
-- read → write/manage 的 entry 可选；指定时才产生入口待回应。
-- Partner remove 不影响既有 Thread membership。
-
-### 明确不做
-
-- 不实现 generic thread_post。
-- 不改 branch first-entry。
-- 不做全局 Todo。
-- 不碰 Task。
-
-### Gate
-
-必须覆盖 partner opposite-request race、last-manager 三条路径、key reset/replay、old-key invalidation、partner removal independence、非成员 root creator 无 descendant manage 权限。
-
----
-
-## 5. C2 — Child Thread 本地化
-
-### 目标
-
-把 Child 从“父 anchor 的可写延伸”纠正为真正独立 Thread；父 anchor 仅作为 lineage 只读锚。
-
-### 必须成立
-
+Branch：
 - thread_branch(thread, anchor, subject, content, summary?, members?) 创建 Child 自己的 seq=1 首条 entry。
-- Child creator = manage，entry 归 Child。
+- Child creator = manage，join_source=branch。
 - members 只能来自父 Thread 当前 write/manage；不要求与派生者是 partner。
-- write/manage 初始成员的入口是 Child 首条 entry。
+- write/manage 初始成员入口 = Child 首条 entry；read 不产生入口 pending。
+- 本人对父 anchor 的 pending 若存在，由 branch 同事务履行；不存在时 branch 本身仍是合法分解动作。
+
+Local entry scope：
 - Child key 只能绑定 Child entry。
 - Child reply 只能指 Child entry。
-- lineage 读取可返回从 root 到当前 Child 的 anchor chain，但这些 ancestor entries 不进入 Child 写 scope。
-- 父 Thread 后续 close/remove 不改变 Child lifecycle/membership。
+- add / role-entry 只能使用当前 Thread entry。
+- lineage 读取仍可返回 root→current 的 ancestor anchor chain，但 anchor chain 是 read-only context，不进入写 scope。
 - 父 Thread manage 若不是 Child member，不能读/管 Child。
 
-### DROP gate
+DB：
+- join entry 使用 (thread_id, entry_id) 同线程 FK。
+- ThreadRole entry 使用同线程 FK。
+- receipt input 使用同线程 FK。
+- reply_to 使用同线程 FK。
+- parent anchor 继续用 (parent_thread_id, anchor_entry_id) 指向直接父 Thread entry。
 
-阶段结束必须搜索不到任何业务使用的 RootCreatorCanGovernThread，也不能再用“current thread OR direct anchor”作为写 scope。
+### 4.3 明确不做
+
+- receipt state/resolution 不在 C1 切最终模型。
+- generic thread_post / ask 不在 C1。
+- Task / Todo 不动。
+
+### 4.4 C1 Gate
+
+- 四类 cross-thread write reference SQL 负测全部失败。
+- Child seq=1 entry 属于 Child。
+- parent anchor 只能通过 lineage/context 读取，不能 reply/add/key。
+- branch members 不要求 partner，但必须是 parent write/manage。
+- parent close/remove 不影响 Child lifecycle/membership。
+- parent manage 非 Child member 越权失败。
+- exact-SHA CI。
 
 ---
 
-## 6. C3 — thread_post 与待回应状态机
+## 5. C2 — thread_post / obligation 闭合
 
-### 目标
+### 5.1 目标
 
-一次性收口 Thread 的发言、回应对象、履行方式和并发；不在这一阶段实现 Task claim 集成之外的 Task 新机制。
+一次性切换发言语义和待回应持久状态；receipt schema 与 service 同阶段完成，避免“最终 schema + 旧业务”中间态。
 
-### thread_post
+### 5.2 Schema / model
+
+- thread_memories 增加 asked、task_id。
+- thread_receipts：
+  - reason ∈ {entry, ask, reply, pair}
+  - state ∈ {pending, fulfilled, withdrawn}
+  - fulfilled resolution ∈ {reply, handle, claim, branch}
+  - withdrawn resolution ∈ {leave, remove, role_change, close}
+  - resolution_note 仅 handle 可有
+  - resolved_at
+- 旧 handled 语义删除，不做 compatibility 状态。
+
+### 5.3 thread_post
 
 按 PRD §4.2 唯一实现：
 
 - content | memory 二选一。
-- summary 规则。
+- summary 规则；Thread Memory description = summary。
 - reply_to? 仅本 Thread。
-- ask?：显式名单，包括 []。
-- task? 只做引用持久化，Task 资格/结果逻辑留 T4。
+- ask? 显式名单，包括 []。
+- task?：本阶段可引用当前既有公开 Task；private Task 的 author/visibility 规则到 T4 扩展，不另造临时私有规则。
 - input_ref? 只做 stale guard，不决定履行。
 - recipient precedence：ask → reply author → pair → none。
 - 返回 asked、my_pending、next_action。
 
-### obligation
+### 5.4 obligation
 
 - source reason 与 resolution 分离。
-- reply / handle / branch / claim 各有独立 resolution。
-- leave / remove / role_change / close 为 withdrawn resolution。
-- thread_handle(note?) 保存 note，不创建新 entry。
 - reply 本身履行本人对 reply target 的 pending obligation；不依赖 input_ref。
+- thread_handle(note?) = resolution handle；保存 note，不创建 entry。
+- branch = resolution branch。
+- leave/remove/role_change/close 转 withdrawn + 对应 resolution。
+- claim enum 先存在；真正由 work_claim 写入到 T4。
 - 同一 obligation 的终结 CAS 至多一次。
+- input_ref stale 必须零副作用。
 
-### summary / content
+### 5.5 旧 ReplyThreadState
 
-- Thread content 仍以 origin=thread Memory 承载。
-- summary 存该 Memory 的 description。
-- 完整内容不塞入结构字段。
+产品语义必须只有 thread_post 一套。
 
-### C3 gate
+可保留内部兼容 wrapper 以缩小代码扰动，但 wrapper 只能调用同一 transition；不得继续有第二套 recipient/receipt 规则。旧“input 必须等于 reply target”必须删除。
 
-覆盖 PRD §12.2 的并发矩阵和 §12.3 场景 1–7 中纯 Thread 部分。
-旧“ReplyThreadState 即产品语义”的 API 不得继续决定新行为；可以保留内部兼容 wrapper，但 wrapper 必须完全落到 thread_post 的同一语义，不能存在第二套状态机。
+### 5.6 C2 Gate
+
+覆盖 PRD §12.2 相关并发和 §12.3 场景 1–7 的 Thread 部分：
+
+- ask / reply / pair / ask:[]。
+- direct reply 无 Todo input 也正确履行。
+- input_ref stale 零写入。
+- handle note。
+- close / role change / leave 的 withdrawn resolution。
+- reply vs handle / branch 并发不重复履行。
+- summary 时间线与按需全文。
+- exact-SHA CI。
 
 ---
 
-## 7. M1 — Memory 读取闭合
+## 6. M1 — Memory 读取闭合
 
 这是 T4 前的独立小阶段。
 
@@ -313,11 +369,11 @@ Gate：current/historical、soft-delete pinned、public unshare、非 owner hist
 
 ---
 
-## 8. T4 — Task 按范式修正
+## 7. T4 — Task 按范式修正
 
-T4 只有在 C0–C3 + M1 全部 exact-SHA gate 完成后才能生成具体工单；不得现在锁未来代码 BASE。
+T4 只有在 C0–C2 + M1 全部 exact-SHA gate 完成后才能生成具体工单；不得现在锁未来代码 BASE。
 
-### 必须实现的既定产品语义
+### 必须实现
 
 1. contract version：
    - author update 产生新 version；
@@ -333,7 +389,8 @@ T4 只有在 C0–C3 + M1 全部 exact-SHA gate 完成后才能生成具体工�
    - author judge。
 4. Memory outputs：
    - submit 时固定 name/code/revision/checksum；
-   - 统一 output_hash 覆盖 payload + Memory bindings，作为 request-key 幂等内容身份。
+   - output_hash = canonical payload + fixed Memory bindings；
+   - request_key 幂等以完整 output_hash 判同/异。
 5. retention：
    - receiver：非终态为重投保留内容/绑定；终态清除，保留 output_hash + outcome facts；不形成平台 task_results。
    - author：settled 保留 accepted output 作为 task_results；rejected/failed 清输出内容/绑定，保留事实。
@@ -354,73 +411,65 @@ T4 只有在 C0–C3 + M1 全部 exact-SHA gate 完成后才能生成具体工�
 
 ---
 
-## 9. T5 — Todo / Work Context / 可恢复性
+## 8. T5 — Todo / Work Context / 可恢复性
 
-### Todo 必须只由持久状态计算
-
-四类：
+Todo 只由持久状态计算：
 
 - reply
 - partner_request
 - deliver
 - assess
 
-无事项时按 PRD 的 wait / poll_after 规则。
+无事项时按 PRD wait / poll_after。
 
-### Thread work context
-
-thread_get：
+thread_get 返回：
 
 - 摘要时间线分页；
-- 指定 entries 再展开完整内容；
-- 当前 membership / role；
+- entries 按需全文；
+- membership / role；
 - my pending；
 - child links；
-- lineage anchor chain（Child only，read-only）。
+- lineage anchor chain（read-only）。
 
 partner_list 返回伙伴与共同开放 Thread。
-履约记录必须能从 receipt resolution + Task terminal facts 计算；本阶段不得自行发明 reputation score、排名或新的公开评价工具。若产品需要额外暴露面，先改 PRD。
 
-Gate：掉线后清除进程/会话本地状态，只凭 todo → work context 完成恢复。
+履约记录必须能从 receipt resolution + Task terminal facts 计算；不得自行发明 reputation score、排名或新的公开评价工具。若产品要额外暴露面，先改 PRD。
+
+Gate：清除进程/会话局部状态，只凭 todo → work context 恢复并继续。
 
 ---
 
-## 10. T6 — MCP / HTTP / Product Surface
-
-T6 才注册/暴露冻结接口。
+## 9. T6 — MCP / HTTP / Product Surface
 
 - 工具名、参数、next_action 只来自 PRD §8。
-- 所有写工具同一 envelope / error / idempotency 语义。
-- MCP 与 HTTP 必须调用同一 service state transition，不允许双实现。
-- 更新 llms.txt / public docs / Web 时只做已经成立机制的表达，不新增规则。
-- A8：结构字段和用户/Agent 内容严格分开。
+- 所有写工具同一 envelope / error / idempotency。
+- MCP 与 HTTP 调同一 service transition，不允许双实现。
+- llms.txt / public docs / Web 只表达已成立机制，不新增规则。
+- 结构字段与 Agent 内容严格分开。
 
-Gate：MCP / HTTP 双端等价测试；不依赖 UI 才能完成核心场景。
+Gate：MCP / HTTP 等价；核心场景不依赖 UI。
 
 ---
 
-## 11. T7 — 全量合规验收
+## 10. T7 — 全量合规验收
 
-最终必须同时通过：
+最终同时通过：
 
-1. Kungfu PRD §12 全部场景。
-2. Task 1.0 全部既有回归与账本不变式。
+1. PRD §12 全场景。
+2. Task 1.0 全回归与账本不变式。
 3. migration fresh + upgrade rehearsal。
-4. 幂等 / concurrency / stale-input 随机压力。
+4. 幂等 / concurrency / stale 随机压力。
 5. 越权矩阵。
-6. 进程状态清空后的恢复测试。
-7. 两种异构运行时只凭 MCP 完成：
-   - 两人对话并正常结束；
-   - 群议 ask；
-   - private Task 结构化传递。
-8. 反向审计：逐个 public write action 指出 PRD 条款；任何无法指出来源的业务规则 = 不合格。
+6. 进程状态清空后的恢复。
+7. 两种异构运行时只凭 MCP 完成对话、群议、private Task。
+8. 反向审计：逐个 public write action 指出 PRD 条款；无法指出来源的业务规则 = 不合格。
 9. exact HEAD CI success + clean git status。
 
 ---
 
-## 12. 每个阶段工单的固定模板
+## 11. 每阶段工单固定模板
 
-后续给执行 Agent 的工单必须包含以下全部字段，缺一不可：
+每个执行工单必须含：
 
 - BASE：完整 SHA。
 - Authority：kungfu.md / PRD exact blob 或 commit。
@@ -428,9 +477,9 @@ Gate：MCP / HTTP 双端等价测试；不依赖 UI 才能完成核心场景。
 - Allowed files：白名单。
 - KEEP：本阶段绝不能破坏的机制。
 - Required changes：逐条映射 PRD。
-- Forbidden changes：明确不能顺手做什么。
-- Negative tests：至少列越权 / stale / rollback / idempotency / concurrency 中相关项。
-- Stop conditions：遇到未定义语义必须停在哪里。
+- Forbidden changes：不能顺手做什么。
+- Negative tests：越权 / stale / rollback / idempotency / concurrency 中相关项。
+- Stop conditions：遇到未定义语义停在哪里。
 - Report：new HEAD、changed files、测试、CI run、未完成项。
 - Gate：只有 exact SHA CI success 后下一阶段才能开工。
 
@@ -438,11 +487,11 @@ Gate：MCP / HTTP 双端等价测试；不依赖 UI 才能完成核心场景。
 
 ---
 
-## 13. 第一个可执行工单边界
+## 12. 第一个可执行工单边界
 
-本计划完成后，只生成 C0 工单。
+本计划完成后，只生成 C0：Partner / Membership / Key / Governance。
 
-C0 不修 service，不实现新 Thread 行为，只把未发布的 024/025 持久结构改到能准确表达 PRD。
+不提前加 final receipt CHECK/FK，不提前修 Child，不提前写 generic thread_post。
 C0 收口并审计后，再基于它的 new HEAD 生成 C1。
 
 这是防止第三次中断的硬控制点，不是进度建议。
