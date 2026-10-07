@@ -36,7 +36,7 @@
 | S1 | PRD v1 房间面 | 协议冻结+R15..17 | 验收逐条有协议引用；场景适配裁定 D-005 | **已关闭**（b44b961） |
 | D1 | Memory 版本化 | 工单 D1.md → ccac236 | dev.sh test 全绿（监督者独立复跑 PASS）+ diff 零越界 | **已关闭** |
 | D2 | 房间骨架+幂等设施 | 工单 D2.md → 本提交 | dev.sh test 全绿（监督者复跑 PASS，D-009 修正后）+ diff 白名单+裁定三文件 | **已关闭** |
-| D3 | 条目与义务 + 幂等快照 | — | CI + 并发 CAS 负测 | 未开始 |
+| D3 | 条目与义务 + 幂等快照 | 025 迁移 → 本提交 | dev.sh test 全绿（7 测试组全过：四规则/收束四路径/幂等同形/并发 CAS/引用权限）+ 自我审计 D-012/D-013 | **已关闭** |
 | D4 | 分派 | — | CI + L4 出口负测 | 未开始 |
 | D5 | 轮次投影 | — | CI + 恢复测试 | 未开始 |
 | D6 | 暴露面 | — | 双通道等价 | 未开始 |
@@ -87,3 +87,10 @@ Backlog（不进当前周期）：unify_test.go `TestAccountMemoryToolsBothChann
 | D-009 | D2 工单缺陷裁定（监督者修正）：白名单补 `internal/errors/status.go`（9 线程码→HTTP 机械映射）、`unify_test.go`（28→38 计数钉两处）、`public_text_test.go`（thread 工具 llms.txt 豁免表，D6 移除）；agent 停机报告正确——注册（Required）与 gate 全绿在原白名单内矛盾。次级发现归 D6：config.go 频率桶（thread_write 120/min、thread_start 30/h、thread_read 600/min）+ llms.txt 文档 + 移除豁免表 | D2 停机报告 | 2026-10-07 |
 
 | D-011 | D1/D2 代码审计裁定（后台只读 agent：P1×2/P2×3/P3×2）：P1-B 开放房上限 TOCTOU → thread_start/join 计数前 `LockAccountRow`（账户行锁串行化）；P1-E 并发停用末两位治理者可留零治理者开放房 → 级联先独立语句 FOR UPDATE 锁被治理房间、判定 UPDATE 取新快照；P2-F 非作者带 revision 读公开记忆**当前**版本误拒 → 按 §9 行 1 放行（历史版本仍 403），测试改钉；P2-H thread_list 分页测试改真 keyset 翻页（52 房走查无重复）；P3-G 陈旧 NOTE 删；P3-A 幂等范围收窄为房间面写工具（D-010，PRD 已改）；P2-G 频率桶维持归 D6（D-009） | 审计 | 2026-10-07 |
+
+| D-012 | D3 schema 细化：thread_entries 增自有 `summary` 列（memory=code 引用时摘要不能写入他人记忆的 description）；PRD schema 行同步 | 实现期自查 | 2026-10-07 |
+| D-013 | D3 实现发现 L3 缺口并修正：工具结果必须 View=Facts 同形，否则重放返回 Facts 形状与首次 View 形状不一致（post/handle/retract 已改；实现还抓到 readable 规则错误——自己的固定引用撤回后仍对成员可读，§5/§9，SQL 已修）。**遗留**：D2 工具（thread_start 等）存在同款 View≠Facts 隐患，D8 反向审计前统一扫尾 | 自我审计 | 2026-10-07 |
+
+D3 白名单修正（同 D-009 类别，机械钉子）：`internal/errors/status.go`（+SUMMARY_REQUIRED 映射）、`internal/mcpserver/public_text_test.go`（D6 豁免表 +3 新工具）。
+
+Backlog 追加：D2 工具 View=Facts 同形扫尾（D8 前）。
