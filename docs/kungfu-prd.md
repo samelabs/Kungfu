@@ -489,6 +489,7 @@ Memory 更新与归档；`thread_start`；`thread_post`（写记忆、分配 seq
 | `thread_receipts` / `HandlePendingThreadReceipt` | `handled` 合并 reply / handle / branch 等不同了结方式，且无 `handle note` | §4.3、§10.1：来源 reason 与 resolution 分离，保存 `resolution_note` |
 | `RemoveThreadParticipant` / `ChangeThreadPermission` | 可移除或降级最后一个 manage，没有 `LAST_MANAGER` 闸 | §4.1、§4.6：开放线程始终至少一个 manage |
 | `kungfu_read.go` | `memory_get` 只能读当前 revision | §3：作者可显式读取历史 revision；非作者只读公开当前 revision |
+| `thread_state.go` 全部幂等 replay | Create / Reply / Branch / Add / Join / Permission / Close / Subject 等多数操作只保存对象 id，重放时重新读取**当前**对象，后续状态变化会让旧 key 的返回漂移 | §8.3、§12 I2：`thread_idempotency.result_ref` 保存首次成功动作的 replay-safe 业务结果快照；重放不得重新投影当前对象；一次性 raw secret 例外为不重放 |
 | `ResetThreadJoinKeyState` 幂等重放 | 后续 reset 后，旧幂等键重放返回**当前** key fingerprint，而非首次动作结果 | §8.3、§12 I2：返回首次成功结果的原 fingerprint，raw key 不重放 |
 | `ChangeThreadPermission` read → write/manage | 强制要求入口 `entry` | §4.6：入口条目可选；只有指定时才产生入口待回应 |
 | `migrations/024_thread_core.sql` / `025_thread_receipt_idempotency.sql` | `join_entry_id`、成员 `entry_id`、receipt `input_entry_id`、reply FK 只按 entry id 约束；`thread_memories` 无 `asked` / `task_id` | §4.1–§4.5、§10.1：本线程引用用 `(thread_id, entry_id)` 约束；条目持久化 `asked` 与 `task_id` |
