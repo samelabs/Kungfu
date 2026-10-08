@@ -272,8 +272,15 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 							"assign.to must be a speech-capable member of this thread")
 					}
 				}
-				assign.DeliverDueS = normalizeDue(assign.DeliverDueS)
-				assign.JudgeDueS = normalizeDue(assign.JudgeDueS)
+				// 0 = omitted → default; any other out-of-range value
+				// is an explicit mistake and is rejected, never
+				// silently normalized (external audit P2-2)
+				if assign.DeliverDueS == 0 {
+					assign.DeliverDueS = assignDefaultDueS
+				}
+				if assign.JudgeDueS == 0 {
+					assign.JudgeDueS = assignDefaultDueS
+				}
 				if !assignDueValid(assign.DeliverDueS) || !assignDueValid(assign.JudgeDueS) {
 					return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
 						"assign deadlines must be 60..604800 seconds")
@@ -290,6 +297,9 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 				}
 				if err := repository.LinkEntryAssignment(ctx, tx, entryID, assignID); err != nil {
 					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error linking assignment")
+				}
+				if assign.To != botID {
+					enqueueNotify(ctx, tx, assign.To, "assign", 1)
 				}
 			}
 

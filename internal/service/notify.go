@@ -8,18 +8,16 @@ package service
 // always harmless because todo_list recomputes from facts.
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
+	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
@@ -47,27 +45,31 @@ func NotifyRegister(ctx context.Context, pool *pg.Pool, botID int64, rawURL stri
 	secret := hex.EncodeToString(secretBytes)
 	challenge := hex.EncodeToString(secretBytes[:16])
 
-	// ownership probe: the endpoint must answer 2xx to the challenge
-	probe, err := http.NewRequestWithContext(ctx, http.MethodPost, u,
-		strings.NewReader(`{"type":"verification","challenge":"`+challenge+`"}`))
-	if err != nil {
-		return nil, errors.New(422, "VALIDATION_FAILED", "url is not usable")
-	}
-	probe.Header.Set("Content-Type", "application/json")
-	resp, err := notifyHTTPClient.Do(probe)
-	if err != nil || resp.StatusCode < 200 || resp.StatusCode > 299 {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+	// ownership probe over the hardened outbound path (external audit
+	// P1-1): private/loopback/link-local targets are refused, redirects
+	// forbidden — the same authority the Task receiver deliveries use.
+	// The endpoint must answer 2xx AND echo the challenge in its body
+	// (P1-2): a bare 2xx proves nothing about control of the endpoint.
+	probeBody := []byte(`{"type":"verification","challenge":"` + challenge + `"}`)
+	probe := delivery.PostJSON(ctx, u, probeBody, map[string]string{"Content-Type": "application/json"},
+		delivery.ErrorConfig{})
+	if probe.ResponseCode == nil || *probe.ResponseCode < 200 || *probe.ResponseCode > 299 {
 		return nil, errors.New(422, "VALIDATION_FAILED",
-			"endpoint did not answer 2xx to the verification challenge")
+			"endpoint did not answer 2xx to the verification challenge (SSRF policy may have refused it)")
 	}
-	_ = resp.Body.Close()
+	echoed := probe.ResponseBody != nil && strings.Contains(*probe.ResponseBody, challenge)
+	if !echoed {
+		return nil, errors.New(422, "VALIDATION_FAILED",
+			"endpoint answered 2xx but did not echo the challenge — verification incomplete")
+	}
 
 	if err := repository.UpsertAccountNotify(ctx, pool, botID, u, secret); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error storing endpoint")
 	}
-	return map[string]any{"url": u, "verified": true}, nil
+	// the signing secret is disclosed ONCE, here (P1-2 closure): the
+	// receiver verifies dispatches as sha256 HMAC over the raw body
+	// with this secret, sent as X-Kungfu-Signature
+	return map[string]any{"url": u, "verified": true, "secret": secret}, nil
 }
 
 // NotifyDelete drops the accelerator target; facts and todo_list are
@@ -79,8 +81,6 @@ func NotifyDelete(ctx context.Context, pool *pg.Pool, botID int64) (map[string]a
 	}
 	return map[string]any{"deleted": ok}, nil
 }
-
-var notifyHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 // DispatchNotifyOutbox delivers queued signals best-effort. One
 // pass: claim a batch, POST each to the account's verified endpoint
@@ -99,12 +99,12 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 		_ = pg.Rollback(tx)
 		return 0, nil
 	}
-	type delivery struct {
+	type notifyTarget struct {
 		row  repository.OutboxRow
 		url  string
 		hmac string
 	}
-	targets := make([]delivery, 0, len(batch))
+	targets := make([]notifyTarget, 0, len(batch))
 	for _, r := range batch {
 		u, secret, ok, err := repository.FindAccountNotify(ctx, tx, r.AccountID)
 		if err != nil {
@@ -117,7 +117,7 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 			}
 			continue
 		}
-		targets = append(targets, delivery{row: r, url: u, hmac: secret})
+		targets = append(targets, notifyTarget{row: r, url: u, hmac: secret})
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
@@ -130,17 +130,11 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 		})
 		mac := hmac.New(sha256.New, []byte(d.hmac))
 		mac.Write(body)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body))
-		if err != nil {
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Kungfu-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-		resp, err := notifyHTTPClient.Do(req)
-		ok := err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+		res := delivery.PostJSON(ctx, d.url, body, map[string]string{
+			"Content-Type":       "application/json",
+			"X-Kungfu-Signature": "sha256=" + hex.EncodeToString(mac.Sum(nil)),
+		}, delivery.ErrorConfig{})
+		ok := res.ResponseCode != nil && *res.ResponseCode >= 200 && *res.ResponseCode <= 299
 		if err := repository.MarkOutboxSent(context.Background(), pool, d.row.ID, ok); err == nil && ok {
 			sent++
 		}

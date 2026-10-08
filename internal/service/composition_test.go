@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"testing"
 
 	"kungfu.md/internal/pg"
@@ -164,7 +165,7 @@ func TestComposePinVisibilityMatrix(t *testing.T) {
 		return r["entry"].(int64)
 	}
 	readable := func(entry int64) bool {
-		view, err := ThreadGet(ctx, pool, a, code, "", []int64{entry})
+		view, err := ThreadGet(ctx, pool, a, code, "", []int64{entry}, "", nil)
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
@@ -549,5 +550,173 @@ func TestFuzzRandomActionSequences(t *testing.T) {
 			}
 			w.checkInvariants()
 		})
+	}
+}
+
+// ── External-audit regression: deactivation × join race (P1-3).
+// The seam now locks the account row BEFORE any room lock and
+// re-verifies active under it — a disabling transaction committing
+// mid-join can no longer leave the disabled account with a fresh
+// membership, regardless of interleaving.
+func TestExtAuditDeactivationJoinRace(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	for round := 0; round < 12; round++ {
+		victim, _, _ := a7TestBot(t, pool, 5)
+		code, raw := threadStart(t, pool, owner, "race-deact", true, "")
+		var wg sync.WaitGroup
+		joined := make(chan error, 1)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, jErr := ThreadJoin(ctx, pool, victim, raw, "")
+			joined <- jErr
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = pool.Exec(ctx, `UPDATE tb_bots SET status='disabled' WHERE id=$1`, victim)
+			tx, err := pool.TxBegin(ctx)
+			if err == nil {
+				_, _ = repository.TerminateAccountThreadMemberships(ctx, tx, victim)
+				_ = tx.Commit(ctx)
+			}
+		}()
+		wg.Wait()
+		joinErr := <-joined
+		_ = joinErr
+		// invariant either way: a disabled account holds NO membership
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM thread_members m
+			 JOIN tb_bots b ON b.id = m.account_id
+			 WHERE m.account_id=$1 AND b.status='disabled'`, victim).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("round %d: disabled account holds %d memberships", round, n)
+		}
+		_, _ = pool.Exec(ctx, `DELETE FROM thread_members WHERE thread_id=(SELECT id FROM threads WHERE code=$1)`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM threads WHERE code=$1`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_bots WHERE id=$1`, victim)
+	}
+}
+
+// ── External-audit regression: explicit invalid dues are rejected,
+// never silently normalized (P2-2); an empty memories array is not a
+// delivery (P2-1); assignment creation notifies the assignee (P2-3).
+func TestExtAuditInputBoundariesAndInviteNotify(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "ext", true, "")
+	defer threadCleanup(t, pool, []int64{owner, a}, code)
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	// negative due is an explicit mistake
+	if _, err := ThreadPost(ctx, pool, owner, code, "bad due", "", "", nil, nil,
+		&AssignSpec{To: a, Requirements: "x", DeliverDueS: -5}, "xd1"); err == nil {
+		t.Fatal("negative deliver_due must be rejected")
+	} else {
+		threadErrIs(t, err, 422, "VALIDATION_FAILED")
+	}
+	// omitted due falls back to default
+	r, err := ThreadPost(ctx, pool, owner, code, "default due", "", "", nil, nil,
+		&AssignSpec{To: a, Requirements: "default due work"}, "xd2")
+	if err != nil {
+		t.Fatalf("post+assign: %v", err)
+	}
+	if r["assign"] == nil {
+		t.Fatal("assign missing")
+	}
+	var due int
+	if err := pool.QueryRow(ctx,
+		`SELECT deliver_due_s FROM assigns WHERE id=$1`, r["assign"].(int64)).Scan(&due); err != nil || due != 86400 {
+		t.Fatalf("default due = %d (err %v)", due, err)
+	}
+
+	// memories "[]" is emptiness, not a delivery
+	if _, err := AssignTake(ctx, pool, a, r["assign"].(int64), "", "[]", "xt1"); err != nil {
+		t.Fatalf("take without delivery: %v", err)
+	}
+	if _, err := AssignSubmit(ctx, pool, a, r["assign"].(int64), "", "[]", "xs1"); err == nil {
+		t.Fatal("empty delivery (payload='', memories='[]') must be rejected")
+	} else {
+		threadErrIs(t, err, 422, "VALIDATION_FAILED")
+	}
+
+	// creating an assignment notifies the assignee (kind 'assign')
+	var invited int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM notify_outbox WHERE account_id=$1 AND kind='assign'`, a).Scan(&invited); err != nil || invited < 1 {
+		t.Fatalf("assign invite notification = %d (err %v)", invited, err)
+	}
+}
+
+// ── External-audit regression: thread_get assignments are bounded
+// and expandable (P1-5). ──
+func TestExtAuditAssignmentsBounded(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, _ := threadStart(t, pool, owner, "bounded", false, "")
+	defer threadCleanup(t, pool, []int64{owner}, code)
+	// self-assigned 120 assignments: one page holds 50 + cursor
+	var last int64
+	for i := 0; i < 120; i++ {
+		res, err := ThreadPost(ctx, pool, owner, code, "bulk", "", "", nil, nil,
+			&AssignSpec{To: owner, Requirements: "bulk work item", DeliverDueS: 3600, JudgeDueS: 3600},
+			fmt.Sprintf("bd-%d", i))
+		if err != nil {
+			t.Fatalf("post %d: %v", i, err)
+		}
+		last = res["assign"].(int64)
+	}
+	page1, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := page1["assignments"].([]map[string]any)
+	if len(digest) != 50 {
+		t.Fatalf("page1 = %d, want bounded 50", len(digest))
+	}
+	if _, has := digest[0]["requirements"]; has {
+		t.Fatal("digest rows must not carry requirements (bounded payload)")
+	}
+	nc, _ := page1["assignments_next_cursor"].(string)
+	if nc == "" {
+		t.Fatal("pagination cursor missing")
+	}
+	// expansion by id carries the heavy fields
+	expanded, err := ThreadGet(ctx, pool, owner, code, "", nil, "", []int64{last})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := expanded["assignments_expanded"].([]any)
+	if len(rows) != 1 || rows[0].(map[string]any)["requirements"] != "bulk work item" {
+		t.Fatalf("expanded = %v", rows)
+	}
+	// obligation-driven next[]: OPEN self-assigns create no items
+	// (A11) — take one without payload, and the deliver obligation
+	// must surface as a prefilled assign_submit hint
+	if _, err := AssignTake(ctx, pool, owner, last, "", "", "xb-take"); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	page2, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextCalls := page2["next"].([]map[string]any)
+	found := false
+	for _, n := range nextCalls {
+		if n["tool"] == "assign_submit" && n["args"].(map[string]any)["assign"] == last {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("next[] lacks the prefilled assign_submit handle: %v", nextCalls)
 	}
 }

@@ -6,13 +6,22 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+
+	"kungfu.md/internal/delivery"
 	"sync"
 	"testing"
 )
+
+func tlsRoots(srv *httptest.Server) *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	return pool
+}
 
 func TestNotifyRegisterAndDispatch(t *testing.T) {
 	pool := revisionTestPool(t)
@@ -31,7 +40,7 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 		defer mu.Unlock()
 		if m["type"] == "verification" {
 			sawChallenge = true
-			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"echo":"` + m["challenge"].(string) + `"}`))
 			return
 		}
 		payloads = append(payloads, m)
@@ -41,30 +50,34 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	// the test client trusts the self-signed cert of the test server
-	prevClient := notifyHTTPClient
-	srvClient := srv.Client()
-	srvClient.Timeout = prevClient.Timeout
-	notifyHTTPClient = srvClient
-	t.Cleanup(func() { notifyHTTPClient = prevClient })
+	// TestMain already allows loopback for this whole test binary —
+	// re-allowing here would restore to FALSE at cleanup and break
+	// the delivery tests that run after us (found the hard way). We
+	// only pin the TLS roots for our self-signed test server.
+	restoreRoots := delivery.TrustRootsForTest(tlsRoots(srv))
+	t.Cleanup(restoreRoots)
 
 	// unverified endpoints are refused: a 404 server rejects first
 	bad := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(404)
+		w.WriteHeader(200) // 2xx but does NOT echo the challenge
 	}))
 	defer bad.Close()
 	if _, err := NotifyRegister(ctx, pool, a, bad.URL); err == nil {
-		t.Fatal("endpoint failing the challenge must be refused")
+		t.Fatal("a bare 2xx without the challenge echo must be refused")
 	}
 	if _, err := NotifyRegister(ctx, pool, a, "http://plain.example/x"); err == nil {
 		t.Fatal("non-https endpoint must be refused")
 	}
 
-	if _, err := NotifyRegister(ctx, pool, a, srv.URL); err != nil {
+	reg, err := NotifyRegister(ctx, pool, a, srv.URL)
+	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	if !sawChallenge {
 		t.Fatal("registration must probe with a challenge")
+	}
+	if secret, _ := reg["secret"].(string); len(secret) != 64 {
+		t.Fatalf("register must disclose the signing secret once, got %v", reg["secret"])
 	}
 
 	// a new obligation queues a notification in the same transaction

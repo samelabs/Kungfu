@@ -135,8 +135,10 @@ func assignPayloadCheck(schema *string, payload string) error {
 // assignMemoriesCheck pins the caller's own active memories at their
 // current revisions; returns the fixed binding array.
 func assignMemoriesCheck(ctx context.Context, tx pgx.Tx, botID int64, memories string) (string, error) {
-	if strings.TrimSpace(memories) == "" || memories == "[]" {
-		return "[]", nil
+	// "" and "[]" are the same emptiness (external audit P2-1): the
+	// empty marker lets the callers treat a bare "[]" as no delivery
+	if strings.TrimSpace(memories) == "" || strings.TrimSpace(memories) == "[]" {
+		return "", nil
 	}
 	var refs []struct {
 		Name string `json:"name"`
@@ -211,16 +213,16 @@ func AssignTake(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 			a.State = "taken"
 			takeFacts := map[string]any{"deliver_due_at": deliverDue}
 			var judgeDue any
-			if payload != "" || strings.TrimSpace(memories) != "" {
+			fixedMem, err := assignMemoriesCheck(ctx, tx, botID, memories)
+			if err != nil {
+				return threadActionOutcome{}, err
+			}
+			if payload != "" || fixedMem != "" { // "[]" is not a delivery (P2-1)
 				if err := assignPayloadCheck(a.OutputSchema, payload); err != nil {
 					return threadActionOutcome{}, err
 				}
-				fixedMem, err := assignMemoriesCheck(ctx, tx, botID, memories)
-				if err != nil {
-					return threadActionOutcome{}, err
-				}
-				due, err := repository.InsertAssignmentDelivery(ctx, tx, a.ID, payload, fixedMem)
-				if err != nil {
+				due, dErr := repository.InsertAssignmentDelivery(ctx, tx, a.ID, payload, fixedMem)
+				if dErr != nil {
 					return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error storing delivery")
 				}
 				a.State = "delivered"
@@ -266,15 +268,15 @@ func AssignSubmit(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
 					"Assignment is not in progress (state: "+a.State+")")
 			}
-			if payload == "" && strings.TrimSpace(memories) == "" {
+			fixedMem, err := assignMemoriesCheck(ctx, tx, botID, memories)
+			if err != nil {
+				return threadActionOutcome{}, err
+			}
+			if payload == "" && fixedMem == "" { // "[]" counts as empty (P2-1)
 				return threadActionOutcome{}, errors.New(422, "VALIDATION_FAILED",
 					"A delivery needs payload and/or memories")
 			}
 			if err := assignPayloadCheck(a.OutputSchema, payload); err != nil {
-				return threadActionOutcome{}, err
-			}
-			fixedMem, err := assignMemoriesCheck(ctx, tx, botID, memories)
-			if err != nil {
 				return threadActionOutcome{}, err
 			}
 			due, err := repository.InsertAssignmentDelivery(ctx, tx, a.ID, payload, fixedMem)

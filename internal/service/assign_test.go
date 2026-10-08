@@ -573,7 +573,7 @@ func TestExpandedEntryServesPinnedRevision(t *testing.T) {
 			t.Fatalf("push update: %v", err)
 		}
 	}
-	view, err := ThreadGet(ctx, pool, a, code, "", []int64{r["entry"].(int64)})
+	view, err := ThreadGet(ctx, pool, a, code, "", []int64{r["entry"].(int64)}, "", nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

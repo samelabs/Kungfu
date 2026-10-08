@@ -95,6 +95,19 @@ func runThreadAction(ctx context.Context, pool *pg.Pool, botID int64, tool, idem
 	}
 	defer func() { _ = pg.Rollback(tx) }()
 
+	// Every room write takes the ACCOUNT row lock first and verifies
+	// active status UNDER that lock (external audit P1-3): a deactivation
+	// committing between a plain status read and this transaction can no
+	// longer leave a disabled account with fresh memberships, and the
+	// global lock order account→room removes the AB-BA pair with the
+	// deactivation cascade (bot→threads).
+	if err := repository.LockAccountRow(ctx, tx, botID); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during "+tool)
+	}
+	if err := requireActiveAccount(ctx, tx, botID); err != nil {
+		return nil, err
+	}
+
 	if idemKey != "" {
 		rec, err := repository.FindThreadIdempotency(ctx, tx, botID, tool, idemKey)
 		if err != nil {
@@ -190,6 +203,12 @@ func threadNextActions(th *model.Thread, role string, members, governors int64) 
 	if th.Status == repository.ThreadStatusClosed {
 		return []string{"thread_leave"} // members may still leave (§6.5)
 	}
+	// every speech-capable member can speak (§6.2); the obligation
+	// driven hints ride thread_get's todos slice (each item already
+	// carries kind + handles), this list covers the capability floor
+	if role == repository.ThreadRoleGovernor || role == repository.ThreadRoleSpeaker {
+		next = append(next, "thread_post")
+	}
 	if role == repository.ThreadRoleGovernor {
 		next = append(next, "thread_key")
 		if th.KeyHash != nil {
@@ -204,7 +223,10 @@ func threadNextActions(th *model.Thread, role string, members, governors int64) 
 		}
 		return next
 	}
-	return []string{"thread_leave"}
+	if role == repository.ThreadRoleSpeaker || role == repository.ThreadRoleObserver {
+		next = append(next, "thread_leave")
+	}
+	return next
 }
 
 func threadView(next []string) map[string]any {
@@ -755,15 +777,23 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 // structure, own role, the member table, key facts (§9), the D2
 // action list — and empty placeholders for the timeline and open
 // items (D3/D5 fill those).
-func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64) (map[string]any, error) {
-	th, err := repository.FindThreadByCode(ctx, pool, code)
+func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64, assignCursor string, assignIDs []int64) (map[string]any, error) {
+	// one read transaction: membership and content share a snapshot —
+	// a revocation racing this read cannot leak half a room
+	tx, txErr := pool.TxBegin(ctx)
+	if txErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading thread")
+	}
+	defer func() { _ = pg.Rollback(tx) }()
+
+	th, err := repository.FindThreadByCode(ctx, tx, code)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading thread")
 	}
 	if th == nil {
 		return nil, errors.New(404, "THREAD_NOT_FOUND", "Thread not found")
 	}
-	me, err := repository.FindThreadMember(ctx, pool, th.ID, botID)
+	me, err := repository.FindThreadMember(ctx, tx, th.ID, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading membership")
 	}
@@ -771,7 +801,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		return nil, errors.New(403, "NOT_MEMBER", "You are not a member of this thread")
 	}
 
-	rows, err := repository.ListThreadMembers(ctx, pool, th.ID)
+	rows, err := repository.ListThreadMembers(ctx, tx, th.ID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading members")
 	}
@@ -814,7 +844,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		}
 		beforeSeq = v
 	}
-	items, err := repository.ThreadTimeline(ctx, pool, th.ID, beforeSeq, threadPageSize)
+	items, err := repository.ThreadTimeline(ctx, tx, th.ID, beforeSeq, threadPageSize)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading timeline")
 	}
@@ -822,7 +852,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	for _, it := range items {
 		pageEntryIDs = append(pageEntryIDs, it.ID)
 	}
-	receiptStates, rErr := repository.ReceiptStatesForEntries(ctx, pool, th.ID, pageEntryIDs)
+	receiptStates, rErr := repository.ReceiptStatesForEntries(ctx, tx, th.ID, pageEntryIDs)
 	if rErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading response states")
 	}
@@ -863,21 +893,40 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	}
 
 	// my open obligations in this room — the room slice of the turn
-	// list, all three kinds (the account-wide todo_list pages the same
-	// projection)
-	slice, err := TodoList(ctx, pool, botID, th.ID, "")
-	if err != nil {
-		return nil, err
+	// list, all three kinds, read INSIDE the snapshot transaction
+	todoItems, tErr := repository.TodoItemsForAccount(ctx, tx, botID, th.ID, "", 0, 0, 51)
+	if tErr != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading open items")
 	}
-	todos := slice["todos"]
+	todos := make([]map[string]any, 0, len(todoItems))
+	for _, it := range todoItems {
+		row := map[string]any{
+			"kind": it.Kind, "thread": it.Thread, "author": it.Author,
+			"summary":     it.Summary,
+			"next_action": map[string]string{"reply": "respond", "deliver": "deliver", "judge": "judge"}[it.Kind],
+		}
+		if it.EntryID != nil {
+			row["entry"] = *it.EntryID
+		}
+		if it.AssignID != nil {
+			row["assign"] = *it.AssignID
+		}
+		if it.Seq != nil {
+			row["seq"] = *it.Seq
+		}
+		if it.DueAt != nil {
+			row["due_at"] = *it.DueAt
+		}
+		todos = append(todos, row)
+	}
 
 	// full payloads on demand (§8): entries=[…]
-	expanded := []any{}
+	entriesExpanded := []any{}
 	if len(entryIDs) > 0 {
 		if len(entryIDs) > threadPageSize {
 			return nil, errors.New(422, "VALIDATION_FAILED", "entries exceeds 50 ids")
 		}
-		full, err := repository.ExpandThreadEntries(ctx, pool, th.ID, entryIDs)
+		full, err := repository.ExpandThreadEntries(ctx, tx, th.ID, entryIDs)
 		if err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error loading entries")
 		}
@@ -894,7 +943,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 			if f.Content != nil {
 				row["content"] = *f.Content
 			}
-			expanded = append(expanded, row)
+			entriesExpanded = append(entriesExpanded, row)
 		}
 	}
 
@@ -902,12 +951,38 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	if th.Subject != nil {
 		room["subject"] = *th.Subject
 	}
-	// the assignments section (§9: assignments, deliveries and
-	// judgments are room content) — requirements, deadlines, state
-	// machine, payload, verdict and reject reason all readable here
-	assignRows, err := repository.ListThreadAssignments(ctx, pool, th.ID)
+	// the assignments section (§9) — BOUNDED: the digest pages by id
+	// (50/page, cursor); assignments=[ids] expands requirements,
+	// schema, payload and reject reason on demand (external audit P1-5)
+	var assignBefore int64
+	if strings.TrimSpace(assignCursor) != "" {
+		v, cErr := strconv.ParseInt(strings.TrimSpace(assignCursor), 10, 64)
+		if cErr != nil || v < 0 {
+			return nil, errors.New(422, "VALIDATION_FAILED", "assignments cursor is not a valid page cursor")
+		}
+		assignBefore = v
+	}
+	var expandIDs []int64
+	if len(assignIDs) > 50 {
+		return nil, errors.New(422, "VALIDATION_FAILED", "assignments expansion exceeds 50 ids")
+	}
+	expandIDs = assignIDs
+	fetchAll := len(expandIDs) > 0
+	assignRows, err := repository.ListThreadAssignments(ctx, tx, th.ID, assignBefore, 51, nil)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")
+	}
+	var assignNext any
+	if !fetchAll && len(assignRows) > 50 {
+		assignRows = assignRows[:50]
+		assignNext = strconv.FormatInt(assignRows[49].ID, 10)
+	}
+	var expanded []repository.AssignmentFullRow
+	if fetchAll {
+		expanded, err = repository.ListThreadAssignments(ctx, tx, th.ID, 0, 51, expandIDs)
+		if err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")
+		}
 	}
 	assignments := make([]map[string]any, 0, len(assignRows))
 	for _, a := range assignRows {
@@ -916,14 +991,10 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 			"entry":         a.EntryID,
 			"creator":       a.CreatorID,
 			"to":            a.AssigneeID,
-			"requirements":  a.Requirements,
 			"deliver_due_s": a.DeliverDueS,
 			"judge_due_s":   a.JudgeDueS,
 			"state":         a.State,
 			"at":            a.CreatedAt,
-		}
-		if a.OutputSchema != nil {
-			row["output_schema"] = *a.OutputSchema
 		}
 		if a.TakenAt != nil {
 			row["taken_at"] = *a.TakenAt
@@ -931,17 +1002,25 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		if a.DeliverDueAt != nil {
 			row["deliver_due_at"] = *a.DeliverDueAt
 		}
+		if a.JudgeDueAt != nil {
+			row["judge_due_at"] = *a.JudgeDueAt
+		}
+		assignments = append(assignments, row)
+	}
+	assignmentsExpanded := []any{}
+	for _, a := range expanded {
+		row := map[string]any{
+			"assign":       a.ID,
+			"requirements": a.Requirements,
+		}
+		if a.OutputSchema != nil {
+			row["output_schema"] = *a.OutputSchema
+		}
 		if a.Payload != nil {
 			row["payload"] = *a.Payload
 		}
 		if a.MemoriesJSON != nil {
 			row["memories"] = *a.MemoriesJSON
-		}
-		if a.SubmittedAt != nil {
-			row["submitted_at"] = *a.SubmittedAt
-		}
-		if a.JudgeDueAt != nil {
-			row["judge_due_at"] = *a.JudgeDueAt
 		}
 		if a.Verdict != nil {
 			row["verdict"] = *a.Verdict
@@ -952,20 +1031,54 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		if a.JudgedAt != nil {
 			row["judged_at"] = *a.JudgedAt
 		}
-		assignments = append(assignments, row)
+		assignmentsExpanded = append(assignmentsExpanded, row)
+	}
+
+	_ = tx.Commit(ctx) // read-only snapshot done
+
+	// obligation-driven, prefilled next[] (external audit P1-4): the
+	// caller's own items first, then the capability floor in the same
+	// {tool, args} shape — a room with no obligations still tells the
+	// caller what they CAN do here
+	nextCalls := make([]map[string]any, 0, 6)
+	for _, it := range todoItems {
+		switch it.Kind {
+		case "reply":
+			nextCalls = append(nextCalls, map[string]any{
+				"tool": "thread_post", "args": map[string]any{"thread": th.Code, "reply_to": *it.EntryID}})
+		case "deliver":
+			nextCalls = append(nextCalls, map[string]any{
+				"tool": "assign_submit", "args": map[string]any{"assign": *it.AssignID}})
+		case "judge":
+			nextCalls = append(nextCalls, map[string]any{
+				"tool": "assign_judge", "args": map[string]any{"assign": *it.AssignID}})
+		}
+		if len(nextCalls) >= 3 {
+			break
+		}
+	}
+	if len(nextCalls) < 3 {
+		for _, tool := range threadNextActions(th, me.Role, int64(len(rows)), governors) {
+			nextCalls = append(nextCalls, map[string]any{"tool": tool, "args": map[string]any{"thread": th.Code}})
+			if len(nextCalls) >= 3 {
+				break
+			}
+		}
 	}
 
 	return map[string]any{
-		"thread":      room,
-		"role":        me.Role,
-		"members":     members,
-		"key":         keyFacts,
-		"timeline":    timeline,
-		"next_cursor": nextCursor,
-		"entries":     expanded,
-		"assignments": assignments,
-		"todos":       todos,
-		"next":        threadNextActions(th, me.Role, int64(len(rows)), governors),
+		"thread":                  room,
+		"role":                    me.Role,
+		"members":                 members,
+		"key":                     keyFacts,
+		"timeline":                timeline,
+		"next_cursor":             nextCursor,
+		"entries":                 entriesExpanded,
+		"assignments":             assignments,
+		"assignments_next_cursor": assignNext,
+		"assignments_expanded":    assignmentsExpanded,
+		"todos":                   todos,
+		"next":                    nextCalls,
 	}, nil
 }
 

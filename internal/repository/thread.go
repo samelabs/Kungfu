@@ -859,7 +859,7 @@ func InsertAssignmentDelivery(ctx context.Context, q pg.Querier,
 	var due string
 	err := q.QueryRow(ctx, `
 		INSERT INTO assign_deliveries (assign_id, payload, memories_json, judge_due_at)
-		VALUES ($1, NULLIF($2,'')::jsonb, $3::jsonb,
+		VALUES ($1, NULLIF($2,'')::jsonb, COALESCE(NULLIF($3,'')::jsonb, '[]'::jsonb),
 		        NOW() + make_interval(secs => (SELECT judge_due_s FROM assigns WHERE id = $1)))
 		RETURNING to_char(judge_due_at, 'YYYY-MM-DD HH24:MI:SS')`,
 		assignID, payload, memoriesJSON).Scan(&due)
@@ -1188,7 +1188,9 @@ func MarkOutboxSent(ctx context.Context, q pg.Querier, id int64, sent bool) erro
 
 // AssignmentFullRow is the member-facing read of one assignment and
 // its delivery (§9: assignments, deliveries and judgments are room
-// content — this is the surface the write path never had).
+// content — this is the surface the write path never had). The digest
+// listing carries the light fields; Detail() layers the heavy ones
+// (requirements/schema/payload/verdict) for on-demand expansion.
 type AssignmentFullRow struct {
 	ID           int64
 	EntryID      int64
@@ -1213,21 +1215,31 @@ type AssignmentFullRow struct {
 
 // ListThreadAssignments returns every assignment of a room with its
 // delivery and verdict, oldest first — the workset's progress view.
-func ListThreadAssignments(ctx context.Context, q pg.Querier, threadID int64) ([]AssignmentFullRow, error) {
+func ListThreadAssignments(ctx context.Context, q pg.Querier, threadID int64, beforeID int64, limit int, ids []int64) ([]AssignmentFullRow, error) {
+	// bounded digest (external audit P1-5): the light columns page by
+	// id keyset; explicit ids expand the heavy columns on demand
 	rows, err := q.Query(ctx, `
-		SELECT a.id, a.entry_id, a.creator_id, a.assignee_id, a.requirements,
-		       a.output_schema::text, a.deliver_due_s, a.judge_due_s, a.state,
+		SELECT a.id, a.entry_id, a.creator_id, a.assignee_id,
+		       CASE WHEN $3::bigint[] IS NOT NULL THEN a.requirements ELSE '' END,
+		       CASE WHEN $3::bigint[] IS NOT NULL THEN a.output_schema::text END,
+		       a.deliver_due_s, a.judge_due_s, a.state,
 		       to_char(a.taken_at, 'YYYY-MM-DD HH24:MI:SS'),
 		       to_char(a.deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
 		       to_char(a.created_at, 'YYYY-MM-DD HH24:MI:SS'),
-		       d.payload::text, d.memories_json::text,
+		       CASE WHEN $3::bigint[] IS NOT NULL THEN d.payload::text END,
+		       CASE WHEN $3::bigint[] IS NOT NULL THEN d.memories_json::text END,
 		       to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS'),
 		       to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'),
-		       d.verdict, d.reason, to_char(d.judged_at, 'YYYY-MM-DD HH24:MI:SS')
+		       d.verdict,
+		       CASE WHEN $3::bigint[] IS NOT NULL THEN d.reason END,
+		       to_char(d.judged_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM assigns a
 		LEFT JOIN assign_deliveries d ON d.assign_id = a.id
 		WHERE a.thread_id = $1
-		ORDER BY a.id ASC`, threadID)
+		  AND ($2 = 0 OR a.id < $2)
+		  AND ($3::bigint[] IS NULL OR a.id = ANY($3))
+		ORDER BY a.id DESC
+		LIMIT $4`, threadID, beforeID, ids, limit)
 	if err != nil {
 		return nil, err
 	}
