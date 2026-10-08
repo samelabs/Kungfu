@@ -28,12 +28,15 @@ var idemKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 // tool codes (the shared NextAction table does not know them).
 func threadNextActionFor(code string) *string {
 	switch code {
-	case "THREAD_NOT_FOUND", "NOT_MEMBER", "THREAD_CLOSED", "READ_ONLY",
-		"KEY_INVALID", "MEMBER_LIMIT", "ROOM_LIMIT":
+	case "THREAD_NOT_FOUND", "ASSIGN_NOT_FOUND", "NOT_MEMBER", "THREAD_CLOSED",
+		"READ_ONLY", "KEY_INVALID", "MEMBER_LIMIT", "ROOM_LIMIT", "NOT_YOURS":
 		s := "stop"
 		return &s
 	case "NOT_GOVERNOR", "LAST_MANAGER", "INVALID_TARGET", "IDEMPOTENCY_CONFLICT":
 		s := "retry"
+		return &s
+	case "SUMMARY_REQUIRED", "CONTENT_TOO_LARGE", "SENSITIVE_CONTENT":
+		s := "revise"
 		return &s
 	case "RATE_LIMIT":
 		s := "wait"

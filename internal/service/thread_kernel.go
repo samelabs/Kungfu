@@ -247,7 +247,7 @@ func loadRoomForGovernor(ctx context.Context, tx pgx.Tx, code string, botID int6
 func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string, issueKey bool, idemKey string) (map[string]any, error) {
 	subject = strings.TrimSpace(subject)
 	if utf8.RuneCountInString(subject) > threadMaxSubjectRunes {
-		return nil, errors.NewWithDetails(400, "VALIDATION_FAILED", "subject exceeds 200 characters",
+		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "subject exceeds 200 characters",
 			map[string]interface{}{"errors": []map[string]string{
 				{"field": "subject", "message": "subject is limited to 200 characters"},
 			}})
@@ -335,7 +335,7 @@ func ThreadIssueKey(ctx context.Context, pool *pg.Pool, botID int64, code, role,
 		role = repository.ThreadRoleSpeaker // §6.1 default
 	}
 	if !threadValidRole(role) {
-		return nil, errors.NewWithDetails(400, "VALIDATION_FAILED", "role must be governor, speaker or observer",
+		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "role must be governor, speaker or observer",
 			map[string]interface{}{"errors": []map[string]string{
 				{"field": "role", "message": "role must be one of governor, speaker, observer"},
 			}})
@@ -610,7 +610,7 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 // no-effect successes).
 func ThreadSetRole(ctx context.Context, pool *pg.Pool, botID int64, code string, member int64, role, idemKey string) (map[string]any, error) {
 	if !threadValidRole(role) {
-		return nil, errors.NewWithDetails(400, "VALIDATION_FAILED", "role must be governor, speaker or observer",
+		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "role must be governor, speaker or observer",
 			map[string]interface{}{"errors": []map[string]string{
 				{"field": "role", "message": "role must be one of governor, speaker, observer"},
 			}})
@@ -973,7 +973,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 // (≤50 per page). Open-item counts join with the D5 turn projection.
 func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor string) (map[string]any, error) {
 	if status != "" && status != repository.ThreadStatusOpen && status != repository.ThreadStatusClosed {
-		return nil, errors.NewWithDetails(400, "VALIDATION_FAILED", "status must be open or closed",
+		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "status must be open or closed",
 			map[string]interface{}{"errors": []map[string]string{
 				{"field": "status", "message": "status must be one of open, closed"},
 			}})
@@ -981,10 +981,10 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 	var beforeID int64
 	if strings.TrimSpace(cursor) != "" {
 		id, err := strconv.ParseInt(strings.TrimSpace(cursor), 10, 64)
-		if err != nil || id <= 0 {
+		if err != nil || id < 0 {
 			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
 		}
-		beforeID = id
+		beforeID = id // 0 = first page, same grammar as thread_get
 	}
 
 	rows, err := repository.ListThreadsForMember(ctx, pool, botID, status, beforeID, threadPageSize+1)

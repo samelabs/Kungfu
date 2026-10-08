@@ -823,7 +823,7 @@ func TestThreadListAndGetProjections(t *testing.T) {
 	if _, err := ThreadList(ctx, pool, guest, "bogus", ""); err == nil {
 		t.Fatal("invalid status must be rejected")
 	} else {
-		threadErrIs(t, err, 400, "VALIDATION_FAILED")
+		threadErrIs(t, err, 422, "VALIDATION_FAILED")
 	}
 	if _, err := ThreadList(ctx, pool, guest, "", "not-a-cursor"); err == nil {
 		t.Fatal("invalid cursor must be rejected")

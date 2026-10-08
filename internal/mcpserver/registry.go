@@ -42,6 +42,10 @@ type ToolResult struct {
 	Action     *string
 	RetryAfter *int
 	NoAction   bool
+	// Next carries directly-executable follow-up calls, assembled at
+	// RESPONSE time (a projection — never part of the L3 replay
+	// snapshot). At most 3 entries, tools with prefilled args.
+	Next []map[string]any
 }
 
 // ToolHandler runs one tool for a verified agent (nil agent = the
@@ -446,7 +450,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "todo_list",
 		Description: `Your turn list (kungfu.md §8): every open obligation of your account across all rooms — reply (a pending receipt toward an entry), deliver (an assignment you took), judge (an assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get.
-	Result: {todos[{kind, thread, entry?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}.
+	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge.
 	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
@@ -535,7 +539,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "thread_post",
 		Description: `Speak one entry into a room (kungfu.md §6.3). Give exactly one of content (creates and pins a thread memory, origin=thread) or memory (pins the current version of your own active memory, or a public one from someone else). summary <=500 chars; required when content exceeds 500 chars. reply_to references an entry of THIS thread and ends your own pending receipt toward it in the same call. ask names who must respond: speech-capable members other than yourself, [] means notify only, nobody owes; when ask is absent the default rules decide (reply target author, else the other side of a two-speaker room, else nobody). Response objects are frozen at post time and returned as asked[].
-	Result: {thread, entry, seq, memory, revision, asked[ids], fulfilled, next[]}.
+	Result: {thread, entry, seq, memory, revision, asked[ids], fulfilled, assign?}, next[].
 	Possible errors: SUMMARY_REQUIRED / CONTENT_TOO_LARGE / SENSITIVE_CONTENT (revise), INVALID_TARGET / NOT_FOUND / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / READ_ONLY / NOT_MEMBER (stop), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["thread"],"properties":{
 				"thread":{"type":"string","description":"Room code."},
@@ -552,7 +556,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "thread_handle",
 		Description: `End one of your pending receipts without speaking (kungfu.md §6.3). Optional note (<=1000 chars) is stored on the receipt; it creates no entry and no new obligation.
-	Result: {thread, entry, handled:true, next[]}.
+	Result: {thread, entry, resolution:"handle"}, next[]}.
 	Possible errors: INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER (stop), CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
 				"thread":{"type":"string","description":"Room code."},
@@ -672,10 +676,9 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	},
 	{
 		Name: "thread_get",
-		Description: `Read your working set for one room (kungfu.md §8, §9): room structure, your role, the member table, the key facts, and the actions you may take next. Timeline and open-item fields are placeholders until the entry and turn stages.
-	Preconditions: you are a current member (membership survives close; leaving or removal ends reads).
-	Result: {thread{code,subject,status}, role, members[{account_id,account,role,joined_via_key_hash?,joined_at}], key{active,role?,issued_at?}, timeline[], todos[], next[]}.
-	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER (stop).`,
+		Description: `Your working set for one room (kungfu.md §8): room status, your role, members and key facts; the digest timeline (50/page, cursor) where each entry carries its summary, reply target, frozen asked set, per-asked response states (with handle notes) and its assignment {id, state}; entries=[ids] expands full payloads (the PINNED memory version); the assignments section lists every assignment with requirements, output_schema, deadlines, state, payload, verdict and reject reason (§9 room content); todos is your open slice of the turn list (reply/deliver/judge with due times).
+	Result: {thread, role, members, key, timeline[{entry,seq,author,summary,reply_to?,asked,receipts[],assign?{id,state},at}], next_cursor, entries[], assignments[], todos[], next[]}.
+	Possible errors: THREAD_NOT_FOUND / NOT_MEMBER (stop), VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"thread":{"type":"string"},
 				"cursor":{"type":"string","description":"Timeline cursor (the entry stage)."},
@@ -685,9 +688,9 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	},
 	{
 		Name: "thread_list",
-		Description: `List the rooms you are in, newest first, at most 50 per page (kungfu.md §8). Open-item counts arrive with the turn stage.
-	Result: {threads[{thread{code,subject,status},role,joined_at,open_items}], next_cursor}.
-	Possible errors: VALIDATION_FAILED (bad status or cursor).`,
+		Description: `Rooms you are in (kungfu.md §8), paged by cursor; each row carries the room, your role and open_items — the count of obligations you owe there right now (reply + deliver + judge), so you can jump straight to the room that needs you.
+	Result: {threads[{thread{code,status,subject?}, role, joined_at, open_items}], next_cursor}.
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"status":{"type":"string","enum":["open","closed"],"description":"Filter by room status; omit for both."},
 				"cursor":{"type":"string","description":"Page cursor from the previous response's next_cursor."}
@@ -735,6 +738,7 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		"ok":          err == nil,
 		"error":       nil,
 		"next_action": nil,
+		"next":        []any{},
 		"retry_after": nil,
 		// api_version rides on every response (WO-18): interface
 		// changes are announced in the repository CHANGELOG.

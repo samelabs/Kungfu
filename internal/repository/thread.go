@@ -822,28 +822,6 @@ func FindAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow
 	return &a, nil
 }
 
-// LockAssignment takes the assign row lock inside the room
-// transaction — take/void/drop races serialize here (L5).
-func LockAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow, error) {
-	row := q.QueryRow(ctx, `
-		SELECT id, thread_id, entry_id, creator_id, assignee_id, requirements,
-		       output_schema::text, deliver_due_s, judge_due_s, state,
-		       to_char(taken_at, 'YYYY-MM-DD HH24:MI:SS'),
-		       to_char(deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
-		       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS')
-		FROM assigns WHERE id = $1 FOR UPDATE`, id)
-	var a AssignmentRow
-	if err := row.Scan(&a.ID, &a.ThreadID, &a.EntryID, &a.CreatorID, &a.AssigneeID,
-		&a.Requirements, &a.OutputSchema, &a.DeliverDueS, &a.JudgeDueS, &a.State,
-		&a.TakenAt, &a.DeliverDueAt, &a.CreatedAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &a, nil
-}
-
 // TakeAssignmentCAS moves open→taken and stamps the deadline clock
 // (deliver deadline runs from take, §6.4).
 func TakeAssignmentCAS(ctx context.Context, q pg.Querier, id, assigneeID int64) (bool, string, error) {
@@ -978,26 +956,61 @@ func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) (
 // RecoverAssigns materializes deadline outcomes (L4: expiry beats
 // in-flight handling; the inline guards mirror these transitions).
 func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (int, error) {
-	tag, err := pool.Exec(context.Background(), `
+	// timed_out: the assignee's clock ran out — tell both parties
+	rows, err := pool.Query(context.Background(), `
 		UPDATE assigns SET state = 'timed_out', closed_at = NOW()
 		WHERE id IN (
 		    SELECT id FROM assigns WHERE state = 'taken' AND deliver_due_at <= NOW()
-		    LIMIT $1 FOR UPDATE SKIP LOCKED)`, batch)
+		    LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING id, assignee_id, creator_id`, batch)
 	if err != nil {
 		return 0, err
 	}
-	n := int(tag.RowsAffected())
-	tag, err = pool.Exec(context.Background(), `
+	n := 0
+	for rows.Next() {
+		var id, assignee, creator int64
+		if err := rows.Scan(&id, &assignee, &creator); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		n++
+		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
+		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	// undecided: the creator's clock ran out — tell both parties
+	rows, err = pool.Query(context.Background(), `
 		UPDATE assigns SET state = 'undecided', closed_at = NOW()
 		WHERE id IN (
 		    SELECT a.id FROM assigns a
 		    JOIN assign_deliveries d ON d.assign_id = a.id
 		    WHERE a.state = 'delivered' AND d.judge_due_at <= NOW()
-		    LIMIT $1 FOR UPDATE SKIP LOCKED)`, batch)
+		    LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING id, assignee_id, creator_id`, batch)
 	if err != nil {
 		return n, err
 	}
-	return n + int(tag.RowsAffected()), nil
+	for rows.Next() {
+		var id, assignee, creator int64
+		if err := rows.Scan(&id, &assignee, &creator); err != nil {
+			rows.Close()
+			return n, err
+		}
+		n++
+		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
+		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return n, err
+	}
+	rows.Close()
+	return n, nil
 }
 
 // LinkEntryAssignment back-fills the entry's assign_id pointer.

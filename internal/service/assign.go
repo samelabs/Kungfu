@@ -331,6 +331,7 @@ func AssignJudge(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 			if err != nil || !ok {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE", "Assignment is not awaiting judgment")
 			}
+			enqueueNotify(ctx, tx, a.AssigneeID, "verdict", 1)
 			if verdict == "adopt" {
 				a.State = "adopted"
 			} else {
@@ -369,6 +370,7 @@ func AssignDrop(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 			if err != nil || !ok {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE", "Assignment is not in progress")
 			}
+			enqueueNotify(ctx, tx, a.CreatorID, "exit", 1)
 			a.State = "dropped"
 			facts := assignmentFacts(code, a)
 			return threadActionOutcome{Facts: facts, View: facts}, nil
@@ -399,6 +401,7 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 			if err != nil || !ok {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE", "Assignment already settled")
 			}
+			enqueueNotify(ctx, tx, a.AssigneeID, "exit", 1)
 			a.State = "voided"
 			facts := assignmentFacts(code, a)
 			return threadActionOutcome{Facts: facts, View: facts}, nil
