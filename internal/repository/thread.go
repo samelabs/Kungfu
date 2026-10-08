@@ -441,6 +441,13 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 		WHERE account_id = $1 AND state = 'pending'`, botID); err != nil {
 		return nil, err
 	}
+	// composition (deactivation × outbox): the obligations are gone,
+	// so their queued notifications must die with them — a dispatch
+	// telling a disabled account it owes something would be a lie
+	if _, err := q.Exec(ctx,
+		`DELETE FROM notify_outbox WHERE account_id = $1 AND sent_at IS NULL`, botID); err != nil {
+		return nil, err
+	}
 	// R-18: the disabled member's undelivered assignments void across
 	// ALL rooms (both as assignee and as creator); delivered ones keep
 	// their judgment clock and settle as undecided at the deadline.
