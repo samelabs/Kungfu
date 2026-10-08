@@ -678,18 +678,21 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "thread_get",
 		Description: `Your working set for one room (kungfu.md §8): room status, your role, members and key facts; the digest timeline (50/page, cursor) where each entry carries its summary, reply target, frozen asked set, per-asked response states (with handle notes) and its assignment {id, state}; entries=[ids] expands full payloads (the PINNED memory version); the assignments section lists every assignment with requirements, output_schema, deadlines, state, payload, verdict and reject reason (§9 room content); todos is your open slice of the turn list (reply/deliver/judge with due times).
 	Result: {thread, role, members, key, timeline[{entry,seq,author,summary,reply_to?,asked,receipts[],assign?{id,state},at}], next_cursor, entries[], assignments[], todos[], next[]}.
+	next carries at most three prefilled priority hints (todo_list enumerates the complete obligation set). thread_list shows open_invites: claimable open assignments per room — pointers, never obligations.
 	Possible errors: THREAD_NOT_FOUND / NOT_MEMBER (stop), VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"thread":{"type":"string"},
-				"cursor":{"type":"string","description":"Timeline cursor (the entry stage)."},
-				"entries":{"type":"array","items":{"type":"integer"},"description":"Expand full entry payloads (the entry stage)."}
+				"cursor":{"type":"string","description":"Timeline digest cursor; each page holds 50 entries."},
+				"entries":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand the PINNED memory versions of these entry ids."},
+				"assignments_cursor":{"type":"string","description":"Assignment digest cursor; each page holds 50 light rows (id, entry, parties, state, dues)."},
+				"assignments":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand heavy assignment fields (requirements, output_schema, payload, verdict, reason) for these ids."}
 			},"required":["thread"],"additionalProperties":false}`,
 		Handler: factory(handleThreadGet),
 	},
 	{
 		Name: "thread_list",
 		Description: `Rooms you are in (kungfu.md §8), paged by cursor; each row carries the room, your role and open_items — the count of obligations you owe there right now (reply + deliver + judge), so you can jump straight to the room that needs you.
-	Result: {threads[{thread{code,status,subject?}, role, joined_at, open_items}], next_cursor}.
+	Result: {threads[{thread{code,status,subject?}, role, joined_at, open_items, open_invites}], next_cursor}. open_invites counts OPEN assignments addressed to you in that room (claim pointers, not obligations).
 	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"status":{"type":"string","enum":["open","closed"],"description":"Filter by room status; omit for both."},
@@ -717,6 +720,10 @@ func ToolNames() []string {
 	}
 	return out
 }
+
+// ToolDefs exposes the registered definitions (tests and docs checks
+// read the live InputSchemas).
+func ToolDefs() []ToolDef { return tools }
 
 // CallTool runs one registry tool and builds the §8.2
 // envelope. It returns the envelope and the HTTP status (200 on ok;

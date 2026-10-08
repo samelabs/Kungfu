@@ -1341,3 +1341,30 @@ func AssignmentDeadlinePassed(ctx context.Context, q pg.Querier, assignID int64,
 	}
 	return passed, nil
 }
+
+// ThreadOpenInviteCounts counts, per room, the OPEN assignments
+// addressed to the account while it holds a current membership there
+// (PM-002 B-1: a read-only projection — the invite is no obligation,
+// the count only tells the agent WHERE to look). Backed by
+// idx_assigns_assignee (assignee_id, state).
+func ThreadOpenInviteCounts(ctx context.Context, q pg.Querier, accountID int64) (map[int64]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT a.thread_id, COUNT(*)
+		FROM assigns a
+		JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = $1
+		WHERE a.assignee_id = $1 AND a.state = 'open'
+		GROUP BY a.thread_id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var id, n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}

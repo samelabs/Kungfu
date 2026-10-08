@@ -1119,6 +1119,10 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 	if err2 != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading open item counts")
 	}
+	invites, err3 := repository.ThreadOpenInviteCounts(ctx, pool, botID)
+	if err3 != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading invite counts")
+	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		room := map[string]any{"code": r.Code, "status": r.Status}
@@ -1126,10 +1130,11 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 			room["subject"] = *r.Subject
 		}
 		items = append(items, map[string]any{
-			"thread":     room,
-			"role":       r.Role,
-			"joined_at":  r.JoinedAt,
-			"open_items": openItems[r.ID],
+			"thread":       room,
+			"role":         r.Role,
+			"joined_at":    r.JoinedAt,
+			"open_items":   openItems[r.ID],
+			"open_invites": invites[r.ID], // PM-002 B-1: claimable, no obligation
 		})
 	}
 	return map[string]any{
