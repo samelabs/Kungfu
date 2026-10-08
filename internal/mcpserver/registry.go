@@ -685,7 +685,8 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 				"cursor":{"type":"string","description":"Timeline digest cursor; each page holds 50 entries."},
 				"entries":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand the PINNED memory versions of these entry ids."},
 				"assignments_cursor":{"type":"string","description":"Assignment digest cursor; each page holds 50 light rows (id, entry, parties, state, dues)."},
-				"assignments":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand heavy assignment fields (requirements, output_schema, payload, verdict, reason) for these ids."}
+				"assignments":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand heavy assignment fields (requirements, output_schema, payload, verdict, reason) for these ids."},
+				"assignments_mine_open":{"type":"boolean","default":false,"description":"Filter the digest to YOUR open (unaccepted) assignments only — the server-authenticated identity is the filter basis; paging and cursor unchanged."}
 			},"required":["thread"],"additionalProperties":false}`,
 		Handler: factory(handleThreadGet),
 	},

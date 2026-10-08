@@ -777,7 +777,7 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 // structure, own role, the member table, key facts (§9), the D2
 // action list — and empty placeholders for the timeline and open
 // items (D3/D5 fill those).
-func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64, assignCursor string, assignIDs []int64) (map[string]any, error) {
+func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64, assignCursor string, assignIDs []int64, mineOpen bool) (map[string]any, error) {
 	// one read transaction: membership and content share a snapshot —
 	// a revocation racing this read cannot leak half a room. READ
 	// COMMITTED takes a fresh snapshot PER STATEMENT (PM-001 A:
@@ -974,7 +974,12 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	}
 	expandIDs = assignIDs
 	fetchAll := len(expandIDs) > 0
-	assignRows, err := repository.ListThreadAssignments(ctx, tx, th.ID, assignBefore, 51, nil)
+	var assignRows []repository.AssignmentFullRow
+	if mineOpen {
+		assignRows, err = repository.ListThreadAssignmentsMineOpen(ctx, tx, th.ID, botID, assignBefore, 51)
+	} else {
+		assignRows, err = repository.ListThreadAssignments(ctx, tx, th.ID, assignBefore, 51, nil)
+	}
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")
 	}

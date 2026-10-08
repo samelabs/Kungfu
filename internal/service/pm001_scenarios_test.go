@@ -258,7 +258,7 @@ func TestPM001ScaleMembersAndThousandAssignments(t *testing.T) {
 	start = time.Now()
 	pages, cursor := 0, ""
 	for {
-		view, err := ThreadGet(ctx, pool, lead, code, "", nil, cursor, nil)
+		view, err := ThreadGet(ctx, pool, lead, code, "", nil, cursor, nil, false)
 		if err != nil {
 			t.Fatalf("page %d: %v", pages, err)
 		}
@@ -283,7 +283,7 @@ func TestPM001ScaleMembersAndThousandAssignments(t *testing.T) {
 		t.Fatalf("pages = %d, want 20", pages)
 	}
 	// expansion of the newest assignment still carries the heavy field
-	view, err := ThreadGet(ctx, pool, lead, code, "", nil, "", []int64{last})
+	view, err := ThreadGet(ctx, pool, lead, code, "", nil, "", []int64{last}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

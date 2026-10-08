@@ -165,7 +165,7 @@ func TestComposePinVisibilityMatrix(t *testing.T) {
 		return r["entry"].(int64)
 	}
 	readable := func(entry int64) bool {
-		view, err := ThreadGet(ctx, pool, a, code, "", []int64{entry}, "", nil)
+		view, err := ThreadGet(ctx, pool, a, code, "", []int64{entry}, "", nil, false)
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
@@ -675,7 +675,7 @@ func TestExtAuditAssignmentsBounded(t *testing.T) {
 		}
 		last = res["assign"].(int64)
 	}
-	page1, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	page1, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +691,7 @@ func TestExtAuditAssignmentsBounded(t *testing.T) {
 		t.Fatal("pagination cursor missing")
 	}
 	// expansion by id carries the heavy fields
-	expanded, err := ThreadGet(ctx, pool, owner, code, "", nil, "", []int64{last})
+	expanded, err := ThreadGet(ctx, pool, owner, code, "", nil, "", []int64{last}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +705,7 @@ func TestExtAuditAssignmentsBounded(t *testing.T) {
 	if _, err := AssignTake(ctx, pool, owner, last, "", "", "xb-take"); err != nil {
 		t.Fatalf("take: %v", err)
 	}
-	page2, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	page2, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

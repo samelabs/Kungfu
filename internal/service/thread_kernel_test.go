@@ -222,7 +222,7 @@ func TestThreadLastManagerThreePaths(t *testing.T) {
 	if n := threadMemberCount(t, pool, code); n != 2 {
 		t.Fatalf("members = %d, want 2 (no effect)", n)
 	}
-	view, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestThreadGovernanceAuthorization(t *testing.T) {
 	}
 
 	// the observer reads the room (read-only member view)
-	obsView, err := ThreadGet(ctx, pool, observer, code, "", nil, "", nil)
+	obsView, err := ThreadGet(ctx, pool, observer, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("observer thread_get: %v", err)
 	}
@@ -310,12 +310,12 @@ func TestThreadGovernanceAuthorization(t *testing.T) {
 	}
 
 	// a non-member neither reads nor leaves
-	_, err = ThreadGet(ctx, pool, outsider, code, "", nil, "", nil)
+	_, err = ThreadGet(ctx, pool, outsider, code, "", nil, "", nil, false)
 	threadErrIs(t, err, 403, "NOT_MEMBER")
 	_, err = ThreadLeave(ctx, pool, outsider, code, "")
 	threadErrIs(t, err, 403, "NOT_MEMBER")
 	// unknown room
-	_, err = ThreadGet(ctx, pool, owner, "0000000000aa", "", nil, "", nil)
+	_, err = ThreadGet(ctx, pool, owner, "0000000000aa", "", nil, "", nil, false)
 	threadErrIs(t, err, 404, "THREAD_NOT_FOUND")
 }
 
@@ -347,7 +347,7 @@ func TestThreadCloseSemantics(t *testing.T) {
 		threadErrIs(t, err, 409, "THREAD_CLOSED")
 	}
 	// members are kept and can still read and leave — even the last governor
-	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("member read on closed room: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestThreadDeactivationCascade(t *testing.T) {
 	}
 
 	// the room closed in the same fact; the guest membership survived
-	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("guest read after cascade: %v", err)
 	}
@@ -655,7 +655,7 @@ func TestThreadConcurrencyJoinAndClose(t *testing.T) {
 		t.Fatalf("concurrent close failed: %v", err)
 	}
 	jErr := <-joinErr
-	view, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -738,7 +738,7 @@ func TestThreadListAndGetProjections(t *testing.T) {
 		t.Fatalf("join: %v", err)
 	}
 
-	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, guest, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

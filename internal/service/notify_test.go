@@ -29,6 +29,16 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 	a, _, _ := a7TestBot(t, pool, 5)
 	ctx := context.Background()
 
+	// dispatch drains the GLOBAL outbox (≤50 rows per pass): rows
+	// left by earlier tests point at endpoints whose certificates are
+	// NOT in this test's pinned roots, and their handshake failures
+	// would mask our own row's delivery. Retire foreign unsent rows —
+	// tests that run later create and assert their own rows.
+	if _, err := pool.Exec(ctx,
+		`UPDATE notify_outbox SET sent_at = NOW() WHERE sent_at IS NULL`); err != nil {
+		t.Fatalf("outbox isolation: %v", err)
+	}
+
 	var mu sync.Mutex
 	var payloads []map[string]any
 	var sawChallenge bool

@@ -506,11 +506,12 @@ func handleThreadClose(ctx context.Context, deps *Deps, agent *model.Bot, args j
 
 func handleThreadGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Thread            string  `json:"thread"`
-		Cursor            string  `json:"cursor"`
-		Entries           []int64 `json:"entries"`
-		AssignmentsCursor string  `json:"assignments_cursor"`
-		Assignments       []int64 `json:"assignments"`
+		Thread              string  `json:"thread"`
+		Cursor              string  `json:"cursor"`
+		Entries             []int64 `json:"entries"`
+		AssignmentsCursor   string  `json:"assignments_cursor"`
+		Assignments         []int64 `json:"assignments"`
+		AssignmentsMineOpen bool    `json:"assignments_mine_open"`
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Thread == "" {
 		return ToolResult{}, argError("thread is required")
@@ -518,7 +519,7 @@ func handleThreadGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	if !deps.limiter().CheckAgent(agent.ID, "thread_read") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_read").RetryAfter)
 	}
-	res, err := service.ThreadGet(ctx, deps.Pool, agent.ID, in.Thread, in.Cursor, in.Entries, in.AssignmentsCursor, in.Assignments)
+	res, err := service.ThreadGet(ctx, deps.Pool, agent.ID, in.Thread, in.Cursor, in.Entries, in.AssignmentsCursor, in.Assignments, in.AssignmentsMineOpen)
 	if err != nil {
 		return threadErrResult(err)
 	}

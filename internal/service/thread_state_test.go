@@ -353,7 +353,7 @@ func TestMemoryPinning(t *testing.T) {
 	if _, err := Unshare(ctx, pool, other, priv.Code); err != nil {
 		t.Fatalf("unshare: %v", err)
 	}
-	view, err := ThreadGet(ctx, pool, owner, code, "", []int64{r3["entry"].(int64)}, "", nil)
+	view, err := ThreadGet(ctx, pool, owner, code, "", []int64{r3["entry"].(int64)}, "", nil, false)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestMemoryPinning(t *testing.T) {
 	if _, err := Delete(ctx, pool, owner, up.Code); err != nil {
 		t.Fatalf("delete own: %v", err)
 	}
-	view2, err := ThreadGet(ctx, pool, owner, code, "", []int64{r2["entry"].(int64)}, "", nil)
+	view2, err := ThreadGet(ctx, pool, owner, code, "", []int64{r2["entry"].(int64)}, "", nil, false)
 	if err != nil {
 		t.Fatalf("get2: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestCollectionHooks(t *testing.T) {
 		t.Fatalf("close receipt = %s %v", st, res)
 	}
 	// the room still reads back (§6.5 read-only) with the timeline
-	view, err := ThreadGet(ctx, pool, a, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, a, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("read closed room: %v", err)
 	}

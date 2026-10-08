@@ -1216,6 +1216,17 @@ type AssignmentFullRow struct {
 // ListThreadAssignments returns every assignment of a room with its
 // delivery and verdict, oldest first — the workset's progress view.
 func ListThreadAssignments(ctx context.Context, q pg.Querier, threadID int64, beforeID int64, limit int, ids []int64) ([]AssignmentFullRow, error) {
+	return listThreadAssignments(ctx, q, threadID, beforeID, limit, ids, 0, false)
+}
+
+// ListThreadAssignmentsMineOpen filters IN THE DATABASE to the
+// caller's own OPEN assignments (PM-003 A): the server-authenticated
+// account id is the only filter basis, never a client-supplied one.
+func ListThreadAssignmentsMineOpen(ctx context.Context, q pg.Querier, threadID, accountID, beforeID int64, limit int) ([]AssignmentFullRow, error) {
+	return listThreadAssignments(ctx, q, threadID, beforeID, limit, nil, accountID, true)
+}
+
+func listThreadAssignments(ctx context.Context, q pg.Querier, threadID int64, beforeID int64, limit int, ids []int64, mineAccount int64, mineOpen bool) ([]AssignmentFullRow, error) {
 	// bounded digest (external audit P1-5): the light columns page by
 	// id keyset; explicit ids expand the heavy columns on demand
 	rows, err := q.Query(ctx, `
@@ -1238,8 +1249,9 @@ func ListThreadAssignments(ctx context.Context, q pg.Querier, threadID int64, be
 		WHERE a.thread_id = $1
 		  AND ($2 = 0 OR a.id < $2)
 		  AND ($3::bigint[] IS NULL OR a.id = ANY($3))
+		  AND ($5 = 0 OR (a.assignee_id = $5 AND a.state = 'open'))
 		ORDER BY a.id DESC
-		LIMIT $4`, threadID, beforeID, ids, limit)
+		LIMIT $4`, threadID, beforeID, ids, limit, mineAccount)
 	if err != nil {
 		return nil, err
 	}

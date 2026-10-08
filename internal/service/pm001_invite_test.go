@@ -60,7 +60,7 @@ func TestPM001InviteDiscoveryExperiment(t *testing.T) {
 	}
 	// the ONLY compensation path today: thread_get on the room, where
 	// the assignments digest shows the open invite with its id
-	view, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

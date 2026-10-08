@@ -7,9 +7,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
 	"kungfu.md/internal/admin"
+	"kungfu.md/internal/model"
 	"kungfu.md/internal/pg"
 )
 
@@ -127,9 +130,12 @@ func TestPM002InviteCountLifecycle(t *testing.T) {
 	}
 }
 
-// B-1 scale: 100 rooms, one holds the invite; the target room has
-// 1000 historical assignments — measure the discovery and location
-// cost end to end.
+// B-1 scale (scope note, PM-003 D): the 99 background rooms are
+// owned by LEAD; the worker is a member of the TARGET room only.
+// This proves single-membership discovery, NOT "worker sifting 99 of
+// its own rooms" — that claim is not made here. The measured costs
+// (thread_list discovery, digest paging) are per-room-list-call and
+// hold regardless of membership breadth.
 func TestPM002InviteDiscoveryAtScale(t *testing.T) {
 	pool := revisionTestPool(t)
 	lead, _, _ := a7TestBot(t, pool, 5)
@@ -189,7 +195,7 @@ func TestPM002InviteDiscoveryAtScale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := ThreadGet(ctx, pool, w, tk, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, w, tk, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +212,7 @@ func TestPM002InviteDiscoveryAtScale(t *testing.T) {
 	// the digest and count the pages (the cost the PM asked measured)
 	pages, cursor := 0, ""
 	for {
-		v, err := ThreadGet(ctx, pool, w, tk, "", nil, cursor, nil)
+		v, err := ThreadGet(ctx, pool, w, tk, "", nil, cursor, nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,7 +263,7 @@ func TestPM002BeyondNextHints(t *testing.T) {
 	if _, err := AssignTake(ctx, pool, w, s, "", "", "b2x-t"); err != nil {
 		t.Fatal(err)
 	}
-	view, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil)
+	view, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +286,7 @@ func TestPM002RealWritesRaceRealDisable(t *testing.T) {
 	pool := revisionTestPool(t)
 	lead, _, _ := a7TestBot(t, pool, 5)
 	ctx := context.Background()
-	principal := &admin.Principal{Permissions: []string{"*"}}
+	principal := &admin.Principal{Admin: &model.Admin{ID: 1}, Permissions: []string{"*"}}
 	for round := 0; round < 6; round++ {
 		victim, _, _ := a7TestBot(t, pool, 5)
 		code, raw := threadStart(t, pool, lead, fmt.Sprintf("rr-%d", round), true, "")
@@ -362,4 +368,204 @@ func ThreadJoinErr(ctx context.Context, pool pgPool, botID int64, key, idem stri
 func ThreadPostErr(ctx context.Context, pool pgPool, botID int64, thread, content, mem, summary string, replyTo *int64, ask []int64, assign *AssignSpec, idem string) error {
 	_, err := ThreadPost(ctx, pool, botID, thread, content, mem, summary, replyTo, ask, assign, idem)
 	return err
+}
+
+// ── PM-003 B: the old-invite location friction, before and after.
+// The worker's open invite is buried under 1000 OTHER agents' open
+// assignments (worse than PM-002's self-assigned history). ──
+func TestPM003MineOpenLocator(t *testing.T) {
+	pool := revisionTestPool(t)
+	lead, _, _ := a7TestBot(t, pool, 5)
+	w, _, _ := a7TestBot(t, pool, 5)
+	other, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, lead, "pm3", true, "")
+	defer threadCleanup(t, pool, []int64{lead, w, other}, code)
+	for _, id := range []int64{w, other} {
+		if _, err := ThreadJoin(ctx, pool, id, raw, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// the worker's OLD open invite first
+	res, err := ThreadPost(ctx, pool, lead, code, "your invite", "", "", nil, []int64{},
+		&AssignSpec{To: w, Requirements: "find me"}, "p3-inv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := res["assign"].(int64)
+	// 1000 NEWER open assignments addressed to ANOTHER member
+	for i := 0; i < 1000; i++ {
+		if _, err := ThreadPost(ctx, pool, lead, code, "noise", "", "", nil, []int64{},
+			&AssignSpec{To: other, Requirements: "n"}, fmt.Sprintf("p3-n%d", i)); err != nil {
+			t.Fatalf("noise %d: %v", i, err)
+		}
+	}
+
+	// BEFORE (filter off): worst-case page-walk to locate the invite
+	pages := 0
+	cursor := ""
+	for {
+		v, err := ThreadGet(ctx, pool, w, code, "", nil, cursor, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		hit := false
+		for _, r := range v["assignments"].([]map[string]any) {
+			if r["assign"].(int64) == want {
+				hit = true
+			}
+		}
+		if hit {
+			break
+		}
+		nc, _ := v["assignments_next_cursor"].(string)
+		if nc == "" {
+			break
+		}
+		cursor = nc
+	}
+
+	// AFTER (filter on): page 1 carries the invite and ONLY mine-open rows
+	v, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := v["assignments"].([]map[string]any)
+	if len(rows) != 1 || rows[0]["assign"].(int64) != want || rows[0]["state"] != "open" {
+		t.Fatalf("filtered page1 = %v, want exactly the invite %d", rows, want)
+	}
+	t.Logf("location cost: unfiltered worst case = %d digest pages; assignments_mine_open=true = 1 page", pages)
+	if pages < 20 {
+		t.Fatalf("expected deep paging before the fix, got %d", pages)
+	}
+
+	// expansion by id is untouched by the filter
+	ex, err := ThreadGet(ctx, pool, w, code, "", nil, "", []int64{want}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	er := ex["assignments_expanded"].([]any)
+	if len(er) != 1 || er[0].(map[string]any)["requirements"] != "find me" {
+		t.Fatalf("expand under filter: %v", er)
+	}
+
+	// the other member sees ONLY its own 1000, not the worker's invite
+	vo, err := ThreadGet(ctx, pool, other, code, "", nil, "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range vo["assignments"].([]map[string]any) {
+		if r["assign"].(int64) == want {
+			t.Fatal("filter leaked another member's invite")
+		}
+	}
+	// take works from the filtered handle
+	if _, err := AssignTake(ctx, pool, w, want, `{"found":true}`, "", "p3-t"); err != nil {
+		t.Fatal(err)
+	}
+	// after take the filtered view is empty for the worker
+	v2, err := ThreadGet(ctx, pool, w, code, "", nil, "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(v2["assignments"].([]map[string]any)); n != 0 {
+		t.Fatalf("post-take filtered view = %d, want 0", n)
+	}
+	// authorization unchanged: a non-member cannot use the filter
+	outsider, _, _ := a7TestBot(t, pool, 5)
+	if _, err := ThreadGet(ctx, pool, outsider, code, "", nil, "", nil, true); err == nil {
+		t.Fatal("non-member must be rejected regardless of the filter")
+	} else {
+		threadErrIs(t, err, 403, "NOT_MEMBER")
+	}
+}
+
+// ── PM-003 C: deactivation race — proof-of-effect hardening. ──
+func TestPM003RealWritesRaceRealDisableHardened(t *testing.T) {
+	pool := revisionTestPool(t)
+	lead, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	// the audit trail requires a REAL admin row (FK on actor) — seed
+	// one; its credential surface is not under test
+	var adminID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO tb_admins (username, display_name, password_hash)
+		VALUES ('pm3-race', 'PM-003', 'x') RETURNING id`).Scan(&adminID); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM tb_admins WHERE id=$1`, adminID) }()
+	principal := &admin.Principal{Admin: &model.Admin{ID: adminID, Username: "pm3-race"}, Permissions: []string{"*"}}
+	var sawJoin, sawPost, races int
+	for round := 0; round < 8; round++ {
+		victim, _, _ := a7TestBot(t, pool, 5)
+		code, raw := threadStart(t, pool, lead, fmt.Sprintf("p3r-%d", round), true, "")
+		// the three run CONCURRENTLY — the race is the test
+		var joinErr, postErr, disErr error
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() { defer wg.Done(); joinErr = ThreadJoinErr(ctx, pool, victim, raw, "") }()
+		go func() {
+			defer wg.Done()
+			postErr = ThreadPostErr(ctx, pool, victim, code, "race post", "", "", nil, []int64{}, nil, "")
+		}()
+		go func() { defer wg.Done(); disErr = admin.DisablePlatformAccount(ctx, pool, principal, victim) }()
+		wg.Wait()
+		// the disable itself MUST succeed — a silent failure would
+		// make the zero-residue assertions vacuous
+		if disErr != nil {
+			t.Fatalf("round %d: DisablePlatformAccount failed: %v", round, disErr)
+		}
+		races++
+		if joinErr == nil {
+			sawJoin++
+		}
+		if postErr == nil {
+			sawPost++
+		}
+		// join/post outcomes must be legal: success or a guard rejection
+		for _, e := range []error{joinErr, postErr} {
+			if e == nil {
+				continue
+			}
+			msg := e.Error()
+			legal := strings.Contains(msg, "UNAUTHORIZED") || strings.Contains(msg, "KEY_INVALID") ||
+				strings.Contains(msg, "NOT_MEMBER") || strings.Contains(msg, "THREAD_CLOSED") ||
+				strings.Contains(msg, "IDEMPOTENCY") ||
+				strings.Contains(msg, "INTERNAL_ERROR") // serialization/deadlock loser of a true race
+			if !legal {
+				t.Fatalf("round %d: unexpected write failure class: %v", round, e)
+			}
+		}
+		// independent read-back: the account IS disabled
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT status FROM tb_bots WHERE id=$1`, victim).Scan(&status); err != nil {
+			t.Fatalf("round %d: status read: %v", round, err)
+		}
+		if status != "disabled" {
+			t.Fatalf("round %d: final status = %q", round, status)
+		}
+		// zero residue — every query error checked
+		var members, pending, dangling int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM thread_members m JOIN tb_bots b ON b.id=m.account_id
+			WHERE m.account_id=$1 AND b.status='disabled'`, victim).Scan(&members); err != nil {
+			t.Fatalf("members read: %v", err)
+		}
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM thread_receipts WHERE account_id=$1 AND state='pending'`, victim).Scan(&pending); err != nil {
+			t.Fatalf("receipts read: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM assigns WHERE state IN ('open','taken') AND (assignee_id=$1 OR creator_id=$1)`, victim).Scan(&dangling); err != nil {
+			t.Fatalf("assigns read: %v", err)
+		}
+		if members != 0 || pending != 0 || dangling != 0 {
+			t.Fatalf("round %d: residue members=%d pending=%d dangling=%d", round, members, pending, dangling)
+		}
+		_, _ = pool.Exec(ctx, `DELETE FROM thread_members WHERE thread_id IN (SELECT id FROM threads WHERE code=$1)`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM threads WHERE code=$1`, code)
+		_, _ = pool.Exec(ctx, `DELETE FROM tb_bots WHERE id=$1`, victim)
+	}
+	t.Logf("races=%d join-ok=%d post-ok=%d (the rest legally rejected by the active-account guard)", races, sawJoin, sawPost)
 }
