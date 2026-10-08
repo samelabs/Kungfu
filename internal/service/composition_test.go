@@ -720,3 +720,55 @@ func TestExtAuditAssignmentsBounded(t *testing.T) {
 		t.Fatalf("next[] lacks the prefilled assign_submit handle: %v", nextCalls)
 	}
 }
+
+// ── PM-001 A regression: the ThreadGet snapshot transaction must be
+// REPEATABLE READ. Two connections against the real thread_members
+// table: while the read transaction sleeps between statements, a
+// removal commits — the read must keep seeing the pre-removal world
+// (READ COMMITTED was proven leaky: fresh snapshot per statement).
+func TestPM001ThreadGetSnapshotIsolation(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "iso", true, "")
+	defer threadCleanup(t, pool, []int64{owner, a}, code)
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pg.Rollback(tx) }()
+	if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
+		t.Fatal(err)
+	}
+	// stmt1 inside the snapshot tx: two members
+	var n1 int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM thread_members m JOIN threads t ON t.id=m.thread_id WHERE t.code=$1`,
+		code).Scan(&n1); err != nil {
+		t.Fatal(err)
+	}
+	if n1 != 2 {
+		t.Fatalf("stmt1 members = %d, want 2", n1)
+	}
+	// concurrent removal commits between the statements
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM thread_members WHERE account_id=$1`, a); err != nil {
+		t.Fatal(err)
+	}
+	// stmt2 in the SAME transaction: the snapshot must still hold 2
+	var n2 int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM thread_members m JOIN threads t ON t.id=m.thread_id WHERE t.code=$1`,
+		code).Scan(&n2); err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 2 {
+		t.Fatalf("snapshot leaked: stmt2 saw %d members after the removal committed (want 2)", n2)
+	}
+	_ = tx.Commit(ctx)
+}

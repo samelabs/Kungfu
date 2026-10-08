@@ -779,12 +779,18 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 // items (D3/D5 fill those).
 func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cursor string, entryIDs []int64, assignCursor string, assignIDs []int64) (map[string]any, error) {
 	// one read transaction: membership and content share a snapshot —
-	// a revocation racing this read cannot leak half a room
+	// a revocation racing this read cannot leak half a room. READ
+	// COMMITTED takes a fresh snapshot PER STATEMENT (PM-001 A:
+	// proven leaky), so the transaction is promoted to REPEATABLE
+	// READ before any read
 	tx, txErr := pool.TxBegin(ctx)
 	if txErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading thread")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
+	if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading thread")
+	}
 
 	th, err := repository.FindThreadByCode(ctx, tx, code)
 	if err != nil {
