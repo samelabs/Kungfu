@@ -246,23 +246,41 @@ func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.T
 	return t, nil
 }
 
-// GetWork is §5.1 work_get: the task's full contract (minus
-// receiver), the live harness directory, the 30-day stats and the
-// caller's tallies.
+// GetWork is §5.1 work_get: the task's executor package — the full
+// contract (receiver excluded), the live harness directory, the
+// 30-day stats and the caller's tallies. When the caller holds an
+// ACTIVE claim on the task, the contract shown is the version that
+// claim bound (§7.1/§9: an engaged agent always reads the version
+// it bound) and contract_version names it; otherwise the current
+// version is shown.
 func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (map[string]any, error) {
 	t, err := visibleTask(ctx, pool, code)
 	if err != nil {
 		return nil, err
 	}
+	contractJSON := t.Contract
+	contractVersion := t.ContractVersion
+	if claim, err := repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err == nil && claim != nil {
+		bound, err := repository.FindTaskContractVersion(ctx, pool, t.ID, claim.ContractVersion)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if bound != nil {
+			contractJSON = bound
+			contractVersion = claim.ContractVersion
+		}
+	} else if err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
 	var contract task.Contract
-	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+	if err := json.Unmarshal(contractJSON, &contract); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 
 	// §10.8: never expose the receiver — strip the key from the
 	// contract projection entirely
 	var contractProjection map[string]any
-	if err := json.Unmarshal(t.Contract, &contractProjection); err != nil {
+	if err := json.Unmarshal(contractJSON, &contractProjection); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	delete(contractProjection, "receiver")
@@ -277,19 +295,20 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	}
 
 	// M3: the harness directory is queried LIVE from the publisher's
-	// current memories, in the contract's harness_refs order
+	// current memories, in the shown contract's harness_refs order
 	directory, dirErr := liveHarnessDirectory(ctx, pool, t.PublisherID, contract.HarnessRefs)
 	if dirErr != nil {
 		return nil, dirErr
 	}
 
 	view := map[string]any{
-		"code":     t.Code,
-		"status":   t.Status,
-		"contract": contractProjection,
-		"harness":  directory,
-		"stats":    statsView(stats),
-		"my":       my,
+		"code":             t.Code,
+		"status":           t.Status,
+		"contract_version": contractVersion,
+		"contract":         contractProjection,
+		"harness":          directory,
+		"stats":            statsView(stats),
+		"my":               my,
 	}
 	if t.PausedReason != nil {
 		view["paused_reason"] = *t.PausedReason

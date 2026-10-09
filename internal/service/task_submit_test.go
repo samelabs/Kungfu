@@ -466,7 +466,7 @@ func seedSubmissionReturningID(t *testing.T, pool *pg.Pool, code string, agent i
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
 		TaskID: tr.ID, AgentID: agent, RequestKey: key,
 		Payload: []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)),
-		Amount: 5,
+		Amount: 5, ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert submission: %v", err)

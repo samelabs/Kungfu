@@ -82,15 +82,21 @@ func DeliverSubmission(ctx context.Context, pool *pg.Pool, submissionID int64, a
 	if err != nil || t == nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	contract, err := func() (task.Contract, error) {
-		var c task.Contract
-		if err := json.Unmarshal(t.Contract, &c); err != nil {
-			return c, err
-		}
-		return c, nil
-	}()
+	// §7.1: the delivery goes to the receiver of the version the
+	// submission bound — the claim's version when it carried one,
+	// else the version current at intake. A later task_update never
+	// redirects an in-flight submission; redeliveries (uncertain)
+	// resolve the same immutable row.
+	contractRaw, err := repository.FindTaskContractVersion(ctx, pool, sub.TaskID, sub.ContractVersion)
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if contractRaw == nil {
+		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Bound contract version is missing")
+	}
+	var contract task.Contract
+	if err := json.Unmarshal(contractRaw, &contract); err != nil {
+		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 
 	// §7.1 request, delivered outside any transaction. submission_id

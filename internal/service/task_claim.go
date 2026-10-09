@@ -39,14 +39,18 @@ func taskNotOpen(t *repository.TaskRow) *errors.AppError {
 		fmt.Sprintf("Task is %s, not open", t.Status), details)
 }
 
-// claimView is the §5.2 return structure.
+// claimView is the §5.2 return structure. ContractVersion is the
+// contract version this engagement bound (Task 1.1 §7.1) —
+// submissions under this claim are checked and delivered against
+// it, whatever the task's current version says later.
 type claimView struct {
-	ClaimID   WireID    `json:"claim_id"`
-	TaskCode  string    `json:"task_code"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Deadline  time.Time `json:"deadline"`
-	Amount    int64     `json:"amount"`
-	Status    string    `json:"status"`
+	ClaimID         WireID    `json:"claim_id"`
+	TaskCode        string    `json:"task_code"`
+	ContractVersion int64     `json:"contract_version"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Deadline        time.Time `json:"deadline"`
+	Amount          int64     `json:"amount"`
+	Status          string    `json:"status"`
 }
 
 func newClaimView(c *repository.ClaimRow, code string) claimView {
@@ -54,10 +58,11 @@ func newClaimView(c *repository.ClaimRow, code string) claimView {
 		ClaimID:  WireID(c.ClaimID),
 		TaskCode: code,
 
-		ExpiresAt: c.ExpiresAt,
-		Deadline:  c.Deadline,
-		Amount:    c.Amount,
-		Status:    c.Status,
+		ContractVersion: c.ContractVersion,
+		ExpiresAt:       c.ExpiresAt,
+		Deadline:        c.Deadline,
+		Amount:          c.Amount,
+		Status:          c.Status,
 	}
 }
 
@@ -147,9 +152,10 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		TaskID:  t.ID,
 		AgentID: agentID,
 
-		ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
-		Deadline:  now.Add(time.Duration(maxDur) * time.Second),
-		Amount:    contract.Price,
+		ContractVersion: t.ContractVersion,
+		ExpiresAt:       now.Add(time.Duration(ttl) * time.Second),
+		Deadline:        now.Add(time.Duration(maxDur) * time.Second),
+		Amount:          contract.Price,
 	})
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")

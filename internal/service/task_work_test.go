@@ -285,6 +285,7 @@ func TestListWorkStatsPrecision(t *testing.T) {
 		TaskID: mustTaskID(t, pool, codeA), AgentID: agent,
 		RequestKey: fmt.Sprintf("f-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)), Amount: 5,
+		ContractVersion: 1,
 	})
 	if err != nil {
 		t.Fatalf("insert failed-seed: %v", err)

@@ -52,21 +52,24 @@ var ErrInsufficientReservation = errors.New("release exceeds task reservation")
 // ---------------------------------------------------------------------------
 
 // TaskRow is a row of tb_task. Contract is the raw current
-// contract JSON — the one contract (WO-22).
+// contract JSON at version ContractVersion (the one contract's
+// CURRENT version, Task 1.1 §7.1); every version ever published is
+// kept in task_contract_versions.
 type TaskRow struct {
-	ID           int64
-	Code         string
-	PublisherID  int64
-	Status       string
-	BudgetLocked int64
-	Settled      int64
-	Reserved     int64
-	Refunded     int64
-	PausedReason *string
-	ClosedReason *string
-	Contract     []byte
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              int64
+	Code            string
+	PublisherID     int64
+	Status          string
+	BudgetLocked    int64
+	Settled         int64
+	Reserved        int64
+	Refunded        int64
+	PausedReason    *string
+	ClosedReason    *string
+	Contract        []byte
+	ContractVersion int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // NewTaskRow is the insert input for a new (paused) task.
@@ -76,33 +79,69 @@ type NewTaskRow struct {
 	Contract    []byte
 }
 
-// InsertTask creates a paused task with zeroed counters. Budget
-// locking is a separate primitive (LockTaskBudget).
+// InsertTask creates a paused task with zeroed counters and its
+// contract as version 1 (the first row of task_contract_versions,
+// same transaction). Budget locking is a separate primitive
+// (LockTaskBudget).
 func InsertTask(ctx context.Context, q pg.Querier, in NewTaskRow) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO tb_task (code, publisher_id, status, contract)
-		VALUES ($1, $2, 'paused', $3)
-		RETURNING id`, in.Code, in.PublisherID, in.Contract).Scan(&id)
+		WITH task AS (
+			INSERT INTO tb_task (code, publisher_id, status, contract, contract_version)
+			VALUES ($1, $2, 'paused', $3, 1)
+			RETURNING id
+		)
+		INSERT INTO task_contract_versions (task_id, version, contract)
+		SELECT task.id, 1, $3 FROM task
+		RETURNING task_id`, in.Code, in.PublisherID, in.Contract).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task: %w", err)
 	}
 	return id, nil
 }
 
-// UpdateTaskContract replaces the contract JSON (paused editing).
-// The caller owns the status precondition.
-func UpdateTaskContract(ctx context.Context, q pg.Querier, taskID int64, contract []byte) error {
-	tag, err := q.Exec(ctx, `
-		UPDATE tb_task SET contract = $2, updated_at = NOW()
-		WHERE id = $1`, taskID, contract)
+// ReplaceTaskContract publishes a NEW contract version (§7.1): the
+// task's contract becomes `contract` at version fromVersion+1 and
+// the version row is written in the same statement pair — a
+// compare-and-swap on the current version, so a concurrent publish
+// surfaces as ErrTaskStateConflict instead of overwriting. The
+// caller owns the status precondition (paused). Returns the new
+// version.
+func ReplaceTaskContract(ctx context.Context, q pg.Querier, taskID int64, fromVersion int64, contract []byte) (int64, error) {
+	var to int64
+	err := q.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE tb_task
+			SET contract = $3, contract_version = contract_version + 1, updated_at = NOW()
+			WHERE id = $1 AND contract_version = $2
+			RETURNING id, contract_version
+		)
+		INSERT INTO task_contract_versions (task_id, version, contract)
+		SELECT id, contract_version, $3 FROM bumped
+		RETURNING version`, taskID, fromVersion, contract).Scan(&to)
 	if err != nil {
-		return fmt.Errorf("update contract: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrTaskStateConflict
+		}
+		return 0, fmt.Errorf("replace task contract: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("task %d not found", taskID)
+	return to, nil
+}
+
+// FindTaskContractVersion loads one immutable contract version of a
+// task; nil when that version does not exist.
+func FindTaskContractVersion(ctx context.Context, q pg.Querier, taskID, version int64) ([]byte, error) {
+	var contract []byte
+	err := q.QueryRow(ctx, `
+		SELECT contract FROM task_contract_versions
+		WHERE task_id = $1 AND version = $2`, taskID, version).Scan(&contract)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
 	}
-	return nil
+	if err != nil {
+		return nil, fmt.Errorf("find task contract version: %w", err)
+	}
+	return contract, nil
 }
 
 // TaskCodeExists reports whether a task code is taken (publiccode
@@ -150,7 +189,7 @@ func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int
 	query := `
 		SELECT tb_task.id, tb_task.code, tb_task.publisher_id, tb_task.status,
 		       tb_task.budget_locked, tb_task.settled, tb_task.reserved, tb_task.refunded,
-		       tb_task.paused_reason, tb_task.closed_reason, tb_task.contract,
+		       tb_task.paused_reason, tb_task.closed_reason, tb_task.contract, tb_task.contract_version,
 		       tb_task.created_at, tb_task.updated_at
 		FROM tb_task` +
 		where + `
@@ -165,7 +204,7 @@ func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int
 	for rows.Next() {
 		var t TaskRow
 		if err := rows.Scan(&t.ID, &t.Code, &t.PublisherID, &t.Status, &t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
-			&t.PausedReason, &t.ClosedReason, &t.Contract,
+			&t.PausedReason, &t.ClosedReason, &t.Contract, &t.ContractVersion,
 			&t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
@@ -177,13 +216,13 @@ func FindTasksByPublisherPage(ctx context.Context, q pg.Querier, publisherID int
 const taskSelect = `
 	SELECT id, code, publisher_id, status,
 	       budget_locked, settled, reserved, refunded,
-	       paused_reason, closed_reason, contract, created_at, updated_at
+	       paused_reason, closed_reason, contract, contract_version, created_at, updated_at
 	FROM tb_task`
 
 func scanTask(row pgx.Row) (*TaskRow, error) {
 	var t TaskRow
 	if err := row.Scan(&t.ID, &t.Code, &t.PublisherID, &t.Status, &t.BudgetLocked, &t.Settled, &t.Reserved, &t.Refunded,
-		&t.PausedReason, &t.ClosedReason, &t.Contract, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.PausedReason, &t.ClosedReason, &t.Contract, &t.ContractVersion, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -274,26 +313,30 @@ func CountAgentSubmissionsBatch(ctx context.Context, q pg.Querier, agentID int64
 // tb_task_claim
 // ---------------------------------------------------------------------------
 
-// ClaimRow is a row of tb_task_claim.
+// ClaimRow is a row of tb_task_claim. ContractVersion is the
+// contract version the engagement bound at creation (§7.1: later
+// revisions do not move it).
 type ClaimRow struct {
-	ClaimID   int64
-	TaskID    int64
-	AgentID   int64
-	ExpiresAt time.Time
-	Deadline  time.Time
-	Amount    int64
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ClaimID         int64
+	TaskID          int64
+	AgentID         int64
+	ContractVersion int64
+	ExpiresAt       time.Time
+	Deadline        time.Time
+	Amount          int64
+	Status          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // NewClaimRow is the insert input; the claim starts active.
 type NewClaimRow struct {
-	TaskID    int64
-	AgentID   int64
-	ExpiresAt time.Time
-	Deadline  time.Time
-	Amount    int64
+	TaskID          int64
+	AgentID         int64
+	ContractVersion int64
+	ExpiresAt       time.Time
+	Deadline        time.Time
+	Amount          int64
 }
 
 // InsertClaim creates an active claim. The task reservation is a
@@ -302,10 +345,10 @@ type NewClaimRow struct {
 func InsertClaim(ctx context.Context, q pg.Querier, in NewClaimRow) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO tb_task_claim (task_id, agent_id, expires_at, deadline, amount)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO tb_task_claim (task_id, agent_id, contract_version, expires_at, deadline, amount)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING claim_id`,
-		in.TaskID, in.AgentID, in.ExpiresAt, in.Deadline, in.Amount).Scan(&id)
+		in.TaskID, in.AgentID, in.ContractVersion, in.ExpiresAt, in.Deadline, in.Amount).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task_claim: %w", err)
 	}
@@ -313,12 +356,12 @@ func InsertClaim(ctx context.Context, q pg.Querier, in NewClaimRow) (int64, erro
 }
 
 const claimSelect = `
-	SELECT claim_id, task_id, agent_id, expires_at, deadline, amount, status, created_at, updated_at
+	SELECT claim_id, task_id, agent_id, contract_version, expires_at, deadline, amount, status, created_at, updated_at
 	FROM tb_task_claim`
 
 func scanClaim(row pgx.Row) (*ClaimRow, error) {
 	var c ClaimRow
-	if err := row.Scan(&c.ClaimID, &c.TaskID, &c.AgentID, &c.ExpiresAt, &c.Deadline, &c.Amount, &c.Status,
+	if err := row.Scan(&c.ClaimID, &c.TaskID, &c.AgentID, &c.ContractVersion, &c.ExpiresAt, &c.Deadline, &c.Amount, &c.Status,
 		&c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -804,38 +847,43 @@ func ApplyClaimStatus(ctx context.Context, q pg.Querier, claimID int64, from, ev
 // SubmissionRow is a row of tb_task_submission. Payload is raw JSON,
 // kept only while the submission is non-terminal (redelivery needs
 // it) and set to NULL by the terminal-state write itself; the reply
-// fields hold the receiver's recorded answer.
+// fields hold the receiver's recorded answer. ContractVersion is
+// the version the submission was checked and delivered against —
+// the claim's bound version when it carried one, else the current
+// version at intake (§7.1).
 type SubmissionRow struct {
-	SubmissionID int64
-	TaskID       int64
-	AgentID      int64
-	RequestKey   string
-	Payload      []byte
-	PayloadHash  string
-	Amount       int64
-	State        string
-	ResponseCode *int
-	ResponseBody *string
-	Failure      *string
-	Revises      *int64
-	ClaimID      *int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	SettledAt    *time.Time
+	SubmissionID    int64
+	TaskID          int64
+	AgentID         int64
+	RequestKey      string
+	Payload         []byte
+	PayloadHash     string
+	Amount          int64
+	State           string
+	ResponseCode    *int
+	ResponseBody    *string
+	Failure         *string
+	Revises         *int64
+	ClaimID         *int64
+	ContractVersion int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	SettledAt       *time.Time
 }
 
 // NewSubmissionRow is the insert input; the submission is created in
 // delivering with the first SubmissionEvent (cause "submit") in the
 // same transaction.
 type NewSubmissionRow struct {
-	TaskID      int64
-	AgentID     int64
-	RequestKey  string
-	Payload     []byte
-	PayloadHash string
-	Amount      int64
-	Revises     *int64
-	ClaimID     *int64
+	TaskID          int64
+	AgentID         int64
+	RequestKey      string
+	Payload         []byte
+	PayloadHash     string
+	Amount          int64
+	Revises         *int64
+	ClaimID         *int64
+	ContractVersion int64
 }
 
 // InsertSubmission creates the submission and its first event. Call
@@ -844,11 +892,11 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 	var id int64
 	err := tx.QueryRow(ctx, `
 		INSERT INTO tb_task_submission
-			(task_id, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id)
-		VALUES ($1, $2, $3, $4, $5, $6, 'delivering', $7, $8)
+			(task_id, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id, contract_version)
+		VALUES ($1, $2, $3, $4, $5, $6, 'delivering', $7, $8, $9)
 		RETURNING submission_id`,
 		in.TaskID, in.AgentID, in.RequestKey,
-		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID).Scan(&id)
+		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID, in.ContractVersion).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task_submission: %w", err)
 	}
@@ -862,7 +910,7 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 
 const submissionSelect = `
 	SELECT submission_id, task_id, agent_id, request_key, payload, payload_hash,
-	       amount, state, response_code, response_body, failure, revises, claim_id,
+	       amount, state, response_code, response_body, failure, revises, claim_id, contract_version,
 	       created_at, updated_at, settled_at
 	FROM tb_task_submission`
 
@@ -870,7 +918,7 @@ func scanSubmission(row pgx.Row) (*SubmissionRow, error) {
 	var s SubmissionRow
 	if err := row.Scan(&s.SubmissionID, &s.TaskID, &s.AgentID, &s.RequestKey,
 		&s.Payload, &s.PayloadHash, &s.Amount, &s.State, &s.ResponseCode, &s.ResponseBody,
-		&s.Failure, &s.Revises, &s.ClaimID,
+		&s.Failure, &s.Revises, &s.ClaimID, &s.ContractVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.SettledAt); err != nil {
 		return nil, err
 	}

@@ -47,6 +47,9 @@ const (
 //	6  at most one Submission per (agent, task, request_key)
 //	9  each Submission's state equals the to_state of its last
 //	   SubmissionEvent (append-only itself is enforced by trigger)
+//	§7.1 (Task 1.1) every bound contract version exists: the task's
+//	   current version, every Claim's version and every Submission's
+//	   version resolve to a task_contract_versions row
 //
 // It returns nil when every check passes. A missing task is an
 // error, not a violation.
@@ -73,6 +76,32 @@ func CheckInvariants(ctx context.Context, q pg.Querier, taskID int64) error {
 	if available < 0 {
 		add("§10.1: available = %d < 0 (budget_locked=%d settled=%d reserved=%d refunded=%d)",
 			available, budgetLocked, settled, reserved, refunded)
+	}
+
+	// -- §7.1 (Task 1.1): every referenced contract version exists —
+	//    the task's current version, every Claim's bound version and
+	//    every Submission's recorded version resolve to a
+	//    task_contract_versions row.
+	var brokenVersions int64
+	if err := q.QueryRow(ctx, `
+		SELECT
+		  (SELECT COUNT(*) FROM tb_task t
+		    WHERE t.id = $1 AND NOT EXISTS (
+		      SELECT 1 FROM task_contract_versions v
+		      WHERE v.task_id = t.id AND v.version = t.contract_version))
+		  + (SELECT COUNT(*) FROM tb_task_claim c
+		      WHERE c.task_id = $1 AND NOT EXISTS (
+		        SELECT 1 FROM task_contract_versions v
+		        WHERE v.task_id = c.task_id AND v.version = c.contract_version))
+		  + (SELECT COUNT(*) FROM tb_task_submission s
+		      WHERE s.task_id = $1 AND NOT EXISTS (
+		        SELECT 1 FROM task_contract_versions v
+		        WHERE v.task_id = s.task_id AND v.version = s.contract_version))`,
+		taskID).Scan(&brokenVersions); err != nil {
+		return fmt.Errorf("audit bound versions of task %d: %w", taskID, err)
+	}
+	if brokenVersions > 0 {
+		add("§7.1: %d task/claim/submission rows reference a contract version with no task_contract_versions row", brokenVersions)
 	}
 
 	// -- §10.2: reserved = Σ active claims + Σ non-terminal submissions
