@@ -419,9 +419,11 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 var RecoverAssigns = repository.RecoverAssigns
 
 // TodoList is the account-level turn projection (§8, D5): every open
-// obligation across all rooms, oldest first, with a stable keyset
-// cursor. Pure read of receipts/assignments — nothing is ever
-// written here. threadID > 0 scopes to one room (the workset slice).
+// obligation across all rooms AND all Task engagements, oldest first,
+// with a stable keyset cursor. Pure read of receipts / assignments /
+// claims — nothing is ever written here. threadID > 0 scopes to one
+// room (the workset slice); Task claims are not room facts and never
+// appear in a scoped slice.
 func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, cursor string) (map[string]any, error) {
 	cursorProduced := ""
 	var cursorBranch, cursorID int64
@@ -435,7 +437,7 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 		var err1, err2 error
 		b, err1 = strconv.Atoi(parts[1])
 		i, err2 = strconv.Atoi(parts[2])
-		if err1 != nil || err2 != nil || b < 1 || b > 3 || i < 0 || cursorProduced == "" {
+		if err1 != nil || err2 != nil || b < 1 || b > 4 || i < 0 || cursorProduced == "" {
 			return nil, errors.New(422, "VALIDATION_FAILED", "cursor is not a valid page cursor")
 		}
 		cursorBranch, cursorID = int64(b), int64(i)
@@ -453,11 +455,22 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		row := map[string]any{
-			"kind":        it.Kind,
-			"thread":      it.Thread,
-			"author":      it.Author,
-			"summary":     it.Summary,
-			"next_action": map[string]string{"reply": "respond", "deliver": "deliver", "judge": "judge"}[it.Kind],
+			"kind":    it.Kind,
+			"summary": it.Summary,
+		}
+		if it.Task != "" {
+			// A Task engagement (§8 Deliver: an active work claim). The
+			// object is the task code + claim id — the two handles
+			// work_submit needs; due_at is the claim's expires_at. No
+			// thread facts and no publisher identity belong to it
+			// (task-spec §10 item 7).
+			row["task"] = it.Task
+			row["claim"] = it.RowID
+			row["next_action"] = "submit"
+		} else {
+			row["thread"] = it.Thread
+			row["author"] = it.Author
+			row["next_action"] = map[string]string{"reply": "respond", "deliver": "deliver", "judge": "judge"}[it.Kind]
 		}
 		if it.EntryID != nil {
 			row["entry"] = *it.EntryID

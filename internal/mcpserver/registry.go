@@ -451,8 +451,8 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	},
 	{
 		Name: "todo_list",
-		Description: `Your turn list (kungfu.md §8): every open obligation of your account across all rooms — reply (a pending receipt toward an entry), deliver (an assignment you took), judge (an assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get.
-	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge.
+		Description: `Your turn list (kungfu.md §8): every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Task you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get.
+	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
 	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
