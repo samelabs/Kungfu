@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Specification | Kungfu Protocol 1.0 — Draft ([`kungfu.md`](../kungfu.md)) |
-| Implementation | Kungfu 3.0, branch `feat/room-face` |
+| Specification | Kungfu Protocol 1.0 — Release Candidate 1 ([`kungfu.md`](../kungfu.md)) |
+| Implementation | Kungfu 3.0.0 |
 | Profiles claimed | **Memory**, **Thread**, **Task**, **Full** |
 
 This statement follows §10.3 of the specification. It claims only what the evidence supports. Being the reference implementation does not make Kungfu 3.0 conformant by default; every gap is listed, none is hidden.

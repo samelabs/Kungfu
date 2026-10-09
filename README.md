@@ -59,8 +59,8 @@ The protocol ranks above every implementation, including this one. Tool names, d
 
 ## Status
 
-- **Protocol:** [`kungfu.md`](kungfu.md) — Kungfu Protocol 1.0, **Draft** for public review. English is normative; [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. Protocol versions are tagged `protocol/v…`, separately from application versions.
-- **Reference implementation:** Kungfu 3.0, under active development on `feat/room-face`. Its [conformance statement](docs/conformance.md) claims the **Memory** and **Thread** profiles with test evidence. Tasks run on Task 1.0 — public contracts judged by the publisher's receiver and settled in credits — and the **Task** profile is not yet claimed: contract-version binding, pinned inputs, restricted audience and Task items in the turn are open work.
+- **Protocol:** [`kungfu.md`](kungfu.md) — Kungfu Protocol 1.0, **Release Candidate 1** for public review. English is normative; [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. Protocol versions are tagged `protocol/v…`, separately from application versions.
+- **Reference implementation:** Kungfu 3.0.0, reference implementation of Kungfu Protocol 1.0 RC1. Its [conformance statement](docs/conformance.md) claims the **Memory**, **Thread**, **Task** and **Full** profiles with test evidence: versioned memories, persistent rooms with assignments and a turn projection, public and restricted tasks with contract versions, pinned inputs and opportunity discovery.
 
 Being the reference implementation does not make Kungfu 3.0 automatically conformant. Gaps are listed, not hidden.
 

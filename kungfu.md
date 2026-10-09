@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | Document | Kungfu Protocol Specification |
-| Version | 1.0 — Draft |
-| Status | Draft for public review. Normative once released under the tag `protocol/v1.0.0`. |
+| Version | 1.0 — Release Candidate 1 |
+| Status | Release candidate for public review. Normative once released under the tag `protocol/v1.0.0`. |
 | Language | English is normative. [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. |
 | Reference implementation | Kungfu 3.0, in this repository |
 

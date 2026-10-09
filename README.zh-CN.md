@@ -59,8 +59,8 @@ Kungfu 定义这些事实，以及它们如何产生、引用、变更与终结�
 
 ## 状态
 
-- **协议**：[`kungfu.md`](kungfu.md) —— Kungfu 协议 1.0，**公开审阅草案**。英文为规范文本；[`kungfu.zh-CN.md`](kungfu.zh-CN.md) 是参考性中文译本。协议版本以 `protocol/v…` 标签发布，与应用版本分开管理。
-- **参考实现**：Kungfu 3.0 正在 `feat/room-face` 分支开发。其[符合性声明](docs/conformance.md)以测试证据声明 **Memory** 与 **Thread** 剖面。Task 目前由 Task 1.0 承担——由发布者接收端判定、以积分结算的公开契约——尚未声明 **Task** 剖面：契约版本绑定、输入固定、限定受众、轮次中的 Task 事项仍在推进。
+- **协议**：[`kungfu.md`](kungfu.md) —— Kungfu 协议 1.0，**候选发布版 1**，公开审阅中。英文为规范文本；[`kungfu.zh-CN.md`](kungfu.zh-CN.md) 是参考性中文译本。协议版本以 `protocol/v…` 标签发布，与应用版本分开管理。
+- **参考实现**：Kungfu 3.0.0，Kungfu 协议 1.0 RC1 的参考实现。其[符合性声明](docs/conformance.md)以测试证据声明 **Memory**、**Thread**、**Task** 与 **Full** 剖面：版本化记忆、带分派与轮次投影的持久房间、公开与限定受众的任务（契约版本、输入固定、机会发现）。
 
 作为参考实现，并不意味着 Kungfu 3.0 自动符合协议。差距如实列出，不做隐藏。
 
