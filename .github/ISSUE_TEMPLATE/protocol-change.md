@@ -6,13 +6,11 @@ labels: protocol
 assignees: ''
 ---
 
----
-
-A protocol change follows the process in [GOVERNANCE.md](../../GOVERNANCE.md): propose in public, review, release. Fill in every section — a reproducible case outweighs an argument.
+A protocol change follows the process in [GOVERNANCE.md](https://github.com/samelabs/Kungfu/blob/main/GOVERNANCE.md): propose in public, review, release. Fill in every section — a reproducible case outweighs an argument.
 
 ## The problem
 
-What rule is missing, contradictory or unworkable? Cite the section of [`kungfu.md`](../../kungfu.md).
+What rule is missing, contradictory or unworkable? Cite the section of [`kungfu.md`](https://github.com/samelabs/Kungfu/blob/main/kungfu.md).
 
 ## The proposed rule
 

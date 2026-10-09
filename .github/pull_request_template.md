@@ -7,7 +7,7 @@ What changed and why.
 Pick one:
 
 - [ ] **None** — no protocol text and no protocol-visible behavior changes.
-- [ ] **Changes `kungfu.md`** — protocol revision per [GOVERNANCE.md](../GOVERNANCE.md); the translation is updated in this PR.
+- [ ] **Changes `kungfu.md`** — protocol revision per [GOVERNANCE.md](https://github.com/samelabs/Kungfu/blob/main/GOVERNANCE.md); the translation is updated in this PR.
 - [ ] **Changes protocol-visible behavior** — `docs/conformance.md` is updated in this PR.
 
 ## Local tests
