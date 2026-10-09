@@ -110,24 +110,6 @@ func resolveHarnessRefs(ctx context.Context, q pg.Querier, publisherID int64, re
 	return pins, nil
 }
 
-// harnessSnapshotJSON records the harness revisions current at a
-// claim-less intake (nil → NULL when there is nothing to record).
-func harnessSnapshotJSON(ctx context.Context, q pg.Querier, publisherID int64, refs []string) ([]byte, error) {
-	pins, err := resolveHarnessRefs(ctx, q, publisherID, refs)
-	if err != nil || len(pins) == 0 {
-		return nil, err
-	}
-	entries := make([]harnessSnapshotEntry, 0, len(pins))
-	for _, p := range pins {
-		entries = append(entries, harnessSnapshotEntry{Code: p.Code, Revision: p.Revision})
-	}
-	b, err := json.Marshal(entries)
-	if err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
-	}
-	return b, nil
-}
-
 // ClaimTask is the §5.2 work_claim operation: reserve one price under
 // a new claim (idempotent per agent+task — an existing active claim is
 // returned as-is).

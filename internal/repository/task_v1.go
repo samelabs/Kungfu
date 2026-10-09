@@ -329,7 +329,11 @@ type ClaimRow struct {
 	UpdatedAt       time.Time
 }
 
-// NewClaimRow is the insert input; the claim starts active.
+// NewClaimRow is the insert input. Status "" starts the claim ACTIVE
+// (the work_claim path); Status task.ClaimUsed inserts the
+// ACCEPTANCE FACT of a claim-less submission (Task 1.1 §7.3): an
+// engagement recorded at delivery, born used — it binds the contract
+// version and harness revisions but never holds a reservation.
 type NewClaimRow struct {
 	TaskID          int64
 	AgentID         int64
@@ -337,18 +341,25 @@ type NewClaimRow struct {
 	ExpiresAt       time.Time
 	Deadline        time.Time
 	Amount          int64
+	Status          string
 }
 
-// InsertClaim creates an active claim. The task reservation is a
-// separate primitive (ReserveTaskAmount) — compose both in one
-// transaction (spec §5.2 work_claim).
+// InsertClaim creates a claim (active unless Status says otherwise).
+// The task reservation is a separate primitive (ReserveTaskAmount) —
+// compose both in one transaction (spec §5.2 work_claim). A born-used
+// fact takes no reservation at all: the submission's own reservation
+// is the one that counts.
 func InsertClaim(ctx context.Context, q pg.Querier, in NewClaimRow) (int64, error) {
+	status := in.Status
+	if status == "" {
+		status = task.ClaimActive
+	}
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO tb_task_claim (task_id, agent_id, contract_version, expires_at, deadline, amount)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO tb_task_claim (task_id, agent_id, contract_version, expires_at, deadline, amount, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING claim_id`,
-		in.TaskID, in.AgentID, in.ContractVersion, in.ExpiresAt, in.Deadline, in.Amount).Scan(&id)
+		in.TaskID, in.AgentID, in.ContractVersion, in.ExpiresAt, in.Deadline, in.Amount, status).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task_claim: %w", err)
 	}

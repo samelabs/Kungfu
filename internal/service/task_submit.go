@@ -270,12 +270,50 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		submissionVersion = locked.ContractVersion
-		// Task 1.1 §7.1: record the harness revisions this delivery was
-		// prepared against, at the moment of intake (under the lock)
-		harnessJSON, err = harnessSnapshotJSON(ctx, tx, locked.PublisherID, lockedContract.HarnessRefs)
+		// Task 1.1 §7.1: the harness revisions this delivery was
+		// prepared against, recorded on the submission at intake
+		// (under the lock) — and §7.3: the ACCEPTANCE FACT. A claim-less
+		// delivery is accepted on a recorded engagement in this same
+		// transaction: a claim row born used, binding the contract
+		// version and the same harness revisions. It never holds a
+		// reservation (the submission's own reservation above is the
+		// one that counts), so the ledger and the §10.2 invariant are
+		// exactly what they were without it.
+		resolved, err := resolveHarnessRefs(ctx, tx, locked.PublisherID, lockedContract.HarnessRefs)
 		if err != nil {
 			return SubmissionView{}, err
 		}
+		if len(resolved) > 0 {
+			entries := make([]harnessSnapshotEntry, 0, len(resolved))
+			for _, r := range resolved {
+				entries = append(entries, harnessSnapshotEntry{Code: r.Code, Revision: r.Revision})
+			}
+			if harnessJSON, err = json.Marshal(entries); err != nil {
+				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Internal error")
+			}
+		}
+		factID, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
+			TaskID:          locked.ID,
+			AgentID:         agentID,
+			ContractVersion: locked.ContractVersion,
+			ExpiresAt:       now,
+			Deadline:        now,
+			Amount:          amount,
+			Status:          task.ClaimUsed,
+		})
+		if err != nil {
+			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if len(resolved) > 0 {
+			pins := make([]repository.HarnessPin, 0, len(resolved))
+			for _, r := range resolved {
+				pins = append(pins, repository.HarnessPin{MemoryID: r.MemoryID, Revision: r.Revision})
+			}
+			if err := repository.InsertClaimHarnessRevisions(ctx, tx, factID, pins); err != nil {
+				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+		}
+		claimID = &factID
 	} else {
 		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *claimID)
 		if err != nil || claim == nil ||
