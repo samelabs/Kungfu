@@ -1101,7 +1101,8 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		 JOIN threads t ON t.id = a.thread_id
 		 JOIN thread_entries e ON e.id = a.entry_id
 		 JOIN tb_bots b ON b.id = a.creator_id
-		 WHERE a.assignee_id = $1 AND a.state = 'taken' AND ($2 = 0 OR a.thread_id = $2))
+		 WHERE a.assignee_id = $1 AND a.state = 'taken' AND a.deliver_due_at > NOW()
+		   AND ($2 = 0 OR a.thread_id = $2))
 		UNION ALL
 		(SELECT 3, 'judge', t.code, NULL::text, a.entry_id, a.id, e.seq, b.bot_name,
 		        COALESCE(e.summary, ''), to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS')
@@ -1112,14 +1113,14 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		 JOIN tb_bots b ON b.id = a.assignee_id
 		 JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
 		 WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
-		   AND ($2 = 0 OR a.thread_id = $2))
+		   AND d.judge_due_at > NOW() AND ($2 = 0 OR a.thread_id = $2))
 		UNION ALL
 		(SELECT 4, 'deliver', ''::text, t.code, NULL::bigint AS entry_id, c.claim_id,
 		        NULL::bigint AS seq, ''::text AS author, t.contract->>'title',
 		        to_char(c.expires_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(c.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM tb_task_claim c
 		 JOIN tb_task t ON t.id = c.task_id
-		 WHERE c.agent_id = $1 AND c.status = 'active' AND $2 = 0)
+		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)
 		) items
 		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
 		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
@@ -1356,11 +1357,13 @@ func ThreadOpenItemsCounts(ctx context.Context, q pg.Querier, accountID int64) (
 		    WHERE r.account_id = $1 AND r.state = 'pending'
 		    UNION ALL
 		    SELECT a.thread_id FROM assigns a
-		    WHERE a.assignee_id = $1 AND a.state = 'taken'
+		    WHERE a.assignee_id = $1 AND a.state = 'taken' AND a.deliver_due_at > NOW()
 		    UNION ALL
 		    SELECT a.thread_id FROM assigns a
+		    JOIN assign_deliveries d ON d.assign_id = a.id
 		    JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
 		    WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
+		      AND d.judge_due_at > NOW()
 		) t GROUP BY thread_id`, accountID)
 	if err != nil {
 		return nil, err

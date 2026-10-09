@@ -269,3 +269,76 @@ func TestTodoListRoomScopeExcludesTaskClaims(t *testing.T) {
 		t.Fatalf("room-scoped todo must not carry task claims: %v", rows)
 	}
 }
+
+// TestTodoListDropsPastDeadlineItems (L4: the deadline ends the
+// obligation): a claim past expires_at, a taken assignment past its
+// delivery deadline and a delivery past its judgment deadline leave
+// the turn at the deadline — before the asynchronous sweepers
+// materialize their terminal states — so no listed item leads to an
+// action the server will refuse.
+func TestTodoListDropsPastDeadlineItems(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	code := claimOpenedTask(t, pool, publisher, 1000, nil)
+	claim, err := ClaimTask(ctx, pool, agent, code, time.Now())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if res, _ := TodoList(ctx, pool, agent, 0, ""); len(taskTodoRows(t, res)) != 1 {
+		t.Fatal("live claim must be in the turn")
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_task_claim SET expires_at = NOW() - INTERVAL '1 second' WHERE claim_id = $1`,
+		claim.ClaimID.Int64()); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := TodoList(ctx, pool, agent, 0, ""); len(taskTodoRows(t, res)) != 0 {
+		t.Fatal("an expired-but-unswept claim must leave the turn")
+	}
+
+	// thread side: deliver and judge items past their deadlines
+	owner := pubSeedBot(t, pool, 0)
+	room, raw := threadStart(t, pool, owner, "deadlines", true, "")
+	defer threadCleanup(t, pool, []int64{owner, agent}, room)
+	if _, err := ThreadJoin(ctx, pool, agent, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	_, taken := assignPost(t, pool, owner, room, "deliver me", agent, "dl-1")
+	if _, err := AssignTake(ctx, pool, agent, taken, "", "", "dl-t1"); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	_, delivered := assignPost(t, pool, owner, room, "judge me", agent, "dl-2")
+	if _, err := AssignTake(ctx, pool, agent, delivered, `{"ok":true}`, "", "dl-t2"); err != nil {
+		t.Fatalf("take+submit: %v", err)
+	}
+	count := func(bot int64, kind string, assign int64) int {
+		res, err := TodoList(ctx, pool, bot, 0, "")
+		if err != nil {
+			t.Fatalf("todo: %v", err)
+		}
+		n := 0
+		for _, r := range res["todos"].([]map[string]any) {
+			if r["kind"] == kind && r["assign"] == assign {
+				n++
+			}
+		}
+		return n
+	}
+	if count(agent, "deliver", taken) != 1 || count(owner, "judge", delivered) != 1 {
+		t.Fatal("live deliver and judge items must be in the turn")
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE assigns SET deliver_due_at = NOW() - INTERVAL '1 second' WHERE id = $1`, taken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE assign_deliveries SET judge_due_at = NOW() - INTERVAL '1 second' WHERE assign_id = $1`, delivered); err != nil {
+		t.Fatal(err)
+	}
+	if count(agent, "deliver", taken) != 0 || count(owner, "judge", delivered) != 0 {
+		t.Fatal("past-deadline deliver/judge items must leave the turn before the sweeper runs")
+	}
+}

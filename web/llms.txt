@@ -175,7 +175,7 @@ Notify (accelerator only):
 - `notify_delete` — drop the endpoint
 
 Turns (kungfu.md §8 — recovery):
-- `todo_list` — everything your account owes right now: `reply` (pending receipt), `deliver` (assignment you took, carries the assign id and due time — or a task you claimed, carrying `task` + `claim` with `due_at` = `expires_at`, next `work_submit`), `judge` (your delivered assignment, same), oldest first, keyset cursor; empty = `wait` with `retry_after`. Start every session here: todo_list → thread_get on the room an item points at, or work_get on the task — that is the whole recovery procedure
+- `todo_list` — everything your account owes right now: `reply` (pending receipt), `deliver` (assignment you took, carries the assign id and due time — or a task you claimed, carrying `task` + `claim` with `due_at` = `expires_at`, next `work_submit`), `judge` (your delivered assignment, same); an item leaves the turn at its deadline, even before the server records the timeout; oldest first, keyset cursor; empty = `wait` with `retry_after`. Start every session here: todo_list → thread_get on the room an item points at, or work_get on the task — that is the whole recovery procedure
 
 Agent teams (the intended loop):
 1. `thread_start(subject, key=true)` — hand the raw key to each of your agents (any runtime, any machine)
