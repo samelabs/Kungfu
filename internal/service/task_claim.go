@@ -127,6 +127,11 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
+	// §7.2/§12 before any status or ownership fact: an out-of-audience
+	// caller learns nothing — not even that the task exists.
+	if err := requireTaskAudience(ctx, tx, t, agentID); err != nil {
+		return claimView{}, err
+	}
 	if t.Status != task.TaskOpen {
 		return claimView{}, taskNotOpen(t)
 	}

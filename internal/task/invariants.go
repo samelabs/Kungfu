@@ -50,6 +50,10 @@ const (
 //	§7.1 (Task 1.1) every bound contract version exists: the task's
 //	   current version, every Claim's version and every Submission's
 //	   version resolve to a task_contract_versions row
+//	§7.2 (Task 1.2) the audience is consistent and fixed: a
+//	   restricted contract ⇔ task_audience rows naming 1–50 existing
+//	   agents (never the publisher), an open contract ⇔ no rows, and
+//	   every published version carries the same audience
 //
 // It returns nil when every check passes. A missing task is an
 // error, not a violation.
@@ -102,6 +106,54 @@ func CheckInvariants(ctx context.Context, q pg.Querier, taskID int64) error {
 	}
 	if brokenVersions > 0 {
 		add("§7.1: %d task/claim/submission rows reference a contract version with no task_contract_versions row", brokenVersions)
+	}
+
+	// -- §7.2 (Task 1.2): the audience is consistent and fixed. A
+	//    restricted contract carries 1–50 resolved names as
+	//    task_audience rows (agents exist by FK; the publisher is
+	//    never among them), an open contract has no rows, and every
+	//    published version carries the SAME audience (it is fixed at
+	//    creation; canonicalized name order makes equal sets equal
+	//    JSONB). Pre-1.2 contracts have no audience key → open.
+	var audType string
+	var audRows, publisherRows, jsonNames, driftedVersions int64
+	if err := q.QueryRow(ctx, `
+		SELECT
+		  COALESCE(t.contract->'audience'->>'type', 'open'),
+		  (SELECT COUNT(*) FROM task_audience ta WHERE ta.task_id = t.id),
+		  (SELECT COUNT(*) FROM task_audience ta
+		    WHERE ta.task_id = t.id AND ta.agent_id = t.publisher_id),
+		  CASE WHEN jsonb_typeof(t.contract->'audience'->'agents') = 'array'
+		       THEN jsonb_array_length(t.contract->'audience'->'agents')
+		       ELSE 0 END,
+		  (SELECT COUNT(*) FROM task_contract_versions v
+		    WHERE v.task_id = t.id
+		      AND COALESCE(v.contract->'audience', '{"type":"open"}'::jsonb)
+		          IS DISTINCT FROM COALESCE(t.contract->'audience', '{"type":"open"}'::jsonb))
+		FROM tb_task t WHERE t.id = $1`, taskID).
+		Scan(&audType, &audRows, &publisherRows, &jsonNames, &driftedVersions); err != nil {
+		return fmt.Errorf("audit audience of task %d: %w", taskID, err)
+	}
+	switch audType {
+	case AudienceOpen:
+		if audRows != 0 {
+			add("§7.2: open audience but %d task_audience rows", audRows)
+		}
+	case AudienceRestricted:
+		if audRows < 1 || audRows > maxAudienceAgents {
+			add("§7.2: restricted audience with %d named agents (must be 1–%d)", audRows, maxAudienceAgents)
+		}
+		if publisherRows > 0 {
+			add("§7.2: the publisher is named in its own task's audience")
+		}
+		if jsonNames != audRows {
+			add("§7.2: contract names %d agents but %d task_audience rows exist", jsonNames, audRows)
+		}
+	default:
+		add("§7.2: unknown audience type %q", audType)
+	}
+	if driftedVersions > 0 {
+		add("§7.2: %d published contract versions carry a different audience than the current one", driftedVersions)
 	}
 
 	// -- §10.2: reserved = Σ active claims + Σ non-terminal submissions

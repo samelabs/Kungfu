@@ -299,7 +299,10 @@ func TestTask11HarnessPinningUpgradeDrill(t *testing.T) {
 	if split < 0 {
 		t.Fatal("032 migration not found")
 	}
-	pre, m032 := files[:split], files[split]
+	// the pending tail after the pre-032 chain (032, and anything
+	// shipped after it — an upgrade run applies every pending file
+	// together, like the 031 drill)
+	pre, from032 := files[:split], files[split:]
 
 	dbName := "kf_task11b_" + nanoSuffix()
 	adminURL := ""
@@ -364,13 +367,15 @@ func TestTask11HarnessPinningUpgradeDrill(t *testing.T) {
 	}
 	legacyClaim := claimView{ClaimID: WireID(legacyClaimID)}
 
-	// apply the shipped 032
-	sqlBytes, err := os.ReadFile(m032)
-	if err != nil {
-		t.Fatalf("read %s: %v", m032, err)
-	}
-	if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
-		t.Fatalf("apply 032: %v", err)
+	// apply the shipped 032 onward (one upgrade run)
+	for _, f := range from032 {
+		sqlBytes, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", f, err)
+		}
 	}
 
 	// the legacy claim has no pin and keeps the live read

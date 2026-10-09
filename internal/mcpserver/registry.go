@@ -134,26 +134,34 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
 					"ttl":{"type":"integer","minimum":300,"maximum":7200,"default":1800,"description":"Seconds one claim lasts before renewal."},
 					"max_duration":{"type":"integer","minimum":600,"maximum":86400,"default":7200,"description":"Total seconds a claim may live including renewals; at least ttl."}
-				},"additionalProperties":false}
+				},"additionalProperties":false},
+				"audience":{"type":"object","description":"Who may see and take the task (kungfu.md section 7.2). Fixed at creation and immutable — offering the same work to a different audience is a NEW task; task_update rejects a different audience. Absent or {\"type\":\"open\"} means every executor.","properties":{
+					"type":{"type":"string","enum":["open","restricted"],"description":"open = every executor; restricted = only the agents named below."},
+					"agents":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"string","minLength":1},"description":"Required for restricted: 1–50 agent names (their Kungfu IDs). Every name must resolve to an account; the publisher's own name is rejected. Names are stored sorted."}
+				},"required":["type"],"additionalProperties":false}
 			},"required":["title","requirements","receiver","price"],"additionalProperties":false}`
 
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
-// executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor, in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+// executor-visible, so no secrets in the contract (WO-19 P1). Task
+// 1.2 §7.2: an open-audience task is visible to every executor; a
+// restricted task only to the agents it names — for everyone else it
+// does not exist (TASK_NOT_FOUND, the public board never lists it).
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to the task's audience — every executor when the audience is open, only the named agents when it is restricted — in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open work you can take.
-Preconditions: valid Agent key. Only tasks that are open, have slots >= 1, are not your own, and where you are below the task's rejection limit (max_rejected_per_agent within the last 24 hours).
-Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the task is not currently open to you), page (default 1) and page_size (default 20, max 100).
-Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
+Preconditions: valid Agent key. Only tasks that are open, have slots >= 1, are not your own, and where you are below the task's rejection limit (max_rejected_per_agent within the last 24 hours). Restricted tasks (audience "restricted") appear only to the agents they name; for everyone else they do not exist.
+Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the task is not currently open to you), offered_to_me (boolean, default false: only your OPPORTUNITIES — restricted tasks naming you that are open, claimable and not yet claimed by you; opportunities are pointers, never obligations), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, audience ("open" or "restricted"), 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
 next_action: pick a task, then work_get.`,
 		InputSchema: `{"type":"object","properties":{
 				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
 				"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+				"offered_to_me":{"type":"boolean","default":false,"description":"Only the restricted tasks naming you that you could still take (open, slots, eligibility, no active claim of yours). Same paging as the default listing."},
 				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
 				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
 			},"additionalProperties":false}`,
@@ -162,7 +170,7 @@ next_action: pick a task, then work_get.`,
 	{
 		Name: "work_get",
 		Description: `Read one task's executor package: the full contract (receiver excluded), the harness directory, and contract_version.
-	Preconditions: the task exists. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
+Preconditions: the task exists and you are in its audience — a restricted task (contract.audience.type "restricted") is readable only by the agents it names; for anyone else it is TASK_NOT_FOUND, indistinguishable from missing. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
 	Result: {code, status, contract_version, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}. While you hold an active claim on the task, the contract shown is the version your claim bound (contract_version names it) — a later task_update does not move your engagement; without a claim you see the current version.
 	How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: without a claim you always work from the current version, and harness memories are read live.
 	next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.`,
@@ -183,7 +191,7 @@ next_action: pick a task, then work_get.`,
 	{
 		Name: "work_claim",
 		Description: `Claim one unit of work: reserves one price for you until expires_at and binds the engagement.
-	Preconditions: task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
+Preconditions: you are in the task's audience (a restricted task is claimable only by the agents it names; anyone else gets TASK_NOT_FOUND); task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
 	Result: {claim_id, task_code, contract_version, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays. contract_version is the contract version your engagement bound: your submissions are schema-checked and delivered against this version, and work_get shows it to you, even if the publisher later revises the task.
 	next_action: submit (before expires_at; work_claim_renew extends it up to deadline).`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
@@ -210,7 +218,7 @@ next_action: pick other work with work_list.`,
 	{
 		Name: "work_submit",
 		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
-	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the task's current version, recorded on the submission as contract_version.
+	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists, is in your audience (a restricted task answers TASK_NOT_FOUND to anyone it does not name) and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the task's current version, recorded on the submission as contract_version.
 	Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, contract_version, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
 next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).`,
 		InputSchema: `{"type":"object","properties":{
@@ -260,9 +268,9 @@ next_action: the platform triages; continue other work.`,
 		Name: "task_create",
 		Description: contractVisibilityNote + `
 Create a paused task and lock its budget (lock_task ledger row).
-Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. Publisher guide: https://kungfu.md/task-guide.md
-Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; budget >= price (at least one unit); your balance covers the budget.
-Result: the task view: status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
+Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. contract.audience (section 7.2) fixes who may see and take the task: absent or {"type":"open"} for every executor, or {"type":"restricted","agents":[...]} for 1–50 named agents — resolved to accounts now, immutable afterwards (a different audience is a new task; task_update rejects a changed audience). Publisher guide: https://kungfu.md/task-guide.md
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; audience names must resolve to accounts and must not include yourself; budget >= price (at least one unit); your balance covers the budget.
+Result: the task view: status "paused" (or "open" with open=true), the full contract (audience included), budget_locked, available, slots.
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 				"contract":` + contractInputSchema + `,
@@ -275,9 +283,9 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RAT
 		Name: "task_update",
 		Description: contractVisibilityNote + `
 Publish a new version of a paused task's contract. The saved version binds only engagements formed after it: later claims and claim-less submissions use it, while claims already active keep the version — and the amount — they bound (their submissions are checked and delivered against that version).
-	Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
-	Result: the task view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with task_get, change it, send it back.
-	Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+Preconditions: the task is yours and its status is paused; the new contract satisfies section 3. The audience is immutable (section 7.2): sending the SAME audience (any order) is fine, a different one is VALIDATION_FAILED — offer the work to a different audience as a new task.
+Result: the task view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"contract":` + contractInputSchema + `
@@ -454,8 +462,9 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "todo_list",
 		Description: `Your turn list (kungfu.md §8): every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Task you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get.
-	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
-	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty, opportunities {tasks, assignments}}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
+opportunities counts what is ADDRESSED to you but not yet yours (section 8: pointers, never obligations): tasks = restricted tasks naming you that you could still take (see work_list offered_to_me=true), assignments = open thread assignments addressed to you (see thread_list). Zero is reported like any other number; when nonzero, next[] carries one hint where to look — obligations always come first.
+Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
 			},"additionalProperties":false}`,
