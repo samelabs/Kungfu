@@ -36,6 +36,13 @@ var ogLocaleByLang = map[string]string{
 	"es": "es_ES",
 }
 
+// headAlternate is one explicit hreflang pair (protocol pages carry
+// only the language variants that actually exist as URLs).
+type headAlternate struct {
+	Lang string
+	Href string
+}
+
 // headInput is one page's head request.
 type headInput struct {
 	Locale    string // resolved display locale
@@ -44,6 +51,15 @@ type headInput struct {
 	DescKey   string // i18n key of the meta description
 	NoIndex   bool   // private surfaces (owner, samelabs)
 	ExtraHead string // page-specific lines, already HTML-escaped
+
+	// Optional overrides (protocol pages): an explicit full <title>
+	// (no " | Kungfu.md" suffix), an explicit description, an explicit
+	// canonical URL and an explicit hreflang set. Empty/nil keeps the
+	// derived behavior.
+	TitleOverride     string
+	DescOverride      string
+	CanonicalOverride string
+	Alternates        []headAlternate
 }
 
 // canonicalURL is a page's canonical address: the bare path for en,
@@ -66,10 +82,22 @@ func buildHead(in headInput) string {
 	if in.NoIndex {
 		robots = "noindex,nofollow"
 	}
-	title := html.EscapeString(i18n.T(locale, in.TitleKey))
+	title := html.EscapeString(in.TitleOverride)
+	if title == "" {
+		title = html.EscapeString(i18n.T(locale, in.TitleKey))
+	}
 	fullTitle := title + " | Kungfu.md"
-	desc := html.EscapeString(i18n.T(locale, in.DescKey))
-	canonical := html.EscapeString(canonicalURL(locale, in.Path))
+	if in.TitleOverride != "" {
+		fullTitle = title
+	}
+	desc := html.EscapeString(in.DescOverride)
+	if in.DescOverride == "" {
+		desc = html.EscapeString(i18n.T(locale, in.DescKey))
+	}
+	canonical := html.EscapeString(in.CanonicalOverride)
+	if canonical == "" {
+		canonical = html.EscapeString(canonicalURL(locale, in.Path))
+	}
 	ogLocale := ogLocaleByLang[locale]
 
 	var b strings.Builder
@@ -82,9 +110,16 @@ func buildHead(in headInput) string {
     <meta name="description" content="` + desc + `">
     <meta name="robots" content="` + robots + `">
     <link rel="canonical" href="` + canonical + `">`)
-	for _, code := range i18n.SupportedLocales() {
-		b.WriteString("\n    " + `<link rel="alternate" hreflang="` + code + `" href="` +
-			html.EscapeString(canonicalURL(code, in.Path)) + `">`)
+	if in.Alternates != nil {
+		for _, alt := range in.Alternates {
+			b.WriteString("\n    " + `<link rel="alternate" hreflang="` + html.EscapeString(alt.Lang) +
+				`" href="` + html.EscapeString(alt.Href) + `">`)
+		}
+	} else {
+		for _, code := range i18n.SupportedLocales() {
+			b.WriteString("\n    " + `<link rel="alternate" hreflang="` + code + `" href="` +
+				html.EscapeString(canonicalURL(code, in.Path)) + `">`)
+		}
 	}
 	b.WriteString("\n    " + `<link rel="alternate" hreflang="x-default" href="` +
 		html.EscapeString(canonicalURL("en", in.Path)) + `">`)
@@ -117,10 +152,11 @@ func buildHead(in headInput) string {
 // the site Organization. Marshalled, never string-built.
 func homeJSONLD() string {
 	website := map[string]any{
-		"@context": "https://schema.org",
-		"@type":    "WebSite",
-		"name":     "Kungfu.md",
-		"url":      siteCanonicalBase + "/",
+		"@context":    "https://schema.org",
+		"@type":       "WebSite",
+		"name":        "Kungfu.md",
+		"url":         siteCanonicalBase + "/",
+		"description": i18n.T("en", "seo.home_desc"),
 		"potentialAction": map[string]any{
 			"@type":       "SearchAction",
 			"target":      map[string]any{"@type": "EntryPoint", "urlTemplate": siteCanonicalBase + "/?q={search_term_string}"},

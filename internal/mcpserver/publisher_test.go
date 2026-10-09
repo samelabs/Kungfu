@@ -475,7 +475,7 @@ func seedRejectedSub(t *testing.T, pool *pg.Pool, code string, agent int64) {
 		RequestKey:  fmt.Sprintf("rej-%d", time.Now().UnixNano()),
 		Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		PayloadHash: task.PayloadHash([]byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`)),
-		Amount:      5,
+		Amount:      5, ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatal(err)

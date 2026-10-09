@@ -41,6 +41,11 @@ func ReportTask(ctx context.Context, pool *pg.Pool, agentID int64, code, reason 
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
+	// §7.2/§12: reporting must not become an existence oracle for a
+	// restricted task — the gate runs before the open-report lookup.
+	if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+		return nil, err
+	}
 	if id, ok, err := repository.FindOpenReportByReporterTask(ctx, pool, t.ID, agentID); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if ok {

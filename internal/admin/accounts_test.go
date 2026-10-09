@@ -131,6 +131,14 @@ func TestAccountsAdminDetailAggregatesNeverMerged(t *testing.T) {
 			t.Fatalf("seed task: %v", err)
 		}
 	}
+	// every seeded task needs its version-1 row (Task 1.1 §7.1): the
+	// submissions below bind contract_version 1
+	if _, err := db.Exec(ctx, `
+		INSERT INTO task_contract_versions (task_id, version, contract)
+		SELECT id, 1, COALESCE(contract, '{}'::jsonb) FROM tb_task WHERE publisher_id = $1
+		ON CONFLICT DO NOTHING`, id); err != nil {
+		t.Fatalf("seed task versions: %v", err)
+	}
 	for i := 0; i < 3; i++ {
 		reqKey := fmt.Sprintf("pr_sub%09d", i)
 		if _, err := db.Exec(ctx, `

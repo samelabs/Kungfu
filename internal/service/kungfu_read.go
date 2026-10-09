@@ -75,6 +75,62 @@ func GetKungfuForBot(ctx context.Context, pool *pg.Pool, botID int64, code strin
 	return kungfuDetailFromModel(k), nil
 }
 
+// GetKungfuRevisionForBot serves memory_get(code, revision) — the
+// versioned read (kungfu.md §5/§9):
+//   - the author reads ANY existing revision of their memory, from
+//     the current row or memory_revisions, valid or withdrawn
+//     (作者恒可读自己的任何版本);
+//   - a non-author never receives a pinned revision: only the
+//     current version of a valid PUBLIC memory is readable by
+//     others, so an explicit revision is a permission error.
+func GetKungfuRevisionForBot(ctx context.Context, pool *pg.Pool, botID int64, code string, revision int64) (map[string]interface{}, error) {
+	k, err := repository.FindKungfuByCodeAnyStatus(ctx, pool, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+	}
+	if k == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+	}
+
+	if k.BotID != botID {
+		// Non-author: the current version of a valid PUBLIC memory is
+		// readable by everyone (§9 row 1) — an explicit revision that
+		// equals it serves the same bytes. Anything else (historical
+		// revision, private, or withdrawn) is refused; withdrawn keeps
+		// the 404 of the current-version path so existence does not leak.
+		if k.Status != "active" {
+			return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+		}
+		if k.Visibility != "public" || revision != k.Revision {
+			return nil, errors.New(403, "NOT_OWNER", "Only the creator can read a specific revision")
+		}
+		logOperation(ctx, pool, &botID, "get", strPtr("kungfu"), &code,
+			map[string]interface{}{"title": k.Title, "owner": false, "revision": revision}, true)
+		return kungfuDetailFromModel(k), nil
+	}
+
+	// Author: the requested revision is the current one → the row
+	// itself; otherwise the archived snapshot must exist.
+	if revision == k.Revision {
+		logOperation(ctx, pool, &botID, "get", strPtr("kungfu"), &code,
+			map[string]interface{}{"title": k.Title, "owner": true, "revision": revision}, true)
+		return kungfuDetailFromModel(k), nil
+	}
+
+	snapshot, err := repository.FindKungfuRevision(ctx, pool, k.ID, revision)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+	}
+	if snapshot == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+	}
+
+	logOperation(ctx, pool, &botID, "get", strPtr("kungfu"), &code,
+		map[string]interface{}{"title": snapshot.Title, "owner": true, "revision": revision}, true)
+
+	return kungfuDetailFromRevision(k, snapshot), nil
+}
+
 // -- Kungfu model → presenter maps --
 
 func kungfuListItemFromRepo(k *repository.KungfuListItem) map[string]interface{} {
@@ -84,6 +140,8 @@ func kungfuListItemFromRepo(k *repository.KungfuListItem) map[string]interface{}
 		"tags":        parseJSONTags(k.TagsJSON),
 		"description": k.Description,
 		"visibility":  k.Visibility,
+		"revision":    k.Revision,
+		"origin":      k.Origin,
 		"created_at":  k.CreatedAt,
 		"updated_at":  k.UpdatedAt,
 	}
@@ -98,8 +156,27 @@ func kungfuDetailFromModel(k *model.Kungfu) map[string]interface{} {
 		"content":     k.Content,
 		"checksum":    k.Checksum,
 		"visibility":  k.Visibility,
+		"revision":    k.Revision,
 		"created_at":  k.CreatedAt,
 		"updated_at":  k.UpdatedAt,
+	}
+}
+
+// kungfuDetailFromRevision projects one archived version: the
+// snapshot's content fields and write time, with the memory-level
+// facts (code, visibility, creation time) from the current row.
+func kungfuDetailFromRevision(k *model.Kungfu, r *model.KungfuRevision) map[string]interface{} {
+	return map[string]interface{}{
+		"code":        k.Code,
+		"title":       r.Title,
+		"tags":        parseJSONTags(r.TagsJSON),
+		"description": r.Description,
+		"content":     r.Content,
+		"checksum":    r.Checksum,
+		"visibility":  k.Visibility,
+		"revision":    r.Revision,
+		"created_at":  k.CreatedAt,
+		"updated_at":  r.UpdatedAt,
 	}
 }
 
@@ -115,4 +192,74 @@ func parseJSONTags(raw string) []string {
 		return []string{}
 	}
 	return tags
+}
+
+// GetDeliveredMemoryForBot reads a memory version through the
+// assignment delivery that pinned it (§9: "the Memory version a
+// delivery pins — current members, while the membership lasts").
+// The caller must be a current member of the assignment's room and
+// the delivery must bind this code; the revision is the one fixed at
+// delivery, never a caller choice. Private, later-updated and
+// withdrawn memories stay readable at that version. Ordinary
+// memory_get permissions are unchanged.
+func GetDeliveredMemoryForBot(ctx context.Context, pool *pg.Pool, botID int64, code string, assignID int64) (map[string]interface{}, error) {
+	a, err := repository.FindAssignment(ctx, pool, assignID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignment")
+	}
+	if a == nil {
+		return nil, errors.New(404, "ASSIGN_NOT_FOUND", "Assignment not found")
+	}
+	me, err := repository.FindThreadMember(ctx, pool, a.ThreadID, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading membership")
+	}
+	if me == nil {
+		return nil, errors.New(403, "NOT_MEMBER", "You are not a member of this thread")
+	}
+	raw, found, err := repository.AssignmentDeliveryMemories(ctx, pool, assignID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading delivery")
+	}
+	var bound []struct {
+		Code     string `json:"code"`
+		Revision int64  `json:"revision"`
+	}
+	if found {
+		_ = json.Unmarshal([]byte(raw), &bound)
+	}
+	var revision int64
+	for _, b := range bound {
+		if b.Code == code {
+			revision = b.Revision
+			break
+		}
+	}
+	if revision == 0 {
+		return nil, errors.New(404, "NOT_FOUND", "This assignment's delivery does not include that memory")
+	}
+	k, err := repository.FindKungfuByCodeAnyStatus(ctx, pool, code)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+	}
+	if k == nil {
+		return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+	}
+	var out map[string]interface{}
+	if revision == k.Revision {
+		out = kungfuDetailFromModel(k)
+	} else {
+		snapshot, err := repository.FindKungfuRevision(ctx, pool, k.ID, revision)
+		if err != nil {
+			return nil, errors.New(500, "INTERNAL_ERROR", "Error retrieving Kungfu")
+		}
+		if snapshot == nil {
+			return nil, errors.New(404, "NOT_FOUND", "Kungfu not found")
+		}
+		out = kungfuDetailFromRevision(k, snapshot)
+	}
+	logOperation(ctx, pool, &botID, "get", strPtr("kungfu"), &code,
+		map[string]interface{}{"title": out["title"], "owner": k.BotID == botID,
+			"revision": revision, "assign": assignID}, true)
+	return out, nil
 }

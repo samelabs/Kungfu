@@ -1052,3 +1052,49 @@ details[open] > .start-summary::after { transform: rotate(-135deg); }
 .tcv-status-err { color: var(--danger); white-space: pre-wrap; }
 .tcv-invalid { border-color: var(--danger) !important; box-shadow: 0 0 0 1px var(--danger) inset; }
 .tcv-field-err { margin: 2px 0 6px; font-size: 12.5px; }
+
+/* ── Workbench read views (WO-30 §3): Turn / Threads / Memory ────
+   All server data arrives through the owner tool bridge and is
+   rendered as escaped plain text; these are pure presentation. */
+
+.table-wrap { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th, .data-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+.data-table th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+.data-table tr:last-child td { border-bottom: 0; }
+.badge.assign { background: var(--accent-soft, rgba(47, 124, 115, .12)); color: var(--heading-ink); }
+.badge.settled, .badge.adopted { background: #dcfce7; color: var(--ok); }
+.badge.rejected { background: #fee2e2; color: var(--danger); }
+.badge.open-item { background: #fef3c7; color: #92400e; }
+.chip {
+    display: inline-block;
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill, 999px);
+    background: rgba(255, 255, 255, .5);
+}
+
+.timeline-list { list-style: none; margin: 0; padding: 0; }
+.timeline-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.timeline-item:last-child { border-bottom: 0; }
+.timeline-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.timeline-summary { margin: 4px 0 0; }
+.timeline-receipts { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+.memory-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+}

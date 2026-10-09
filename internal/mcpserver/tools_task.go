@@ -85,10 +85,11 @@ func submissionResult(ctx context.Context, deps *Deps, agentID int64, m map[stri
 
 func handleWorkList(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Q        string `json:"q"`
-		Code     string `json:"code"`
-		Page     int    `json:"page"`
-		PageSize int    `json:"page_size"`
+		Q           string `json:"q"`
+		Code        string `json:"code"`
+		Page        int    `json:"page"`
+		PageSize    int    `json:"page_size"`
+		OfferedToMe bool   `json:"offered_to_me"`
 	}
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`) // a tools/call with no arguments at all
@@ -96,7 +97,7 @@ func handleWorkList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
 	}
-	filter := service.WorkListFilter{Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize}
+	filter := service.WorkListFilter{Q: in.Q, Code: in.Code, Page: in.Page, PageSize: in.PageSize, OfferedToMe: in.OfferedToMe}
 	filter.Normalize()
 	items, total, err := service.ListWork(ctx, deps.Pool, agent.ID, time.Now(), filter)
 	if err != nil {
@@ -123,13 +124,14 @@ func handleWorkGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.
 
 func handleWorkHarness(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Code  string `json:"code"`
-		RefID string `json:"ref_id"`
+		Code    string          `json:"code"`
+		RefID   string          `json:"ref_id"`
+		ClaimID *service.WireID `json:"claim_id"` // optional: serve the claim's pinned revision
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.RefID == "" {
 		return ToolResult{}, argError("code and ref_id are required")
 	}
-	m, err := service.GetHarness(ctx, deps.Pool, agent.ID, in.Code, in.RefID)
+	m, err := service.GetHarness(ctx, deps.Pool, agent.ID, in.Code, in.RefID, in.ClaimID.Int64Ptr(), time.Now())
 	if err != nil {
 		return ToolResult{}, err
 	}

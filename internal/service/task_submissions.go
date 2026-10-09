@@ -32,6 +32,9 @@ type publisherSubmissionRow struct {
 // ListSubmissionsForPublisher returns one page of the task's
 // submissions (newest first, optional state filter) with the total.
 // agent_ref matches the value the receiver saw at delivery (§7.1).
+// A non-publisher first passes the audience gate (WO-32a):
+// out-of-audience callers get TASK_NOT_FOUND, in-audience
+// non-publishers NOT_OWNER.
 func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID int64, code, state string, page, pageSize int, agentRefKey []byte) ([]publisherSubmissionRow, int64, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
@@ -40,8 +43,8 @@ func ListSubmissionsForPublisher(ctx context.Context, pool *pg.Pool, publisherID
 	if err != nil {
 		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if t.PublisherID != publisherID {
-		return nil, 0, errors.New(0, "NOT_OWNER", "Not your task")
+	if err := requireOwnerOrAudience(ctx, pool, t, publisherID); err != nil {
+		return nil, 0, err
 	}
 	if state != "" {
 		valid := false

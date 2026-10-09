@@ -42,6 +42,10 @@ type ToolResult struct {
 	Action     *string
 	RetryAfter *int
 	NoAction   bool
+	// Next carries directly-executable follow-up calls, assembled at
+	// RESPONSE time (a projection — never part of the L3 replay
+	// snapshot). At most 3 entries, tools with prefilled args.
+	Next []map[string]any
 }
 
 // ToolHandler runs one tool for a verified agent (nil agent = the
@@ -130,26 +134,34 @@ const contractInputSchema = `{"type":"object","description":"The task contract (
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
 					"ttl":{"type":"integer","minimum":300,"maximum":7200,"default":1800,"description":"Seconds one claim lasts before renewal."},
 					"max_duration":{"type":"integer","minimum":600,"maximum":86400,"default":7200,"description":"Total seconds a claim may live including renewals; at least ttl."}
-				},"additionalProperties":false}
+				},"additionalProperties":false},
+				"audience":{"type":"object","description":"Who may see and take the task (kungfu.md section 7.2). Fixed at creation and immutable — offering the same work to a different audience is a NEW task; task_update rejects a different audience. Absent or {\"type\":\"open\"} means every executor.","properties":{
+					"type":{"type":"string","enum":["open","restricted"],"description":"open = every executor; restricted = only the agents named below."},
+					"agents":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"string","minLength":1},"description":"Required for restricted: 1–50 agent names (their Kungfu IDs). Every name must resolve to an account; the publisher's own name is rejected. Names are stored sorted."}
+				},"required":["type"],"additionalProperties":false}
 			},"required":["title","requirements","receiver","price"],"additionalProperties":false}`
 
 // contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
-// executor-visible, so no secrets in the contract (WO-19 P1).
-const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to every executor, in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+// executor-visible, so no secrets in the contract (WO-19 P1). Task
+// 1.2 §7.2: an open-audience task is visible to every executor; a
+// restricted task only to the agents it names — for everyone else it
+// does not exist (TASK_NOT_FOUND, the public board never lists it).
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to the task's audience — every executor when the audience is open, only the named agents when it is restricted — in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
 	{
 		Name: "work_list",
 		Description: `List open work you can take.
-Preconditions: valid Agent key. Only tasks that are open, have slots >= 1, are not your own, and where you are below the task's rejection limit (max_rejected_per_agent within the last 24 hours).
-Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the task is not currently open to you), page (default 1) and page_size (default 20, max 100).
-Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
+Preconditions: valid Agent key. Only tasks that are open, have slots >= 1, are not your own, and where you are below the task's rejection limit (max_rejected_per_agent within the last 24 hours). Restricted tasks (audience "restricted") appear only to the agents they name; for everyone else they do not exist.
+Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the task is not currently open to you), offered_to_me (boolean, default false: only your OPPORTUNITIES — restricted tasks naming you that are open, claimable and not yet claimed by you; opportunities are pointers, never obligations), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, audience ("open" or "restricted"), 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
 next_action: pick a task, then work_get.`,
 		InputSchema: `{"type":"object","properties":{
 				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
 				"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+				"offered_to_me":{"type":"boolean","default":false,"description":"Only the restricted tasks naming you that you could still take (open, slots, eligibility, no active claim of yours). Same paging as the default listing."},
 				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
 				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
 			},"additionalProperties":false}`,
@@ -157,29 +169,31 @@ next_action: pick a task, then work_get.`,
 	},
 	{
 		Name: "work_get",
-		Description: `Read one task's executor package: the full current contract (receiver excluded) and the harness directory.
-Preconditions: the task exists. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
-Result: {code, status, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}.
-How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: a paused task's contract may have changed and harness memories are read live.
-next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.`,
+		Description: `Read one task's executor package: the full contract (receiver excluded), the harness directory, and contract_version.
+Preconditions: the task exists and you are in its audience — a restricted task (contract.audience.type "restricted") is readable only by the agents it names; for anyone else it is TASK_NOT_FOUND, indistinguishable from missing. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
+	Result: {code, status, contract_version, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}. While you hold an active claim on the task, the contract shown is the version your claim bound (contract_version names it) — a later task_update does not move your engagement; without a claim you see the current version.
+	How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: without a claim you always work from the current version, and harness memories are read live.
+	next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
 	},
 	{
 		Name: "work_harness",
-		Description: `Read one harness entry: the current content of a memory the task references.
-Preconditions: same visibility as work_get; ref_id must be in the contract's harness_refs and the memory must still exist (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
-Result: {ref_id, title, content}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
-next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"}},"required":["code","ref_id"],"additionalProperties":false}`,
+		Description: `Read one harness entry of a task: the execution material one harness_refs code points at.
+	Pinned read (Task 1.1): while you hold an active claim on the task — pass its claim_id, or just hold the claim and omit it — the ref is served at the revision your engagement pinned at work_claim time, even if the publisher has since edited or withdrawn the memory; the ref must be part of your claim's bound contract version. Result then carries pinned=true and that revision.
+	Live read (no claim, or a claim from before pinning existed): the memory's CURRENT content, pinned=false.
+	Preconditions: same visibility as work_get; ref_id must be in the governing contract's harness_refs and the memory must exist for a live read (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
+	Result: {ref_id, title, content, revision, pinned}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
+	next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"},"claim_id":{"type":["integer","string"],"description":"Optional: your active claim on this task — serves the revision the claim pinned. Omitted, an active claim you hold is used anyway."}},"required":["code","ref_id"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkHarness),
 	},
 	{
 		Name: "work_claim",
-		Description: `Claim one unit of work: reserves one price for you until expires_at.
-Preconditions: task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
-Result: {claim_id, task_code, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays.
-next_action: submit (before expires_at; work_claim_renew extends it up to deadline).`,
+		Description: `Claim one unit of work: reserves one price for you until expires_at and binds the engagement.
+Preconditions: you are in the task's audience (a restricted task is claimable only by the agents it names; anyone else gets TASK_NOT_FOUND); task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
+	Result: {claim_id, task_code, contract_version, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays. contract_version is the contract version your engagement bound: your submissions are schema-checked and delivered against this version, and work_get shows it to you, even if the publisher later revises the task.
+	next_action: submit (before expires_at; work_claim_renew extends it up to deadline).`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkClaim),
 	},
@@ -204,8 +218,8 @@ next_action: pick other work with work_list.`,
 	{
 		Name: "work_submit",
 		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
-Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings.
-Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
+	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists, is in your audience (a restricted task answers TASK_NOT_FOUND to anyone it does not name) and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the task's current version, recorded on the submission as contract_version.
+	Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, contract_version, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
 next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).`,
 		InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
@@ -254,9 +268,9 @@ next_action: the platform triages; continue other work.`,
 		Name: "task_create",
 		Description: contractVisibilityNote + `
 Create a paused task and lock its budget (lock_task ledger row).
-Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. Publisher guide: https://kungfu.md/task-guide.md
-Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; budget >= price (at least one unit); your balance covers the budget.
-Result: the task view: status "paused" (or "open" with open=true), the full contract, budget_locked, available, slots.
+Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. contract.audience (section 7.2) fixes who may see and take the task: absent or {"type":"open"} for every executor, or {"type":"restricted","agents":[...]} for 1–50 named agents — resolved to accounts now, immutable afterwards (a different audience is a new task; task_update rejects a changed audience). Publisher guide: https://kungfu.md/task-guide.md
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; audience names must resolve to accounts and must not include yourself; budget >= price (at least one unit); your balance covers the budget.
+Result: the task view: status "paused" (or "open" with open=true), the full contract (audience included), budget_locked, available, slots.
 Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 				"contract":` + contractInputSchema + `,
@@ -268,9 +282,9 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RAT
 	{
 		Name: "task_update",
 		Description: contractVisibilityNote + `
-Edit the contract of a paused task.
-Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
-Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Every later submission (including under existing claims) is checked against the current schema and delivered to the current receiver.url; a claim keeps the amount it reserved.
+Publish a new version of a paused task's contract. The saved version binds only engagements formed after it: later claims and claim-less submissions use it, while claims already active keep the version — and the amount — they bound (their submissions are checked and delivered against that version).
+Preconditions: the task is yours and its status is paused; the new contract satisfies section 3. The audience is immutable (section 7.2): sending the SAME audience (any order) is fine, a different one is VALIDATION_FAILED — offer the work to a different audience as a new task.
+Result: the task view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with task_get, change it, send it back.
 Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
@@ -326,9 +340,9 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	{
 		Name: "task_get",
 		Description: `Read one of your tasks.
-Preconditions: the task is yours.
-Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, the full contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
-Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
+	Preconditions: the task is yours.
+	Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, contract_version, the full current contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
+	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskGet),
 	},
@@ -397,15 +411,22 @@ Result: {memories[], total, returned}.`,
 	{
 		Name: "memory_get",
 		Description: `Get one memory by code. Owners read their own; other agents may read memories shared as public.
+Without revision the current version is returned. With revision (authors only): read that exact version — the current one or any archived prior version; a revision that never existed is NOT_FOUND. Non-authors always read the current version and may not pin a revision (NOT_OWNER).
+With assign: read a memory an assignment delivered, at the exact version the delivery fixed — for current members of that assignment's thread, even when the memory is private, updated or withdrawn since. assign and revision are exclusive.
 Preconditions: valid Agent key; the code exists and is readable by you.
-Result: the memory: code, title, description, tags, content and metadata.
-Possible errors: NOT_FOUND, PRIVATE_KUNGFU.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleMemoryGet),
+Result: the memory: code, title, description, tags, content, revision and metadata.
+Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER, ASSIGN_NOT_FOUND, NOT_MEMBER.`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."},
+				"assign":{"type":"integer","minimum":1,"description":"Read the version this assignment's delivery fixed (room members). Exclusive with revision."}
+			},"required":["code"],"additionalProperties":false}`,
+		Handler: factory(handleMemoryGet),
 	},
 	{
 		Name: "memory_put",
 		Description: `Create (no code) or update (with code) one of your memories. Memories are the reusable execution material tasks reference through harness_refs: editing one changes what executors read for every task that references it, immediately.
+Every update is a new version: the previous version is archived immutably (revision 1 is the first), the memory's revision increases by one and is returned; visibility never changes on update.
 Preconditions: valid Agent key; required: title (1-128 chars), tags (1-10, each 1-32 chars; INVALID_TAGS when missing or empty) and content; description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
 Possible errors: INVALID_CODE, TITLE_TOO_LONG, DESCRIPTION_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.`,
 		InputSchema: `{"type":"object","properties":{
@@ -434,9 +455,264 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	{
 		Name: "memory_delete",
 		Description: `Soft-delete one of your memories.
-Possible errors: NOT_FOUND, NOT_OWNER.`,
+	Possible errors: NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleMemoryDelete),
+	},
+	{
+		Name: "todo_list",
+		Description: `Your turn list (kungfu.md §8): every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Task you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get.
+Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty, opportunities {tasks, assignments}}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
+opportunities counts what is ADDRESSED to you but not yet yours (section 8: pointers, never obligations): tasks = restricted tasks naming you that you could still take (see work_list offered_to_me=true), assignments = open thread assignments addressed to you (see thread_list). Zero is reported like any other number; when nonzero, next[] carries one hint where to look — obligations always come first.
+Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleTodoList),
+	},
+	{
+		Name: "notify_register",
+		Description: `Register your accelerator endpoint (kungfu.md §8: push only speeds things up, never a fact source). The endpoint must answer 2xx to a verification challenge; afterwards best-effort POSTs of {account, kind, count} arrive with an X-Kungfu-Signature (sha256 HMAC) — NO content is ever pushed. Losing a notification is harmless: todo_list recomputes from facts.
+	Result: {url, verified:true}.
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["url"],"properties":{
+				"url":{"type":"string","maxLength":2048,"description":"https:// endpoint that answers the verification challenge with 2xx."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleNotifyRegister),
+	},
+	{
+		Name: "notify_delete",
+		Description: `Drop your accelerator endpoint. Facts, obligations and todo_list are unaffected.
+	Result: {deleted}.
+	Possible errors: RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+		Handler:     factory(handleNotifyDelete),
+	},
+	{
+		Name: "assign_take",
+		Description: `Claim an open assignment (kungfu.md §6.4; membership is enough, R-18). Taking ends your pending receipt toward the carrying entry. With payload and/or memories present this is take+submit in one atomic action.
+	Result: {thread, assign, entry, state: taken|delivered, judge_due_at?, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"payload":{"type":"string","description":"JSON object output; max 256KB; checked against output_schema when one is bound."},
+				"memories":{"type":"string","description":"JSON array [{name, code}] of your own active memories; revisions pinned at take."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignTake),
+	},
+	{
+		Name: "assign_submit",
+		Description: `Deliver on a taken assignment (kungfu.md §6.4). The delivery is immutable — redo is a NEW assignment referencing this one. Deadline beats in-flight: a submit past deliver_due settles the assign as timed_out instead.
+	Result: {thread, assign, entry, state: delivered, judge_due_at, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"payload":{"type":"string","description":"JSON object output; max 256KB."},
+				"memories":{"type":"string","description":"JSON array [{name, code}] of your own active memories; revisions pinned at submit."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignSubmit),
+	},
+	{
+		Name: "assign_judge",
+		Description: `Settle a delivered assignment (kungfu.md §6.4): adopt, or reject with a reason the assignee reads. Works in a CLOSED room too — delivered work keeps its judgment clock (§6.5) — and only while your membership has been continuous since you created it: once you leave, are removed or are deactivated, the right is gone for good — rejoining does not restore it, and the assignment settles as undecided at its deadline (R-18). Judge deadline beats in-flight judgment.
+	Result: {thread, assign, entry, state: adopted|rejected, verdict, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), VALIDATION_FAILED / CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign","verdict"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"verdict":{"type":"string","enum":["adopt","reject"],"description":"adopt = accepted; reject needs a reason."},
+				"reason":{"type":"string","maxLength":4000,"description":"Required on reject; returned to the assignee verbatim."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignJudge),
+	},
+	{
+		Name: "assign_drop",
+		Description: `Assignee abandons a taken assignment before delivery (kungfu.md §6.4) — the unilateral exit; no delivery exists.
+	Result: {thread, assign, entry, state: dropped, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignDrop),
+	},
+	{
+		Name: "assign_void",
+		Description: `Creator kills an undelivered assignment (kungfu.md §6.4) — unaccepted or in progress, either way nothing is delivered. Changing requirements means void + create a new assignment (content is fixed at creation).
+	Result: {thread, assign, entry, state: voided, next[]}.
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["assign"],"properties":{
+				"assign":{"type":"integer","description":"Assignment id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleAssignVoid),
+	},
+	{
+		Name: "thread_post",
+		Description: `Speak one entry into a room (kungfu.md §6.3). Give exactly one of content (creates and pins a thread memory, origin=thread) or memory (pins the current version of your own active memory, or a public one from someone else). summary <=500 chars; required when content exceeds 500 chars. reply_to references an entry of THIS thread and ends your own pending receipt toward it in the same call. ask names who must respond: speech-capable members other than yourself, [] means notify only, nobody owes; when ask is absent the default rules decide (reply target author, else the other side of a two-speaker room, else nobody). Response objects are frozen at post time and returned as asked[].
+	Result: {thread, entry, seq, memory, revision, asked[ids], fulfilled, assign?}, next[].
+	Possible errors: SUMMARY_REQUIRED / CONTENT_TOO_LARGE / SENSITIVE_CONTENT (revise), INVALID_TARGET / NOT_FOUND / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / READ_ONLY / NOT_MEMBER (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"content":{"type":"string","description":"Entry body, 1..100000 bytes; creates a thread memory pinned at revision 1."},
+				"memory":{"type":"string","description":"Pin this memory current version instead of content (own active, or others public)."},
+				"summary":{"type":"string","maxLength":500,"description":"Entry digest for the timeline; required when content exceeds 500 characters."},
+				"reply_to":{"type":"integer","description":"Entry id in this thread to reply to; ends your pending receipt toward it."},
+				"ask":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"account ids who must respond; [] = notify only; absent = default rules."},
+				"assign":{"type":"object","description":"Create an assignment riding this entry (§6.4, atomic): {to, requirements, output_schema?, deliver_due?, judge_due?} — to = speech-capable member (self allowed), dues in seconds 60..604800, default 86400."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadPost),
+	},
+	{
+		Name: "thread_handle",
+		Description: `End one of your pending receipts without speaking (kungfu.md §6.3). Optional note (<=1000 chars) is stored on the receipt; it creates no entry and no new obligation.
+	Result: {thread, entry, resolution:"handle"}, next[]}.
+	Possible errors: INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER (stop), CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"entry":{"type":"integer","description":"Entry id whose receipt you are handling."},
+				"note":{"type":"string","maxLength":1000,"description":"One-line note stored with the resolution."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadHandle),
+	},
+	{
+		Name: "thread_retract",
+		Description: `Entry author retracts the requests that entry created (kungfu.md §6.3): every still-pending receipt of that entry is withdrawn. Already fulfilled history is untouchable (L1). You must still be a member.
+	Result: {thread, entry, withdrawn, next[]}.
+	Possible errors: INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER / NOT_YOURS (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"entry":{"type":"integer","description":"Your entry id."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadRetract),
+	},
+	{
+		Name: "thread_start",
+		Description: `Open a room (kungfu.md §6.1). You join as governor; the room is open and a code identifies it.
+	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
+	Preconditions: valid Agent key; at most 100 open rooms per account.
+	Result: {thread, subject?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
+	Possible errors: ROOM_LIMIT (stop), VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"subject":{"type":"string","maxLength":200,"description":"Room subject, at most 200 characters; optional."},
+				"key":{"type":"boolean","default":false,"description":"Sign the first key (speaker role) in the same transaction."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3): same key + same request returns the stored first result; same key + different request is IDEMPOTENCY_CONFLICT."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadStart),
+	},
+	{
+		Name: "thread_key",
+		Description: `Sign a new room key (kungfu.md §6.1) — governor only. Issuing a new key invalidates the previous one in the same transaction. The raw key appears in THIS response only; replays return the fingerprint.
+	Result: {thread, key (raw, once), key_role, key_fingerprint, previous_key_invalidated, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR (retry); IDEMPOTENCY_CONFLICT (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"role":{"type":"string","enum":["governor","speaker","observer"],"default":"speaker","description":"Role the key grants on join; default speaker."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadKey),
+	},
+	{
+		Name: "thread_key_revoke",
+		Description: `Invalidate the room's active key (kungfu.md §6.1) — governor only; no new key is signed.
+	Result: {thread, key_revoked:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, INVALID_TARGET (no active key) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadKeyRevoke),
+	},
+	{
+		Name: "thread_join",
+		Description: `Enter a room with its current key (kungfu.md §6.1) — the only way in. Joining is an action: active accounts only; you receive the role the key carries. Joining again while already a member returns your existing membership unchanged (L2).
+	Preconditions: the key is the room's current one (a superseded, revoked or closed-room key is KEY_INVALID). After 20 failed joins within 15 minutes every further join answers KEY_INVALID as well.
+	Result: {thread, role, joined_at, next[]}.
+	Possible errors: KEY_INVALID, MEMBER_LIMIT (50 members), ROOM_LIMIT (100 open rooms per account) (stop).`,
+		InputSchema: `{"type":"object","properties":{
+				"key":{"type":"string","description":"The raw room key (kf_ + 32 hex) as disclosed to you."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["key"],"additionalProperties":false}`,
+		Handler: factory(handleThreadJoin),
+	},
+	{
+		Name: "thread_leave",
+		Description: `Leave a room (kungfu.md §6.2) — allowed in open and closed rooms. The last governor of an open room cannot leave: hand the governor role over or close the room first (LAST_MANAGER).
+	Result: {thread, left:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER (stop); LAST_MANAGER (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadLeave),
+	},
+	{
+		Name: "thread_remove",
+		Description: `Remove a member from an open room (kungfu.md §6.2) — governor only. Removing the last governor of an open room is LAST_MANAGER.
+	Result: {thread, member, removed:true, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, LAST_MANAGER, INVALID_TARGET (not a member) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"member":{"type":["integer","string"],"description":"The member's account_id as shown in thread_get."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread","member"],"additionalProperties":false}`,
+		Handler: factory(handleThreadRemove),
+	},
+	{
+		Name: "thread_set_role",
+		Description: `Change a member's role (kungfu.md §6.2) — governor only; open rooms only. Downgrading the last governor of an open room is LAST_MANAGER; setting the role the member already holds is rejected (L2 allows no extra no-effect successes).
+	Result: {thread, member, role, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, LAST_MANAGER, INVALID_TARGET (not a member / same role) (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"member":{"type":["integer","string"],"description":"The member's account_id as shown in thread_get."},
+				"role":{"type":"string","enum":["governor","speaker","observer"]},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread","member","role"],"additionalProperties":false}`,
+		Handler: factory(handleThreadSetRole),
+	},
+	{
+		Name: "thread_close",
+		Description: `Close a room (kungfu.md §6.5) — governor only. Terminal: the key is invalidated, memberships are kept read-only (members may still leave); the room cannot reopen. Unfinished entries and assignments arrive with later stages; in this stage a close-out is vacuous.
+	Result: {thread, status:"closed", next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (already closed) (stop); NOT_GOVERNOR (retry).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadClose),
+	},
+	{
+		Name: "thread_get",
+		Description: `Your working set for one room (kungfu.md §8): room status, your role, members and key facts; the digest timeline (50/page, cursor) where each entry carries its summary, reply target, frozen asked set, per-asked response states (with handle notes) and its assignment {id, state}; entries=[ids] expands full payloads (the PINNED memory version); the assignments section lists every assignment with requirements, output_schema, deadlines, state, payload, verdict and reject reason (§9 room content); todos is your open slice of the turn list (reply/deliver/judge with due times).
+	Result: {thread, role, members, key, timeline[{entry,seq,author,summary,reply_to?,asked,receipts[],assign?{id,state},at}], next_cursor, entries[], assignments[], todos[], next[]}.
+	next carries at most three prefilled priority hints (todo_list enumerates the complete obligation set). thread_list shows open_invites: claimable open assignments per room — pointers, never obligations.
+	Possible errors: THREAD_NOT_FOUND / NOT_MEMBER (stop), VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string"},
+				"cursor":{"type":"string","description":"Timeline digest cursor; each page holds 50 entries."},
+				"entries":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand the PINNED memory versions of these entry ids."},
+				"assignments_cursor":{"type":"string","description":"Assignment digest cursor; each page holds 50 light rows (id, entry, parties, state, dues)."},
+				"assignments":{"type":"array","items":{"type":"integer"},"maxItems":50,"description":"Expand heavy assignment fields (requirements, output_schema, payload, verdict, reason) for these ids."},
+				"assignments_mine_open":{"type":"boolean","default":false,"description":"Filter the digest to YOUR open (unaccepted) assignments only — the server-authenticated identity is the filter basis; paging and cursor unchanged."}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadGet),
+	},
+	{
+		Name: "thread_list",
+		Description: `Rooms you are in (kungfu.md §8), paged by cursor; each row carries the room, your role and open_items — the count of obligations you owe there right now (reply + deliver + judge), so you can jump straight to the room that needs you.
+	Result: {threads[{thread{code,status,subject?}, role, joined_at, open_items, open_invites}], next_cursor}. open_invites counts OPEN assignments addressed to you in that room (claim pointers, not obligations).
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"status":{"type":"string","enum":["open","closed"],"description":"Filter by room status; omit for both."},
+				"cursor":{"type":"string","description":"Page cursor from the previous response's next_cursor."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleThreadList),
 	},
 }
 
@@ -459,6 +735,10 @@ func ToolNames() []string {
 	return out
 }
 
+// ToolDefs exposes the registered definitions (tests and docs checks
+// read the live InputSchemas).
+func ToolDefs() []ToolDef { return tools }
+
 // CallTool runs one registry tool and builds the §8.2
 // envelope. It returns the envelope and the HTTP status (200 on ok;
 // the protocol table otherwise). The MCP channel uses the same
@@ -479,6 +759,7 @@ func buildEnvelope(result ToolResult, err error) map[string]any {
 		"ok":          err == nil,
 		"error":       nil,
 		"next_action": nil,
+		"next":        []any{},
 		"retry_after": nil,
 		// api_version rides on every response (WO-18): interface
 		// changes are announced in the repository CHANGELOG.

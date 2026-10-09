@@ -203,19 +203,6 @@ function bindCopyNewKey() {
     });
 }
 
-function bindReload() {
-    if (!qs('#reloadBtn')) return;
-    qs('#reloadBtn').addEventListener('click', async () => {
-        try {
-            await loadAccount();
-            renderOverview();
-            showToast(noticeText(t('auth.reloaded')), 'ok');
-        } catch (error) {
-            showToast(noticeText(String(error)), 'error');
-        }
-    });
-}
-
 function bindLogout() {
     if (!qs('#logoutBtn')) return;
     qs('#logoutBtn').addEventListener('click', async () => {
@@ -237,6 +224,5 @@ function bindAuthHandlers() {
     bindPasswordForm();
     bindResetKey();
     bindCopyNewKey();
-    bindReload();
     bindLogout();
 }

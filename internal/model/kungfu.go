@@ -11,6 +11,29 @@ type Kungfu struct {
 	Checksum    string  `db:"checksum" json:"checksum"`
 	Visibility  string  `db:"visibility" json:"visibility"`
 	Status      string  `db:"status" json:"-"`
-	CreatedAt   string  `db:"created_at" json:"created_at"`
-	UpdatedAt   string  `db:"updated_at" json:"updated_at"`
+	// Revision is the memory's current version (kungfu.md §5):
+	// creation is revision 1; every author update archives the
+	// previous version in memory_revisions and bumps this by 1.
+	Revision int64 `db:"revision" json:"-"`
+	// Origin records what created the memory: 'standalone' (the
+	// memory tools) or 'thread' (Thread-stage entry payloads; no
+	// writer exists yet — lists already exclude it).
+	Origin    string `db:"origin" json:"-"`
+	CreatedAt string `db:"created_at" json:"created_at"`
+	UpdatedAt string `db:"updated_at" json:"updated_at"`
+}
+
+// KungfuRevision is one archived prior version of a memory
+// (memory_revisions). It carries the old version's full content
+// snapshot; memory-level facts (code, visibility, author) live on
+// the tb_kungfus row.
+type KungfuRevision struct {
+	MemoryID    int64
+	Revision    int64
+	Title       string
+	TagsJSON    string
+	Description *string
+	Content     string
+	Checksum    string
+	UpdatedAt   string
 }

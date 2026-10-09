@@ -7,6 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
+	github.com/yuin/goldmark v1.7.8
 	golang.org/x/crypto v0.54.0
 	golang.org/x/text v0.40.0
 )

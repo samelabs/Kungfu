@@ -179,7 +179,7 @@ func TestRecoverStuckDelivering(t *testing.T) {
 		TaskID: tr.ID, AgentID: agent,
 		RequestKey: fmt.Sprintf("stuck-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)),
-		Amount: 5,
+		Amount: 5, ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert: %v", err)

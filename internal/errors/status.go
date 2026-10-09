@@ -35,6 +35,21 @@ var statusByCode = map[string]int{
 	"INVALID_REQUEST_KEY":   http.StatusUnprocessableEntity,
 	"VALIDATION_FAILED":     http.StatusUnprocessableEntity,
 
+	// room-face thread tools (kungfu.md §6; D-009)
+	"THREAD_NOT_FOUND": http.StatusNotFound,
+	"ASSIGN_NOT_FOUND": http.StatusNotFound,
+	"NOT_MEMBER":       http.StatusForbidden,
+	"NOT_GOVERNOR":     http.StatusForbidden,
+	"NOT_YOURS":        http.StatusForbidden,
+	"READ_ONLY":        http.StatusForbidden,
+	"THREAD_CLOSED":    http.StatusConflict,
+	"LAST_MANAGER":     http.StatusConflict,
+	"MEMBER_LIMIT":     http.StatusConflict,
+	"ROOM_LIMIT":       http.StatusConflict,
+	"KEY_INVALID":      http.StatusUnauthorized,
+	"INVALID_TARGET":   http.StatusUnprocessableEntity,
+	"SUMMARY_REQUIRED": http.StatusUnprocessableEntity,
+
 	// account and storage tools (§8.4「账户与存储工具错误」)
 	"NAME_TAKEN":           http.StatusConflict,
 	"INVALID_NAME":         http.StatusUnprocessableEntity,

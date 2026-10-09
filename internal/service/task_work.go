@@ -32,12 +32,16 @@ const (
 // WorkListFilter is the work_list query surface (WO-19 Q1): a
 // keyword over title/requirements, an exact code, and paging. All
 // fields optional; an absent filter returns page 1 at the default
-// size. Code wins over keyword when both are given.
+// size. Code wins over keyword when both are given. OfferedToMe
+// (Task 1.2 §8) narrows the list to the caller's opportunities:
+// restricted tasks naming the caller that are still offerable —
+// same paging and cursor contract.
 type WorkListFilter struct {
-	Q        string
-	Code     string
-	Page     int
-	PageSize int
+	Q           string
+	Code        string
+	Page        int
+	PageSize    int
+	OfferedToMe bool
 }
 
 // Normalize trims, resolves precedence and applies the paging rules
@@ -122,9 +126,21 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 // queries — no per-task round trips.
 func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, filter WorkListFilter) ([]map[string]any, int64, error) {
 	filter.Normalize()
-	rows, total, err := repository.FindOpenWorkPage(ctx, pool, agentID,
-		repository.WorkFilter{Keyword: filter.Q, Code: filter.Code, RejectionsSince: rejectionsSince(now)},
-		filter.PageSize, (filter.Page-1)*filter.PageSize)
+	var rows []repository.WorkCandidate
+	var total int64
+	var err error
+	if filter.OfferedToMe {
+		// §8 opportunities: exactly "work_list would list it" plus
+		// "named for me" plus "not already taken" — same shape, same
+		// ordering, same paging.
+		rows, total, err = repository.FindOfferedWorkPage(ctx, pool, agentID,
+			repository.WorkFilter{Keyword: filter.Q, Code: filter.Code},
+			now, filter.PageSize, (filter.Page-1)*filter.PageSize)
+	} else {
+		rows, total, err = repository.FindOpenWorkPage(ctx, pool, agentID,
+			repository.WorkFilter{Keyword: filter.Q, Code: filter.Code, RejectionsSince: rejectionsSince(now)},
+			filter.PageSize, (filter.Page-1)*filter.PageSize)
+	}
 	if err != nil {
 		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
@@ -179,6 +195,7 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, 
 			"price":        k.contract.Price,
 			"slots":        slotsFor(&k.row.Task, k.contract),
 			"claim":        map[string]any{"required": k.contract.Claim.Required},
+			"audience":     k.contract.NormalizedAudience().Type,
 			"stats":        statsView(stats),
 			"my":           k.my,
 		})
@@ -234,8 +251,10 @@ func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, pag
 	return out, total, nil
 }
 
-// visibleTask loads a task with executor visibility.
-func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.TaskRow, error) {
+// visibleTask loads a task with executor visibility, then applies
+// the §7.2/§12 audience gate: outside a restricted task's audience
+// the caller gets the same TASK_NOT_FOUND a missing task produces.
+func visibleTask(ctx context.Context, pool *pg.Pool, agentID int64, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
 		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
@@ -243,26 +262,47 @@ func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.T
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
+	if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
-// GetWork is §5.1 work_get: the task's full contract (minus
-// receiver), the live harness directory, the 30-day stats and the
-// caller's tallies.
+// GetWork is §5.1 work_get: the task's executor package — the full
+// contract (receiver excluded), the live harness directory, the
+// 30-day stats and the caller's tallies. When the caller holds an
+// ACTIVE claim on the task, the contract shown is the version that
+// claim bound (§7.1/§9: an engaged agent always reads the version
+// it bound) and contract_version names it; otherwise the current
+// version is shown.
 func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (map[string]any, error) {
-	t, err := visibleTask(ctx, pool, code)
+	t, err := visibleTask(ctx, pool, agentID, code)
 	if err != nil {
 		return nil, err
 	}
+	contractJSON := t.Contract
+	contractVersion := t.ContractVersion
+	if claim, err := repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err == nil && claim != nil {
+		bound, err := repository.FindTaskContractVersion(ctx, pool, t.ID, claim.ContractVersion)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if bound != nil {
+			contractJSON = bound
+			contractVersion = claim.ContractVersion
+		}
+	} else if err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
 	var contract task.Contract
-	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+	if err := json.Unmarshal(contractJSON, &contract); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
 
 	// §10.8: never expose the receiver — strip the key from the
 	// contract projection entirely
 	var contractProjection map[string]any
-	if err := json.Unmarshal(t.Contract, &contractProjection); err != nil {
+	if err := json.Unmarshal(contractJSON, &contractProjection); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
 	}
 	delete(contractProjection, "receiver")
@@ -277,19 +317,20 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	}
 
 	// M3: the harness directory is queried LIVE from the publisher's
-	// current memories, in the contract's harness_refs order
+	// current memories, in the shown contract's harness_refs order
 	directory, dirErr := liveHarnessDirectory(ctx, pool, t.PublisherID, contract.HarnessRefs)
 	if dirErr != nil {
 		return nil, dirErr
 	}
 
 	view := map[string]any{
-		"code":     t.Code,
-		"status":   t.Status,
-		"contract": contractProjection,
-		"harness":  directory,
-		"stats":    statsView(stats),
-		"my":       my,
+		"code":             t.Code,
+		"status":           t.Status,
+		"contract_version": contractVersion,
+		"contract":         contractProjection,
+		"harness":          directory,
+		"stats":            statsView(stats),
+		"my":               my,
 	}
 	if t.PausedReason != nil {
 		view["paused_reason"] = *t.PausedReason
@@ -334,19 +375,49 @@ func contractJSONOf(c task.Contract) []byte {
 	return b
 }
 
-// GetHarness is §5.1 work_harness: one memory's CURRENT content (M3).
-// The ref must be in the contract's harness_refs and the memory must
-// still exist; anything else is HARNESS_REF_NOT_FOUND.
-func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID string) (map[string]any, error) {
-	t, err := visibleTask(ctx, pool, code)
+// GetHarness is §5.1 work_harness, Task 1.1 §7.1/§7.3: the harness
+// read of one ref. When the caller carries the task's engagement —
+// an explicit claim_id or simply an active claim on the task — the
+// ref is served at the revision the claim PINNED, even after the
+// publisher updates or withdraws the memory (§9: input versions
+// bound by an engagement stay readable to the engaged agent). Every
+// other caller reads the memory's current content (the Task 1.0
+// live read, for browsing). The ref must be part of the contract
+// that governs the caller — the claim's bound version when engaged,
+// else the current version.
+func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID string, claimID *int64, now time.Time) (map[string]any, error) {
+	t, err := visibleTask(ctx, pool, agentID, code)
 	if err != nil {
 		return nil, err
 	}
+
+	// the engagement, if any: an explicit claim_id must be the
+	// caller's active claim on this task; without one, an active
+	// claim of the caller on this task serves the same read
+	var engaged *repository.ClaimRow
+	if claimID != nil {
+		engaged, err = checkClaim(ctx, pool, *claimID, agentID, t.ID, now)
+		if err != nil {
+			return nil, err
+		}
+	} else if engaged, err = repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	} else if err != nil {
+		engaged = nil
+	}
+
+	// the contract that governs this read: bound version when
+	// engaged, current version otherwise
 	var contract task.Contract
-	if err := json.Unmarshal(t.Contract, &contract); err != nil {
+	if engaged != nil {
+		contract, err = contractVersionOf(ctx, pool, t.ID, engaged.ContractVersion)
+		if err != nil {
+			return nil, err
+		}
+	} else if err := json.Unmarshal(t.Contract, &contract); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
-	// the ref must be part of this task's harness_refs
+	// the ref must be part of that contract's harness_refs
 	found := false
 	for _, ref := range contract.HarnessRefs {
 		if ref == refID {
@@ -358,7 +429,34 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 		return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
 			fmt.Sprintf("ref %q is not part of this task", refID))
 	}
-	// read the publisher's CURRENT memory content
+
+	// pinned read: the claim froze a revision of this memory
+	kAny, err := repository.FindKungfuByCodeAnyStatus(ctx, pool, refID)
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if engaged != nil && kAny != nil {
+		if pinned, err := repository.ClaimHarnessRevision(ctx, pool, engaged.ClaimID, kAny.ID); err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		} else if pinned != nil {
+			if *pinned == kAny.Revision {
+				return harnessView(kAny.Code, kAny.Title, kAny.Content, kAny.Revision, true), nil
+			}
+			snapshot, err := repository.FindKungfuRevision(ctx, pool, kAny.ID, *pinned)
+			if err != nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			if snapshot == nil {
+				return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
+					fmt.Sprintf("ref %q: the pinned version is no longer available", refID))
+			}
+			return harnessView(kAny.Code, snapshot.Title, snapshot.Content, snapshot.Revision, true), nil
+		}
+		// no pin (a claim formed before migration 032, or the memory
+		// was deleted at claim time): fall through to the live read
+	}
+
+	// live read: the publisher's CURRENT memory content (Task 1.0)
 	k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, t.PublisherID, refID)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -367,11 +465,20 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 		return nil, errors.New(0, "HARNESS_REF_NOT_FOUND",
 			fmt.Sprintf("ref %q is not part of this task", refID))
 	}
+	return harnessView(k.Code, k.Title, k.Content, k.Revision, false), nil
+}
+
+// harnessView is the work_harness result: the content served, the
+// revision it was served at, and whether that revision was pinned by
+// the caller's engagement.
+func harnessView(refID, title, content string, revision int64, pinned bool) map[string]any {
 	return map[string]any{
-		"ref_id":  k.Code,
-		"title":   k.Title,
-		"content": k.Content,
-	}, nil
+		"ref_id":   refID,
+		"title":    title,
+		"content":  content,
+		"revision": revision,
+		"pinned":   pinned,
+	}
 }
 
 // eventView is one SubmissionEvent in the executor's status output.
@@ -440,7 +547,9 @@ func GetSubmissionStatus(ctx context.Context, pool *pg.Pool, agentID int64, subm
 }
 
 // ListHistory is §8.1 work_history: the agent's submissions, newest
-// first, optionally filtered by task.
+// first, optionally filtered by task. A restricted task stays
+// indistinguishable from a missing one for an out-of-audience
+// caller (§12) — the same TASK_NOT_FOUND, never an empty history.
 func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string, page, pageSize int) ([]SubmissionView, int64, error) {
 	var taskID *int64
 	if code != "" {
@@ -450,6 +559,9 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 		}
 		if err != nil {
 			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+			return nil, 0, err
 		}
 		taskID = &t.ID
 	}

@@ -167,6 +167,7 @@ func seedSubmission(t *testing.T, pool *pg.Pool, code string, agent int64, state
 		TaskID: tr.ID, AgentID: agent, RequestKey: key,
 		Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 		PayloadHash: strings.Repeat("a", 64), Amount: tr2price(t, pool, code),
+		ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert submission: %v", err)
@@ -446,6 +447,7 @@ func TestExpireClaims(t *testing.T) {
 			RequestKey:  fmt.Sprintf("used-%d", cUsed.ClaimID.Int64()),
 			Payload:     []byte(`{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`),
 			PayloadHash: strings.Repeat("b", 64), Amount: cUsed.Amount, ClaimID: cUsed.ClaimID.Int64Ptr(),
+			ContractVersion: cUsed.ContractVersion,
 		}); err != nil {
 			t.Fatalf("insert used submission: %v", err)
 		}
