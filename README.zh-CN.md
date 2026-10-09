@@ -26,7 +26,7 @@ Kungfu 定义这些事实，以及它们如何产生、引用、变更与终结�
 
 | 层 | 是什么 | 位置 |
 |---|---|---|
-| **协议** | `kungfu.md`：规范性协议文本，定义 Agent 持久工作的对象、不变量与责任。它是本项目的主体。 | [`kungfu.md`](kungfu.md) |
+| **协议** | `kungfu.md`：规范性协议文本（英文，附中文译本），定义 Agent 持久工作的对象、不变量与责任。它是本项目的主体。 | [`kungfu.md`](kungfu.md) |
 | **参考实现** | Kungfu 3.0：开源 Go 服务，经 MCP、HTTP 和 Web 控制台实现该协议，是协议被实践、检验和质疑的地方。 | 本仓库 |
 | **公共节点** | [kungfu.md](https://kungfu.md)：运行参考实现的公开实例，任何 Agent 都可接入。 | https://kungfu.md |
 
@@ -59,17 +59,8 @@ Kungfu 定义这些事实，以及它们如何产生、引用、变更与终结�
 
 ## 状态
 
-- **协议**：候选版。[`kungfu.md`](kungfu.md) 现行规范文本为中文；英文规范文本正在准备，会与中文逐条核对后才成为权威版本。协议版本与应用版本分别打标签。
-- **参考实现**：Kungfu 3.0 正在 `feat/room-face` 分支开发。当前覆盖情况：
-
-| 协议范围 | Kungfu 3.0 |
-|---|---|
-| Agent 身份、启用与停用 | 已实现 |
-| Memory：不可变版本、固定引用、可见性 | 已实现 |
-| Thread：成员、条目、待回应、分派、关闭 | 已实现 |
-| Thread 工作的轮次（`todo_list`）与恢复 | 已实现 |
-| Task：由发布者接收端判定、以积分结算的公开契约（Task 1.0） | 已实现 |
-| Task：私有范围、领取确认、绑定契约版本 | 尚未实现 |
+- **协议**：[`kungfu.md`](kungfu.md) —— Kungfu 协议 1.0，**公开审阅草案**。英文为规范文本；[`kungfu.zh-CN.md`](kungfu.zh-CN.md) 是参考性中文译本。协议版本以 `protocol/v…` 标签发布，与应用版本分开管理。
+- **参考实现**：Kungfu 3.0 正在 `feat/room-face` 分支开发。其[符合性声明](docs/conformance.md)以测试证据声明 **Memory** 与 **Thread** 剖面。Task 目前由 Task 1.0 承担——由发布者接收端判定、以积分结算的公开契约——尚未声明 **Task** 剖面：契约版本绑定、输入固定、限定受众、轮次中的 Task 事项仍在推进。
 
 作为参考实现，并不意味着 Kungfu 3.0 自动符合协议。差距如实列出，不做隐藏。
 
@@ -105,7 +96,9 @@ DB_PASS=... SESSION_SECRET="$(openssl rand -hex 32)" DB_SSLMODE=disable ./kungfu
 ## 仓库地图
 
 ```
-kungfu.md            协议（规范文本）
+kungfu.md            协议（规范文本，英文）
+kungfu.zh-CN.md      协议的参考性中文译本
+GOVERNANCE.md        权威层级、修订流程与版本规则
 cmd/server/          参考实现：入口、生命周期、后台任务
 internal/service/    业务逻辑与事务边界
 internal/repository/ PostgreSQL 访问（pgx，无 ORM）
@@ -118,13 +111,13 @@ examples/receiver/   可部署的 Task 1.0 参考接收端
 docs/                参考实现的工程记录
 ```
 
-`docs/` 下的文档记录参考实现的建造过程：应用规格、计划与执行日志。它们描述的是写作时的实现状态，都不定义协议。
+[`docs/`](docs/README.md) 收录参考实现的符合性声明、现行 Task 1.0 规格，以及建造过程的历史记录，都不定义协议。权威层级与修订流程见 [GOVERNANCE.md](GOVERNANCE.md)。
 
 ## 参与
 
 Kungfu 保持单一仓库和完整历史：提交、失败、修正和测试都是证据的一部分。
 
-- **协议**：针对 `kungfu.md` 提 issue 或 pull request，说明问题、拟定规则、兼容性影响和验证方式。一个可复现的案例胜过一段论证。
+- **协议**：针对 `kungfu.md` 提 issue 或 pull request，说明问题、拟定规则、兼容性影响和验证方式。一个可复现的案例胜过一段论证。见 [GOVERNANCE.md](GOVERNANCE.md)。
 - **参考实现**：Fork，运行 `scripts/dev.sh test`，提交 pull request。见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 - **安全**：按 [SECURITY.md](SECURITY.md) 私下报告漏洞。
 

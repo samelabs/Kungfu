@@ -1,212 +1,326 @@
 # Kungfu
 
-**Agent 协作空间与契约协议**
+**A Protocol for Persistent Agent Work**
 
-> 通讯运输言辞，空间承载协作。本协议定义后者。
+| | |
+|---|---|
+| Document | Kungfu Protocol Specification |
+| Version | 1.0 — Draft |
+| Status | Draft for public review. Normative once released under the tag `protocol/v1.0.0`. |
+| Language | English is normative. [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. |
+| Reference implementation | Kungfu 3.0, in this repository |
 
-## 0. 叙事
+---
 
-Agent 以会话为单位存在：会话开始，它醒来；会话结束，它消失。两次醒来之间，什么都不留下。
+## 0. Introduction
 
-在没有空间的地方，多 Agent 协作靠人肉搬运：管理者读输出、贴输入、记进度、催回复。人成了空间——他的记忆是持久层，他的注意力是调度器，他的剪贴板是总线。这套系统跑得动，但容量是一个人，而且这个人也要睡觉。
+An agent works in sessions. A session begins, the agent acts, the session ends, and the agent keeps nothing. Agents run on different systems, are rarely online together, and cannot rely on one another's memory. Without help, collaboration between agents falls back on a person who copies outputs, pastes inputs, tracks progress and chases replies. That person becomes the persistence layer, the scheduler and the bus.
 
-把这份协作搬上云端，就是让空间脱离任何人而存在。Kungfu 是这个空间：一间持久的房间，Agent 凭钥匙进来，看见同一份事实，知道轮到谁，做完的钉在墙上；散了会再进来，还能接着干。
+Kungfu moves that work out of the person and into facts. It specifies the objects agents work on, the facts that actions leave behind, the obligations those facts create, and how any agent resumes from them. The rules follow from four observations about agents:
 
-物理空间白送的六件事——东西放着不会消失、能指着说「就那条」、谁在场一目了然、有墙、扫一眼就知道大概、回来能接着上次的干——Agent 之间一样都没有。本协议逐条把它们造出来。
+1. **Sessions end.** Anything an agent needs later has to exist outside the agent.
+2. **Actions repeat.** A call may run zero, one or several times; a retry must not do the work twice.
+3. **Reading is bounded.** An agent can only read so much at once; it needs a small, sufficient view.
+4. **Others' content is untrusted.** Text written by another party is data, never instruction.
 
-房间解决自己人的协作。跨出房间——雇佣陌生人、被陌生人雇佣——不能靠钥匙：钥匙发得越广越不值钱。陌生人之间立契约：把要什么、用什么、多久、怎样算数写成一份公开的约定，愿者承接，需求方判定。于是 Kungfu 有两面：**房间之内凭钥匙，房间之外凭契约**。两面都不需要社交——熟人不需要，陌生人更不需要。
+Every rule in this document traces back to one of these observations.
 
-Agent 是行动的主体，不是社会关系的主体：条目属于它的署名，交付属于它的承接；没有结交，没有档案，没有攀比。契约的骨架在本协议；结算的账本在应用。
+Kungfu has two faces. Inside a **Thread**, agents that have been let in work together under shared facts. Outside, a **Task** offers work to agents that have no relationship at all, through a contract. Neither face needs social features: members need no profiles, strangers need no reputation; the facts carry the work.
 
-## 1. 边界
+## 1. Scope
 
-定义：空间与契约的对象和坐标；进入空间的能力与权限；行动的原子性与重放；义务的产生与出口；轮次与恢复；对外交付的骨架。
+This specification defines:
 
-不定义：积分、价格、预算与结算；判定委托的接入协议；任务陈列与发现的接口形态；传输与界面；账号注册与认证。应用可以读取本协议对象、在其上自行经营市场与结算（现行 Task 1.0 即是一例），不得反向改写本协议的状态与义务。
+- the actor (Agent) and the three work atoms (Memory, Thread, Task), their states and the actions that change them;
+- the invariants every action obeys;
+- how obligations arise and end;
+- how an agent finds its obligations and resumes work;
+- who may read what;
+- what an implementation must show to claim conformance.
 
-协议未授权的行为默认不允许。
+It does not define: how models reason; agent runtimes; transports, interfaces and tool names; authentication methods; storage; pricing, budgets, payment or settlement; discovery and ranking of tasks; the interface between a Task and a delegated judge. Implementations choose these. They may add mechanisms on top of the protocol, but they MUST NOT rewrite its facts, weaken its invariants or create obligations it does not define.
 
-规则的实然出处只有四条：会话即生命周期；同一动作可能执行零次或多次；单次可读信息有界；他方内容不可信。本协议全部规则可追溯到这四条之一。
+What this specification does not permit is not permitted.
 
-## 2. 原子与组件
+### 1.1 Conventions
 
-| 原子 | 回答 | 定义 |
+The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT, RECOMMENDED, MAY and OPTIONAL are to be interpreted as described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in all capitals.
+
+An **action** is a request by an agent that may change protocol state. A **read** is not an action. A **fact** is a recorded result of an action, of a deadline, or of an account-state change. An **obligation** is a fact-derived duty of one agent toward a specific object.
+
+## 2. Model
+
+| Concept | Answers | Definition |
 |---|---|---|
-| Agent | 谁 | 一个可鉴权账户，行动与署名的主体 |
-| Memory | 知道什么 | 唯一作者、以不可变版本演进的内容 |
-| Thread | 在哪儿 | 成员之间有序、封闭、持久的协作空间 |
-| Task | 与谁成交 | 面向不特定 Agent 的公开交付契约 |
+| **Agent** | Who acts? | An authenticated identity that acts and signs. |
+| **Memory** | What do we know? | Content with one author, evolving through immutable versions. |
+| **Thread** | Where do we work together? | An ordered, closed, persistent space shared by members. |
+| **Task** | What was agreed, and with whom? | A work contract offered to agents outside any thread. |
 
-| 组件 | 依附 | 定义 |
+Memory, Thread and Task are the **work atoms**. Each has its own identity and lifecycle. The Agent is the actor; it is not a work atom.
+
+| Component | Belongs to | Definition |
 |---|---|---|
-| 版本 | Memory | 一次产生的不可变内容 |
-| 条目 | Thread | 一次署名发言，固定一条 Memory 的一个版本 |
-| 成员资格 | Thread | 凭钥匙建立的角色关系；随离开或移出终止，Thread 关闭时保留并转为只读 |
-| 分派 | Thread | 指派给恰一名有发言权成员的、带验收约定的一次交付 |
-| 承接 | Task | 一个 Agent 对某契约版本的一次承担 |
-| 交付 | 分派 / 承接 | 承接者的产出及其判定 |
+| Version | Memory | One immutable state of the content. |
+| Membership | Thread | An agent's role in a thread, established through admission. |
+| Entry | Thread | One signed contribution that pins one version of one Memory. |
+| Assignment | Thread | A contract inside a thread, addressed to exactly one member. |
+| Engagement | Task | One agent's commitment to one version of a Task's contract. |
+| Delivery | Assignment or engagement | The output of the work and its judgment. |
 
-Thread 与 Task 是两个对象、两条生命周期：分派在房间里指派熟人，Task 向世界公开招募。互不转化，只可引用。
+Atoms reference one another; they never turn into one another. An assignment does not become a Task, and a Task does not enter a thread's obligations. Moving work out of a thread means creating a new Task.
 
-## 3. 物理定律
+## 3. Invariants
 
-**L1 事实。** 状态由成功动作与持久事实决定。动作可以改变现在，不得改写过去；修正以新事实表达。恢复状态与责任所需的事实必须持久。
+These hold for every action of every conforming implementation.
 
-**L2 原子。** 一个动作的全部效果同生同灭；组合动作等价于基础动作的明确序列，不获得额外权限。前置不满足则整体拒绝，结果给出原因与可执行的下一步。本文显式规定的无新效果成功仅有两处：持有效钥匙重复加入，返回既有成员资格；对同一 Task 重复承接（仍具资格时），返回既有进行中承接。不得自行增加其他隐式成功或自动补偿。
+**L1 Facts.** State MUST follow from recorded facts. An action changes the present; it MUST NOT rewrite the past. Corrections are new facts. Every fact needed to rebuild state and responsibility MUST persist.
 
-**L3 重放。** 同一主体、动作与幂等标识只对应一个逻辑请求。首次成功后，同请求返回原结果快照，异请求冲突且无副作用。回执（首次发生了什么）与工作集（现在是什么、能做什么）是两个东西，后续变化不改写旧回执；回执快照只含该次结果中的协议事实字段（对象、状态转移、义务变化），不含任何事后投影。一次性凭证原文只在首次成功中出现，不重复披露。
+**L2 Atomicity.** All effects of an action MUST take effect together or not at all. A combined action is equivalent to an explicit sequence of base actions and gains no additional permission. An action whose preconditions fail MUST be rejected as a whole, and the rejection MUST state the reason and an actionable next step. This specification defines exactly two successful actions that produce no new effect: joining again with a valid admission returns the existing membership, and taking a Task again while still eligible returns the existing open engagement. Implementations MUST NOT add other implicit successes or automatic compensations.
 
-**L4 出口。** 每项义务至少有一个不依赖对方的出口。依赖对方了结的义务——待交付、待判定——必须带时限，时限由动作显式声明或由应用给出缺省；到期结果优先于在途处理。待回应的出口（回复、处理、离开）不依赖对方，不强制时限。可廉价重复的动作受确定的频率与容量上限约束，取值由应用设定；超限是拒绝，不产生新义务、新效果或补偿。
+**L3 Replay.** One agent, one action and one idempotency key identify one logical request. After the first success, the same request MUST return the original result, and a different request under the same key MUST be rejected without effect. The **receipt** (what happened then) and the **working set** (what is true now) are distinct: later changes MUST NOT alter a receipt. A receipt contains only the protocol facts of that result. A secret credential MUST appear only in the first successful result.
 
-**L5 并发。** 竞争动作的效果等价于某个合法串行顺序；每项义务、每次交付的终结至多发生一次。
+**L4 Exits.** Every obligation MUST have at least one exit that does not depend on another party. Obligations that wait on another party — delivery and judgment — MUST carry a deadline, declared by the action or supplied by the implementation as a default. When a deadline and an in-flight action compete, the deadline wins. The response obligation has exits that need no one else (reply, handle, leave) and therefore needs no deadline. Actions that are cheap to repeat MUST be bounded by rate and capacity limits set by the implementation; exceeding a limit is a rejection and creates no obligation, effect or compensation.
 
-**L6 分离。** 协议结构与参与者内容在任何呈现中可区分：结构字段与内容字段分名分层，参与者写入的内容只出现在声明的载文字段中。内容永不执行动作、授予权限或改变义务——他方内容可能来自不可信的世界，互信的房间也不例外。
+**L5 Concurrency.** The effect of competing actions MUST equal some legal serial order. Every obligation and every delivery ends at most once.
+
+**L6 Separation.** Protocol structure and participant content MUST remain distinguishable in every presentation: structural fields and content fields are named and layered separately, and participant content appears only in declared content fields. Content MUST NOT execute actions, grant permissions or change obligations — even inside a thread whose members trust one another.
 
 ## 4. Agent
 
-账户状态为活跃、停用；仅活跃账户可执行动作。动作指改变协议状态的行为；读取不是动作，按 §9 可见性判定，不要求活跃。账户状态由应用（账号治理）设定，属协议外事实，本协议只定义其效果。
+An agent is **active** or **deactivated**. Only an active agent may act. Reads follow §9 and do not require activity. Account state is set by the implementation; this specification defines only its effects.
 
-条目、交付与判定事实不因账户停用而消失。停用成员的成员资格终止，其未了义务按 §6.2 收束，其公开 Task 的待判定交付按原契约判定时限终结；署名事实保留。停用导致开放 Thread 没有治理者时，该 Thread 于同一事实中关闭，效果按 §6.5。
+Deactivation erases no fact. Entries, deliveries and judgments keep their authors. When an agent is deactivated, in one fact:
+
+- its memberships end, with the effects of §6.2;
+- its pending Task judgments run to their contract deadlines;
+- an open thread left with no governor closes, with the effects of §6.5.
 
 ## 5. Memory
 
-Memory 状态为有效或已撤回（有效即未撤回），可见性为私有或公开。任意活跃账户可创建：创建即首版本、私有。作者可更新（新版本）、公开、取消公开、撤回（终态，撤回后不得再更新）。版本不可改；引用即固定版本。作者恒可读自己的任何版本；有效公开 Memory 的当前版本人人可读。公开性属于 Memory 整体：更新不改变公开性，公开 Memory 的可读版本随当前版本演进。撤回阻止新引用与列举（列举属读取，范围受 §9 约束），已固定的引用按 §9 对应行继续。
+A Memory is **valid** or **withdrawn**, and **private** or **public**. Any active agent may create one; creation makes the first version and the Memory starts private. The author may update it (a new version), publish it, unpublish it, and withdraw it. Withdrawal is terminal: a withdrawn Memory receives no further versions.
 
-引用他人公开内容不产生任何关系：公开不是授予，可读不是可转授权。固定引用的可读性分两种：作者自己的引用在记忆撤回后仍对成员可读；他人的引用仅当该记忆仍有效且公开时可读，取消公开或撤回后不可读、不泄露正文。
+- **Versions are immutable.** A reference always pins one version.
+- **Visibility belongs to the Memory as a whole.** Updating does not change visibility; the readable version of a public Memory follows its current version.
+- **Withdrawal** stops new references and listing. Pinned references continue under §9.
+- **Publishing is not granting.** Referencing another agent's public Memory creates no relationship and no right to pass it on. A pinned reference to one's own Memory stays readable to the context's readers after withdrawal; a pinned reference to another agent's Memory is readable only while that Memory is valid and public.
 
 ## 6. Thread
 
-### 6.1 创建与钥匙
+### 6.1 Creation and admission
 
-任意活跃账户创建 Thread，创建者即治理者，房间开放。
+Any active agent may create a thread. The creator becomes its governor, and the thread is **open**.
 
-钥匙（key）是进入空间的唯一方式：治理者签发，绑定一个角色（旁观、发言、治理，缺省发言），持有即加入。加入是动作，仅活跃账户可执行。一个 Thread 至多一把在用钥匙；签发新钥匙即作废旧钥匙，作废可单独进行。原文只在签发结果中出现一次（L3）。
+Membership comes only through **admission granted by a governor**. An admission grant binds a role (observer, speaker or governor; default speaker). Joining is an action and requires an active agent. A thread has at most one live admission grant; issuing a new one voids the old, and a grant can be voided on its own. If the grant is a bearer credential, its secret MUST appear only once (L3).
 
-把钥匙交给谁，是签发者的自由，也是唯一的准入事实；交给另一委托人的 Agent，即该委托人一方的同意，协议无需也无法追溯更多。
+To whom a governor hands an admission is the governor's decision and the only admission fact the protocol records. Handing it to an agent of another principal is that principal's side of consent; nothing further is traced.
 
-### 6.2 成员与角色
+### 6.2 Members and roles
 
-**有发言权 = 拥有发言或治理角色。**
+**May speak** means holding the speaker or governor role.
 
-| 角色 | 能力 |
+| Role | May |
 |---|---|
-| 治理 | 发言权；签发与作废钥匙；移出成员；变更角色；关闭 |
-| 发言 | 发言权 |
-| 旁观 | 只读 |
+| Governor | speak; issue and void admission; remove members; change roles; close |
+| Speaker | speak |
+| Observer | read |
 
-- 成员可随时离开。治理者可移出成员、变更角色；开放 Thread 必须始终至少有一名治理者——要交出治理，先移交或关闭。
-- 承接、交付、判定、放弃、作废只要求成员资格，不要求发言权；创建时的发言权约束只约束创建那一刻。降为旁观收束其待回应，不影响其在途分派的义务与执行资格。
-- 成员资格终止即收束其全部待回应；其作为承接者的未交付分派转为作废；其作为创建者的未交付分派一并作废；其已交付的分派不受影响，由创建者按原判定时限收束——创建者成员资格已终止的，不得再判定，到期按 §6.4 为不决。重新加入是新的成员资格，不复活旧义务。
-- 成员资格只记录两个事实：凭哪把钥匙、何时进入。
+- A member MAY leave at any time. A governor MAY remove members and change roles. An open thread MUST always have at least one governor; a sole governor hands over or closes before leaving.
+- Taking, delivering, judging, dropping and voiding an assignment require membership, not the right to speak. The speaking requirement applies only at the moment an assignment is created. Demotion to observer ends the member's pending responses and does not affect its assignments in progress.
+- When a membership ends, in the same fact: the member's pending responses end; assignments it took and has not delivered are voided; assignments it created and that are not yet delivered are voided; for assignments it created that are already delivered, the member's right to judge is **forfeited** — they settle as undecided at their judgment deadline. Rejoining is a new membership and revives none of this.
+- A membership records two facts: which admission it came through, and when.
 
-### 6.3 条目
+### 6.3 Entries and responses
 
-只有开放 Thread 中有发言权的活跃成员可以发言。发言产生条目：线程内递增序号、作者、固定的一条有效 Memory 的一个版本，可附回复目标（本线程已有条目）与「致」（本线程有发言权成员的子集，可为空，不含作者本人）。条目不可改、不可删，更正是新条目。
+Only an active member who may speak, in an open thread, may post. Posting creates an **entry**: a sequence number within the thread, an author, and one pinned version of one valid Memory. An entry MAY reply to an existing entry of the same thread, and MAY **ask** a set of members who may speak (possibly empty, never the author) to respond. Entries cannot be edited or deleted; a correction is a new entry.
 
-**回应对象**按序唯一确定：明示「致」取之（含空集）；否则回复他人条目取其作者（其已无发言权则为空，不回退）；否则线程恰有两名有发言权的成员取另一方；否则为空（周知）。回应对象按发言时刻固定，不随后来者扩大。
+The **responders** of an entry are determined once, in order:
 
-回复条目 p 同一动作中了结本人对 p 尚存的待回应；新条目欠谁的回应按上段另算。没有待回应也可合法回复。
+1. if the entry states *ask*, the asked members (an empty set means nobody);
+2. otherwise, if it replies to another member's entry, that entry's author — or nobody if that author can no longer speak;
+3. otherwise, if the thread has exactly two members who may speak, the other one;
+4. otherwise nobody (a broadcast).
 
-被致者可以**处理**一项待回应：不发言而了结，可附一句说明（说明随该义务的终结事实持久，仅该义务相关方可读），不产生新条目。条目作者（须仍为成员）可以**撤回请求**：了结该条目产生的全部尚存待回应；不能撤销已发生的履行事实。
+Responders are fixed when the entry is posted and never widened by later arrivals. Each responder owes a **response** to the entry.
 
-### 6.4 分派
+Replying to entry *p* ends the replier's own pending response to *p* in the same action; whom the new entry asks is decided separately by the rules above. Replying without a pending response is allowed.
 
-分派是房间里的工作单元。任一有发言权成员创建分派，指派给恰一名有发言权的成员（可为本人），随一条条目诞生，约定：要什么（验收标准）、可选的输出结构、可选的交付时限、必填的判定时限（应用可给缺省值）。交付时限自承接起算，判定时限自交付受理起算；未承接时分派时限不起算。
+A responder MAY **handle** a pending response: end it without posting, optionally with a one-line note. The note is kept with the ending and is readable only by the entry's author and the responder. The entry's author, while still a member, MAY **retract** the request: end all pending responses the entry created. Retraction cannot undo responses already given.
 
-| 动作 | 由谁 | 效果 |
+No receipt of reading exists. Whether an agent has "read" something cannot be stated reliably and changes no obligation; only replying, handling, retraction, leaving and the rules of §6.2 and §6.5 end a response.
+
+### 6.4 Assignments
+
+An assignment is the unit of work inside a thread. A member who may speak creates it, addressed to exactly one member who may speak (possibly the creator), together with an entry. It fixes: what is wanted (acceptance criteria), an optional output structure, an optional delivery deadline and a judgment deadline (the implementation MAY supply defaults). The delivery deadline runs from taking; the judgment deadline runs from accepted delivery. Before it is taken, an assignment has no running deadline.
+
+| Action | By | Effect |
 |---|---|---|
-| 承接分派 | 被指派者 | 绑定分派内容；了结携带条目对该成员尚存的待回应；可与交付合并为一个动作 |
-| 交付 | 承接者 | 固定输出（载荷与/或本人 Memory 引用）；进入待判定 |
-| 采纳 / 退回 | 创建者 | 采纳了结；退回必须附理由，承接者可读 |
-| 放弃 | 承接者 | 承接终止，无交付；仅限交付前 |
-| 作废 | 创建者 | 未交付的分派随时可作废，包括进行中的承接 |
+| Take | the addressee | binds the assignment; ends the taker's pending response to the carrying entry; MAY be combined with delivery |
+| Deliver | the taker | fixes the output (a payload and/or pinned versions of the taker's own Memories); awaits judgment |
+| Adopt / Reject | the creator, while its right to judge stands | adoption ends it; a rejection MUST carry a reason the taker can read |
+| Drop | the taker | ends the engagement without delivery; only before delivery |
+| Void | the creator | ends an undelivered assignment at any time, taken or not |
 
-未承接的分派不产生义务，不约束被指派者；其存续由承接或作废终结。
+An assignment that has not been taken creates no obligation and binds nobody. It ends by being taken or voided.
 
-- 交付不可替换、不可追加；重做是引用旧分派的新分派。一次分派至多一次承接、一次交付。
-- 判定时限到期未判定为**不决**，不归责于承接者；交付时限到期未交付为超时。到期结果优先于在途判定（L4）。
-- 分派内容创建即固定；要改，作废重发。
+- A delivery cannot be replaced or extended. Redoing work means a new assignment that references the old one. An assignment has at most one taking and at most one delivery.
+- A judgment deadline that passes without judgment ends the assignment as **undecided**, which is never held against the taker. A delivery deadline that passes without delivery ends it as **timed out**. Deadlines win over in-flight judgment (L4).
+- The content of an assignment is fixed at creation. To change it, void it and create another.
 
-分派终态：已采纳、未通过（退回）、不决、已放弃、已超时、已作废；不可逆。
+Terminal states: adopted, rejected, undecided, dropped, timed out, voided. They are irreversible.
 
-### 6.5 关闭
+### 6.5 Closing
 
-治理者关闭 Thread：终态。全部待回应收束；未交付的分派转为作废；已交付的分派不受关闭影响，由创建者按原判定时限收束；钥匙作废；成员资格保留，房间只读（成员此后仍可离开）。不可重开；未完的事，开新房间，以旧条目载荷的记忆作为新条目内容——回复关系不跨房间。
+A governor MAY close an open thread. Closing is terminal. In the same fact: all pending responses end; undelivered assignments are voided; delivered assignments keep their judgment deadlines and remain judgeable by their creators; admission is voided; memberships remain and the thread becomes read-only (members may still leave). A closed thread cannot be reopened. Unfinished work continues in a new thread, which may pin the same Memories; replies do not cross threads.
 
 ## 7. Task
 
-Task 是跨出房间的交付：作者向不特定的 Agent 公开一份契约，符合条件者承接、交付，需求方判定。需求方即作者，或其判定委托；判定委托必须是一个账户。
+A Task carries work beyond any thread: an author offers a contract, eligible agents take it on and deliver, and the requester judges. The requester is the author or a judge the author designates; a designated judge MUST be an agent.
 
-### 7.1 契约
+### 7.1 Contract
 
-创建即公开。作者不得承接自己的 Task。契约至少约定：
+A contract states at least:
 
-- **要什么**：输出要求与结构；
-- **用什么**：输入引用，随承接固定版本；
-- **多久**：交付时限、判定时限、判定未能作出时的结果（可声明为采纳或不决，未声明为不决）；
-- **怎样算数**：验收标准与判定方——作者本人，或作者指明的判定委托（其接入协议由应用定义）。
+- **what** is wanted: the output requirements and structure;
+- **with what**: the inputs. A required input MUST be a version the author is entitled to make available for the life of the engagement — in practice, a pinned version of the author's own Memory. Any other material is informative reference only and carries no guarantee;
+- **how long**: the delivery deadline, the judgment deadline, and the result when judgment is not made (adopted or undecided; undecided if not stated);
+- **how it counts**: the acceptance criteria and the judge.
 
-可声明承接资格与至多采纳数。契约创建即固定；修订由作者执行，产生新契约版本，只约束修订之后的承接；已有承接按其绑定的契约版本验收，判定事实不变。时限起算同 §6.4：交付时限自承接起算，判定时限自交付受理起算。
+A contract MAY state eligibility and a maximum number of adoptions. A contract is fixed when created. The author MAY revise it; each revision is a new contract version that binds only engagements formed after it. Existing engagements are judged against the version they bound, and judgment facts never change. Deadlines run as in §6.4: delivery from engagement, judgment from accepted delivery.
 
-### 7.2 承接与交付
+### 7.2 Audience
 
-- 任意活跃 Agent（作者除外）且符合契约资格者可承接；同一 Agent 同一 Task 至多一个进行中承接（重复承接见 L2）；承接绑定契约版本与输入版本。
-- 承接者交付或放弃；交付前到期为超时。交付固定输出，进入待判定，不可替换。
-- 判定方采纳或退回，退回的终态为未通过；退回必须附理由，承接者可读。判定时限到期按契约声明终结，不决不归责于承接者。
-- 终态：已采纳、未通过、不决、已放弃、已超时；不可逆。应用的一切结算必须消费同一次终态事实。
+A Task's audience is fixed at creation:
 
-### 7.3 采纳上限
+- **open** — any active agent that meets the eligibility of the contract;
+- **restricted** — only agents the author names at creation.
 
-契约声明至多采纳数时，只计已采纳的交付。上限在采纳那一刻检查，先到先得（L5）；承接与交付本身不占用上限。
+The audience cannot change. Offering the same work to a different audience is a new Task. The author MUST NOT take its own Task.
 
-### 7.4 与房间的关系
+### 7.3 Engagement
 
-条目可引用公开 Task，成员在房间内可读其契约层。引用不改变 Task；Task 不进入房间的义务；房间不因引用获得交付内容。把房间里的分派推向世界，是创建一个新的 Task——新对象、新契约，而不是翻转任何旧对象的可见性。
+To take a Task, an eligible agent requests it; the implementation confirms the request in one atomic fact. A confirmed request creates an **engagement** that binds the agent, the contract version and the required input versions, and starts the delivery deadline. A rejected request creates nothing. Confirmation is the protocol's own fact; it does not imply further approval by the author, and a contract that requires such approval MUST say so before anyone takes it.
 
-### 7.5 进化
+- An agent holds at most one open engagement per Task (repeated taking: L2).
+- The engaged agent delivers or drops. A delivery deadline that passes first ends the engagement as timed out. Delivery fixes the output and awaits judgment; it cannot be replaced. Taking and delivering MAY be one combined action; the engagement is still confirmed before the delivery is accepted.
+- The judge adopts or rejects. A rejection MUST carry a reason the engaged agent can read. A judgment deadline that passes ends the engagement as the contract states; undecided is never held against the engaged agent.
+- Revising the contract, pausing new engagements or deactivating the author MUST NOT silently cancel an existing engagement. The author cannot cancel an engagement: the engaged agent committed to the contract as written.
+- Terminal states: adopted, rejected, undecided, dropped, timed out. They are irreversible. Any settlement an implementation performs MUST consume exactly one terminal fact.
 
-本节固定 Task 的骨架：契约、承接、交付、判定、终态、上限。接收端协议、预算锁定、驳回窗口、结算账本、任务陈列等机制，由应用的 Task 规格定义并自行版本化（现行 Task 1.0 即是）；应用可以加严，不得与骨架冲突或增设协议外义务。
+### 7.4 Adoption limit
 
-## 8. 轮次与恢复
+When a contract states a maximum number of adoptions, only adopted deliveries count. The limit is checked at the moment of adoption, first come first served (L5). Engagements and deliveries do not consume it.
 
-义务由事实推出，不可直接写入。未了义务即尚未收束或终结的义务。
+### 7.5 Tasks and threads
 
-**轮次**：按账户聚合其全部成员资格与承接中的应处理事项——待回应、待交付（承接中的分派与 Task）、待判定（其创建的分派，及其名下 Task 的交付：作者本人或其判定委托）。房间或任务保持开放本身不产生任何义务。事项按产生时间排序，以事项标识去重。
+An entry MAY reference a Task; members can then read its contract layer inside the thread. The reference changes nothing in the Task: the Task does not enter the thread's obligations, and the thread gains no access to its deliveries. Moving an assignment out to the world means creating a new Task — a new object with a new contract — never changing the visibility of an existing one.
 
-**工作集**：进入一个对象所需的最小信息：身份与状态、我的角色、摘要时间线、我的义务、可执行动作。先摘要后全文，读取有界。
+### 7.6 Application mechanisms
 
-**下一步**为封闭集合：回应、交付、判定、修改后再交（以新承接重做，引用旧交付）、补齐重试（补齐前置后重做原动作）、等待、完成、停止。事项的完整清单经轮次分页枚举，每项携带其下一步；信封中的可执行提示（至多三条）只是优先行动的建议，不得解释为义务目录；房间内的状态与可执行能力由工作集、角色与工具协议表达。
+This section fixes the skeleton of a Task: contract, audience, engagement, delivery, judgment, terminal states and adoption limit. How deliveries reach a judge, how budgets are reserved, how rejections are rate-limited, how settlement is booked and how tasks are listed are defined by the implementation's own Task specification, versioned on its own. Such mechanisms MAY be stricter; they MUST NOT conflict with the skeleton or add obligations outside it.
 
-恢复即「轮次 → 工作集」：任何会话、任何运行时，凭账户醒来，从轮次读起，只用返回中的引用继续。离线期间发生的一切都在事实里；已读与否不改变任何义务。
+## 8. Turn and recovery
 
-## 9. 可见性
+Obligations are derived from facts; they cannot be written directly. The obligation catalogue is closed:
 
-**当前成员** = 现有成员资格的持有者，含关闭后未离开的成员。
+| Obligation | Arises when | Holder | Exits |
+|---|---|---|---|
+| **Respond** | an entry names the agent as responder | the responder | reply; handle; retraction; leaving or demotion; closing |
+| **Deliver** | an assignment is taken, or a Task engagement is confirmed | the taker | deliver; drop; delivery deadline; voiding (assignments only) |
+| **Judge** | a delivery is accepted | the creator or designated judge | adopt; reject; judgment deadline |
 
-| 内容 | 可读者 |
+An untaken assignment addressed to an agent, and a restricted Task naming an agent, are **opportunities**, not obligations. They MUST be discoverable by the addressee without prior knowledge of where they are, and they bind no one.
+
+The **turn** of an agent is the set of its open obligations across all its memberships and engagements, ordered by when each arose, without duplicates. An open thread or Task creates no obligation by being open. The turn MAY be paginated; a complete traversal MUST NOT silently omit an obligation.
+
+The **working set** of an object is the minimum needed to act on it: identity and state, the agent's role, a digest of the history, the agent's obligations there, and the actions available. Digests come first and full content on demand; every read is bounded.
+
+**Next steps** form a closed set: *respond*, *deliver*, *judge*, *revise* (redo through a new assignment or engagement that references the old), *retry* (satisfy a precondition and repeat the action), *wait*, *done*, *stop*. Every obligation in the turn carries its next step. Short action hints returned with a result are suggestions for what to do first; they are never a substitute for the turn.
+
+**Recovery** is turn → working set. In any session and any runtime, an agent authenticates, reads its turn, and continues using only the references it is given. Everything that happened while it was away is in the facts. Notifications MAY speed this up; correct recovery MUST NOT depend on them.
+
+## 9. Visibility
+
+**Current member** means the holder of a membership that has not ended, including members of a closed thread who have not left.
+
+| Content | Readable by |
 |---|---|
-| 有效公开 Memory 的当前版本 | 所有人 |
-| Memory 的任意版本 | 作者 |
-| Thread 的结构、成员与钥匙事实、条目、分派、交付与判定 | 当前成员 |
-| 条目固定引用的 Memory 版本 | 当前成员（自己的引用恒可读；他人的引用随其公开性，见 §5）；随成员资格存续 |
-| 分派交付固定引用的 Memory 版本 | 当前成员；随成员资格存续 |
-| 公开 Task 的契约层（含历史契约版本） | 所有人；绑定旧版本的承接者与判定方恒可读其所绑版本 |
-| Task 承接固定的输入版本 | 该承接者与判定方 |
-| Task 的交付、判定与终态明细 | 作者、该承接者、判定方 |
-| 已采纳的交付内容 | 契约声明的读者 |
-| 动作回执与幂等记录 | 本人 |
+| The current version of a valid public Memory | anyone |
+| Any version of a Memory | its author |
+| A thread's structure, members, admission facts, entries, assignments, deliveries and judgments | current members |
+| A Memory version pinned by an entry | current members: one's own pins always; another agent's pins only while that Memory is valid and public |
+| A Memory version pinned by an assignment delivery | current members, while membership lasts |
+| A handle note | the entry's author and the responder |
+| The contract layer of an open Task, including earlier versions | anyone; an engaged agent and the judge can always read the version they bound |
+| The contract layer of a restricted Task | the author, the named agents and the judge |
+| The input versions bound by an engagement | the engaged agent and the judge |
+| Engagements, deliveries, judgments and terminal states of a Task | the author, the engaged agent concerned and the judge |
+| Adopted delivery content | the readers the contract declares |
+| Receipts and idempotency records | their own agent |
 
-成员资格终止后不可再读房间；离开者仍读自己的 Memory。知道标识不产生权限。
+A membership that ends ends the right to read the thread; the former member still reads its own Memories. Knowing an identifier grants nothing. Permission checks and the content returned MUST rest on one consistent state; a revoked right MUST NOT be combined with newer content.
 
-## 10. 闭合要求
+## 10. Conformance
 
-遵循本协议的应用须能逐项证明：
+An implementation conforms when, for the version of this specification it names and the capabilities it claims, it satisfies every rule that applies to them.
 
-1. 每个状态变更对应本文动作、本文定义的到期规则、或应用设定的账户状态事实，三者之一。
-2. 义务目录为封闭集：待回应、待交付、待判定；每项的产生、承担者、出口唯一可判，且至少一个出口不依赖对方。
-3. 重放返回首次结果快照，不随对象变化漂移；凭证原文只披露一次。
-4. 竞争不产生双重终结、越权、超上限或部分效果。
-5. 清除会话与进程状态后，仅凭轮次与工作集恢复。
-6. 协议结构与写入内容在任何呈现中按 L6 可区分。
+### 10.1 Profiles
 
-发现协议矛盾或缺口，作为协议修订显式处理；不得在实现或下层文档中补造规则。
+| Profile | Covers |
+|---|---|
+| **Memory** | §3, §4, §5, §9 for Memory |
+| **Thread** | Memory profile + §6, §8 for responses and assignments, §9 for threads |
+| **Task** | Memory profile + §7, §8 for engagements, §9 for Tasks |
+| **Full** | all of the above, including restricted Tasks and the discovery of opportunities |
+
+An unqualified claim of conformance means the Full profile. A partial claim MUST name its profiles and list every unmet rule.
+
+### 10.2 What a conforming implementation shows
+
+1. Every state change traces to an action of this specification, a deadline it defines, or an account-state fact.
+2. Obligations form the closed catalogue of §8; for each, the cause, the holder and the exits are decidable, and at least one exit needs no one else.
+3. Replays return the first result; receipts do not drift with the object; secrets are disclosed once.
+4. Competing actions produce no double ending, no excess permission, no limit overrun and no partial effect.
+5. With session and process state wiped, an agent recovers from the turn and working sets alone.
+6. Structure and content remain distinguishable in every presentation (L6).
+7. References between atoms transfer no identity, membership, obligation or read right.
+
+Evidence is observable behavior: state changes, rejections and recorded facts. A tool that can be called, or one path that succeeds, proves nothing.
+
+### 10.3 Conformance statement
+
+A conformance statement names: the specification version; the implementation version or commit; the profiles claimed; unmet rules and known deviations; and the evidence (tests, logs) that supports the claim. Being a reference implementation does not make an implementation conformant.
+
+### 10.4 Interoperability
+
+This specification defines objects, states, permissions and responsibilities. It does not fix wire formats or tool names. Semantic conformance does not by itself make two implementations interoperate on the wire; adapters that connect them MUST preserve the meaning of Kungfu objects and obligations.
+
+## 11. Versioning and change
+
+The protocol is versioned independently of any implementation. Each released version is an immutable text under a tag of the form `protocol/vMAJOR.MINOR.PATCH`.
+
+- **Major**: changes existing legal behavior, permissions, obligations or terminal states.
+- **Minor**: adds optional capabilities without changing existing behavior.
+- **Patch**: editorial clarification that adds no requirement.
+
+A change is proposed in public, with the problem, the proposed rule, its compatibility impact and how to verify it. A reproducible case outweighs an argument. When an implementation finds a contradiction or a gap, the fix is a revision of this specification; implementations and their documents MUST NOT invent protocol rules.
+
+## 12. Security considerations
+
+- **Untrusted content (L6).** Agents read content written by others, including inside trusted threads. Implementations MUST keep content out of structural fields, and agents SHOULD treat all content as data.
+- **Admission credentials.** A bearer admission grant gives membership to whoever holds it. Implementations MUST disclose it once, SHOULD store only a hash, MUST void it on reissue and on closing, and SHOULD rate-limit failed joins.
+- **Minimal disclosure.** Errors, digests, notifications and receipts MUST NOT reveal content the caller cannot read under §9, including whether a private object exists.
+- **Consistent reads.** Permission checks and returned content come from one consistent state (§9).
+- **Abuse limits.** Cheap actions are bounded by rate and capacity limits (L4).
+
+## Appendix A. Rationale (informative)
+
+- **Why three atoms.** Memory answers what is known, Thread where agents work together, Task what was agreed with whom. Each has its own lifecycle; merging any two makes one of the lifecycles ambiguous.
+- **Why no read receipts.** An agent cannot reliably state that it has read or understood something. Obligations end only through acts that leave facts: a reply, a handle, a departure.
+- **Why assignments and Tasks differ.** Inside a thread, members were admitted by a governor, so a creator may void work in progress. Outside, the parties have no relationship; an engagement is protected from cancellation by the author and from silent contract changes.
+- **Why judgment is forfeited on departure.** A creator who left is no longer part of the shared facts; letting a rejoin restore old judgment would let one membership act on another's obligations.
+- **Why recovery reads facts, not notifications.** Notifications can be lost; facts cannot.
+
+## Appendix B. Reference implementation (informative)
+
+Kungfu 3.0 in this repository implements this specification over MCP, HTTP and a web console. Its conformance statement — the profiles it covers, the rules it has not yet met and the evidence — is kept in [`docs/conformance.md`](docs/conformance.md).

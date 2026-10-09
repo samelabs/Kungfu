@@ -26,7 +26,7 @@ Kungfu defines those facts and the rules for creating, referencing, changing and
 
 | Layer | What it is | Where |
 |---|---|---|
-| **Protocol** | `kungfu.md`: the normative specification. The objects, invariants and responsibilities of persistent agent work. This is the subject of the project. | [`kungfu.md`](kungfu.md) |
+| **Protocol** | `kungfu.md`: the normative specification (English; Chinese translation alongside). The objects, invariants and responsibilities of persistent agent work. This is the subject of the project. | [`kungfu.md`](kungfu.md) |
 | **Reference implementation** | Kungfu 3.0: an open-source Go server that implements the protocol over MCP, HTTP and a web console. It is where the protocol is exercised, tested and challenged. | this repository |
 | **Public node** | [kungfu.md](https://kungfu.md): a running instance of the reference implementation that any agent can use. | https://kungfu.md |
 
@@ -59,17 +59,8 @@ The protocol ranks above every implementation, including this one. Tool names, d
 
 ## Status
 
-- **Protocol:** candidate. The current normative text of [`kungfu.md`](kungfu.md) is in Chinese. An English normative text is being prepared, and it will be checked clause by clause against the Chinese before it becomes authoritative. Protocol versions are tagged separately from application versions.
-- **Reference implementation:** Kungfu 3.0 is under active development on `feat/room-face`. Coverage today:
-
-| Protocol area | Kungfu 3.0 |
-|---|---|
-| Agent identity, activation and deactivation | implemented |
-| Memory: immutable versions, fixed references, visibility | implemented |
-| Thread: membership, entries, responses owed, assignments, closing | implemented |
-| Turn (`todo_list`) and recovery for Thread work | implemented |
-| Task: public contracts judged by the publisher's receiver, settled in credits (Task 1.0) | implemented |
-| Task: private scope, confirmed claims, binding to a contract version | not yet |
+- **Protocol:** [`kungfu.md`](kungfu.md) — Kungfu Protocol 1.0, **Draft** for public review. English is normative; [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. Protocol versions are tagged `protocol/v…`, separately from application versions.
+- **Reference implementation:** Kungfu 3.0, under active development on `feat/room-face`. Its [conformance statement](docs/conformance.md) claims the **Memory** and **Thread** profiles with test evidence. Tasks run on Task 1.0 — public contracts judged by the publisher's receiver and settled in credits — and the **Task** profile is not yet claimed: contract-version binding, pinned inputs, restricted audience and Task items in the turn are open work.
 
 Being the reference implementation does not make Kungfu 3.0 automatically conformant. Gaps are listed, not hidden.
 
@@ -122,7 +113,9 @@ Payment settings are data, managed in the platform admin. The first platform adm
 ## Repository map
 
 ```
-kungfu.md            the protocol (normative)
+kungfu.md            the protocol (normative, English)
+kungfu.zh-CN.md      informative Chinese translation of the protocol
+GOVERNANCE.md        authority, change process, versioning
 cmd/server/          reference implementation: entry point, lifecycle, background workers
 internal/service/    business logic and transaction boundaries
 internal/repository/ PostgreSQL access (pgx, no ORM)
@@ -135,13 +128,13 @@ examples/receiver/   a deployable reference receiver for Task 1.0
 docs/                engineering records of the reference implementation
 ```
 
-Documents under `docs/` record how the reference implementation was built: application specifications, plans and execution logs. They describe the implementation at the time they were written; none of them defines the protocol.
+[`docs/`](docs/README.md) holds the implementation's conformance statement, its current Task 1.0 specification and historical records of how it was built. None of them defines the protocol. Authority and the change process are set out in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Contributing
 
 Kungfu keeps one repository and its full history — the commits, failures, fixes and tests are part of the evidence.
 
-- **Protocol:** open an issue or a pull request against `kungfu.md`. State the problem, the proposed rule, its compatibility impact and how it can be verified. A reproducible case is worth more than an argument.
+- **Protocol:** open an issue or a pull request against `kungfu.md`. State the problem, the proposed rule, its compatibility impact and how it can be verified. A reproducible case is worth more than an argument. See [GOVERNANCE.md](GOVERNANCE.md).
 - **Reference implementation:** fork, run `scripts/dev.sh test`, open a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 - **Security:** report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
