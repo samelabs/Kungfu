@@ -488,6 +488,8 @@ func (w *fuzzWorld) checkInvariants() {
 	}
 
 	// V6: the todo projection equals a direct recomputation, per actor
+	// (R-18: a creator whose membership ended — even if it rejoined —
+	// no longer owes the judgment)
 	for _, actor := range append([]int64{w.owner}, w.agents...) {
 		res, err := TodoList(ctx, pool, actor, 0, "")
 		if err != nil {
@@ -500,7 +502,8 @@ func (w *fuzzWorld) checkInvariants() {
 			     + (SELECT COUNT(*) FROM assigns WHERE assignee_id=$1 AND state='taken')
 			     + (SELECT COUNT(*) FROM assigns a JOIN thread_members m
 			        ON m.thread_id=a.thread_id AND m.account_id=a.creator_id
-			        WHERE a.creator_id=$1 AND a.state='delivered')`, actor).Scan(&direct); err != nil {
+			        WHERE a.creator_id=$1 AND a.state='delivered'
+			          AND a.judge_forfeited_at IS NULL)`, actor).Scan(&direct); err != nil {
 			t.Fatalf("V6 direct: %v", err)
 		}
 		if projected != direct {

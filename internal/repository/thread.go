@@ -457,6 +457,9 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 		botID); err != nil {
 		return nil, err
 	}
+	if err := ForfeitJudgmentsForCreator(ctx, q, 0, botID); err != nil {
+		return nil, err
+	}
 	if _, err := q.Exec(ctx,
 		`DELETE FROM thread_members WHERE account_id = $1`, botID); err != nil {
 		return nil, err
@@ -689,18 +692,19 @@ func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq
 // only when the pinned version is readable to members per §5/§9
 // (own pin: always; others' public pin: while public and valid).
 type ThreadEntryFull struct {
-	ID        int64
-	Seq       int64
-	AuthorID  int64
-	Author    string
-	Memory    string
-	Revision  int64
-	Readable  bool
-	Content   *string
-	Summary   string
-	ReplyTo   *int64
-	Asked     []int64
-	CreatedAt string
+	ID         int64
+	Seq        int64
+	AuthorID   int64
+	Author     string
+	Memory     string
+	Revision   int64
+	Readable   bool
+	Content    *string
+	Summary    string
+	ReplyTo    *int64 // entry id of the reply target (same identifier as the timeline)
+	ReplyToSeq *int64 // its seq, for human reading
+	Asked      []int64
+	CreatedAt  string
 }
 
 // ExpandThreadEntries loads full entries by id within one thread.
@@ -712,7 +716,8 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		       CASE WHEN k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')
 		            THEN CASE WHEN e.memory_revision = k.revision
 		                 THEN k.content ELSE mr.content END END,
-		       COALESCE(e.summary, ''), (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
+		       COALESCE(e.summary, ''), e.reply_to_id,
+		       (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM thread_entries e
 		JOIN tb_bots b ON b.id = e.author_id
 		JOIN tb_kungfus k ON k.id = e.memory_id
@@ -730,7 +735,7 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		var asked []byte
 		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
 			&it.Memory, &it.Revision, &it.Readable, &it.Content,
-			&it.Summary, &it.ReplyTo, &asked, &it.CreatedAt); err != nil {
+			&it.Summary, &it.ReplyTo, &it.ReplyToSeq, &asked, &it.CreatedAt); err != nil {
 			return nil, err
 		}
 		it.Asked = parseAskedJSON(asked)
@@ -806,6 +811,9 @@ type AssignmentRow struct {
 	TakenAt      *string
 	DeliverDueAt *string
 	CreatedAt    string
+	// JudgeForfeited: the creator's membership ended after this
+	// assignment was created; it can never be judged (R-18)
+	JudgeForfeited bool
 }
 
 // FindAssignment loads one assign (any state) by id.
@@ -815,12 +823,13 @@ func FindAssignment(ctx context.Context, q pg.Querier, id int64) (*AssignmentRow
 		       output_schema::text, deliver_due_s, judge_due_s, state,
 		       to_char(taken_at, 'YYYY-MM-DD HH24:MI:SS'),
 		       to_char(deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'),
-		       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS')
+		       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS'),
+		       judge_forfeited_at IS NOT NULL
 		FROM assigns WHERE id = $1`, id)
 	var a AssignmentRow
 	if err := row.Scan(&a.ID, &a.ThreadID, &a.EntryID, &a.CreatorID, &a.AssigneeID,
 		&a.Requirements, &a.OutputSchema, &a.DeliverDueS, &a.JudgeDueS, &a.State,
-		&a.TakenAt, &a.DeliverDueAt, &a.CreatedAt); err != nil {
+		&a.TakenAt, &a.DeliverDueAt, &a.CreatedAt, &a.JudgeForfeited); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -883,7 +892,8 @@ func JudgeAssignmentCAS(ctx context.Context, q pg.Querier,
 	assignID, creatorID int64, verdict, reason string) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE assigns SET state = $3, closed_at = NOW()
-		WHERE id = $1 AND creator_id = $2 AND state = 'delivered'`,
+		WHERE id = $1 AND creator_id = $2 AND state = 'delivered'
+		  AND judge_forfeited_at IS NULL`,
 		assignID, creatorID, map[string]string{"adopt": "adopted", "reject": "rejected"}[verdict])
 	if err != nil {
 		return false, err
@@ -936,6 +946,18 @@ func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// ForfeitJudgmentsForCreator permanently removes the creator's right to
+// judge its delivered assigns when its membership ends (§6.2, R-18).
+// threadID 0 covers every room (deactivation). Rejoining never clears
+// the mark; the judgment deadline still settles them as undecided.
+func ForfeitJudgmentsForCreator(ctx context.Context, q pg.Querier, threadID, accountID int64) error {
+	_, err := q.Exec(ctx, `
+		UPDATE assigns SET judge_forfeited_at = NOW()
+		WHERE creator_id = $2 AND state = 'delivered' AND judge_forfeited_at IS NULL
+		  AND ($1 = 0 OR thread_id = $1)`, threadID, accountID)
+	return err
 }
 
 // VoidUndeliveredAssigns closes every pre-delivery assign of a room
@@ -1080,7 +1102,8 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		 JOIN thread_entries e ON e.id = a.entry_id
 		 JOIN tb_bots b ON b.id = a.assignee_id
 		 JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
-		 WHERE a.creator_id = $1 AND a.state = 'delivered' AND ($2 = 0 OR a.thread_id = $2))
+		 WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
+		   AND ($2 = 0 OR a.thread_id = $2))
 		) items
 		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
 		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
@@ -1318,7 +1341,7 @@ func ThreadOpenItemsCounts(ctx context.Context, q pg.Querier, accountID int64) (
 		    UNION ALL
 		    SELECT a.thread_id FROM assigns a
 		    JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
-		    WHERE a.creator_id = $1 AND a.state = 'delivered'
+		    WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
 		) t GROUP BY thread_id`, accountID)
 	if err != nil {
 		return nil, err
@@ -1379,4 +1402,20 @@ func ThreadOpenInviteCounts(ctx context.Context, q pg.Querier, accountID int64) 
 		out[id] = n
 	}
 	return out, rows.Err()
+}
+
+// AssignmentDeliveryMemories returns the delivery's fixed memory
+// bindings (JSON array of {name, code, revision, checksum}); found is
+// false when the assignment has no delivery.
+func AssignmentDeliveryMemories(ctx context.Context, q pg.Querier, assignID int64) (string, bool, error) {
+	var memories string
+	err := q.QueryRow(ctx,
+		`SELECT memories_json::text FROM assign_deliveries WHERE assign_id = $1`, assignID).Scan(&memories)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return memories, true, nil
 }

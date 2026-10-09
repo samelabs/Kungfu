@@ -33,20 +33,50 @@ func speechRight(role string) bool {
 	return role == repository.ThreadRoleGovernor || role == repository.ThreadRoleSpeaker
 }
 
-// ThreadPost is the single speaking action (§6.3): one entry, its
-// response objects computed once by the ordered rules and frozen,
-// and — when it replies — the CAS that ends the speaker's own pending
-// receipt toward the replied entry in the same transaction.
-func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode string,
-	content, memoryCode, summary string, replyTo *int64, ask []int64, assign *AssignSpec, idemKey string) (map[string]any, error) {
+// threadPostRequestHashes returns the replay identity of a thread_post.
+// The current identity is SHA-256 over a typed JSON document: every
+// field has its own boundary and type, so no free-text field (content,
+// summary, requirements) can shift into another, and ask keeps the
+// difference between absent (null: default rules) and explicit empty
+// ([]: notify only). The legacy identity is the pre-030 delimiter
+// encoding; it is only ever compared against receipts stored before
+// the upgrade, whose original requests were not kept.
+func threadPostRequestHashes(threadCode, content, memoryCode, summary string,
+	replyTo *int64, ask []int64, assign *AssignSpec) (string, string) {
 
-	// The replay identity covers every semantic input; ask presence
-	// (nil vs explicit empty) is part of it — ask:[] is "notify only",
-	// absent ask falls through to the default rules.
+	var askSorted []int64
+	if ask != nil {
+		askSorted = append([]int64{}, ask...)
+		sort.Slice(askSorted, func(i, j int) bool { return askSorted[i] < askSorted[j] })
+	}
+	type assignID struct {
+		To           int64  `json:"to"`
+		Requirements string `json:"requirements"`
+		OutputSchema string `json:"output_schema"`
+		DeliverDueS  int64  `json:"deliver_due_s"`
+		JudgeDueS    int64  `json:"judge_due_s"`
+	}
+	var assignDoc *assignID
+	if assign != nil {
+		assignDoc = &assignID{assign.To, assign.Requirements, assign.OutputSchema,
+			assign.DeliverDueS, assign.JudgeDueS}
+	}
+	doc, _ := json.Marshal(struct {
+		V       int       `json:"v"`
+		Thread  string    `json:"thread"`
+		Content string    `json:"content"`
+		Memory  string    `json:"memory"`
+		Summary string    `json:"summary"`
+		ReplyTo *int64    `json:"reply_to"`
+		Ask     *[]int64  `json:"ask"`
+		Assign  *assignID `json:"assign"`
+	}{2, threadCode, content, memoryCode, summary, replyTo, askPtr(askSorted, ask != nil), assignDoc})
+	current := sha256Hex(string(doc))
+
+	// legacy (v1) encoding, verbatim
 	askForHash := []int64{}
 	if ask != nil {
-		askForHash = append([]int64(nil), ask...)
-		sort.Slice(askForHash, func(i, j int) bool { return askForHash[i] < askForHash[j] })
+		askForHash = askSorted
 	}
 	askMarker := "absent"
 	if ask != nil {
@@ -63,12 +93,33 @@ func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode stri
 			strconv.FormatInt(assign.DeliverDueS, 10), strconv.FormatInt(assign.JudgeDueS, 10),
 		}, ",")
 	}
-	requestHash := sha256Hex(strings.Join([]string{
+	legacy := sha256Hex(strings.Join([]string{
 		"v1", threadCode, content, memoryCode, summary, replyMarker, askMarker,
 		numsJoin(askForHash), assignForHash,
 	}, "\x1f"))
+	return current, legacy
+}
 
-	return runThreadAction(ctx, pool, botID, "thread_post", idemKey, requestHash,
+func askPtr(sorted []int64, present bool) *[]int64 {
+	if !present {
+		return nil
+	}
+	if sorted == nil {
+		sorted = []int64{}
+	}
+	return &sorted
+}
+
+// ThreadPost is the single speaking action (§6.3): one entry, its
+// response objects computed once by the ordered rules and frozen,
+// and — when it replies — the CAS that ends the speaker's own pending
+// receipt toward the replied entry in the same transaction.
+func ThreadPost(ctx context.Context, pool *pg.Pool, botID int64, threadCode string,
+	content, memoryCode, summary string, replyTo *int64, ask []int64, assign *AssignSpec, idemKey string) (map[string]any, error) {
+
+	requestHash, legacyHash := threadPostRequestHashes(threadCode, content, memoryCode, summary, replyTo, ask, assign)
+
+	return runThreadActionCompat(ctx, pool, botID, "thread_post", idemKey, requestHash, legacyHash,
 		func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error) {
 			if err := requireActiveAccount(ctx, tx, botID); err != nil {
 				return threadActionOutcome{}, err

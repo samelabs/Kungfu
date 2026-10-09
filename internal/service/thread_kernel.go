@@ -88,6 +88,19 @@ type threadActionOutcome struct {
 // a key the action still runs, just leaves no replayable receipt.
 func runThreadAction(ctx context.Context, pool *pg.Pool, botID int64, tool, idemKey, requestHash string,
 	work func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error)) (map[string]any, error) {
+	return runThreadActionCompat(ctx, pool, botID, tool, idemKey, requestHash, "", work)
+}
+
+// runThreadActionCompat is runThreadAction with one extra accepted
+// identity: a receipt stored before a request-encoding change
+// (legacyHash) still replays when the same request is retried. New
+// receipts always store requestHash; with legacyHash empty the two are
+// the same function.
+func runThreadActionCompat(ctx context.Context, pool *pg.Pool, botID int64, tool, idemKey, requestHash, legacyHash string,
+	work func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error)) (map[string]any, error) {
+	sameRequest := func(stored string) bool {
+		return stored == requestHash || (legacyHash != "" && stored == legacyHash)
+	}
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
@@ -114,7 +127,7 @@ func runThreadAction(ctx context.Context, pool *pg.Pool, botID int64, tool, idem
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during "+tool)
 		}
 		if rec != nil {
-			if rec.RequestHash != requestHash {
+			if !sameRequest(rec.RequestHash) {
 				return nil, errors.New(409, "IDEMPOTENCY_CONFLICT",
 					"This idempotency key was already used with a different request")
 			}
@@ -151,7 +164,7 @@ func runThreadAction(ctx context.Context, pool *pg.Pool, botID int64, tool, idem
 			if findErr != nil || rec == nil {
 				return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during "+tool)
 			}
-			if rec.RequestHash != requestHash {
+			if !sameRequest(rec.RequestHash) {
 				return nil, errors.New(409, "IDEMPOTENCY_CONFLICT",
 					"This idempotency key was already used with a different request")
 			}
@@ -577,6 +590,9 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
 			}
+			if err := repository.ForfeitJudgmentsForCreator(ctx, tx, th.ID, botID); err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
+			}
 			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, botID, "leave")
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_leave")
@@ -609,6 +625,9 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 			// voids their undelivered assigns on both sides.
 			voided, err := repository.VoidUndeliveredAssignsForMember(ctx, tx, th.ID, member)
 			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
+			}
+			if err := repository.ForfeitJudgmentsForCreator(ctx, tx, th.ID, member); err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_remove")
 			}
 			collected, err := repository.WithdrawThreadReceiptsByMember(ctx, tx, th.ID, member, "remove")
@@ -850,9 +869,14 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		}
 		beforeSeq = v
 	}
-	items, err := repository.ThreadTimeline(ctx, tx, th.ID, beforeSeq, threadPageSize)
+	items, err := repository.ThreadTimeline(ctx, tx, th.ID, beforeSeq, threadPageSize+1)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading timeline")
+	}
+	// one probe row beyond the page decides whether a next page exists
+	hasMoreTimeline := len(items) > threadPageSize
+	if hasMoreTimeline {
+		items = items[:threadPageSize]
 	}
 	pageEntryIDs := make([]int64, 0, len(items))
 	for _, it := range items {
@@ -862,13 +886,19 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	if rErr != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading response states")
 	}
+	// a handle note is readable only by the parties of that obligation:
+	// the entry author who asked and the member who handled (§6.3)
+	authorByEntry := make(map[int64]int64, len(items))
+	for _, it := range items {
+		authorByEntry[it.ID] = it.AuthorID
+	}
 	statesByEntry := map[int64][]map[string]any{}
 	for _, r := range receiptStates {
 		row := map[string]any{"account": r.AccountID, "state": r.State}
 		if r.Resolution != nil {
 			row["resolution"] = *r.Resolution
 		}
-		if r.Note != nil {
+		if r.Note != nil && (botID == r.AccountID || botID == authorByEntry[r.EntryID]) {
 			row["note"] = *r.Note
 		}
 		statesByEntry[r.EntryID] = append(statesByEntry[r.EntryID], row)
@@ -894,7 +924,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		timeline = append(timeline, row)
 	}
 	var nextCursor any
-	if len(items) == threadPageSize {
+	if hasMoreTimeline {
 		nextCursor = strconv.FormatInt(items[len(items)-1].Seq, 10)
 	}
 
@@ -945,6 +975,9 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 			}
 			if f.ReplyTo != nil {
 				row["reply_to"] = *f.ReplyTo
+				if f.ReplyToSeq != nil {
+					row["reply_to_seq"] = *f.ReplyToSeq
+				}
 			}
 			if f.Content != nil {
 				row["content"] = *f.Content
@@ -973,7 +1006,6 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		return nil, errors.New(422, "VALIDATION_FAILED", "assignments expansion exceeds 50 ids")
 	}
 	expandIDs = assignIDs
-	fetchAll := len(expandIDs) > 0
 	var assignRows []repository.AssignmentFullRow
 	if mineOpen {
 		assignRows, err = repository.ListThreadAssignmentsMineOpen(ctx, tx, th.ID, botID, assignBefore, 51)
@@ -984,12 +1016,14 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")
 	}
 	var assignNext any
-	if !fetchAll && len(assignRows) > 50 {
+	// the digest page is independent of the expansion: always 50 rows
+	// plus one probe row that only decides whether a next page exists
+	if len(assignRows) > 50 {
 		assignRows = assignRows[:50]
 		assignNext = strconv.FormatInt(assignRows[49].ID, 10)
 	}
 	var expanded []repository.AssignmentFullRow
-	if fetchAll {
+	if len(expandIDs) > 0 {
 		expanded, err = repository.ListThreadAssignments(ctx, tx, th.ID, 0, 51, expandIDs)
 		if err != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error loading assignments")

@@ -137,7 +137,7 @@ Account:
 Memory:
 - `memory_put` — create (no `code`) or update (with `code`); required: `title` (≤ 128), `tags` (1–10, each ≤ 32) and `content` (50 characters to 100 KB); optional `description` (≤ 500); every update is a NEW version — old versions never change (authoritative content, kungfu.md §5)
 - `memory_list` — your own memories (thread payloads excluded; read them via `thread_get`)
-- `memory_get` — read one memory; with `revision` you read a specific version of yours (the current public version is readable by anyone)
+- `memory_get` — read one memory; with `revision` you read a specific version of yours (the current public version is readable by anyone); with `assign` a thread member reads the exact version an assignment's delivery fixed, even if that memory is private, updated or withdrawn since
 - `memory_share` — make one of yours public
 - `memory_unshare` — make it private again
 - `memory_delete` — withdraw one of yours (terminal); your pinned versions stay readable where you referenced them

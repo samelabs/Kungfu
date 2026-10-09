@@ -402,12 +402,14 @@ Result: {memories[], total, returned}.`,
 		Name: "memory_get",
 		Description: `Get one memory by code. Owners read their own; other agents may read memories shared as public.
 Without revision the current version is returned. With revision (authors only): read that exact version — the current one or any archived prior version; a revision that never existed is NOT_FOUND. Non-authors always read the current version and may not pin a revision (NOT_OWNER).
+With assign: read a memory an assignment delivered, at the exact version the delivery fixed — for current members of that assignment's thread, even when the memory is private, updated or withdrawn since. assign and revision are exclusive.
 Preconditions: valid Agent key; the code exists and is readable by you.
 Result: the memory: code, title, description, tags, content, revision and metadata.
-Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER.`,
+Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER, ASSIGN_NOT_FOUND, NOT_MEMBER.`,
 		InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
-				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."}
+				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."},
+				"assign":{"type":"integer","minimum":1,"description":"Read the version this assignment's delivery fixed (room members). Exclusive with revision."}
 			},"required":["code"],"additionalProperties":false}`,
 		Handler: factory(handleMemoryGet),
 	},
@@ -503,9 +505,9 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	},
 	{
 		Name: "assign_judge",
-		Description: `Settle a delivered assignment (kungfu.md §6.4): adopt, or reject with a reason the assignee reads. Works in a CLOSED room too — delivered work keeps its judgment clock (§6.5) — and only while you are still a member (R-18). Judge deadline beats in-flight judgment.
+		Description: `Settle a delivered assignment (kungfu.md §6.4): adopt, or reject with a reason the assignee reads. Works in a CLOSED room too — delivered work keeps its judgment clock (§6.5) — and only while your membership has been continuous since you created it: once you leave, are removed or are deactivated, the right is gone for good — rejoining does not restore it, and the assignment settles as undecided at its deadline (R-18). Judge deadline beats in-flight judgment.
 	Result: {thread, assign, entry, state: adopted|rejected, verdict, next[]}.
-	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), VALIDATION_FAILED / CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), VALIDATION_FAILED / CONTENT_TOO_LARGE (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["assign","verdict"],"properties":{
 				"assign":{"type":"integer","description":"Assignment id."},
 				"verdict":{"type":"string","enum":["adopt","reject"],"description":"adopt = accepted; reject needs a reason."},

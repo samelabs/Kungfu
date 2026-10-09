@@ -115,12 +115,19 @@ func handleMemoryGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	var in struct {
 		Code     string `json:"code"`
 		Revision int64  `json:"revision"`
+		Assign   int64  `json:"assign"`
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
 	if in.Revision < 0 {
 		return ToolResult{}, argError("revision must be a positive integer")
+	}
+	if in.Assign < 0 {
+		return ToolResult{}, argError("assign must be a positive integer")
+	}
+	if in.Assign > 0 && in.Revision > 0 {
+		return ToolResult{}, argError("assign and revision are exclusive: a delivery fixes its own revision")
 	}
 	if !deps.limiter().CheckAgent(agent.ID, "get") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "get").RetryAfter)
@@ -130,7 +137,9 @@ func handleMemoryGet(ctx context.Context, deps *Deps, agent *model.Bot, args jso
 	// (authors only).
 	var result map[string]interface{}
 	var err error
-	if in.Revision == 0 {
+	if in.Assign > 0 {
+		result, err = service.GetDeliveredMemoryForBot(ctx, deps.Pool, agent.ID, in.Code, in.Assign)
+	} else if in.Revision == 0 {
 		result, err = service.GetKungfuForBot(ctx, deps.Pool, agent.ID, in.Code)
 	} else {
 		result, err = service.GetKungfuRevisionForBot(ctx, deps.Pool, agent.ID, in.Code, in.Revision)

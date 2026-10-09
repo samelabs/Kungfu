@@ -329,6 +329,10 @@ func AssignJudge(ctx context.Context, pool *pg.Pool, botID, assignID int64,
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
 					"Assignment is not awaiting judgment (state: "+a.State+")")
 			}
+			if a.JudgeForfeited {
+				return threadActionOutcome{}, errors.New(403, "NOT_YOURS",
+					"Your right to judge this assignment ended when your membership ended; it settles as undecided at its deadline")
+			}
 			ok, err := repository.JudgeAssignmentCAS(ctx, tx, a.ID, botID, verdict, reason)
 			if err != nil || !ok {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE", "Assignment is not awaiting judgment")
