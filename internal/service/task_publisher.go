@@ -66,9 +66,14 @@ func lockOwnedTask(ctx context.Context, q pg.Querier, publisherID int64, code st
 	return t, nil
 }
 
-// marshalContract stores the effective (WithDefaults) contract JSON.
+// marshalContract stores the effective (WithDefaults) contract JSON,
+// the audience in canonical (sorted) name order — equal sets are
+// equal JSONB, which the §7.2 immutability audit relies on.
 func marshalContract(c task.Contract) ([]byte, error) {
-	b, err := json.Marshal(c.WithDefaults())
+	stored := c.WithDefaults()
+	aud := stored.NormalizedAudience()
+	stored.Audience = &aud
+	b, err := json.Marshal(stored)
 	if err != nil {
 		return nil, fmt.Errorf("marshal contract: %w", err)
 	}
@@ -101,7 +106,8 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 
 // taskView projects a task row plus §4 derived amounts. The contract
 // IS the task's one contract column at its current version (M1);
-// contract_version names that version (§7.1).
+// contract_version names that version (§7.1). audience names the
+// §7.2 audience with its resolved agent names (sorted, as stored).
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	var contract task.Contract
 	view := map[string]interface{}{}
@@ -109,6 +115,12 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 		view["title"] = contract.Title
 		view["price"] = contract.Price
 		view["contract"] = json.RawMessage(t.Contract)
+		aud := contract.NormalizedAudience()
+		audView := map[string]interface{}{"type": aud.Type}
+		if len(aud.Agents) > 0 {
+			audView["agents"] = aud.Agents
+		}
+		view["audience"] = audView
 	}
 	available := t.BudgetLocked - t.Settled - t.Reserved - t.Refunded
 	slots := int64(0)
@@ -193,6 +205,14 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
 		return nil, err
 	}
+	// §7.2: the audience is resolved to account ids at creation and
+	// persisted with the task in its own transaction. Resolution runs
+	// on the audience as written (input order), so a field error
+	// indexes the author's array.
+	audienceIDs, err := resolveAudience(ctx, pool, publisherID, *defaults.Audience)
+	if err != nil {
+		return nil, err
+	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
@@ -213,6 +233,9 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		Code: code, PublisherID: publisherID, Contract: contractJSON,
 	})
 	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if err := repository.InsertTaskAudience(ctx, tx, taskID, audienceIDs); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := repository.LockTaskBudget(ctx, pool, tx, taskID, publisherID, budget); err != nil {
@@ -242,6 +265,10 @@ func isInsufficientCreditsErr(err error) bool {
 // engagements formed after it). The saved version applies to every
 // later claim and to every claim-less submission; claims already
 // active keep the version — and the amount — they bound.
+//
+// §7.2: the audience is fixed at creation. A contract whose audience
+// differs from the stored one is rejected; the same audience
+// (order-insensitive) passes through unchanged.
 func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string, contract task.Contract) (map[string]interface{}, error) {
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
@@ -266,6 +293,16 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	}
 	if t.Status != task.TaskPaused {
 		return nil, invalidTaskState(t.Status)
+	}
+	var stored task.Contract
+	if err := json.Unmarshal(t.Contract, &stored); err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
+	}
+	if !task.AudienceEqual(stored.NormalizedAudience(), defaults.NormalizedAudience()) {
+		return nil, validationFailed([]task.FieldError{{
+			Field:   "audience",
+			Message: "audience is fixed at creation; publish a new task for a different audience",
+		}})
 	}
 	if _, err := repository.ReplaceTaskContract(ctx, tx, t.ID, t.ContractVersion, contractJSON); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")

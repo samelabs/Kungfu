@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -81,6 +82,72 @@ type Contract struct {
 	Price        int64       `json:"price"`
 	Limits       Limits      `json:"limits,omitempty"`
 	Claim        ClaimConfig `json:"claim,omitempty"`
+	Audience     *Audience   `json:"audience,omitempty"`
+}
+
+// Audience is the §7.2 audience section: open (缺省 — every active
+// agent that meets the eligibility) or restricted (only the agents
+// the author names, 1–50). The audience is fixed at creation and
+// immutable — offering the same work to a different audience is a
+// new Task. Names are resolved to account ids by the service layer
+// at creation (the pure kernel checks only shape); WithDefaults
+// materializes the open 缺省 and canonicalizes the name order so a
+// semantically equal audience is always byte-equal JSON.
+type Audience struct {
+	Type   string   `json:"type"`
+	Agents []string `json:"agents,omitempty"`
+}
+
+// Audience types (§7.2).
+const (
+	AudienceOpen       = "open"
+	AudienceRestricted = "restricted"
+)
+
+// §7.2 bound: a restricted audience names 1–50 agents.
+const (
+	maxAudienceAgents = 50
+	maxAgentNameLen   = 64
+)
+
+// NormalizedAudience returns the audience with the 缺省 filled in:
+// absent → {"type":"open"}; a restricted audience's names sorted.
+func (c Contract) NormalizedAudience() Audience {
+	if c.Audience == nil {
+		return Audience{Type: AudienceOpen}
+	}
+	out := Audience{Type: c.Audience.Type}
+	if len(c.Audience.Agents) > 0 {
+		out.Agents = append([]string(nil), c.Audience.Agents...)
+		sort.Strings(out.Agents)
+	}
+	return out
+}
+
+// AudienceEqual reports whether two audiences name the same set of
+// agents (order-insensitive; absent equals open).
+func AudienceEqual(a, b Audience) bool {
+	if a.Type != b.Type {
+		return false
+	}
+	if a.Type != AudienceRestricted {
+		return true // open audiences carry no names
+	}
+	if len(a.Agents) != len(b.Agents) {
+		return false
+	}
+	sorted := func(xs []string) []string {
+		s := append([]string(nil), xs...)
+		sort.Strings(s)
+		return s
+	}
+	a2, b2 := sorted(a.Agents), sorted(b.Agents)
+	for i := range a2 {
+		if a2[i] != b2[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Output is the §3 output section: an optional JSON Schema the
@@ -109,7 +176,11 @@ type Receiver struct {
 
 // WithDefaults returns a copy with the §3 缺省 filled in:
 // limits.max_rejected_per_agent → 5, claim.ttl → 1800,
-// claim.max_duration → 7200 (claim.required is false when absent).
+// claim.max_duration → 7200 (claim.required is false when absent),
+// and audience → {"type":"open"} (§7.2 — the stored contract always
+// names its audience; the name ORDER stays the author's, so
+// validation errors index the input as written. Storage
+// canonicalizes the order; NormalizedAudience is the sorted form).
 func (c Contract) WithDefaults() Contract {
 	out := c
 	if out.Limits.MaxRejectedPerAgent == nil {
@@ -123,6 +194,9 @@ func (c Contract) WithDefaults() Contract {
 	if out.Claim.MaxDuration == nil {
 		v := int64(DefaultClaimMaxDuration)
 		out.Claim.MaxDuration = &v
+	}
+	if out.Audience == nil {
+		out.Audience = &Audience{Type: AudienceOpen}
 	}
 	return out
 }
@@ -199,6 +273,39 @@ func ValidateContract(c Contract) []FieldError {
 	}
 	if maxDur < ttl {
 		add("claim.max_duration", "must be ≥ claim.ttl (%d), got %d", ttl, maxDur)
+	}
+
+	// -- audience (§7.2): shape only. Whether a name resolves to an
+	//    account, and whether it is the publisher itself, are
+	//    service-layer checks (they need the database) --
+	if c.Audience != nil {
+		switch c.Audience.Type {
+		case AudienceOpen:
+			if len(c.Audience.Agents) > 0 {
+				add("audience.agents", "only a restricted audience names agents")
+			}
+		case AudienceRestricted:
+			if n := len(c.Audience.Agents); n < 1 || n > maxAudienceAgents {
+				add("audience.agents", "must contain between 1 and %d entries, got %d", maxAudienceAgents, n)
+			}
+			seen := map[string]bool{}
+			for i, name := range c.Audience.Agents {
+				if name == "" {
+					add(fmt.Sprintf("audience.agents[%d]", i), "required")
+					continue
+				}
+				if utf8.RuneCountInString(name) > maxAgentNameLen {
+					add(fmt.Sprintf("audience.agents[%d]", i),
+						"must be at most %d characters, got %d", maxAgentNameLen, utf8.RuneCountInString(name))
+				}
+				if seen[name] {
+					add(fmt.Sprintf("audience.agents[%d]", i), "%q appears more than once", name)
+				}
+				seen[name] = true
+			}
+		default:
+			add("audience.type", "must be %q or %q, got %q", AudienceOpen, AudienceRestricted, c.Audience.Type)
+		}
 	}
 
 	// -- no credential-shaped strings anywhere --

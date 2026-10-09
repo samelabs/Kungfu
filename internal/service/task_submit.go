@@ -136,6 +136,12 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if t == nil {
 		return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
+	// §7.2/§12 at the existence step itself: an out-of-audience
+	// caller gets the missing-task answer, before any status, claim
+	// or limit fact can leak the task's existence.
+	if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+		return SubmissionView{}, err
+	}
 	if t.PublisherID == agentID {
 		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}

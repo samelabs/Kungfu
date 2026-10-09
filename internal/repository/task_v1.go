@@ -657,6 +657,10 @@ func EscapeLike(s string) string {
 // matches title and requirements case-insensitively (wildcards
 // escaped by the caller); code is an exact match — a code that is
 // not currently claimable simply yields no rows.
+//
+// Task 1.2 §7.2: a restricted task (task_audience rows exist) is
+// listed only to an agent it names; the anonymous board (agentID 0)
+// never lists one.
 func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFilter, limit, offset int) ([]WorkCandidate, int64, error) {
 	where := ` WHERE tb_task.status = 'open'
 		  AND (tb_task.contract->>'price')::bigint >= 1
@@ -677,6 +681,16 @@ func FindOpenWorkPage(ctx context.Context, q pg.Querier, agentID int64, f WorkFi
 		          AND e.at > $%d)
 		      < COALESCE(NULLIF(tb_task.contract #>> '{limits,max_rejected_per_agent}', '')::bigint, %d)`,
 			n, since, task.DefaultMaxRejectedPerAgent)
+		// §7.2: open tasks for everyone; restricted tasks only for
+		// the agents they name.
+		where += fmt.Sprintf(`
+		  AND (NOT EXISTS (SELECT 1 FROM task_audience ta WHERE ta.task_id = tb_task.id)
+		       OR EXISTS (SELECT 1 FROM task_audience ta
+		                  WHERE ta.task_id = tb_task.id AND ta.agent_id = $%d))`, n)
+	} else {
+		// the anonymous board never sees a restricted task (§12)
+		where += `
+		  AND NOT EXISTS (SELECT 1 FROM task_audience ta WHERE ta.task_id = tb_task.id)`
 	}
 	if f.Code != "" {
 		args = append(args, f.Code)

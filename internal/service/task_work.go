@@ -32,12 +32,16 @@ const (
 // WorkListFilter is the work_list query surface (WO-19 Q1): a
 // keyword over title/requirements, an exact code, and paging. All
 // fields optional; an absent filter returns page 1 at the default
-// size. Code wins over keyword when both are given.
+// size. Code wins over keyword when both are given. OfferedToMe
+// (Task 1.2 §8) narrows the list to the caller's opportunities:
+// restricted tasks naming the caller that are still offerable —
+// same paging and cursor contract.
 type WorkListFilter struct {
-	Q        string
-	Code     string
-	Page     int
-	PageSize int
+	Q           string
+	Code        string
+	Page        int
+	PageSize    int
+	OfferedToMe bool
 }
 
 // Normalize trims, resolves precedence and applies the paging rules
@@ -122,9 +126,21 @@ func myTallyFor(ctx context.Context, pool *pg.Pool, agentID int64, t *repository
 // queries — no per-task round trips.
 func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, filter WorkListFilter) ([]map[string]any, int64, error) {
 	filter.Normalize()
-	rows, total, err := repository.FindOpenWorkPage(ctx, pool, agentID,
-		repository.WorkFilter{Keyword: filter.Q, Code: filter.Code, RejectionsSince: rejectionsSince(now)},
-		filter.PageSize, (filter.Page-1)*filter.PageSize)
+	var rows []repository.WorkCandidate
+	var total int64
+	var err error
+	if filter.OfferedToMe {
+		// §8 opportunities: exactly "work_list would list it" plus
+		// "named for me" plus "not already taken" — same shape, same
+		// ordering, same paging.
+		rows, total, err = repository.FindOfferedWorkPage(ctx, pool, agentID,
+			repository.WorkFilter{Keyword: filter.Q, Code: filter.Code},
+			now, filter.PageSize, (filter.Page-1)*filter.PageSize)
+	} else {
+		rows, total, err = repository.FindOpenWorkPage(ctx, pool, agentID,
+			repository.WorkFilter{Keyword: filter.Q, Code: filter.Code, RejectionsSince: rejectionsSince(now)},
+			filter.PageSize, (filter.Page-1)*filter.PageSize)
+	}
 	if err != nil {
 		return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
@@ -179,6 +195,7 @@ func ListWork(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time, 
 			"price":        k.contract.Price,
 			"slots":        slotsFor(&k.row.Task, k.contract),
 			"claim":        map[string]any{"required": k.contract.Claim.Required},
+			"audience":     k.contract.NormalizedAudience().Type,
 			"stats":        statsView(stats),
 			"my":           k.my,
 		})
@@ -234,14 +251,19 @@ func ListWorkBoard(ctx context.Context, pool *pg.Pool, keyword, code string, pag
 	return out, total, nil
 }
 
-// visibleTask loads a task with executor visibility.
-func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.TaskRow, error) {
+// visibleTask loads a task with executor visibility, then applies
+// the §7.2/§12 audience gate: outside a restricted task's audience
+// the caller gets the same TASK_NOT_FOUND a missing task produces.
+func visibleTask(ctx context.Context, pool *pg.Pool, agentID int64, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) || t == nil {
 		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+		return nil, err
 	}
 	return t, nil
 }
@@ -254,7 +276,7 @@ func visibleTask(ctx context.Context, pool *pg.Pool, code string) (*repository.T
 // it bound) and contract_version names it; otherwise the current
 // version is shown.
 func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now time.Time) (map[string]any, error) {
-	t, err := visibleTask(ctx, pool, code)
+	t, err := visibleTask(ctx, pool, agentID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +386,7 @@ func contractJSONOf(c task.Contract) []byte {
 // that governs the caller — the claim's bound version when engaged,
 // else the current version.
 func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID string, claimID *int64, now time.Time) (map[string]any, error) {
-	t, err := visibleTask(ctx, pool, code)
+	t, err := visibleTask(ctx, pool, agentID, code)
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +547,9 @@ func GetSubmissionStatus(ctx context.Context, pool *pg.Pool, agentID int64, subm
 }
 
 // ListHistory is §8.1 work_history: the agent's submissions, newest
-// first, optionally filtered by task.
+// first, optionally filtered by task. A restricted task stays
+// indistinguishable from a missing one for an out-of-audience
+// caller (§12) — the same TASK_NOT_FOUND, never an empty history.
 func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string, page, pageSize int) ([]SubmissionView, int64, error) {
 	var taskID *int64
 	if code != "" {
@@ -535,6 +559,9 @@ func ListHistory(ctx context.Context, pool *pg.Pool, agentID int64, code string,
 		}
 		if err != nil {
 			return nil, 0, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if err := requireTaskAudience(ctx, pool, t, agentID); err != nil {
+			return nil, 0, err
 		}
 		taskID = &t.ID
 	}
