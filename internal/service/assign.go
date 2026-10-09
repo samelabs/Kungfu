@@ -487,6 +487,37 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 		out = append(out, row)
 	}
 	res := map[string]any{"todos": out, "next_cursor": nextCursor}
+	// §8 opportunities (Task 1.2): a restricted task naming the caller
+	// and an untaken assignment addressed to them are pointers, never
+	// obligations — reported as read-only counts beside the turn
+	// (they never enter todos). tasks = offered restricted work the
+	// caller could still take; assignments reuses thread_list's
+	// open_invites query (open assignments addressed to me while my
+	// membership lasts). Zero is reported like any other number.
+	offered, err := offeredWorkCount(ctx, pool, botID, time.Now())
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
+	}
+	invites, err := repository.ThreadOpenInviteCounts(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
+	}
+	var openAssignments int64
+	for _, n := range invites {
+		openAssignments += n
+	}
+	res["opportunities"] = map[string]any{"tasks": offered, "assignments": openAssignments}
+	if offered > 0 || openAssignments > 0 {
+		// At most one opportunity hint, and never in place of an
+		// obligation's slot (义务优先): offered work points at
+		// work_list offered_to_me=true, open assignments at
+		// thread_list.
+		hint := map[string]any{"tool": "thread_list", "args": map[string]any{}}
+		if offered > 0 {
+			hint = map[string]any{"tool": "work_list", "args": map[string]any{"offered_to_me": true}}
+		}
+		res["next"] = []map[string]any{hint}
+	}
 	if len(out) == 0 {
 		res["next_action"] = "wait"
 		res["retry_after"] = 60
