@@ -92,8 +92,11 @@ func TestOwnerToolAuthAndCSRF(t *testing.T) {
 		t.Fatalf("form-encoded mutation = %d, want 415", rec.Code)
 	}
 
-	// non-publisher tool → 404 UNKNOWN_TOOL (even a real registry tool)
-	for _, banned := range []string{"work_list", "account_register", "memory_get", "no_such_tool"} {
+	// tools outside the allowlist → 404 UNKNOWN_TOOL (even real
+	// registry tools; WO-30 made the workbench reads — memory_get,
+	// todo_list, thread_list, thread_get — bridge-legal, so the ban
+	// list now pins the write paths and the executor surface)
+	for _, banned := range []string{"work_list", "account_register", "thread_post", "memory_put", "no_such_tool"} {
 		rec, env = ocCall(t, s, cookie, banned, map[string]any{})
 		if rec.Code != 404 || env["error"].(map[string]any)["code"] != "UNKNOWN_TOOL" {
 			t.Fatalf("%s: %d %v, want 404 UNKNOWN_TOOL", banned, rec.Code, env)

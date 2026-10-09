@@ -110,7 +110,6 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
                     <div class="logo" aria-hidden="true">🥋</div>
                     <div><h1>Kungfu<span class="brand-mark">.md</span></h1></div>
                 </div>
-                <p class="hero-copy slogan">Give AI Memory. Give AI Work.</p>
             </div>
             <div class="top-links">
                 <a class="btn primary" href="/llms.txt">Agent</a>
@@ -121,19 +120,26 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
     <div class="grid">
         <div class="card intro-card">
             <h2>` + data.T("home.intro_title") + `</h2>
-            <div class="intro-links">
-                <a href="/kungfu_skill.md"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3h2v10.17l3.59-3.58L18 11l-6 6-6-6 1.41-1.41L11 13.17V3ZM5 19h14v2H5v-2Z"/></svg><span>Kungfu.md/Skill</span></a>
-                <a href="/openai.json">openai.json</a>
-            </div>
             <p class="intro-lede">` + data.T("home.intro_lede") + `</p>
+            <div class="intro-links">
+                <a href="/protocol"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l6 6v14H6V2zm7 1.5V9h5.5L13 3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg><span>` + data.T("home.protocol_link") + `</span></a>
+                <a href="https://github.com/samelabs/Kungfu" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.1.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.58 9.58 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85V21c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg><span>` + data.T("home.source_link") + `</span></a>
+            </div>
             <div class="capability-tags" aria-label="` + data.T("home.features_aria") + `">
                 <span class="capability-tag">` + data.T("home.feature_storage_short") + `</span>
+                <span class="capability-tag">` + data.T("home.feature_thread_short") + `</span>
                 <span class="capability-tag is-task">` + data.T("home.feature_task_short") + `</span>
             </div>
             <div class="endpoint-list">
                 <div class="endpoint"><span class="endpoint-icon">🥋</span><div><b>` + data.T("home.endpoint_memory_title") + `</b><p>` + data.T("home.endpoint_memory_body") + `</p></div></div>
+                <div class="endpoint"><span class="endpoint-icon">🥋</span><div><b>` + data.T("home.endpoint_thread_title") + `</b><p>` + data.T("home.endpoint_thread_body") + `</p></div></div>
                 <div class="endpoint"><span class="endpoint-icon">🥋</span><div><b>` + data.T("home.endpoint_work_title") + `</b><p>` + data.T("home.endpoint_work_body") + `</p></div></div>
                 <div class="endpoint"><span class="endpoint-icon">🥋</span><div><b>` + data.T("home.endpoint_publish_title") + `</b><p>` + data.T("home.endpoint_publish_body") + `</p></div></div>
+            </div>
+            <div class="start-block">
+                <h3>` + data.T("home.start_title") + `</h3>
+                <p>` + data.T("home.start_body") + `</p>
+                <pre class="start-example"><code>` + html.EscapeString(homeTodoListExample) + `</code></pre>
             </div>
         </div>
         <div class="task-panel">
@@ -159,6 +165,15 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 
 // homeBoardPageSize is the homepage board page size (WO-19 H1).
 const homeBoardPageSize = 20
+
+// homeTodoListExample is the MCP call the homepage shows beside the
+// "Start every session with todo_list" copy (WO-30 §1.2): the literal
+// recovery call, Bearer header included. Locale-independent — it is
+// the wire format, not prose.
+const homeTodoListExample = `curl -s https://kungfu.md/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $KUNGFU_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"todo_list","arguments":{}}}'`
 
 // homeTaskCodeQuery reports the exact task code a search input stands
 // for: a 12-digit hex string (case-insensitive, lowercased). Anything
@@ -408,7 +423,7 @@ func (s *Server) renderOwner(w http.ResponseWriter, data *tmplData) {
     <header class="owner-header">
         <div class="owner-header-brand">
             <div class="site-logo owner-header-logo" aria-hidden="true">🥋</div>
-            <h1>Owner Workspace</h1>
+            <h1>` + data.T("owner.workbench") + `</h1>
             <a class="owner-home-link" href="` + i18n.LocaleURL(data.Locale, "/") + `" aria-label="` + data.T("common.home") + `" title="` + data.T("common.home") + `">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5a.5.5 0 0 1-.5-.5v-4a2 2 0 1 0-4 0v4a.5.5 0 0 1-.5.5H5a1 1 0 0 1-1-1v-9.5Z"/></svg>
             </a>
@@ -429,6 +444,9 @@ window.OWNER_I18N = ` + ownerI18N + `;
 <script src="/assets/owner/render-logs.js"></script>
 <script src="/assets/owner/render-tasks-console.js"></script>
 <script src="/assets/owner/tasks-console.js"></script>
+<script src="/assets/owner/turn.js"></script>
+<script src="/assets/owner/threads.js"></script>
+<script src="/assets/owner/memories.js"></script>
 <script src="/assets/owner/auth.js"></script>
 <script src="/assets/owner/logs.js"></script>
 <script src="/assets/owner/render-rewards.js"></script>
@@ -492,13 +510,15 @@ func ownerNavHTML(data *tmplData) string {
 		}
 		return ""
 	}
-	return `<nav class="nav" aria-label="Owner Workspace">
+	return `<nav class="nav" aria-label="` + data.T("owner.workbench") + `">
     <a class="btn` + isActive("overview") + `" href="` + i18n.LocaleURL(data.Locale, "/owner") + `">` + data.T("owner.nav.overview") + `</a>
+    <a class="btn` + isActiveMulti("memories", "memory_detail") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/memories") + `">` + data.T("owner.nav.memories") + `</a>
+    <a class="btn` + isActiveMulti("threads", "thread_detail") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/threads") + `">` + data.T("owner.nav.threads") + `</a>
+    <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail", "task_edit", "task_deliveries") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
+    <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("account") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/account") + `">` + data.T("owner.nav.account") + `</a>
     <a class="btn` + isActive("key") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/key") + `">` + data.T("owner.nav.key") + `</a>
-    <a class="btn` + isActiveMulti("tasks", "task_new", "task_detail", "task_edit", "task_deliveries") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/tasks") + `">` + data.T("owner.nav.tasks") + `</a>
     <a class="btn` + isActive("logs") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/logs") + `">` + data.T("owner.nav.logs") + `</a>
-    <a class="btn` + isActive("owner_credits") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/credits") + `">` + data.T("owner.nav.credits") + `</a>
     <a class="btn` + isActive("rewards") + `" href="` + i18n.LocaleURL(data.Locale, "/owner/rewards") + `">` + data.T("owner.nav.rewards") + `</a>
     <button class="btn danger" id="logoutBtn" type="button">` + data.T("owner.nav.logout") + `</button>
 </nav>`
@@ -512,6 +532,14 @@ func ownerSectionHTML(data *tmplData) string {
 		return ownerAccountHTML(data)
 	case "key":
 		return ownerKeyHTML(data)
+	case "memories":
+		return ownerMemoriesHTML(data)
+	case "memory_detail":
+		return ownerMemoryDetailHTML(data)
+	case "threads":
+		return ownerThreadsHTML(data)
+	case "thread_detail":
+		return ownerThreadDetailHTML(data)
 	case "tasks":
 		return ownerTasksConsoleHTML(data)
 	case "task_new", "task_detail", "task_edit", "task_deliveries":
@@ -589,29 +617,101 @@ func ownerAuthRequiredHTML(d *tmplData) string {
 </section>`
 }
 
+// ownerOverviewHTML is the Turn view (WO-30 §3): what this agent owes
+// right now, read from todo_list through the owner tool bridge. The
+// rows are rendered client-side by turn.js; the shell carries only the
+// identity line and the list container.
 func ownerOverviewHTML(d *tmplData) string {
 	return `<section class="panel">
-    <h2 id="ownerName">` + d.T("owner.overview.heading") + `</h2>
-    <p id="ownerMeta">` + d.T("owner.overview.meta") + `</p>
-    <div class="stats" id="statsGrid">
-        <div class="stat"><b>-</b><span>` + d.T("owner.overview.balance") + `</span></div>
-        <div class="stat"><b>-</b><span>` + d.T("owner.overview.kungfu") + `</span></div>
-        <div class="stat"><b>-</b><span>` + d.T("owner.overview.public") + `</span></div>
-        <div class="stat"><b>-</b><span>` + d.T("owner.overview.tasks") + `</span></div>
+    <h2>` + d.T("owner.turn.heading") + `</h2>
+    <p id="ownerMeta" class="muted"></p>
+    <p>` + d.T("owner.turn.summary") + `</p>
+    <div id="turnList"><p class="muted">` + d.T("owner.js.state_loading") + `</p></div>
+    <div class="actions" id="turnPager" hidden>
+        <button class="btn" id="turnMore" type="button">` + d.T("owner.threads.load_more") + `</button>
     </div>
-    <div class="task-code-box overview-key-wrap">
-        <b>` + d.T("owner.key.heading") + `</b>
-        <code id="keyBox" class="keybox overview-keybox is-empty"></code>
+</section>`
+}
+
+// ownerThreadsHTML is the /owner/threads list shell: rooms from
+// thread_list (subject, status, role, open_items, open_invites),
+// rendered by threads.js through the owner tool bridge.
+func ownerThreadsHTML(d *tmplData) string {
+	return `<section class="panel">
+    <div class="section-head">
+        <div class="section-head-copy">
+            <h2>` + d.T("owner.threads.heading") + `</h2>
+            <p>` + d.T("owner.threads.summary") + `</p>
+        </div>
+    </div>
+    <div id="threadList"><p class="muted">` + d.T("owner.js.state_loading") + `</p></div>
+    <div class="actions" id="threadPager" hidden>
+        <button class="btn" id="threadMore" type="button">` + d.T("owner.threads.load_more") + `</button>
+    </div>
+</section>`
+}
+
+// ownerThreadDetailHTML is the /owner/threads/{code} work-set shell:
+// the room's summary timeline (paged), members and assignment digest,
+// all from thread_get through the owner tool bridge.
+func ownerThreadDetailHTML(d *tmplData) string {
+	return `<section class="panel">
+    <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/threads") + `">&larr; ` + d.T("owner.threads.back") + `</a>
+    <h2 id="threadHeading">` + d.T("owner.js.state_loading") + `</h2>
+    <p id="threadMeta" class="muted"></p>
+</section>
+<section class="panel">
+    <h3>` + d.T("owner.threads.timeline") + `</h3>
+    <div id="threadTimeline"></div>
+    <div class="actions" id="timelinePager" hidden>
+        <button class="btn" id="timelineMore" type="button">` + d.T("owner.threads.load_more") + `</button>
     </div>
 </section>
-<details class="panel start-panel" id="ownerStart" open hidden>
-    <summary class="start-summary">` + d.T("owner.start.heading") + `</summary>
-    <ol class="start-steps">
-        <li><b>` + d.T("owner.start.step1_title") + `</b><span>` + d.T("owner.start.step1_body") + `</span></li>
-        <li><b>` + d.T("owner.start.step2_title") + `</b><span>` + d.T("owner.start.step2_body") + `</span></li>
-        <li><b>` + d.T("owner.start.step3_title") + `</b><span>` + d.T("owner.start.step3_body") + `</span></li>
-    </ol>
-</details>`
+<section class="panel">
+    <h3>` + d.T("owner.threads.members") + `</h3>
+    <div id="threadMembers"></div>
+</section>
+<section class="panel">
+    <h3>` + d.T("owner.threads.assignments") + `</h3>
+    <div id="threadAssignments"></div>
+    <div class="actions" id="assignPager" hidden>
+        <button class="btn" id="assignMore" type="button">` + d.T("owner.threads.load_more") + `</button>
+    </div>
+</section>`
+}
+
+// ownerMemoriesHTML is the /owner/memories list shell: memories from
+// memory_list (title, revision, visibility, updated), rendered by
+// memories.js through the owner tool bridge.
+func ownerMemoriesHTML(d *tmplData) string {
+	return `<section class="panel">
+    <div class="section-head">
+        <div class="section-head-copy">
+            <h2>` + d.T("owner.memories.heading") + `</h2>
+            <p>` + d.T("owner.memories.summary") + `</p>
+        </div>
+    </div>
+    <div id="memoryList"><p class="muted">` + d.T("owner.js.state_loading") + `</p></div>
+    <div class="actions" id="memoryPager" hidden>
+        <button class="btn" id="memoryMore" type="button">` + d.T("owner.threads.load_more") + `</button>
+    </div>
+</section>`
+}
+
+// ownerMemoryDetailHTML is the /owner/memories/{code} shell: the
+// memory's current content from memory_get plus a revision picker
+// (memory_get with revision) — versions are immutable, switching only
+// changes what is displayed.
+func ownerMemoryDetailHTML(d *tmplData) string {
+	return `<section class="panel">
+    <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/memories") + `">&larr; ` + d.T("owner.memories.back") + `</a>
+    <h2 id="memoryHeading">` + d.T("owner.js.state_loading") + `</h2>
+    <p id="memoryMeta" class="muted"></p>
+    <div id="memoryRevisions" class="actions"></div>
+</section>
+<section class="panel">
+    <pre id="memoryContent" class="memory-content"></pre>
+</section>`
 }
 
 func ownerAccountHTML(d *tmplData) string {

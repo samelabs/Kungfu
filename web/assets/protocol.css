@@ -1,0 +1,149 @@
+/* protocol.css — the /protocol pages (WO-30 §2): one document shell
+   for the rendered Kungfu Protocol. Chrome is minimal on purpose —
+   the spec is the content. Shares the public design system
+   (site.css :root tokens). */
+
+.protocol-wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 26px 22px 40px;
+}
+
+.protocol-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.protocol-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--heading-ink);
+    text-decoration: none;
+}
+.protocol-brand .site-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    font-size: 21px;
+}
+.protocol-brand .brand-mark { color: var(--accent); }
+
+.protocol-langs {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    border-radius: var(--radius-pill);
+    padding: 4px;
+}
+.protocol-langs a {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    font-size: 14px;
+    color: var(--muted);
+    text-decoration: none;
+}
+.protocol-langs a:hover { color: var(--accent-strong); }
+.protocol-langs a[aria-current="page"] {
+    background: var(--accent);
+    color: #fff;
+}
+
+.protocol-note {
+    margin: 0 0 14px;
+    font-size: 14px;
+    color: var(--muted);
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+}
+
+.protocol-doc {
+    background: var(--surface-strong);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-soft);
+    padding: 42px 48px 48px;
+}
+
+/* Document typography */
+.protocol-doc h1 {
+    font-size: 30px;
+    line-height: 1.2;
+    color: var(--heading-ink);
+    margin: 0 0 8px;
+}
+.protocol-doc h2 {
+    font-size: 22px;
+    color: var(--heading-ink);
+    margin: 34px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    scroll-margin-top: 20px;
+}
+.protocol-doc h3 { font-size: 17px; color: var(--heading-soft); margin: 24px 0 8px; scroll-margin-top: 20px; }
+.protocol-doc h4 { font-size: 15px; color: var(--heading-soft); margin: 18px 0 6px; }
+.protocol-doc p { margin: 10px 0; max-width: 76ch; }
+.protocol-doc ul, .protocol-doc ol { margin: 10px 0 10px 22px; max-width: 74ch; }
+.protocol-doc li { margin: 4px 0; }
+.protocol-doc a { color: var(--accent-strong); }
+.protocol-doc code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .92em;
+    background: rgba(47, 124, 115, .08);
+    border-radius: 6px;
+    padding: 1px 5px;
+}
+.protocol-doc pre {
+    background: #20261f;
+    color: #e9ede6;
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 14px 0;
+    max-width: 100%;
+}
+.protocol-doc pre code { background: none; color: inherit; padding: 0; font-size: 13px; line-height: 1.5; }
+.protocol-doc blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 2px 16px;
+    margin: 12px 0;
+    color: var(--muted);
+    background: var(--accent-soft);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.protocol-doc hr { border: none; border-top: 1px solid var(--line); margin: 26px 0; }
+
+/* Tables: the spec is table-heavy (the header block, vocabularies);
+   horizontal scroll on narrow screens, never a broken layout. */
+.protocol-doc table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0;
+    font-size: 14px;
+    display: block;
+    overflow-x: auto;
+}
+.protocol-doc th, .protocol-doc td {
+    border: 1px solid var(--line-strong);
+    text-align: left;
+    padding: 8px 12px;
+    vertical-align: top;
+}
+.protocol-doc th { background: var(--accent-soft); color: var(--heading-ink); }
+
+@media (max-width: 720px) {
+    .protocol-wrap { padding: 18px 12px 30px; }
+    .protocol-doc { padding: 24px 18px 28px; }
+    .protocol-doc h1 { font-size: 24px; }
+    .protocol-doc h2 { font-size: 19px; }
+}

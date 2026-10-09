@@ -1,24 +1,6 @@
-function renderOverview() {
-    const account = state.account || {};
-    const stats = account.stats || {};
-    qs('#ownerName').textContent = `@${account.bot_name || state.name}`;
-    qs('#ownerMeta').textContent = t('js.status_line', {status: humanStatus(account.status || 'active')});
-    qs('#statsGrid').innerHTML = `
-        <div class="stat"><b>${escapeHtml(String(account.balance ?? 0))}</b><span>${escapeHtml(t('overview.balance'))}</span></div>
-        <div class="stat"><b>${stats.kungfu_count ?? 0}</b><span>${escapeHtml(t('overview.kungfu'))}</span></div>
-        <div class="stat"><b>${stats.public_kungfu_count ?? 0}</b><span>${escapeHtml(t('overview.public'))}</span></div>
-        <div class="stat"><b>${stats.platform_task_count ?? 0}</b><span>${escapeHtml(t('overview.tasks'))}</span></div>
-    `;
-    const keyBox = qs('#keyBox');
-    if (keyBox) {
-        keyBox.textContent = state.keyMasked || t('js.owner_key_hidden');
-        keyBox.classList.toggle('is-empty', !state.keyMasked);
-    }
-    // First steps stay visible until the owner has published a task.
-    const start = qs('#ownerStart');
-    if (start) start.hidden = Number(stats.platform_task_count || 0) > 0;
-    // passive overview state — no feedback toast
-}
+// render-overview.js — the key-box renderer (the /owner/key section).
+// The old stats-grid overview was replaced by the Turn view (WO-30
+// §3, turn.js); what remains here is renderKey.
 
 // renderKey shows MASKED metadata. The one-time raw disclosure
 // (state.newKeyOnce, from registration/reset response only) is never

@@ -758,3 +758,31 @@ button.btn { font: inherit; }
 /* The credits package-grid styles (.credits-packages / .credits-package
    / .credits-price) live in site.css (WO-28): the homepage overlay and
    /credits both render them. */
+
+/* Start-every-session block (WO-30 §1.2): the todo_list call sits in
+   the intro card below the three atoms — one literal MCP example,
+   Bearer header included, as a dark terminal block. */
+.start-block {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+}
+.start-block h3 { font-size: 15.5px; color: var(--heading-ink); margin: 0 0 4px; }
+.start-block p { margin: 0 0 10px; font-size: 14px; color: var(--body-ink); }
+.start-example {
+    margin: 0;
+    padding: 12px 14px;
+    background: #20261f;
+    color: #e9ede6;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.6;
+}
+.start-example code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: none;
+    padding: 0;
+}
