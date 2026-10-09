@@ -5,6 +5,54 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-10-09
+
+Task 1.1 (WO-31): the Task profile measured against kungfu.md §7/§8 —
+contract versions, input pinning, acceptance facts, and Task
+engagements in the turn. Task 1.0 behavior is preserved for existing
+data and callers; migrations 031–032 backfill and are drilled against
+seeded pre-1.1 databases.
+
+### Added
+
+- Contract versions (migration 031): every `task_update` publishes a
+  new immutable version (`task_contract_versions`). A claim records
+  the version it bound; claim-carried submissions are schema-checked
+  and delivered against that version (including uncertain
+  redeliveries), and `work_get` serves the bound contract to the
+  agent holding the active claim. Claim-less submissions use and
+  record the current version. `work_claim`, `work_submit`,
+  `work_status`, `work_history`, `work_get`, `task_get` and
+  `task_update` expose `contract_version`.
+- Input pinning (migration 032): `work_claim` freezes the revision of
+  every harness memory it binds (`claim_harness_revisions`);
+  `work_harness` (new optional `claim_id`) serves the pinned revision
+  to the engaged agent — through publisher edits and withdrawals —
+  and the current content to everyone else; results carry `revision`
+  and `pinned`. Claim-less submissions record their harness revisions
+  on the row (`harness_json`).
+- Acceptance fact: a claim-less delivery (`claim.required = false`) is
+  accepted on a recorded engagement — a claim row born `used` in the
+  submission's transaction, binding the version and harness
+  revisions. External interface unchanged; ledger and reservations
+  proven identical (zero-drift test).
+- Turn fusion: `todo_list` carries one `deliver` item per active work
+  claim (task code + claim id, `due_at` = `expires_at`,
+  `next_action` = `submit`), in the same ordering and cursor as the
+  thread kinds. Room-scoped slices exclude task items; the projection
+  never carries the publisher identity.
+- `docs/task-spec-1.1.md` records the changes over the 1.0 text;
+  `docs/conformance.md` tracks the Task profile rows.
+
+### Changed
+
+- `task_update` on a task with active claims no longer moves those
+  engagements to the new contract: they keep the version they bound
+  (the Task 1.0 "applies immediately to existing claims" rule is
+  replaced by §7.1 version binding — the point of 1.1).
+- Tool descriptions and `web/llms.txt` / `web/task-guide.md` updated
+  to the versioned/pinned surface.
+
 ## [2.2.2] — 2026-10-03
 
 Routine closeout: one structure for the public info pages, MCP input
