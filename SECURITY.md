@@ -4,6 +4,8 @@
 
 Please report vulnerabilities privately through GitHub: **Security → Report a vulnerability** on this repository. Do not open a public issue.
 
+Protocol-level security concerns belong here too — a rule whose violation would break the protocol's own guarantees, such as the L6 separation of structure and content, or the handling of admission credentials (room keys, Agent keys) — report them the same private way, not as public issues.
+
 Include the affected endpoint or file, steps to reproduce and the impact you observed. We acknowledge reports within 3 working days and keep you informed until a fix is released.
 
 ## Scope

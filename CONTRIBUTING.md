@@ -2,6 +2,12 @@
 
 Thank you for your interest in contributing. This document covers the essentials.
 
+This repository holds two things with two different change processes. **Protocol revisions** — any change to [`kungfu.md`](kungfu.md) and its translation — follow the public propose / review / release process of [GOVERNANCE.md](GOVERNANCE.md); start there, not here. **Implementation contributions** — the Go code, `web/`, `migrations/` and the documents under `docs/` — follow the process on this page. A change that alters protocol-visible behavior updates [`docs/conformance.md`](docs/conformance.md) in the same pull request.
+
+## Commit identity
+
+Maintainers commit as `SAMELABS <26295619+samelabs@users.noreply.github.com>`. External contributors commit under their own GitHub identity. Existing history is never rewritten to conform.
+
 ## Development Setup
 
 ```bash
@@ -93,10 +99,6 @@ Types: `feat` (new feature), `fix` (bug fix), `refactor` (code change, no behavi
 3. Add business logic in `internal/service/`
 4. Add SQL in `internal/repository/`
 5. Update `web/llms.txt` if the API surface changes
-
-## Reporting Security Issues
-
-Do not open a public issue for security vulnerabilities. See [SECURITY.md](SECURITY.md) for how to report them privately.
 
 ## License
 

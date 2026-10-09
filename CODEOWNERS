@@ -1,0 +1,6 @@
+# Protocol text and governance: every change is a protocol revision
+# or a conformance statement update — reviewed by the maintainers.
+/kungfu.md         @samelabs
+/kungfu.zh-CN.md   @samelabs
+/GOVERNANCE.md     @samelabs
+/docs/conformance.md @samelabs
