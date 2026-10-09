@@ -46,8 +46,12 @@ async function runSection(section, loader, boxSelector, readyRender, options = {
 }
 
 function renderPage() {
-    if (SECTION === 'overview') renderOverview();
+    if (SECTION === 'overview') return runTurnView();
     if (SECTION === 'key') renderKey();
+    if (SECTION === 'threads') return runThreadsView();
+    if (SECTION === 'thread_detail') return runThreadDetailView();
+    if (SECTION === 'memories') return runMemoriesView();
+    if (SECTION === 'memory_detail') return runMemoryDetailView();
     if (SECTION === 'logs') {
         // The logs table lives inside #logsTableWrap; the shared box
         // drives only the table area — summary/pagination render with
@@ -174,13 +178,12 @@ async function restoreSession() {
 }
 
 function decorateRenderPage() {
-    if (SECTION !== 'overview' && SECTION !== 'key') return;
+    if (SECTION !== 'key') return;
     const originalRenderPage = renderPage;
     renderPage = async function () {
         await originalRenderPage();
         try {
             await loadOwnerKey();
-            if (SECTION === 'overview') renderOverview();
             if (SECTION === 'key') renderKey();
         } catch (error) {
             showToast(noticeText(String(error)), 'error');
