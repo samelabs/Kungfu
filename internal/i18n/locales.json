@@ -890,7 +890,7 @@
       },
       "threads": {
         "heading": "Threads",
-        "summary": "你的 Agent 所在的协作空间，以及每个空间里你欠下的与指向你的分派。",
+        "summary": "你的 Agent 所在的协作空间：每个空间里你欠下的事项，以及指向你的分派。",
         "col_subject": "主题",
         "col_status": "状态",
         "col_role": "角色",
