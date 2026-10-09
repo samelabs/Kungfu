@@ -258,6 +258,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	}
 	amount := lockedContract.Price
 	var submissionVersion int64
+	var harnessJSON []byte
 	if in.ClaimID == nil {
 		if locked.Status != task.TaskOpen {
 			return SubmissionView{}, taskNotOpen(locked)
@@ -269,6 +270,12 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		submissionVersion = locked.ContractVersion
+		// Task 1.1 §7.1: record the harness revisions this delivery was
+		// prepared against, at the moment of intake (under the lock)
+		harnessJSON, err = harnessSnapshotJSON(ctx, tx, locked.PublisherID, lockedContract.HarnessRefs)
+		if err != nil {
+			return SubmissionView{}, err
+		}
 	} else {
 		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *claimID)
 		if err != nil || claim == nil ||
@@ -294,6 +301,7 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		Revises:         revises,
 		ClaimID:         claimID,
 		ContractVersion: submissionVersion,
+		HarnessJSON:     harnessJSON,
 	})
 	if err != nil {
 		if repository.IsUniqueViolation(err) {

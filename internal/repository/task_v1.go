@@ -841,6 +841,63 @@ func ApplyClaimStatus(ctx context.Context, q pg.Querier, claimID int64, from, ev
 }
 
 // ---------------------------------------------------------------------------
+// claim_harness_revisions (Task 1.1 §7.1/§7.3: an engagement binds its
+// required input versions)
+// ---------------------------------------------------------------------------
+
+// HarnessPin is one input version bound by an engagement: the memory
+// and the revision the claim froze at creation.
+type HarnessPin struct {
+	MemoryID int64
+	Revision int64
+}
+
+// InsertClaimHarnessRevisions freezes the harness revisions a claim
+// binds, in the claim's own creation transaction. An empty set
+// writes nothing (a contract without harness_refs, or refs whose
+// memories were already deleted — those keep the live-404 behavior).
+func InsertClaimHarnessRevisions(ctx context.Context, q pg.Querier, claimID int64, pins []HarnessPin) error {
+	if len(pins) == 0 {
+		return nil
+	}
+	values := strings.Builder{}
+	args := make([]any, 0, len(pins)*3+1)
+	args = append(args, claimID)
+	for i, p := range pins {
+		if i > 0 {
+			values.WriteByte(',')
+		}
+		base := i * 3
+		fmt.Fprintf(&values, "($1,$%d,$%d)", base+2, base+3)
+		args = append(args, p.MemoryID, p.Revision)
+	}
+	if _, err := q.Exec(ctx, `
+		INSERT INTO claim_harness_revisions (claim_id, memory_id, revision)
+		VALUES `+values.String(), args...); err != nil {
+		return fmt.Errorf("insert claim_harness_revisions: %w", err)
+	}
+	return nil
+}
+
+// ClaimHarnessRevision is the revision a claim pinned for one
+// memory; nil when the claim bound no version of it (claims formed
+// before migration 032, or the memory was deleted at claim time —
+// both keep the live-read behavior of Task 1.0).
+func ClaimHarnessRevision(ctx context.Context, q pg.Querier, claimID, memoryID int64) (*int64, error) {
+	var revision int64
+	err := q.QueryRow(ctx, `
+		SELECT revision FROM claim_harness_revisions
+		WHERE claim_id = $1 AND memory_id = $2`, claimID, memoryID).Scan(&revision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find claim harness revision: %w", err)
+	}
+	return &revision, nil
+}
+
+// ---------------------------------------------------------------------------
 // tb_task_submission (+ events)
 // ---------------------------------------------------------------------------
 
@@ -873,7 +930,9 @@ type SubmissionRow struct {
 
 // NewSubmissionRow is the insert input; the submission is created in
 // delivering with the first SubmissionEvent (cause "submit") in the
-// same transaction.
+// same transaction. HarnessJSON (claim-less submissions only, Task
+// 1.1 §7.1) records the harness revisions current at intake —
+// [{code, revision}]; nil stores NULL.
 type NewSubmissionRow struct {
 	TaskID          int64
 	AgentID         int64
@@ -884,6 +943,7 @@ type NewSubmissionRow struct {
 	Revises         *int64
 	ClaimID         *int64
 	ContractVersion int64
+	HarnessJSON     []byte
 }
 
 // InsertSubmission creates the submission and its first event. Call
@@ -892,11 +952,11 @@ func InsertSubmission(ctx context.Context, tx pgx.Tx, in NewSubmissionRow) (int6
 	var id int64
 	err := tx.QueryRow(ctx, `
 		INSERT INTO tb_task_submission
-			(task_id, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id, contract_version)
-		VALUES ($1, $2, $3, $4, $5, $6, 'delivering', $7, $8, $9)
+			(task_id, agent_id, request_key, payload, payload_hash, amount, state, revises, claim_id, contract_version, harness_json)
+		VALUES ($1, $2, $3, $4, $5, $6, 'delivering', $7, $8, $9, $10)
 		RETURNING submission_id`,
 		in.TaskID, in.AgentID, in.RequestKey,
-		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID, in.ContractVersion).Scan(&id)
+		in.Payload, in.PayloadHash, in.Amount, in.Revises, in.ClaimID, in.ContractVersion, in.HarnessJSON).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert tb_task_submission: %w", err)
 	}

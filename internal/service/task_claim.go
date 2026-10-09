@@ -75,6 +75,59 @@ func effectiveContract(ctx context.Context, q pg.Querier, t *repository.TaskRow)
 	return contract, nil
 }
 
+// harnessSnapshotEntry is one input version of an engagement's
+// harness, as recorded on claim-less submissions (Task 1.1 §7.1).
+type harnessSnapshotEntry struct {
+	Code     string `json:"code"`
+	Revision int64  `json:"revision"`
+}
+
+// resolvedHarnessPin is one harness_ref resolved against the
+// publisher's CURRENT memories.
+type resolvedHarnessPin struct {
+	Code     string
+	MemoryID int64
+	Revision int64
+}
+
+// resolveHarnessRefs resolves a contract's harness_refs to the
+// publisher's current memory revisions (Task 1.1 §7.3: the
+// engagement binds the required input versions). A ref whose memory
+// is already deleted resolves to nothing — its reads keep the live
+// HARNESS_REF_NOT_FOUND behavior of Task 1.0.
+func resolveHarnessRefs(ctx context.Context, q pg.Querier, publisherID int64, refs []string) ([]resolvedHarnessPin, error) {
+	pins := make([]resolvedHarnessPin, 0, len(refs))
+	for _, ref := range refs {
+		k, err := repository.FindOwnedActiveKungfuByCode(ctx, q, publisherID, ref)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if k == nil {
+			continue
+		}
+		pins = append(pins, resolvedHarnessPin{Code: k.Code, MemoryID: k.ID, Revision: k.Revision})
+	}
+	return pins, nil
+}
+
+// harnessSnapshotJSON records the harness revisions current at a
+// claim-less intake (nil → NULL when there is nothing to record).
+func harnessSnapshotJSON(ctx context.Context, q pg.Querier, publisherID int64, refs []string) ([]byte, error) {
+	pins, err := resolveHarnessRefs(ctx, q, publisherID, refs)
+	if err != nil || len(pins) == 0 {
+		return nil, err
+	}
+	entries := make([]harnessSnapshotEntry, 0, len(pins))
+	for _, p := range pins {
+		entries = append(entries, harnessSnapshotEntry{Code: p.Code, Revision: p.Revision})
+	}
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
+	}
+	return b, nil
+}
+
 // ClaimTask is the §5.2 work_claim operation: reserve one price under
 // a new claim (idempotent per agent+task — an existing active claim is
 // returned as-is).
@@ -159,6 +212,22 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 	})
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	// Task 1.1 §7.3: the confirmed engagement binds the required input
+	// versions — freeze the current revision of every harness_ref in
+	// the claim's own transaction (deleted memories pin nothing).
+	pins, err := resolveHarnessRefs(ctx, tx, t.PublisherID, contract.HarnessRefs)
+	if err != nil {
+		return claimView{}, err
+	}
+	if len(pins) > 0 {
+		repo := make([]repository.HarnessPin, 0, len(pins))
+		for _, p := range pins {
+			repo = append(repo, repository.HarnessPin{MemoryID: p.MemoryID, Revision: p.Revision})
+		}
+		if err := repository.InsertClaimHarnessRevisions(ctx, tx, claimID, repo); err != nil {
+			return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
 	}
 	if err := repository.ReserveTaskAmount(ctx, tx, t.ID, contract.Price); err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")

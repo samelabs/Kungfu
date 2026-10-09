@@ -256,8 +256,9 @@ func TestWorkGetServesBoundVersionToEngagedAgent(t *testing.T) {
 // -- the 031 upgrade drill --
 
 // task11Migrations returns the migration files split at 031: the
-// pre-031 chain and the 031 file itself.
-func task11Migrations(t *testing.T) (pre []string, m031 string) {
+// pre-031 chain and everything from 031 on (an upgrade run applies
+// every pending file together).
+func task11Migrations(t *testing.T) (pre []string, from031 []string) {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*.sql"))
 	if err != nil || len(files) == 0 {
@@ -266,19 +267,20 @@ func task11Migrations(t *testing.T) (pre []string, m031 string) {
 	sort.Strings(files)
 	for i, f := range files {
 		if strings.Contains(f, "031_") {
-			return files[:i], f
+			return files[:i], files[i:]
 		}
 	}
 	t.Fatal("031 migration not found")
-	return nil, ""
+	return nil, nil
 }
 
 // TestTask11ContractVersionUpgradeDrill: a database carrying live
-// pre-1.1 tasks, claims and submissions is upgraded with 031; the
-// backfill freezes each task's current contract as version 1, every
-// existing engagement binds it, and behavior is unchanged (an
-// upgraded claim still validates and delivers against the version it
-// bound, a post-upgrade revision binds only later claims).
+// pre-1.1 tasks, claims and submissions is upgraded with the 1.1
+// migrations (031 onward); the backfill freezes each task's current
+// contract as version 1, every existing engagement binds it, and
+// behavior is unchanged (an upgraded claim still validates and
+// delivers against the version it bound, a post-upgrade revision
+// binds only later claims).
 func TestTask11ContractVersionUpgradeDrill(t *testing.T) {
 	pubTestPool(t) // presence + skip contract; throwaway DB below
 	ctx := context.Background()
@@ -307,7 +309,7 @@ func TestTask11ContractVersionUpgradeDrill(t *testing.T) {
 	}
 	t.Cleanup(db.Close)
 
-	pre, m031 := task11Migrations(t)
+	pre, from031 := task11Migrations(t)
 	for _, f := range pre {
 		sqlBytes, err := os.ReadFile(f)
 		if err != nil {
@@ -356,13 +358,15 @@ func TestTask11ContractVersionUpgradeDrill(t *testing.T) {
 		t.Fatalf("seed reservation: %v", err)
 	}
 
-	// apply the shipped 031
-	sqlBytes, err := os.ReadFile(m031)
-	if err != nil {
-		t.Fatalf("read %s: %v", m031, err)
-	}
-	if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
-		t.Fatalf("apply 031: %v", err)
+	// apply the shipped 1.1 migrations (031 onward, as one upgrade run)
+	for _, f := range from031 {
+		sqlBytes, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", f, err)
+		}
 	}
 
 	// backfill assertions: version 1 exists and equals the seeded

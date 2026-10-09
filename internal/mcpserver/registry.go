@@ -171,11 +171,13 @@ next_action: pick a task, then work_get.`,
 	},
 	{
 		Name: "work_harness",
-		Description: `Read one harness entry: the current content of a memory the task references.
-Preconditions: same visibility as work_get; ref_id must be in the contract's harness_refs and the memory must still exist (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
-Result: {ref_id, title, content}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
-next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"}},"required":["code","ref_id"],"additionalProperties":false}`,
+		Description: `Read one harness entry of a task: the execution material one harness_refs code points at.
+	Pinned read (Task 1.1): while you hold an active claim on the task — pass its claim_id, or just hold the claim and omit it — the ref is served at the revision your engagement pinned at work_claim time, even if the publisher has since edited or withdrawn the memory; the ref must be part of your claim's bound contract version. Result then carries pinned=true and that revision.
+	Live read (no claim, or a claim from before pinning existed): the memory's CURRENT content, pinned=false.
+	Preconditions: same visibility as work_get; ref_id must be in the governing contract's harness_refs and the memory must exist for a live read (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
+	Result: {ref_id, title, content, revision, pinned}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
+	next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"},"claim_id":{"type":["integer","string"],"description":"Optional: your active claim on this task — serves the revision the claim pinned. Omitted, an active claim you hold is used anyway."}},"required":["code","ref_id"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkHarness),
 	},
 	{

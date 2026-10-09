@@ -413,7 +413,7 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 		t.Fatalf("GetWork: %v", err)
 	}
 	assertClean(t, "GetWork", gw)
-	gh, err := GetHarness(ctx, pool, agent, hcode, "harnessref02")
+	gh, err := GetHarness(ctx, pool, agent, hcode, "harnessref02", nil, time.Now())
 	if err != nil {
 		t.Fatalf("GetHarness: %v", err)
 	}
