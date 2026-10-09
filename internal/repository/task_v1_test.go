@@ -109,7 +109,7 @@ func TestTaskV1LockReserveSettleInvariants(t *testing.T) {
 	subID, err := InsertSubmission(ctx, tx, NewSubmissionRow{
 		TaskID: tr.ID, AgentID: agent,
 		RequestKey: "a-key", Payload: payload,
-		PayloadHash: taskV1Hash(payload), Amount: 5,
+		PayloadHash: taskV1Hash(payload), Amount: 5, ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert submission: %v", err)
@@ -186,6 +186,7 @@ func TestTaskV1ReserveReleaseInvariants(t *testing.T) {
 	claimID, err := InsertClaim(ctx, tx, NewClaimRow{
 		TaskID: tr.ID, AgentID: agent,
 		ExpiresAt: now.Add(30 * time.Minute), Deadline: now.Add(2 * time.Hour), Amount: 5,
+		ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert claim: %v", err)
@@ -243,7 +244,7 @@ func TestTaskV1SubmissionUniqueIdentity(t *testing.T) {
 
 	in := NewSubmissionRow{
 		TaskID: tr.ID, AgentID: agent, RequestKey: "dup-key",
-		Payload: []byte(`{"n":1}`), Amount: 5,
+		Payload: []byte(`{"n":1}`), Amount: 5, ContractVersion: tr.ContractVersion,
 	}
 	in.PayloadHash = taskV1Hash(in.Payload)
 
@@ -291,7 +292,7 @@ func TestTaskV1SubmissionEventAppendOnly(t *testing.T) {
 	}
 	subID, err := InsertSubmission(ctx, tx, NewSubmissionRow{
 		TaskID: tr.ID, AgentID: agent, RequestKey: "ev-key",
-		Payload: payload, PayloadHash: taskV1Hash(payload), Amount: 5,
+		Payload: payload, PayloadHash: taskV1Hash(payload), Amount: 5, ContractVersion: tr.ContractVersion,
 	})
 	if err != nil {
 		t.Fatalf("insert submission: %v", err)
@@ -397,13 +398,23 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 	pool := taskV1Pool(t)
 	ctx := context.Background()
 
+	// seed this test's own identities: the ids must not depend on the
+	// package/DB running order (another package may have created bots
+	// before this one)
+	publisher := taskV1SeedBot(t, pool, 0)
+	agent := taskV1SeedBot(t, pool, 0)
+
 	// seed two tasks with different terminal mixes
 	seedTask := func(code string, n int) int64 {
 		t.Helper()
 		var id int64
-		if err := pool.QueryRow(ctx,
-			`INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
-			 VALUES ($1, 1, 'open', 100000, '{}') RETURNING id`, code).Scan(&id); err != nil {
+		if err := pool.QueryRow(ctx, `
+			WITH task AS (
+				INSERT INTO tb_task (code, publisher_id, status, budget_locked, contract)
+				VALUES ($1, $2, 'open', 100000, '{}') RETURNING id
+			)
+			INSERT INTO task_contract_versions (task_id, version, contract)
+			SELECT id, 1, '{}' FROM task RETURNING task_id`, code, publisher).Scan(&id); err != nil {
 			t.Fatalf("seed task: %v", err)
 		}
 		for i := 0; i < n; i++ {
@@ -413,8 +424,8 @@ func TestGetTaskStatsBatchMatchesSingular(t *testing.T) {
 				state = "rejected"
 			}
 			if err := pool.QueryRow(ctx,
-				`INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state)
-				 VALUES ($1, 1, $2, 'h', 5, 'delivering') RETURNING submission_id`, id,
+				`INSERT INTO tb_task_submission (task_id, agent_id, request_key, payload_hash, amount, state, contract_version)
+				 VALUES ($1, $2, $3, 'h', 5, 'delivering', 1) RETURNING submission_id`, id, agent,
 				fmt.Sprintf("%s-%d", code, i)).Scan(&sid); err != nil {
 				t.Fatalf("seed submission: %v", err)
 			}
