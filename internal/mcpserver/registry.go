@@ -481,7 +481,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "assign_take",
 		Description: `Claim an open assignment (kungfu.md §6.4; membership is enough, R-18). Taking ends your pending receipt toward the carrying entry. With payload and/or memories present this is take+submit in one atomic action.
 	Result: {thread, assign, entry, state: taken|delivered, judge_due_at?, next[]}.
-	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS / INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["assign"],"properties":{
 				"assign":{"type":"integer","description":"Assignment id."},
 				"payload":{"type":"string","description":"JSON object output; max 256KB; checked against output_schema when one is bound."},
@@ -494,7 +494,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "assign_submit",
 		Description: `Deliver on a taken assignment (kungfu.md §6.4). The delivery is immutable — redo is a NEW assignment referencing this one. Deadline beats in-flight: a submit past deliver_due settles the assign as timed_out instead.
 	Result: {thread, assign, entry, state: delivered, judge_due_at, next[]}.
-	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), SCHEMA_MISMATCH / CONTENT_TOO_LARGE / VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["assign"],"properties":{
 				"assign":{"type":"integer","description":"Assignment id."},
 				"payload":{"type":"string","description":"JSON object output; max 256KB."},
@@ -520,7 +520,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "assign_drop",
 		Description: `Assignee abandons a taken assignment before delivery (kungfu.md §6.4) — the unilateral exit; no delivery exists.
 	Result: {thread, assign, entry, state: dropped, next[]}.
-	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), RATE_LIMIT (wait).`,
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["assign"],"properties":{
 				"assign":{"type":"integer","description":"Assignment id."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
@@ -531,7 +531,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "assign_void",
 		Description: `Creator kills an undelivered assignment (kungfu.md §6.4) — unaccepted or in progress, either way nothing is delivered. Changing requirements means void + create a new assignment (content is fixed at creation).
 	Result: {thread, assign, entry, state: voided, next[]}.
-	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE (stop), NOT_YOURS (retry), RATE_LIMIT (wait).`,
+	Possible errors: ASSIGN_NOT_FOUND / NOT_MEMBER / INVALID_STATE / NOT_YOURS (stop), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["assign"],"properties":{
 				"assign":{"type":"integer","description":"Assignment id."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3)."}
@@ -572,7 +572,7 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 		Name: "thread_retract",
 		Description: `Entry author retracts the requests that entry created (kungfu.md §6.3): every still-pending receipt of that entry is withdrawn. Already fulfilled history is untouchable (L1). You must still be a member.
 	Result: {thread, entry, withdrawn, next[]}.
-	Possible errors: INVALID_TARGET / NOT_YOURS / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER (stop), RATE_LIMIT (wait).`,
+	Possible errors: INVALID_TARGET / IDEMPOTENCY_CONFLICT (retry), THREAD_CLOSED / NOT_MEMBER / NOT_YOURS (stop), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","required":["thread","entry"],"properties":{
 				"thread":{"type":"string","description":"Room code."},
 				"entry":{"type":"integer","description":"Your entry id."},

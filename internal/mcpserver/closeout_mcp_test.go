@@ -7,6 +7,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -74,4 +75,33 @@ func TestCloseoutDeliveredMemoryBothDoors(t *testing.T) {
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// TestThreadToolDescriptionsMatchNextAction: every error code a thread
+// tool description labels with a next action must carry the action the
+// server actually returns for it (the NOT_YOURS "retry" drift).
+func TestThreadToolDescriptionsMatchNextAction(t *testing.T) {
+	group := regexp.MustCompile(`([A-Z_]+(?: / [A-Z_]+)*) \((stop|retry|revise|wait)\)`)
+	checked := 0
+	for _, td := range ToolDefs() {
+		if !strings.HasPrefix(td.Name, "thread_") && !strings.HasPrefix(td.Name, "assign_") &&
+			!strings.HasPrefix(td.Name, "todo_") {
+			continue
+		}
+		for _, m := range group.FindAllStringSubmatch(td.Description, -1) {
+			for _, code := range strings.Split(m[1], " / ") {
+				got := threadNextActionFor(code)
+				if got == nil {
+					continue // shared table code, not thread-mapped
+				}
+				checked++
+				if *got != m[2] {
+					t.Errorf("%s: description labels %s as %s, server returns %s", td.Name, code, m[2], *got)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no labelled thread error codes found — the check proves nothing")
+	}
 }
