@@ -48,7 +48,10 @@ func invalidTaskState(status string) *errors.AppError {
 }
 
 // lockOwnedTask loads a task by code under the row lock and enforces
-// the 404 → NOT_OWNER order. The caller owns the transaction.
+// the 404 → audience-gate → NOT_OWNER order (WO-32a: an
+// out-of-audience caller gets the missing-task TASK_NOT_FOUND; an
+// in-audience non-publisher hears NOT_OWNER). The caller owns the
+// transaction.
 func lockOwnedTask(ctx context.Context, q pg.Querier, publisherID int64, code string) (*repository.TaskRow, error) {
 	t, err := repository.FindTaskByCodeForUpdate(ctx, q, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
@@ -60,8 +63,8 @@ func lockOwnedTask(ctx context.Context, q pg.Querier, publisherID int64, code st
 	if t == nil {
 		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
-	if t.PublisherID != publisherID {
-		return nil, errors.New(0, "NOT_OWNER", "Not your task")
+	if err := requireOwnerOrAudience(ctx, q, t, publisherID); err != nil {
+		return nil, err
 	}
 	return t, nil
 }
@@ -524,7 +527,9 @@ func RefundTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 }
 
 // GetTask returns one owned task with its contract, the §4 derived
-// amounts, and the §6.3 30-day statistics.
+// amounts, and the §6.3 30-day statistics. A non-publisher first
+// passes the audience gate (WO-32a): out-of-audience callers get
+// TASK_NOT_FOUND, in-audience non-publishers NOT_OWNER.
 func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string) (map[string]interface{}, error) {
 	t, err := repository.FindTaskByCode(ctx, pool, code)
 	if goerrors.Is(err, pgx.ErrNoRows) {
@@ -536,8 +541,8 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 	if t == nil {
 		return nil, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
-	if t.PublisherID != publisherID {
-		return nil, errors.New(0, "NOT_OWNER", "Not your task")
+	if err := requireOwnerOrAudience(ctx, pool, t, publisherID); err != nil {
+		return nil, err
 	}
 	view, err := taskView(ctx, pool, t)
 	if err != nil {

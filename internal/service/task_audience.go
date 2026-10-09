@@ -79,6 +79,22 @@ func requireTaskAudience(ctx context.Context, q pg.Querier, t *repository.TaskRo
 	return nil
 }
 
+// requireOwnerOrAudience is the publisher-side gate (WO-32a): the
+// publisher proceeds; anyone else first passes the audience gate —
+// an out-of-audience caller gets the missing-task TASK_NOT_FOUND
+// (§12: the publisher tools must not become an existence oracle),
+// while an in-audience non-publisher keeps hearing NOT_OWNER. Open
+// tasks behave exactly as before (the gate passes everyone).
+func requireOwnerOrAudience(ctx context.Context, q pg.Querier, t *repository.TaskRow, callerID int64) error {
+	if t.PublisherID == callerID {
+		return nil
+	}
+	if err := requireTaskAudience(ctx, q, t, callerID); err != nil {
+		return err
+	}
+	return errors.New(0, "NOT_OWNER", "Not your task")
+}
+
 // offeredWorkCount is the §8 "tasks" side of the opportunities
 // projection: restricted tasks naming the agent that are still
 // offerable (open, slots, eligibility, no active claim, active

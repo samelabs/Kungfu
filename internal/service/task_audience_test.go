@@ -366,40 +366,80 @@ func TestRestrictedTaskMinimalDisclosure(t *testing.T) {
 	// task that does not exist — identical error, field for field
 	type probe struct {
 		name string
-		call func(code string) error
+		call func(caller int64, code string) error
+		// publisherSide: the tool answers NOT_OWNER to a non-publisher
+		// once the audience gate lets them see the task at all
+		publisherSide bool
 	}
 	probes := []probe{
-		{"work_get", func(code string) error {
-			_, err := GetWork(ctx, pool, outside, code, now)
+		{"work_get", func(caller int64, code string) error {
+			_, err := GetWork(ctx, pool, caller, code, now)
 			return err
-		}},
-		{"work_harness", func(code string) error {
-			_, err := GetHarness(ctx, pool, outside, code, "anyref", nil, now)
+		}, false},
+		{"work_harness", func(caller int64, code string) error {
+			_, err := GetHarness(ctx, pool, caller, code, "anyref", nil, now)
 			return err
-		}},
-		{"work_claim", func(code string) error {
-			_, err := ClaimTask(ctx, pool, outside, code, now)
+		}, false},
+		{"work_claim", func(caller int64, code string) error {
+			_, err := ClaimTask(ctx, pool, caller, code, now)
 			return err
-		}},
-		{"work_submit", func(code string) error {
-			_, err := SubmitWork(ctx, pool, outside, SubmitInput{
+		}, false},
+		{"work_submit", func(caller int64, code string) error {
+			_, err := SubmitWork(ctx, pool, caller, SubmitInput{
 				Code: code, RequestKey: "probe", Payload: []byte(submitPayloadOK),
 			}, testAgentRefKey, now)
 			return err
-		}},
-		{"work_report", func(code string) error {
-			_, err := ReportTask(ctx, pool, outside, code, "probe report")
+		}, false},
+		{"work_report", func(caller int64, code string) error {
+			_, err := ReportTask(ctx, pool, caller, code, "probe report")
 			return err
-		}},
-		{"work_history", func(code string) error {
-			_, _, err := ListHistory(ctx, pool, outside, code, 1, 20)
+		}, false},
+		{"work_history", func(caller int64, code string) error {
+			_, _, err := ListHistory(ctx, pool, caller, code, 1, 20)
 			return err
-		}},
+		}, false},
+		// the publisher-side tools ride the same gate (WO-32a): an
+		// out-of-audience caller must not learn the task exists from
+		// NOT_OWNER either
+		{"task_get", func(caller int64, code string) error {
+			_, err := GetTask(ctx, pool, caller, code)
+			return err
+		}, true},
+		{"task_update", func(caller int64, code string) error {
+			upd := pubContract("") // valid, so the flow reaches the lookup
+			upd.Title = "probe"
+			_, err := UpdateTask(ctx, pool, caller, code, upd)
+			return err
+		}, true},
+		{"task_open", func(caller int64, code string) error {
+			_, err := OpenTask(ctx, pool, caller, code)
+			return err
+		}, true},
+		{"task_pause", func(caller int64, code string) error {
+			_, err := PauseTask(ctx, pool, caller, code)
+			return err
+		}, true},
+		{"task_close", func(caller int64, code string) error {
+			_, err := CloseTask(ctx, pool, caller, code)
+			return err
+		}, true},
+		{"task_fund", func(caller int64, code string) error {
+			_, err := FundTask(ctx, pool, caller, code, 100)
+			return err
+		}, true},
+		{"task_refund", func(caller int64, code string) error {
+			_, err := RefundTask(ctx, pool, caller, code)
+			return err
+		}, true},
+		{"task_submissions", func(caller int64, code string) error {
+			_, _, err := ListSubmissionsForPublisher(ctx, pool, caller, code, "", 1, 20, testAgentRefKey)
+			return err
+		}, true},
 	}
 	for _, p := range probes {
 		t.Run(p.name, func(t *testing.T) {
-			restrictedErr := appErrOf(t, p.call(code))
-			missingErr := appErrOf(t, p.call(missing))
+			restrictedErr := appErrOf(t, p.call(outside, code))
+			missingErr := appErrOf(t, p.call(outside, missing))
 			if restrictedErr.Code != missingErr.Code ||
 				restrictedErr.Message != missingErr.Message ||
 				fmt.Sprint(restrictedErr.Details) != fmt.Sprint(missingErr.Details) {
@@ -409,6 +449,16 @@ func TestRestrictedTaskMinimalDisclosure(t *testing.T) {
 			}
 			if restrictedErr.Code != "TASK_NOT_FOUND" {
 				t.Fatalf("code = %s, want TASK_NOT_FOUND", restrictedErr.Code)
+			}
+			// an in-audience NON-publisher sees the task (the gate
+			// opens) and is then denied by ownership, not by
+			// existence — on the publisher tools only; the work tools
+			// serve the named agent as usual (flow test)
+			if p.publisherSide {
+				namedErr := appErrOf(t, p.call(named, code))
+				if namedErr.Code != "NOT_OWNER" {
+					t.Fatalf("in-audience non-publisher: code = %s, want NOT_OWNER", namedErr.Code)
+				}
 			}
 		})
 	}

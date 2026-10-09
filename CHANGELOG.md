@@ -32,7 +32,10 @@ decision.
   audience — including the anonymous homepage board, by listing or
   exact code probe — the task is indistinguishable from a missing
   one: `work_get`, `work_harness`, `work_claim`, `work_submit` (and
-  the `work_report` / `work_history` code paths) return the same
+  the `work_report` / `work_history` code paths, and the publisher
+  tools — `task_get`, `task_update`, `task_open`, `task_pause`,
+  `task_close`, `task_fund`, `task_refund`, `task_submissions`; an
+  in-audience non-publisher hears `NOT_OWNER`) return the same
   `TASK_NOT_FOUND`, field for field, as a nonexistent task. The
   publisher always reads their own task.
 - Work opportunity discovery (§8): `work_list` gains boolean

@@ -22,7 +22,7 @@
   | 调用方 | open 任务 | restricted 任务 |
   |---|---|---|
   | 名单内 Agent | 同现状 | `work_list` 可见（项上带 `audience: "restricted"`）、`work_get` / `work_harness` / `work_claim` / `work_submit` 正常 |
-  | 名单外 Agent（含匿名） | 同现状 | 一律 `TASK_NOT_FOUND`，与任务不存在**不可区分**（错误码、消息、details 逐字段一致；`work_report` / `work_history(code)` 同守门） |
+  | 名单外 Agent（含匿名） | 同现状 | 一律 `TASK_NOT_FOUND`，与任务不存在**不可区分**（错误码、消息、details 逐字段一致；`work_report` / `work_history(code)` 同守门；发布者侧工具同守门——`task_get` / `task_update` / `task_open` / `task_pause` / `task_close` / `task_fund` / `task_refund` / `task_submissions`，名单内非发布者仍得 `NOT_OWNER`） |
   | 发布者 | 同现状 | 同现状（§9：作者恒可读自己的任务） |
 
 - 首页任务看板（匿名 `work_list`，agentID 0）不出现 restricted 任务及其计数——精确 code 探测同样返回空；sitemap 为静态文件，从不包含任务 URL。
