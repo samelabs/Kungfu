@@ -100,7 +100,8 @@ func publisherStatsView(s repository.TaskStats, activeClaims int64) publisherSta
 }
 
 // taskView projects a task row plus §4 derived amounts. The contract
-// IS the task's one contract column (M1).
+// IS the task's one contract column at its current version (M1);
+// contract_version names that version (§7.1).
 func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[string]interface{}, error) {
 	var contract task.Contract
 	view := map[string]interface{}{}
@@ -116,6 +117,7 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 	}
 	view["code"] = t.Code
 	view["status"] = t.Status
+	view["contract_version"] = t.ContractVersion
 	view["budget_locked"] = t.BudgetLocked
 	view["settled"] = t.Settled
 	view["reserved"] = t.Reserved
@@ -235,10 +237,11 @@ func isInsufficientCreditsErr(err error) bool {
 	return ok && appErr.Code == "INSUFFICIENT_CREDITS"
 }
 
-// UpdateTask is the §4 update transition: edit the Contract while the
-// task is paused. The saved contract applies immediately to every
-// later submission, including those under existing claims (a claim
-// keeps the amount it reserved).
+// UpdateTask is the §4 update transition: publish a new contract
+// version while the task is paused (§7.1: a revision binds only
+// engagements formed after it). The saved version applies to every
+// later claim and to every claim-less submission; claims already
+// active keep the version — and the amount — they bound.
 func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string, contract task.Contract) (map[string]interface{}, error) {
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
@@ -264,7 +267,7 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	if t.Status != task.TaskPaused {
 		return nil, invalidTaskState(t.Status)
 	}
-	if err := repository.UpdateTaskContract(ctx, tx, t.ID, contractJSON); err != nil {
+	if _, err := repository.ReplaceTaskContract(ctx, tx, t.ID, t.ContractVersion, contractJSON); err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -123,13 +123,14 @@ func handleWorkGet(ctx context.Context, deps *Deps, agent *model.Bot, args json.
 
 func handleWorkHarness(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Code  string `json:"code"`
-		RefID string `json:"ref_id"`
+		Code    string          `json:"code"`
+		RefID   string          `json:"ref_id"`
+		ClaimID *service.WireID `json:"claim_id"` // optional: serve the claim's pinned revision
 	}
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" || in.RefID == "" {
 		return ToolResult{}, argError("code and ref_id are required")
 	}
-	m, err := service.GetHarness(ctx, deps.Pool, agent.ID, in.Code, in.RefID)
+	m, err := service.GetHarness(ctx, deps.Pool, agent.ID, in.Code, in.RefID, in.ClaimID.Int64Ptr(), time.Now())
 	if err != nil {
 		return ToolResult{}, err
 	}

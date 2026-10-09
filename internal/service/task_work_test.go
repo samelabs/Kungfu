@@ -285,6 +285,7 @@ func TestListWorkStatsPrecision(t *testing.T) {
 		TaskID: mustTaskID(t, pool, codeA), AgentID: agent,
 		RequestKey: fmt.Sprintf("f-%d", time.Now().UnixNano()),
 		Payload:    []byte(submitPayloadOK), PayloadHash: task.PayloadHash([]byte(submitPayloadOK)), Amount: 5,
+		ContractVersion: 1,
 	})
 	if err != nil {
 		t.Fatalf("insert failed-seed: %v", err)
@@ -412,7 +413,7 @@ func TestExecutorOutputHidesReceiverAndPublisher(t *testing.T) {
 		t.Fatalf("GetWork: %v", err)
 	}
 	assertClean(t, "GetWork", gw)
-	gh, err := GetHarness(ctx, pool, agent, hcode, "harnessref02")
+	gh, err := GetHarness(ctx, pool, agent, hcode, "harnessref02", nil, time.Now())
 	if err != nil {
 		t.Fatalf("GetHarness: %v", err)
 	}

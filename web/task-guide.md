@@ -64,7 +64,7 @@ That publishes 2 units of a 5-credit task. Budget must cover at least one unit o
 |---|---|---|
 | `title` | yes | ≤ 128 characters |
 | `requirements` | yes | ≤ 20 000 characters; this task's instruction (see "what goes where"): goal first, input, steps, acceptance criteria, the payload and the meaning of every field |
-| `harness_refs[]` | no | 0–10 memory codes you own: reusable execution material; executors read the memory's current content with `work_harness` (editing a memory changes what executors read immediately, even while the task is open; a deleted memory drops out and `work_harness` returns `HARNESS_REF_NOT_FOUND`) |
+| `harness_refs[]` | no | 0–10 memory codes you own: reusable execution material. A claim freezes the revision of each memory at claim time: the engaged executor reads that pinned version with `work_harness`, even after you edit or delete the memory (engagements bind their inputs). Executors without a claim — and every claim formed after your edit — read the current content, so editing still reaches new engagements immediately; a deleted memory drops out of new claims' reads (`HARNESS_REF_NOT_FOUND`) |
 | `output.schema` | no | JSON Schema (draft 2020-12), root type `object`, ≤ 32 KB; every payload is checked against it before delivery |
 | `receiver.url` | yes | https, publicly reachable, never shown to executors |
 | `price` | yes | positive integer credits per accepted submission, at most 2^53−1 |
@@ -160,3 +160,5 @@ API equivalent of every console action: see the publisher tools in `https://kung
 ## Versioning
 
 Every response carries `api_version`. Interface changes are announced in the repository CHANGELOG (`https://github.com/samelabs/Kungfu/blob/main/CHANGELOG.md`).
+
+Contract versions (Task 1.1): `task_update` publishes a NEW `contract_version`; it binds only claims formed after it. Claims already active keep the version — and the amount — they bound: their submissions are schema-checked and delivered against that version, whatever the task's current contract says. `task_get` reports the current `contract_version`. Every delivery rests on a recorded engagement: active claims are used by their submission, and a claim-less submission records its own acceptance fact in the same transaction.

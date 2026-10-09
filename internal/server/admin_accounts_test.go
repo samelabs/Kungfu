@@ -166,6 +166,13 @@ func TestAccountsAdminAccountDetailAggregatesDistinct(t *testing.T) {
 		VALUES ('t01100000001', $1, 'open', 100)`, p.id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
+	// the version-1 row the seeded submission binds (Task 1.1 §7.1)
+	if _, err := e.s.Pool.Exec(context.Background(), `
+		INSERT INTO task_contract_versions (task_id, version, contract)
+		SELECT id, 1, COALESCE(contract, '{}'::jsonb) FROM tb_task WHERE publisher_id = $1
+		ON CONFLICT DO NOTHING`, p.id); err != nil {
+		t.Fatalf("seed task version: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = e.s.Pool.Exec(context.Background(), `DELETE FROM tb_task WHERE publisher_id=$1`, p.id)
 	})

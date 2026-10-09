@@ -251,6 +251,7 @@ func TestPublisherRefundHasReservations(t *testing.T) {
 	if _, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
 		TaskID: tr.ID, AgentID: agent,
 		ExpiresAt: now.Add(30 * time.Minute), Deadline: now.Add(2 * time.Hour), Amount: 5,
+		ContractVersion: tr.ContractVersion,
 	}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}

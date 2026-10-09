@@ -5,7 +5,7 @@
 | Specification | Kungfu Protocol 1.0 — Draft ([`kungfu.md`](../kungfu.md)) |
 | Implementation | Kungfu 3.0, branch `feat/room-face` |
 | Profiles claimed | **Memory**, **Thread** |
-| Profiles not yet claimed | **Task**, **Full** — gaps listed below |
+| Profiles not yet claimed | **Task** (§7.2 restricted audience and §8 opportunity discovery remain), **Full** |
 
 This statement follows §10.3 of the specification. It claims only what the evidence supports. Being the reference implementation does not make Kungfu 3.0 conformant by default; every gap is listed, none is hidden.
 
@@ -33,17 +33,18 @@ This statement follows §10.3 of the specification. It claims only what the evid
 
 ## Task profile — not yet claimed
 
-Tasks are implemented by Task 1.0 ([`docs/task-spec-1.0.md`](task-spec-1.0.md)): public tasks, judged by the author's receiver endpoint, settled in credits. Measured against §7 and §8:
+Tasks are implemented by Task 1.1 ([`docs/task-spec-1.1.md`](task-spec-1.1.md), changes over the 1.0 text in [`docs/task-spec-1.0.md`](task-spec-1.0.md)): public tasks, judged by the author's receiver endpoint, settled in credits. Measured against §7 and §8:
 
 | Rule | Status |
 |---|---|
-| §7.1 a revision binds only later engagements | **Unmet.** `task_update` replaces the contract; later submissions under existing claims are checked against the new contract. |
-| §7.1 / §7.3 required inputs bound at engagement | **Unmet.** `harness_refs` are read at their current version (`work_harness`). |
-| §7.2 restricted audience | **Unmet.** Every task is open. |
-| §7.3 engagement confirmed before delivery | **Partial.** With `claim.required = false` a submission is accepted without a recorded engagement fact. |
+| §7.1 a revision binds only later engagements | Met: every revision is an immutable version (`task_contract_versions`, migration 031); a claim records its bound version, and claim-carried submissions are schema-checked and delivered against it. `TestContractRevisionBindsOnlyLaterEngagements`, `TestTask11ContractVersionUpgradeDrill` (`internal/service/task_version_test.go`). |
+| §7.1 / §7.3 required inputs bound at engagement | Met: `work_claim` freezes each `harness_refs` revision (`claim_harness_revisions`, migration 032); `work_harness` serves the pinned revision to the engaged agent — through publisher edits and withdrawals; claim-less intakes record the revisions on the submission. `TestClaimPinsHarnessRevisions`, `TestTask11HarnessPinningUpgradeDrill` (`internal/service/task_pinning_test.go`). |
+| §7.2 restricted audience | **Unmet.** Every task is open; audience is fixed as open-only. New capability, scheduled separately. |
+| §7.3 engagement confirmed before delivery | Met: every delivery rests on a claim row — active claims are used by their submission; a claim-less intake records an acceptance fact (a claim born `used`, binding the version and input revisions) in the submission's own transaction, with zero ledger drift. `TestClaimlessSubmissionRecordsEngagementFact`, `TestEngagementFactLedgerZeroDrift` (`internal/service/task_engagement_test.go`). |
 | §7.3 judgment deadline and undecided | Met: an unresolved delivery fails after 24 hours and is not counted against the executor. |
-| §7.3 author cannot cancel an engagement | Met: no such action exists. |
+| §7.3 author cannot cancel an engagement | Met: no such action exists; revising, pausing or closing never touches a bound claim. |
 | §7.6 receiver, budget, rejection window, credits | Application mechanisms, allowed by §7.6. |
-| §8 Task engagements and judgments in the turn | **Unmet.** `todo_list` covers thread work only; Task claims and submissions are read through `work_*` and `task_*`. |
+| §8 Task engagements in the turn | Met: `todo_list` carries one `deliver` item per active claim (task code + claim id, `due_at` = `expires_at`, `next_action` = `submit`), same ordering and cursor as the thread kinds. Task 1.x has no agent-side judge obligation — judgment is the receiver's answer (§7.6) — so no judge items arise. `internal/service/task_todo_test.go`. |
+| §8 work discovery (opportunities) | **Unmet** as a protocol surface beyond `work_list`; scheduled separately. |
 
-These gaps are scheduled work, not reinterpretations of the specification.
+Remaining gaps (§7.2 restricted audience, §8 opportunity discovery) are new capabilities, scheduled work, not reinterpretations of the specification; the profile is not claimed until they close.

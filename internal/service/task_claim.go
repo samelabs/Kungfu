@@ -39,14 +39,18 @@ func taskNotOpen(t *repository.TaskRow) *errors.AppError {
 		fmt.Sprintf("Task is %s, not open", t.Status), details)
 }
 
-// claimView is the §5.2 return structure.
+// claimView is the §5.2 return structure. ContractVersion is the
+// contract version this engagement bound (Task 1.1 §7.1) —
+// submissions under this claim are checked and delivered against
+// it, whatever the task's current version says later.
 type claimView struct {
-	ClaimID   WireID    `json:"claim_id"`
-	TaskCode  string    `json:"task_code"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Deadline  time.Time `json:"deadline"`
-	Amount    int64     `json:"amount"`
-	Status    string    `json:"status"`
+	ClaimID         WireID    `json:"claim_id"`
+	TaskCode        string    `json:"task_code"`
+	ContractVersion int64     `json:"contract_version"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Deadline        time.Time `json:"deadline"`
+	Amount          int64     `json:"amount"`
+	Status          string    `json:"status"`
 }
 
 func newClaimView(c *repository.ClaimRow, code string) claimView {
@@ -54,10 +58,11 @@ func newClaimView(c *repository.ClaimRow, code string) claimView {
 		ClaimID:  WireID(c.ClaimID),
 		TaskCode: code,
 
-		ExpiresAt: c.ExpiresAt,
-		Deadline:  c.Deadline,
-		Amount:    c.Amount,
-		Status:    c.Status,
+		ContractVersion: c.ContractVersion,
+		ExpiresAt:       c.ExpiresAt,
+		Deadline:        c.Deadline,
+		Amount:          c.Amount,
+		Status:          c.Status,
 	}
 }
 
@@ -68,6 +73,41 @@ func effectiveContract(ctx context.Context, q pg.Querier, t *repository.TaskRow)
 		return task.Contract{}, err
 	}
 	return contract, nil
+}
+
+// harnessSnapshotEntry is one input version of an engagement's
+// harness, as recorded on claim-less submissions (Task 1.1 §7.1).
+type harnessSnapshotEntry struct {
+	Code     string `json:"code"`
+	Revision int64  `json:"revision"`
+}
+
+// resolvedHarnessPin is one harness_ref resolved against the
+// publisher's CURRENT memories.
+type resolvedHarnessPin struct {
+	Code     string
+	MemoryID int64
+	Revision int64
+}
+
+// resolveHarnessRefs resolves a contract's harness_refs to the
+// publisher's current memory revisions (Task 1.1 §7.3: the
+// engagement binds the required input versions). A ref whose memory
+// is already deleted resolves to nothing — its reads keep the live
+// HARNESS_REF_NOT_FOUND behavior of Task 1.0.
+func resolveHarnessRefs(ctx context.Context, q pg.Querier, publisherID int64, refs []string) ([]resolvedHarnessPin, error) {
+	pins := make([]resolvedHarnessPin, 0, len(refs))
+	for _, ref := range refs {
+		k, err := repository.FindOwnedActiveKungfuByCode(ctx, q, publisherID, ref)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if k == nil {
+			continue
+		}
+		pins = append(pins, resolvedHarnessPin{Code: k.Code, MemoryID: k.ID, Revision: k.Revision})
+	}
+	return pins, nil
 }
 
 // ClaimTask is the §5.2 work_claim operation: reserve one price under
@@ -147,12 +187,29 @@ func ClaimTask(ctx context.Context, pool *pg.Pool, agentID int64, code string, n
 		TaskID:  t.ID,
 		AgentID: agentID,
 
-		ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
-		Deadline:  now.Add(time.Duration(maxDur) * time.Second),
-		Amount:    contract.Price,
+		ContractVersion: t.ContractVersion,
+		ExpiresAt:       now.Add(time.Duration(ttl) * time.Second),
+		Deadline:        now.Add(time.Duration(maxDur) * time.Second),
+		Amount:          contract.Price,
 	})
 	if err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	// Task 1.1 §7.3: the confirmed engagement binds the required input
+	// versions — freeze the current revision of every harness_ref in
+	// the claim's own transaction (deleted memories pin nothing).
+	pins, err := resolveHarnessRefs(ctx, tx, t.PublisherID, contract.HarnessRefs)
+	if err != nil {
+		return claimView{}, err
+	}
+	if len(pins) > 0 {
+		repo := make([]repository.HarnessPin, 0, len(pins))
+		for _, p := range pins {
+			repo = append(repo, repository.HarnessPin{MemoryID: p.MemoryID, Revision: p.Revision})
+		}
+		if err := repository.InsertClaimHarnessRevisions(ctx, tx, claimID, repo); err != nil {
+			return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
 	}
 	if err := repository.ReserveTaskAmount(ctx, tx, t.ID, contract.Price); err != nil {
 		return claimView{}, errors.New(0, "INTERNAL_ERROR", "Database error")

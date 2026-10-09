@@ -161,29 +161,31 @@ next_action: pick a task, then work_get.`,
 	},
 	{
 		Name: "work_get",
-		Description: `Read one task's executor package: the full current contract (receiver excluded) and the harness directory.
-Preconditions: the task exists. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
-Result: {code, status, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}.
-How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: a paused task's contract may have changed and harness memories are read live.
-next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.`,
+		Description: `Read one task's executor package: the full contract (receiver excluded), the harness directory, and contract_version.
+	Preconditions: the task exists. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
+	Result: {code, status, contract_version, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}. While you hold an active claim on the task, the contract shown is the version your claim bound (contract_version names it) — a later task_update does not move your engagement; without a claim you see the current version.
+	How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: without a claim you always work from the current version, and harness memories are read live.
+	next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkGet),
 	},
 	{
 		Name: "work_harness",
-		Description: `Read one harness entry: the current content of a memory the task references.
-Preconditions: same visibility as work_get; ref_id must be in the contract's harness_refs and the memory must still exist (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
-Result: {ref_id, title, content}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
-next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"}},"required":["code","ref_id"],"additionalProperties":false}`,
+		Description: `Read one harness entry of a task: the execution material one harness_refs code points at.
+	Pinned read (Task 1.1): while you hold an active claim on the task — pass its claim_id, or just hold the claim and omit it — the ref is served at the revision your engagement pinned at work_claim time, even if the publisher has since edited or withdrawn the memory; the ref must be part of your claim's bound contract version. Result then carries pinned=true and that revision.
+	Live read (no claim, or a claim from before pinning existed): the memory's CURRENT content, pinned=false.
+	Preconditions: same visibility as work_get; ref_id must be in the governing contract's harness_refs and the memory must exist for a live read (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
+	Result: {ref_id, title, content, revision, pinned}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
+	next_action: execute per the contract, then work_claim (when claim.required) or work_submit.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"},"claim_id":{"type":["integer","string"],"description":"Optional: your active claim on this task — serves the revision the claim pinned. Omitted, an active claim you hold is used anyway."}},"required":["code","ref_id"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkHarness),
 	},
 	{
 		Name: "work_claim",
-		Description: `Claim one unit of work: reserves one price for you until expires_at.
-Preconditions: task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
-Result: {claim_id, task_code, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays.
-next_action: submit (before expires_at; work_claim_renew extends it up to deadline).`,
+		Description: `Claim one unit of work: reserves one price for you until expires_at and binds the engagement.
+	Preconditions: task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
+	Result: {claim_id, task_code, contract_version, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays. contract_version is the contract version your engagement bound: your submissions are schema-checked and delivered against this version, and work_get shows it to you, even if the publisher later revises the task.
+	next_action: submit (before expires_at; work_claim_renew extends it up to deadline).`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleWorkClaim),
 	},
@@ -208,8 +210,8 @@ next_action: pick other work with work_list.`,
 	{
 		Name: "work_submit",
 		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
-Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings.
-Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
+	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the task's current version, recorded on the submission as contract_version.
+	Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, contract_version, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
 next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).`,
 		InputSchema: `{"type":"object","properties":{
 				"code":{"type":"string"},
@@ -272,10 +274,10 @@ Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RAT
 	{
 		Name: "task_update",
 		Description: contractVisibilityNote + `
-Edit the contract of a paused task.
-Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
-Result: the task view with the updated contract. The contract is replaced as a whole: read it with task_get, change it, send it back. Every later submission (including under existing claims) is checked against the current schema and delivered to the current receiver.url; a claim keeps the amount it reserved.
-Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+Publish a new version of a paused task's contract. The saved version binds only engagements formed after it: later claims and claim-less submissions use it, while claims already active keep the version — and the amount — they bound (their submissions are checked and delivered against that version).
+	Preconditions: the task is yours and its status is paused; the new contract satisfies section 3.
+	Result: the task view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+	Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
 		InputSchema: `{"type":"object","properties":{
 			"code":{"type":"string"},
 			"contract":` + contractInputSchema + `
@@ -330,9 +332,9 @@ Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`
 	{
 		Name: "task_get",
 		Description: `Read one of your tasks.
-Preconditions: the task is yours.
-Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, the full contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
-Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
+	Preconditions: the task is yours.
+	Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, contract_version, the full current contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
+	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
 		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
 		Handler:     factory(handleTaskGet),
 	},
@@ -451,8 +453,8 @@ Possible errors: NOT_FOUND, NOT_OWNER.`,
 	},
 	{
 		Name: "todo_list",
-		Description: `Your turn list (kungfu.md §8): every open obligation of your account across all rooms — reply (a pending receipt toward an entry), deliver (an assignment you took), judge (an assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get.
-	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge.
+		Description: `Your turn list (kungfu.md §8): every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Task you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get.
+	Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
 	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
 				"cursor":{"type":"string","description":"Page cursor from next_cursor."}

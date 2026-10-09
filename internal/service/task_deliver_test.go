@@ -373,10 +373,19 @@ func TestDeliverTLSFailureUnreachable(t *testing.T) {
 	rcvTrusted := startProgReceiver(t)
 	code := deliverSyncTask(t, pool, publisher, rcvTrusted, 1000)
 	taskID := deliverTaskID(t, pool, code)
-	if _, err := pool.Exec(ctx,
-		`UPDATE tb_task SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
-		 WHERE id = $1`, taskID, `"`+srv.URL+`"`); err != nil {
-		t.Fatal(err)
+	// repoint BOTH the current contract and version 1 (the version a
+	// fresh submission binds and delivers through — Task 1.1) at the
+	// untrusted server (test-only; opening directly against the
+	// untrusted URL would fail at the test delivery before we can
+	// submit)
+	for _, stmt := range []string{
+		`UPDATE tb_task SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb) WHERE id = $1`,
+		`UPDATE task_contract_versions SET contract = jsonb_set(contract, '{receiver,url}', $2::jsonb)
+		 WHERE task_id = $1 AND version = 1`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, taskID, `"`+srv.URL+`"`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
 		Code:       code,
@@ -414,12 +423,18 @@ func TestDeliverConnectionRefused(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	tr, _ := repository.FindTaskByCode(ctx, pool, code)
-	if _, err := pool.Exec(ctx, `
-		UPDATE tb_task
-		SET contract = replace(contract::text, $2, $3)::jsonb
-		WHERE id = $1`,
-		tr.ID, rcv.url, fmt.Sprintf("https://127.0.0.1:%d/hook", deadPort)); err != nil {
-		t.Fatalf("repoint receiver: %v", err)
+	// repoint both the current contract and version 1 (what a fresh
+	// submission binds and delivers through — Task 1.1) at the dead
+	// port (test-only shortcut)
+	deadURL := fmt.Sprintf("https://127.0.0.1:%d/hook", deadPort)
+	for _, stmt := range []string{
+		`UPDATE tb_task SET contract = replace(contract::text, $2, $3)::jsonb WHERE id = $1`,
+		`UPDATE task_contract_versions SET contract = replace(contract::text, $2, $3)::jsonb
+		 WHERE task_id = $1 AND version = 1`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, tr.ID, rcv.url, deadURL); err != nil {
+			t.Fatalf("repoint receiver: %v", err)
+		}
 	}
 
 	view, subID := deliverSubmit(t, pool, agent, code)

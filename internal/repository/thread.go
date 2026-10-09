@@ -1052,12 +1052,17 @@ func LinkEntryAssignment(ctx context.Context, q pg.Querier, entryID, assignID in
 // -- D5: the account-level turn list (kungfu.md §8) --
 
 // TodoItem is one open obligation of an account, whatever room it
-// lives in (§8: turns are a projection, never written).
+// lives in (§8: turns are a projection, never written). A Task
+// engagement (an active work claim) is the fourth branch: Task is
+// then the task code and RowID the claim id — the two handles
+// work_submit needs; Thread is empty and no thread facts (author,
+// entry, seq) exist for it.
 type TodoItem struct {
 	Kind       string // reply | deliver | judge
 	Thread     string
+	Task       string // task code; empty for thread items
 	EntryID    *int64
-	AssignID   *int64 // the action handle for deliver/judge items
+	AssignID   *int64 // the action handle for thread deliver/judge items
 	Seq        *int64
 	Author     string
 	Summary    string
@@ -1071,13 +1076,17 @@ type TodoItem struct {
 // first, with a stable (produced, branch, id) keyset cursor — an
 // obligation settling between pages never skips or dups its
 // neighbours. threadID > 0 scopes the projection to one room (the
-// room's working-set slice); judge items only appear while the
-// creator is still a member (R-18). The assign id rides deliver and
-// judge items: it is the handle the next action needs.
+// room's working-set slice; Task claims are not room facts and never
+// appear in a scoped slice); judge items only appear while the
+// creator is still a member (R-18). The assign id rides thread deliver
+// and judge items: it is the handle the next action needs. The task
+// code + claim id ride Task-engagement items for work_submit. The
+// summary of a Task item is the task title; the publisher's identity
+// is never part of the projection (task-spec §10 item 7).
 func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
 	rows, err := q.Query(ctx, `
 		SELECT * FROM (
-		(SELECT 1 AS branch, 'reply' AS kind, t.code AS thread, e.id AS entry_id,
+		(SELECT 1 AS branch, 'reply' AS kind, t.code AS thread, NULL::text AS task, e.id AS entry_id,
 		        r.id AS row_id, e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
 		        NULL::text AS due, to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS produced
 		 FROM thread_receipts r
@@ -1086,15 +1095,16 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		 JOIN threads t ON t.id = r.thread_id
 		 WHERE r.account_id = $1 AND r.state = 'pending' AND ($2 = 0 OR r.thread_id = $2))
 		UNION ALL
-		(SELECT 2, 'deliver', t.code, a.entry_id, a.id, e.seq, b.bot_name,
+		(SELECT 2, 'deliver', t.code, NULL::text, a.entry_id, a.id, e.seq, b.bot_name,
 		        COALESCE(e.summary, ''), to_char(a.deliver_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(a.taken_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM assigns a
 		 JOIN threads t ON t.id = a.thread_id
 		 JOIN thread_entries e ON e.id = a.entry_id
 		 JOIN tb_bots b ON b.id = a.creator_id
-		 WHERE a.assignee_id = $1 AND a.state = 'taken' AND ($2 = 0 OR a.thread_id = $2))
+		 WHERE a.assignee_id = $1 AND a.state = 'taken' AND a.deliver_due_at > NOW()
+		   AND ($2 = 0 OR a.thread_id = $2))
 		UNION ALL
-		(SELECT 3, 'judge', t.code, a.entry_id, a.id, e.seq, b.bot_name,
+		(SELECT 3, 'judge', t.code, NULL::text, a.entry_id, a.id, e.seq, b.bot_name,
 		        COALESCE(e.summary, ''), to_char(d.judge_due_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(d.submitted_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM assigns a
 		 JOIN assign_deliveries d ON d.assign_id = a.id
@@ -1103,7 +1113,14 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		 JOIN tb_bots b ON b.id = a.assignee_id
 		 JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
 		 WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
-		   AND ($2 = 0 OR a.thread_id = $2))
+		   AND d.judge_due_at > NOW() AND ($2 = 0 OR a.thread_id = $2))
+		UNION ALL
+		(SELECT 4, 'deliver', ''::text, t.code, NULL::bigint AS entry_id, c.claim_id,
+		        NULL::bigint AS seq, ''::text AS author, t.contract->>'title',
+		        to_char(c.expires_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(c.created_at, 'YYYY-MM-DD HH24:MI:SS')
+		 FROM tb_task_claim c
+		 JOIN tb_task t ON t.id = c.task_id
+		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)
 		) items
 		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
 		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
@@ -1117,13 +1134,16 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		var it TodoItem
 		var branch int64
 		var rowID int64
-		if err := rows.Scan(&branch, &it.Kind, &it.Thread, &it.EntryID, &rowID,
+		var task *string
+		if err := rows.Scan(&branch, &it.Kind, &it.Thread, &task, &it.EntryID, &rowID,
 			&it.Seq, &it.Author, &it.Summary, &it.DueAt, &it.ProducedAt); err != nil {
 			return nil, err
 		}
 		it.Branch = branch
 		it.RowID = rowID
-		if it.Kind != "reply" {
+		if task != nil {
+			it.Task = *task
+		} else if it.Kind != "reply" {
 			id := rowID
 			it.AssignID = &id
 		}
@@ -1337,11 +1357,13 @@ func ThreadOpenItemsCounts(ctx context.Context, q pg.Querier, accountID int64) (
 		    WHERE r.account_id = $1 AND r.state = 'pending'
 		    UNION ALL
 		    SELECT a.thread_id FROM assigns a
-		    WHERE a.assignee_id = $1 AND a.state = 'taken'
+		    WHERE a.assignee_id = $1 AND a.state = 'taken' AND a.deliver_due_at > NOW()
 		    UNION ALL
 		    SELECT a.thread_id FROM assigns a
+		    JOIN assign_deliveries d ON d.assign_id = a.id
 		    JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = a.creator_id
 		    WHERE a.creator_id = $1 AND a.state = 'delivered' AND a.judge_forfeited_at IS NULL
+		      AND d.judge_due_at > NOW()
 		) t GROUP BY thread_id`, accountID)
 	if err != nil {
 		return nil, err

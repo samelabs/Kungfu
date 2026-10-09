@@ -499,11 +499,15 @@ func (w *fuzzWorld) checkInvariants() {
 		var direct int
 		if err := pool.QueryRow(ctx, `
 			SELECT (SELECT COUNT(*) FROM thread_receipts WHERE account_id=$1 AND state='pending')
-			     + (SELECT COUNT(*) FROM assigns WHERE assignee_id=$1 AND state='taken')
+			     + (SELECT COUNT(*) FROM assigns WHERE assignee_id=$1 AND state='taken'
+			          AND deliver_due_at > NOW())
 			     + (SELECT COUNT(*) FROM assigns a JOIN thread_members m
 			        ON m.thread_id=a.thread_id AND m.account_id=a.creator_id
+			        JOIN assign_deliveries d ON d.assign_id=a.id
 			        WHERE a.creator_id=$1 AND a.state='delivered'
-			          AND a.judge_forfeited_at IS NULL)`, actor).Scan(&direct); err != nil {
+			          AND a.judge_forfeited_at IS NULL AND d.judge_due_at > NOW())
+			     + (SELECT COUNT(*) FROM tb_task_claim WHERE agent_id=$1 AND status='active'
+			          AND expires_at > NOW())`, actor).Scan(&direct); err != nil {
 			t.Fatalf("V6 direct: %v", err)
 		}
 		if projected != direct {

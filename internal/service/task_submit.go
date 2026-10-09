@@ -51,25 +51,31 @@ type ReplyView struct {
 }
 
 // SubmissionView is the intake + delivery return structure.
+// ContractVersion is the version the submission was checked and
+// delivered against (§7.1): the claim's bound version when it
+// carried one, else the current version at intake.
 type SubmissionView struct {
-	SubmissionID WireID     `json:"submission_id"`
-	TaskCode     string     `json:"task_code"`
-	State        string     `json:"state"`
-	Amount       int64      `json:"amount"`
-	Paid         int64      `json:"paid"`
-	Reply        *ReplyView `json:"reply"`
-	Failure      *string    `json:"failure"`
-	CreatedAt    time.Time  `json:"created_at"`
+	SubmissionID    WireID     `json:"submission_id"`
+	TaskCode        string     `json:"task_code"`
+	ContractVersion int64      `json:"contract_version"`
+	State           string     `json:"state"`
+	Amount          int64      `json:"amount"`
+	Paid            int64      `json:"paid"`
+	Reply           *ReplyView `json:"reply"`
+	Failure         *string    `json:"failure"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 func newSubmissionView(s *repository.SubmissionRow, code string) SubmissionView {
 	v := SubmissionView{
 		SubmissionID: WireID(s.SubmissionID),
 		TaskCode:     code,
-		State:        s.State,
-		Amount:       s.Amount,
-		Failure:      s.Failure,
-		CreatedAt:    s.CreatedAt,
+
+		ContractVersion: s.ContractVersion,
+		State:           s.State,
+		Amount:          s.Amount,
+		Failure:         s.Failure,
+		CreatedAt:       s.CreatedAt,
 	}
 	if s.ResponseCode != nil {
 		v.Reply = &ReplyView{Status: *s.ResponseCode}
@@ -123,8 +129,10 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	// (c) task existence / then (d) own task — ownership precedes any
 	// claim parsing (§5.3: existence is step 3, OWN_TASK step 4, the
 	// claim itself step 6), so a publisher probing its own task with a
-	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. Every
-	// submission is checked against the task's current contract.
+	// bogus claim_id hears OWN_TASK, never CLAIM_INVALID. A claim-less
+	// submission is checked against the task's CURRENT contract; a
+	// claim-carried one against the version the claim bound (§7.1),
+	// which the claim's row fixes — a later task_update cannot move it.
 	if t == nil {
 		return SubmissionView{}, errors.New(0, "TASK_NOT_FOUND", "Task not found")
 	}
@@ -155,13 +163,23 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 
 	// (f) claim: the current contract decides whether one is
 	// required; a carried claim must be this agent's active claim on
-	// this task, unexpired (spec §5.2).
+	// this task, unexpired (spec §5.2) — and it fixes the contract
+	// version the payload is checked against.
+	var boundClaim *repository.ClaimRow
+	var boundContract task.Contract
 	if in.ClaimID == nil {
 		if contract.Claim.Required {
 			return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
 		}
-	} else if err := checkClaim(ctx, pool, *claimID, agentID, t.ID, now); err != nil {
-		return SubmissionView{}, err
+	} else {
+		boundClaim, err = checkClaim(ctx, pool, *claimID, agentID, t.ID, now)
+		if err != nil {
+			return SubmissionView{}, err
+		}
+		boundContract, err = contractVersionOf(ctx, pool, t.ID, boundClaim.ContractVersion)
+		if err != nil {
+			return SubmissionView{}, err
+		}
 	}
 
 	// (g) revises.
@@ -171,7 +189,9 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		}
 	}
 
-	// (h) payload: a JSON object, schema-valid, credential-free.
+	// (h) payload: a JSON object, schema-valid, credential-free —
+	// against the bound version's schema when a claim is carried,
+	// else the current contract's.
 	var decoded map[string]any
 	if err := json.Unmarshal(in.Payload, &decoded); err != nil || decoded == nil {
 		// JSON null unmarshals into a nil map without error — a null
@@ -180,8 +200,10 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			Pointer: "", Message: "payload must be a JSON object",
 		}})
 	}
-	schema, err := taskSchema(ctx, pool, t.ID)
-	if err != nil {
+	var schema []byte
+	if in.ClaimID != nil {
+		schema = boundContract.Output.Schema
+	} else if schema, err = taskSchema(ctx, pool, t.ID); err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if errs := payloadSchemaErrors(schema, in.Payload); len(errs) > 0 {
@@ -210,17 +232,18 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		return SubmissionView{}, errors.New(0, "OWN_TASK", "You cannot submit to your own task")
 	}
 	// The contract may have changed between the pre-check and the
-	// lock (a paused edit commits in between). Re-verify the
-	// contract-dependent checks against the locked row's contract.
+	// lock (a paused edit commits in between). A claim-carried
+	// submission is immune: its bound version is immutable, so the
+	// pre-validated schema still governs. A claim-less submission
+	// re-verifies the contract-dependent checks against the locked
+	// row's CURRENT version and records that version.
 	var lockedContract task.Contract
 	if err := json.Unmarshal(locked.Contract, &lockedContract); err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
 	}
-	if !bytes.Equal(locked.Contract, t.Contract) {
-		if in.ClaimID == nil {
-			if lockedContract.Claim.Required {
-				return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
-			}
+	if in.ClaimID == nil && !bytes.Equal(locked.Contract, t.Contract) {
+		if lockedContract.Claim.Required {
+			return SubmissionView{}, errors.New(400, "CLAIM_REQUIRED", "This task requires a claim")
 		}
 		if errs := payloadSchemaErrors(lockedContract.Output.Schema, in.Payload); len(errs) > 0 {
 			return SubmissionView{}, schemaMismatch(errs)
@@ -234,6 +257,8 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		return SubmissionView{}, err
 	}
 	amount := lockedContract.Price
+	var submissionVersion int64
+	var harnessJSON []byte
 	if in.ClaimID == nil {
 		if locked.Status != task.TaskOpen {
 			return SubmissionView{}, taskNotOpen(locked)
@@ -244,6 +269,51 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			}
 			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
+		submissionVersion = locked.ContractVersion
+		// Task 1.1 §7.1: the harness revisions this delivery was
+		// prepared against, recorded on the submission at intake
+		// (under the lock) — and §7.3: the ACCEPTANCE FACT. A claim-less
+		// delivery is accepted on a recorded engagement in this same
+		// transaction: a claim row born used, binding the contract
+		// version and the same harness revisions. It never holds a
+		// reservation (the submission's own reservation above is the
+		// one that counts), so the ledger and the §10.2 invariant are
+		// exactly what they were without it.
+		resolved, err := resolveHarnessRefs(ctx, tx, locked.PublisherID, lockedContract.HarnessRefs)
+		if err != nil {
+			return SubmissionView{}, err
+		}
+		if len(resolved) > 0 {
+			entries := make([]harnessSnapshotEntry, 0, len(resolved))
+			for _, r := range resolved {
+				entries = append(entries, harnessSnapshotEntry{Code: r.Code, Revision: r.Revision})
+			}
+			if harnessJSON, err = json.Marshal(entries); err != nil {
+				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Internal error")
+			}
+		}
+		factID, err := repository.InsertClaim(ctx, tx, repository.NewClaimRow{
+			TaskID:          locked.ID,
+			AgentID:         agentID,
+			ContractVersion: locked.ContractVersion,
+			ExpiresAt:       now,
+			Deadline:        now,
+			Amount:          amount,
+			Status:          task.ClaimUsed,
+		})
+		if err != nil {
+			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if len(resolved) > 0 {
+			pins := make([]repository.HarnessPin, 0, len(resolved))
+			for _, r := range resolved {
+				pins = append(pins, repository.HarnessPin{MemoryID: r.MemoryID, Revision: r.Revision})
+			}
+			if err := repository.InsertClaimHarnessRevisions(ctx, tx, factID, pins); err != nil {
+				return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+		}
+		claimID = &factID
 	} else {
 		claim, err := repository.FindClaimByIDForUpdate(ctx, tx, *claimID)
 		if err != nil || claim == nil ||
@@ -255,18 +325,21 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 			return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
 		amount = claim.Amount
+		submissionVersion = claim.ContractVersion
 	}
 
 	subID, err := repository.InsertSubmission(ctx, tx, repository.NewSubmissionRow{
 		TaskID: locked.ID,
 
-		AgentID:     agentID,
-		RequestKey:  in.RequestKey,
-		Payload:     in.Payload,
-		PayloadHash: payloadHash,
-		Amount:      amount,
-		Revises:     revises,
-		ClaimID:     claimID,
+		AgentID:         agentID,
+		RequestKey:      in.RequestKey,
+		Payload:         in.Payload,
+		PayloadHash:     payloadHash,
+		Amount:          amount,
+		Revises:         revises,
+		ClaimID:         claimID,
+		ContractVersion: submissionVersion,
+		HarnessJSON:     harnessJSON,
 	})
 	if err != nil {
 		if repository.IsUniqueViolation(err) {
@@ -292,20 +365,40 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 }
 
 // checkClaim is §5.3 step 6 for a carried claim: this agent's ACTIVE
-// claim on this task, unexpired.
-func checkClaim(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int64, now time.Time) error {
+// claim on this task, unexpired. It returns the claim row — the
+// caller reads the bound contract version off it.
+func checkClaim(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int64, now time.Time) (*repository.ClaimRow, error) {
 	claim, err := repository.FindClaimByID(ctx, pool, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
-		return errors.New(0, "CLAIM_INVALID", "Claim not found")
+		return nil, errors.New(0, "CLAIM_INVALID", "Claim not found")
 	}
 	if err != nil {
-		return errors.New(0, "INTERNAL_ERROR", "Database error")
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if claim.AgentID != agentID || claim.TaskID != taskID ||
 		claim.Status != task.ClaimActive || !claim.ExpiresAt.After(now) {
-		return errors.New(0, "CLAIM_INVALID", "Claim is not active for you on this task")
+		return nil, errors.New(0, "CLAIM_INVALID", "Claim is not active for you on this task")
 	}
-	return nil
+	return claim, nil
+}
+
+// contractVersionOf decodes one immutable contract version of a task
+// (§7.1). A version row can never be missing for a bound claim —
+// the same transaction that bumps the task writes it — so its
+// absence is an internal error, never an executor-visible one.
+func contractVersionOf(ctx context.Context, pool *pg.Pool, taskID, version int64) (task.Contract, error) {
+	raw, err := repository.FindTaskContractVersion(ctx, pool, taskID, version)
+	if err != nil {
+		return task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if raw == nil {
+		return task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Bound contract version is missing")
+	}
+	var c task.Contract
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return task.Contract{}, errors.New(0, "INTERNAL_ERROR", "Stored contract is not valid JSON")
+	}
+	return c, nil
 }
 
 // rejectedCapFor is the §3 缺省 5 unless the contract overrides.
