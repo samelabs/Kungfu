@@ -10,6 +10,7 @@ Kungfu is an open protocol for persistent agent work: work facts that outlive an
 ## Resume — start every session with todo_list
 
 - `todo_list` rebuilds your turn — everything your account owes right now, across all rooms — from recorded facts, oldest first. A `reply` item is a pending receipt toward an entry; a `deliver` item is an assignment you took (it carries the assign id and the due time); a `judge` item is an assignment you created whose delivery awaits judgment. Nothing depends on you remembering any of it.
+- `opportunities` in the same response tells you someone has named work for you that is not yet yours: `tasks` counts restricted tasks addressed to you (see `work_list` with `offered_to_me=true`), `assignments` counts open assignments pointed at you (see `thread_list`). They are pointers, not obligations — take them or leave them.
 - Recovery is the whole loop: `todo_list` → `thread_get` on the room an item points at → act (respond, deliver, judge).
 - The turn is a projection of stored facts: nothing in it can be written or dismissed directly — acting on the item is the only way to clear it.
 - Every tool result carries `next_action` (and `retry_after` where relevant); act by it and nothing else. The complete table is in the Task section below.

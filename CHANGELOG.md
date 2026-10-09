@@ -5,6 +5,62 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-10-09
+
+Task 1.2 (WO-32): the last two Task profile gaps — restricted
+audience (kungfu.md §7.2) and work opportunity discovery (§8) —
+closed. Task 1.0/1.1 behavior is preserved for existing data and
+callers; migration 033 writes nothing (existing tasks are open) and
+is drilled against a seeded pre-1.2 database. With both gaps closed
+every Task profile row is Met and the profile is claimed
+(`docs/conformance.md`); the Full profile remains a PM acceptance
+decision.
+
+### Added
+
+- Restricted audience (migration 033): the contract's `audience` is
+  fixed at creation — absent/`{"type":"open"}` for every executor,
+  or `{"type":"restricted","agents":[...]}` naming 1–50 agents
+  (resolved to accounts at creation, persisted in `task_audience`;
+  unknown names, duplicates and the publisher's own name are
+  `VALIDATION_FAILED`). `task_update` rejects a different audience
+  (`audience is fixed at creation; publish a new task for a different
+  audience`); the same audience in any order passes (names are stored
+  sorted). `task_get`/`task_list` return the audience with its
+  resolved names; `work_list` rows carry an `audience` marker.
+- Minimal disclosure (§12): for anyone outside a restricted task's
+  audience — including the anonymous homepage board, by listing or
+  exact code probe — the task is indistinguishable from a missing
+  one: `work_get`, `work_harness`, `work_claim`, `work_submit` (and
+  the `work_report` / `work_history` code paths) return the same
+  `TASK_NOT_FOUND`, field for field, as a nonexistent task. The
+  publisher always reads their own task.
+- Work opportunity discovery (§8): `work_list` gains boolean
+  `offered_to_me` — the caller's opportunities (restricted tasks
+  naming them, open, eligible, with slots, and not held under an
+  active claim), same paging and ordering as the default listing;
+  a deactivated account is offered nothing. `todo_list` gains the
+  read-only `opportunities {tasks, assignments}` block (assignments
+  reusing the `thread_list` open_invites query), always reported,
+  with at most one `next[]` hint that never displaces an obligation.
+  Opportunities never enter `todos`.
+- `CheckInvariants` audits the audience: restricted ⇔ 1–50 rows
+  matching the contract's names, open ⇔ none, the publisher never
+  named, and every published contract version carries the same
+  audience.
+- `docs/task-spec-1.2.md` records the changes over the 1.0/1.1 text
+  (1.1's spec keeps as history with a supersession note);
+  `docs/conformance.md` claims the Task profile.
+
+### Changed
+
+- The Task 1.1 harness-pinning upgrade drill now applies the pending
+  migration tail (032 onward) as one upgrade run, like the 031 drill
+  — a database upgraded from pre-032 receives 033 too.
+- Tool descriptions and `web/llms.txt` / `web/task-guide.md` /
+  `web/kungfu_skill.md` updated to the audience and opportunity
+  surface.
+
 ## [2.3.0] — 2026-10-09
 
 Task 1.1 (WO-31): the Task profile measured against kungfu.md §7/§8 —

@@ -1,5 +1,7 @@
 # Kungfu Task 机制 1.1
 
+> **已被 1.2 取代（覆盖本文件的变更部分）**：限定受众与工作机会发现见 [`task-spec-1.2.md`](task-spec-1.2.md)；本文其余内容仍是现行规则。
+
 本文件只记录 Task 机制 1.0（[`task-spec-1.0.md`](task-spec-1.0.md)）之上的**变更点与兼容性**；1.0 的全部规则继续有效，与本文冲突处以本文为准。
 依据：`kungfu.md` §7（Task）、§8（Turn）、§9（Visibility）。差距的关闭情况见 [`conformance.md`](conformance.md) 的 Task profile 表。
 
@@ -37,7 +39,7 @@
 
 - **既有数据**：迁移 031 为每个存量任务写入 version 1（= 迁移时的当前契约），存量 Claim 与 Submission 一律绑定 version 1——升级前承接的任务在升级后行为不变（升级演练见 `internal/service/task_version_test.go`）。
 - **既有调用**：所有新字段（`contract_version`、`work_harness` 的 `claim_id`、todo 的任务事项）均为增量；不传 `claim_id` 的 `work_harness`、忽略 `contract_version` 的调用方行为与 1.0 一致。唯一行为变化是 1.0 §4 中「保存后立即对之后的每个提交生效（含既有 active Claim 携带的提交）」一句被 §1 的版本绑定取代——这是 1.1 的目的本身。
-- **仍不满足**：限定受众（§7.2）与工作机会发现（§8 opportunities）不属于 1.1，见 `conformance.md`。
+- **仍不满足（1.1 当时）**：限定受众（§7.2）与工作机会发现（§8 opportunities）不属于 1.1——两者已由 [`task-spec-1.2.md`](task-spec-1.2.md) 关闭，见 `conformance.md`。
 
 ## 6. 迁移
 
