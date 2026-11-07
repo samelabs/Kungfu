@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing. This document covers the essentials.
 
-This repository holds two things with two different change processes. **Protocol revisions** — any change to [`kungfu.md`](kungfu.md) and its translation — follow the public propose / review / release process of [GOVERNANCE.md](GOVERNANCE.md); start there, not here. **Implementation contributions** — the Go code, `web/`, `migrations/` and the documents under `docs/` — follow the process on this page. A change that alters protocol-visible behavior updates [`docs/conformance.md`](docs/conformance.md) in the same pull request.
+This repository holds two things with two different change processes. **Protocol revisions** — any change to [`kungfu-protocol.md`](kungfu-protocol.md) and its translation — follow the protocol's own versioning and change rules (§11); start there, not here. **Implementation contributions** — the Go code, `web/`, `migrations/` and the documents under `docs/` — follow the process on this page. A change that alters protocol-visible behavior updates [`docs/conformance.md`](docs/conformance.md) in the same pull request.
 
 ## Commit identity
 

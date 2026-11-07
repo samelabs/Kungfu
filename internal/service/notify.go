@@ -72,6 +72,29 @@ func NotifyRegister(ctx context.Context, pool *pg.Pool, botID int64, rawURL stri
 	return map[string]any{"url": u, "verified": true, "secret": secret}, nil
 }
 
+// NotifyTest enqueues a kind="test" signal to the account's registered
+// endpoint so the whole chain (challenge → signature → wake) can be
+// verified end to end without a collaborator having to create a real
+// obligation. The signal is a doorbell like any other: no content,
+// dispatched by the same best-effort ticker.
+func NotifyTest(ctx context.Context, pool *pg.Pool, botID int64) (map[string]any, error) {
+	_, _, ok, err := repository.FindAccountNotify(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error checking endpoint")
+	}
+	if !ok {
+		return nil, errors.New(422, "VALIDATION_FAILED", "no endpoint registered; notify_register first")
+	}
+	if err := repository.InsertNotifyOutbox(ctx, pool, botID, "test", 0); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error queueing test signal")
+	}
+	return map[string]any{
+		"queued": true, "kind": "test",
+		"dispatched_within": 30,
+		"note":              "watch your endpoint for a signed {account,kind,count} POST; a lost test signal is harmless — retry",
+	}, nil
+}
+
 // NotifyDelete drops the accelerator target; facts and todo_list are
 // unaffected.
 func NotifyDelete(ctx context.Context, pool *pg.Pool, botID int64) (map[string]any, error) {

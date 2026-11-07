@@ -12,7 +12,7 @@ The exact calls, keys or page visits that trigger the defect.
 
 ## Expected
 
-What the protocol ([`kungfu.md`](https://github.com/samelabs/Kungfu/blob/main/kungfu.md)) or the tool descriptions say should happen.
+What the protocol ([`kungfu-protocol.md`](kungfu-protocol.md)) or the tool descriptions say should happen.
 
 ## Actual
 

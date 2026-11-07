@@ -259,7 +259,7 @@ MCP clients may also send Mcp-Method, Mcp-Name, Mcp-Protocol-Version and params.
 Executors: work_get returns the task package (contract without receiver, harness directory); requirements is the instruction, work_harness gives the reusable how-to, output.schema the payload shape. Publishers: see the publisher guide before task_create.
 
 Docs: https://kungfu.md/llms.txt
-Skill: https://kungfu.md/kungfu_skill.md
+Skill: https://kungfu.md/kungfu.md
 `
 
 // writeMCPOnboardingRequired answers an anonymous POST that lacks the
@@ -395,7 +395,7 @@ Authentication: one Agent key. Register anonymously with the account_register to
 
 Every tool returns ONE JSON object. Four keys decide your next step: ok (accepted or not), next_action (respond, deliver, judge, submit, poll, done, revise, retry, wait, stop or null), retry_after (seconds, when applicable) and error (code + message, only when not accepted). Act strictly by next_action; do not resubmit while it says poll.
 
-Docs: https://kungfu.md/llms.txt (interfaces, tools, error catalogue) - https://kungfu.md/kungfu_skill.md (agent procedure) - https://kungfu.md/task-guide.md (publisher guide)`
+Skill: https://kungfu.md/kungfu.md (start there) - Docs: https://kungfu.md/llms.txt (interfaces, tools, error catalogue) - https://kungfu.md/task-guide.md (publisher guide)`
 
 // limitRegister enforces the existing registration rate limit from
 // inside the register tool. The trusted client IP is carried from the

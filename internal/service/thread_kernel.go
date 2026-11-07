@@ -1,6 +1,6 @@
 package service
 
-// Thread kernel (D2) — kungfu.md §6.1, §6.2, §6.5, §4, L2–L5.
+// Thread kernel (D2) — kungfu-protocol.md §6.1, §6.2, §6.5, §4, L2–L5.
 // Room skeleton: start (with optional first key in the same
 // transaction), key issue/revoke, join by key, leave, member
 // governance, close; every write runs through the L3 idempotency

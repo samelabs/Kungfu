@@ -1,6 +1,6 @@
 package repository
 
-// Task 1.2 (WO-32) — restricted task audience (kungfu.md §7.2) and
+// Task 1.2 (WO-32) — restricted task audience (kungfu-protocol.md §7.2) and
 // work opportunity discovery (§8). task_audience (migration 033)
 // holds the audience as resolved account ids, written once by the
 // task_create transaction and never updated: the audience is fixed

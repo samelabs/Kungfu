@@ -20,6 +20,20 @@ import (
 )
 
 // oppCounts reads todo_list's opportunities block for one agent.
+// onlyWaitHint: every hint is the wake tool (todo_wait) — the empty-
+// turn bridge — and no other hint is present.
+func onlyWaitHint(next []map[string]any) bool {
+	if len(next) == 0 {
+		return false
+	}
+	for _, h := range next {
+		if h["tool"] != "todo_wait" {
+			return false
+		}
+	}
+	return true
+}
+
 func oppCounts(t *testing.T, pool *pg.Pool, agent int64) (tasks, assignments int64, next []map[string]any) {
 	t.Helper()
 	res, err := TodoList(context.Background(), pool, agent, 0, "")
@@ -56,8 +70,10 @@ func TestOpportunityCountsFollowLifecycle(t *testing.T) {
 	if tasks != 1 || assignments != 0 {
 		t.Fatalf("opportunities = %d/%d, want 1/0 (only the task naming the agent)", tasks, assignments)
 	}
-	if len(next) != 1 || next[0]["tool"] != "work_list" {
-		t.Fatalf("next hint = %#v, want one work_list offered_to_me hint", next)
+	// the opportunity hint keeps the first slot; with an empty turn
+	// the todo_wait bridge is appended after it
+	if len(next) != 2 || next[0]["tool"] != "work_list" || next[1]["tool"] != "todo_wait" {
+		t.Fatalf("next hints = %#v, want work_list then todo_wait", next)
 	}
 
 	// claim: the held task is no longer offered
@@ -170,16 +186,18 @@ func TestTodoOpportunitiesAssignmentsSide(t *testing.T) {
 		t.Fatalf("join: %v", err)
 	}
 
-	// zero is reported like any other number, and no hint fires
-	if tasks, assignments, next := oppCounts(t, pool, w); tasks != 0 || assignments != 0 || len(next) != 0 {
-		t.Fatalf("fresh agent opportunities = %d/%d next=%v, want 0/0 and no hint", tasks, assignments, next)
+	// zero is reported like any other number; with an empty turn the
+	// only hint is the wake tool (todo_wait) — no opportunity hint
+	// fires alongside it
+	if tasks, assignments, next := oppCounts(t, pool, w); tasks != 0 || assignments != 0 || !onlyWaitHint(next) {
+		t.Fatalf("fresh agent opportunities = %d/%d next=%v, want 0/0 with only the todo_wait hint", tasks, assignments, next)
 	}
 
 	_, assignID := assignPostAsk(t, pool, lead, code, "w, take this", w, true, "wo32a1")
 	if tasks, assignments, next := oppCounts(t, pool, w); tasks != 0 || assignments != 1 {
 		t.Fatalf("after invite opportunities = %d/%d, want 0/1", tasks, assignments)
 	} else if len(next) != 1 || next[0]["tool"] != "thread_list" {
-		t.Fatalf("next hint = %#v, want one thread_list hint", next)
+		t.Fatalf("next hint = %#v, want one thread_list hint (the carrying ask makes the turn non-empty: no todo_wait bridge)", next)
 	}
 	// the invite is a pointer, never an obligation: todos holds no
 	// item for it

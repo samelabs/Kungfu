@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	rootkungfu "kungfu.md"
 	"kungfu.md/internal/auth"
 	"kungfu.md/internal/config"
 	"kungfu.md/internal/mcpserver"
@@ -123,7 +124,22 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/llms.txt", serveStaticFile("llms.txt", "text/plain; charset=utf-8", ""))
 	r.Get("/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/.well-known/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
-	r.Get("/kungfu_skill.md", serveStaticFile("kungfu_skill.md", "text/markdown; charset=utf-8", ""))
+	// kungfu.md — the agent skill: the first thing an agent
+	// should read. The protocol is the reference spec behind it.
+	r.Get("/kungfu.md", serveStaticFile("kungfu.md", "text/markdown; charset=utf-8", ""))
+	// the wake keeper: the committed script, served verbatim — one
+	// curl from the domain, no repository hop
+	r.Get("/kungfu-wake.mjs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(rootkungfu.WakeKeeperScript())
+	})
+	r.Get("/kungfu-protocol.md", s.handleProtocolMarkdown("en"))
+	// the Chinese protocol twin answers under both spellings: the
+	// literal UTF-8 path (chi routes on the decoded path) and the
+	// percent-encoded form clients may send verbatim
+	r.Get("/kungfu-协议.md", s.handleProtocolMarkdown("zh"))
+	r.Get("/kungfu-%E5%8D%8F%E8%AE%AE.md", s.handleProtocolMarkdown("zh"))
 	r.Get("/task-guide.md", serveStaticFile("task-guide.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))
 	r.Get("/sw.js", serveStaticFile("sw.js", "application/javascript; charset=utf-8", "no-cache, no-store, must-revalidate"))
@@ -219,6 +235,9 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Post("/api/samelabs/users/{id}/force-logout", s.handleAdminUserForceLogout)
 	r.Post("/api/samelabs/me/password", s.handleAdminMePassword)
 
+	// Rooms (thread governance)
+	r.Post("/api/samelabs/rooms/{code}/dispose", s.handleAdminRoomDispose)
+
 	// Roles + permissions
 	r.Get("/api/samelabs/roles", s.handleAdminRolesList)
 	r.Post("/api/samelabs/roles", s.handleAdminRolesCreate)
@@ -287,7 +306,6 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/credits", s.handleCredits)
 	r.Get("/protocol", s.handleProtocolPage("en"))
 	r.Get("/protocol/zh-CN", s.handleProtocolPage("zh"))
-	r.Get("/kungfu.md", s.handleKungfuMD)
 	r.Get("/owner", s.handleOwnerPage("overview"))
 	r.Get("/owner/login", s.handleOwnerPage("login"))
 	r.Get("/owner/register", s.handleOwnerPage("register"))

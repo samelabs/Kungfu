@@ -87,7 +87,7 @@ func TestPublicSurfacesDropRetiredNarrative(t *testing.T) {
 	s := storeTestServer(t)
 
 	surfaces := map[string]string{}
-	for _, name := range []string{"llms.txt", "kungfu_skill.md", "task-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
+	for _, name := range []string{"llms.txt", "kungfu.md", "task-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
 		raw, err := web.StaticFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

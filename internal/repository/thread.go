@@ -1,6 +1,6 @@
 package repository
 
-// Thread core persistence (D2) — kungfu.md §6.1, §6.2, §6.5, §4, L3.
+// Thread core persistence (D2) — kungfu-protocol.md §6.1, §6.2, §6.5, §4, L3.
 // Every method accepts a pg.Querier so it works with both *pg.Pool
 // and pgx.Tx; room mutations run inside one caller transaction that
 // first locks the thread row (LockThreadByCode/LockThreadByID), which
@@ -20,7 +20,7 @@ import (
 	"kungfu.md/internal/publiccode"
 )
 
-// Thread vocabulary (kungfu.md §6.1–§6.5).
+// Thread vocabulary (kungfu-protocol.md §6.1–§6.5).
 const (
 	ThreadStatusOpen   = "open"
 	ThreadStatusClosed = "closed"
@@ -371,7 +371,7 @@ func InsertThreadIdempotency(ctx context.Context, q pg.Querier, accountID int64,
 // -- §4 deactivation cascade --
 
 // TerminateAccountThreadMemberships runs the account-deactivation
-// cascade (kungfu.md §4) inside the caller's transaction: every
+// cascade (kungfu-protocol.md §4) inside the caller's transaction: every
 // membership of the account ends, and every OPEN room that would be
 // left with no governor closes in the same transaction with the
 // §6.5 effects (key group cleared, members kept read-only). Returns
@@ -467,7 +467,7 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 	return closed, nil
 }
 
-// -- D3: entries, receipts and the timeline (kungfu.md §6.3) --
+// -- D3: entries, receipts and the timeline (kungfu-protocol.md §6.3) --
 
 // NextThreadSeq allocates the next in-thread entry number atomically;
 // callers hold the thread row lock, so concurrent posts serialize and
@@ -777,7 +777,7 @@ func MyPendingThreadReceipts(ctx context.Context, q pg.Querier, threadID, accoun
 	return out, rows.Err()
 }
 
-// -- D4: assignments (kungfu.md §6.4, R-18) --
+// -- D4: assignments (kungfu-protocol.md §6.4, R-18) --
 
 // InsertAssignment creates the contracted work unit bound to its
 // carrying entry; content columns are written once and never updated.
@@ -1049,7 +1049,7 @@ func LinkEntryAssignment(ctx context.Context, q pg.Querier, entryID, assignID in
 	return err
 }
 
-// -- D5: the account-level turn list (kungfu.md §8) --
+// -- D5: the account-level turn list (kungfu-protocol.md §8) --
 
 // TodoItem is one open obligation of an account, whatever room it
 // lives in (§8: turns are a projection, never written). A Task

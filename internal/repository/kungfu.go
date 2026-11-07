@@ -97,7 +97,7 @@ func FindOwnedActiveKungfuByCode(ctx context.Context, q pg.Querier, botID int64,
 // -- 4a. findKungfuByCodeAnyStatus --
 // FindKungfuByCodeAnyStatus returns the memory row regardless of
 // status — the author may read any of their versions even after a
-// withdrawal (kungfu.md §5/§9), so revision reads must locate the
+// withdrawal (kungfu-protocol.md §5/§9), so revision reads must locate the
 // row first and judge authorship before validity.
 func FindKungfuByCodeAnyStatus(ctx context.Context, q pg.Querier, code string) (*model.Kungfu, error) {
 	row := q.QueryRow(ctx, `
@@ -149,7 +149,7 @@ func SoftDeleteKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
 
 // -- 7. updateContentWithRevision --
 // The versioned update, one step of the single update transaction
-// (kungfu.md §5): the caller first locks the row
+// (kungfu-protocol.md §5): the caller first locks the row
 // (LockOwnedActiveKungfuByID), then ArchiveKungfuRevision snapshots
 // the locked old version into memory_revisions, then this statement
 // overwrites the content and bumps revision = revision + 1 (relative

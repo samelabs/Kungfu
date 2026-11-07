@@ -102,7 +102,7 @@ func TestThreadToolsBothChannels(t *testing.T) {
 
 // TestA20OrchestrationEndToEnd: the agent-team loop over real tools —
 // one orchestrator, three workers, key handoff, contracted work,
-// judgment with a redo, close (kungfu.md §6+§8; PRD A20).
+// judgment with a redo, close (kungfu-protocol.md §6+§8; PRD A20).
 func anyLen(v any) int {
 	switch s := v.(type) {
 	case []any:

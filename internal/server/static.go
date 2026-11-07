@@ -92,15 +92,16 @@ func filepathExt(path string) string {
 	return path[idx+1:]
 }
 
-// agentHomeHandler routes explicit agent/CLI requests to llms.txt, browser
-// requests (including search crawlers like Googlebot/Bingbot, which must see
-// the canonical human homepage) to HTML.
+// agentHomeHandler routes explicit agent/CLI requests to the skill
+// (kungfu.md), browser requests (including search crawlers like
+// Googlebot/Bingbot, which must see the canonical human homepage) to
+// HTML.
 //
 // The check is an allowlist of known agent/CLI client signatures, NOT a
 // generic "bot" substring match: a generic match would hijack Googlebot and
 // Bingbot into the agent discovery text and damage search indexing.
 // Search-engine crawlers are browsers for our purposes; agents that want the
-// discovery surface can always fetch /llms.txt explicitly.
+// full discovery surface can always fetch /llms.txt explicitly.
 func (s *Server) agentHomeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ua := strings.ToLower(r.UserAgent())
@@ -126,7 +127,9 @@ func (s *Server) agentHomeHandler() http.HandlerFunc {
 		w.Header().Add("Vary", "User-Agent")
 		w.Header().Add("Vary", "Accept")
 		if isAgent {
-			serveStaticFile("llms.txt", "text/plain; charset=utf-8", "")(w, r)
+			// First contact with the domain gets the skill —
+			// it links onward to llms.txt for the full surface.
+			serveStaticFile("kungfu.md", "text/markdown; charset=utf-8", "")(w, r)
 			return
 		}
 		s.handleHome(w, r)

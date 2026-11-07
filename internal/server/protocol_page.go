@@ -74,12 +74,11 @@ func (protocolRelink) Transform(doc *gast.Document, _ text.Reader, _ parser.Cont
 
 func protocolLinkTarget(dest string) string {
 	switch dest {
-	case "", "#", "kungfu.md":
-		if dest == "kungfu.md" {
-			return "/kungfu.md"
-		}
+	case "", "#":
 		return dest
-	case "kungfu.zh-CN.md":
+	case "kungfu-protocol.md":
+		return "/kungfu-protocol.md"
+	case "kungfu-协议.md":
 		return "/protocol/zh-CN"
 	}
 	if strings.HasPrefix(dest, "#") || strings.Contains(dest, "://") {
@@ -196,7 +195,7 @@ func (s *Server) handleProtocolPage(lang string) http.HandlerFunc {
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png">
     <link rel="icon" type="image/svg+xml" href="/assets/icons/app-icon.svg">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
-    <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu.md" title="Kungfu Protocol (normative markdown)">
+    <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu-protocol.md" title="Kungfu Protocol (normative markdown)">
     <link rel="stylesheet" href="/assets/site.css">
     <link rel="stylesheet" href="/assets/protocol.css">`,
 		})
@@ -231,16 +230,27 @@ func (s *Server) handleProtocolPage(lang string) http.HandlerFunc {
 	}
 }
 
-// handleKungfuMD serves GET /kungfu.md: the normative English spec
-// markdown, byte-for-byte as committed, for agents to read directly.
-func (s *Server) handleKungfuMD(w http.ResponseWriter, r *http.Request) {
-	src, err := rootkungfu.ProtocolEnglish()
-	if err != nil {
-		http.Error(w, "protocol document unavailable", http.StatusInternalServerError)
-		return
+// handleProtocolMarkdown serves GET /kungfu-protocol.md (English, the
+// normative text) and /kungfu-协议.md (the Chinese reference
+// translation): byte-for-byte as committed, for agents to read
+// directly. The /kungfu.md URL serves the agent skill, not
+// the spec.
+func (s *Server) handleProtocolMarkdown(locale string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var src []byte
+		var err error
+		if locale == "zh" {
+			src, err = rootkungfu.ProtocolChinese()
+		} else {
+			src, err = rootkungfu.ProtocolEnglish()
+		}
+		if err != nil {
+			http.Error(w, "protocol document unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Write(src)
 	}
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Write(src)
 }
 
 // protocolFooter is the shared footer without the ?lang= switcher:

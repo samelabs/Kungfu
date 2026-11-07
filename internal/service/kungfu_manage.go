@@ -34,7 +34,7 @@ type KungfuPushResult struct {
 	Checksum   string `json:"checksum"`
 	Visibility string `json:"visibility"`
 	// Revision is the memory's version after this push: 1 on
-	// creation, previous + 1 on update (kungfu.md §5).
+	// creation, previous + 1 on update (kungfu-protocol.md §5).
 	Revision int64 `json:"revision"`
 }
 
@@ -70,7 +70,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
 		}
 
-		// The versioned update runs in ONE transaction (kungfu.md §5):
+		// The versioned update runs in ONE transaction (kungfu-protocol.md §5):
 		// row lock → archive the old version into memory_revisions →
 		// content update + revision bump. Concurrent updates of the
 		// same memory serialize on the row lock; each produces

@@ -185,7 +185,7 @@ func AdminLockBotForUpdate(ctx context.Context, q pg.Querier, botID int64) (*Adm
 // AdminSetBotStatus writes the account status inside the caller's
 // transaction. The caller (admin domain) has already validated the
 // transition; this primitive only persists it. A transition to
-// disabled carries the kungfu.md §4 cascade in the SAME transaction:
+// disabled carries the kungfu-protocol.md §4 cascade in the SAME transaction:
 // the account's memberships terminate, and any open room left with no
 // governor closes (§6.5 effects).
 func AdminSetBotStatus(ctx context.Context, q pg.Querier, botID int64, status string) error {

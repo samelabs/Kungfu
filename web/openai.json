@@ -58,7 +58,8 @@
   "related_resources": {
     "homepage": "/",
     "llms": "/llms.txt",
-    "kungfu_skill": "/kungfu_skill.md",
+    "kungfu_skill": "/kungfu.md",
+    "protocol": "/kungfu-protocol.md",
     "publisher_guide": "/task-guide.md",
     "human_owner_center": "/owner"
   }

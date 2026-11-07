@@ -1,13 +1,15 @@
 package server
 
-// WO-30 §2/§5: the /protocol pages and /kungfu.md serve the
+// WO-30 §2/§5: the /protocol pages and /kungfu-protocol.md serve the
 // repository-root spec documents embedded at compile time; rendering
 // is server-side, inert for raw HTML and dangerous link schemes; the
 // pages carry the protocol head (fixed title, first-paragraph
 // description, en/zh/x-default hreflang) and the language switcher
-// with the reference-translation note.
+// with the reference-translation note. /kungfu.md serves the agent
+// skill (web/kungfu.md), not the spec.
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -71,19 +73,40 @@ func TestProtocolPagesServeEmbeddedSpec(t *testing.T) {
 	}
 
 	// the raw normative file: byte-for-byte the embedded repo document
-	raw := protoGet(t, s, "/kungfu.md")
+	raw := protoGet(t, s, "/kungfu-protocol.md")
 	if raw.Code != 200 {
-		t.Fatalf("/kungfu.md = %d", raw.Code)
+		t.Fatalf("/kungfu-protocol.md = %d", raw.Code)
 	}
 	if got := raw.Header().Get("Content-Type"); got != "text/markdown; charset=utf-8" {
-		t.Fatalf("/kungfu.md content-type = %q", got)
+		t.Fatalf("/kungfu-protocol.md content-type = %q", got)
 	}
 	embedded, err := rootkungfu.ProtocolEnglish()
 	if err != nil {
 		t.Fatalf("root embed: %v", err)
 	}
 	if raw.Body.String() != string(embedded) {
-		t.Fatal("/kungfu.md body differs from the embedded kungfu.md")
+		t.Fatal("/kungfu-protocol.md body differs from the embedded kungfu-protocol.md")
+	}
+
+	// the Chinese raw translation answers too (URL-encoded form)
+	zhRaw := protoGet(t, s, "/kungfu-%E5%8D%8F%E8%AE%AE.md")
+	if zhRaw.Code != 200 {
+		t.Fatalf("/kungfu-协议.md = %d", zhRaw.Code)
+	}
+
+	// /kungfu.md is the agent skill now, not the spec
+	card := protoGet(t, s, "/kungfu.md")
+	if card.Code != 200 {
+		t.Fatalf("/kungfu.md = %d", card.Code)
+	}
+	if !strings.Contains(card.Body.String(), "Agent Skill") {
+		t.Fatal("/kungfu.md must serve the skill")
+	}
+
+	// the retired skill URL is simply gone — no redirect compat
+	legacy := protoGet(t, s, "/kungfu_skill.md")
+	if legacy.Code != http.StatusNotFound {
+		t.Fatalf("/kungfu_skill.md = %d, want 404", legacy.Code)
 	}
 }
 
@@ -94,7 +117,7 @@ func TestProtocolPagesServeEmbeddedSpec(t *testing.T) {
 func TestProtocolRenderingIsInjectionSafe(t *testing.T) {
 	evil := "# Title\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>\n\n" +
 		"[evil](javascript:alert(3))\n\n[data](data:text/html;base64,PHNjcmlwdD4=)\n\n" +
-		"[ok](https://example.com/safe)\n\n[doc](docs/conformance.md)\n\n[zhtwin](kungfu.zh-CN.md)\n"
+		"[ok](https://example.com/safe)\n\n[doc](docs/conformance.md)\n\n[zhtwin](kungfu-协议.md)\n"
 	out, err := renderProtocolHTML([]byte(evil))
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -139,5 +162,22 @@ func TestSpecFirstParagraph(t *testing.T) {
 	got := firstSpecParagraph([]byte(doc))
 	if got != "First real paragraph line one continues on two lines." {
 		t.Fatalf("firstSpecParagraph = %q", got)
+	}
+}
+
+// TestWakeKeeperScriptServed: /kungfu-wake.mjs returns the committed
+// keeper bytes — the domain itself distributes the script, so the
+// downloaded keeper can never drift from the deployed server.
+func TestWakeKeeperScriptServed(t *testing.T) {
+	s := storeTestServer(t)
+	rec := protoGet(t, s, "/kungfu-wake.mjs")
+	if rec.Code != 200 {
+		t.Fatalf("/kungfu-wake.mjs = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/javascript; charset=utf-8" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if rec.Body.String() != string(rootkungfu.WakeKeeperScript()) {
+		t.Fatal("served script differs from the committed bytes")
 	}
 }

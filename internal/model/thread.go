@@ -1,6 +1,6 @@
 package model
 
-// Thread is one room row (kungfu.md §6.1/§6.5). The key group —
+// Thread is one room row (kungfu-protocol.md §6.1/§6.5). The key group —
 // KeyHash, KeyRole, KeyIssuedAt — is either all set (exactly one
 // active key) or all nil (never issued, revoked, or cleared by
 // close). Only the sha256 digest is ever stored; the raw key exists
@@ -18,7 +18,7 @@ type Thread struct {
 	ClosedAt    *string `db:"closed_at" json:"closed_at,omitempty"`
 }
 
-// ThreadMember is one membership row (kungfu.md §6.2): exactly two
+// ThreadMember is one membership row (kungfu-protocol.md §6.2): exactly two
 // recorded facts — which key admitted the account (nil for the
 // creator, who never joins by key) and when — plus the current role.
 // A terminated membership is a deleted row; rejoining is a new row.

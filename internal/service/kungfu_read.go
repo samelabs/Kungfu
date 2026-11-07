@@ -76,7 +76,7 @@ func GetKungfuForBot(ctx context.Context, pool *pg.Pool, botID int64, code strin
 }
 
 // GetKungfuRevisionForBot serves memory_get(code, revision) — the
-// versioned read (kungfu.md §5/§9):
+// versioned read (kungfu-protocol.md §5/§9):
 //   - the author reads ANY existing revision of their memory, from
 //     the current row or memory_revisions, valid or withdrawn
 //     (作者恒可读自己的任何版本);

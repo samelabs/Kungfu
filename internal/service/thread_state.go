@@ -1,6 +1,6 @@
 package service
 
-// Thread speaking state (D3) — kungfu.md §6.3: entries, the response
+// Thread speaking state (D3) — kungfu-protocol.md §6.3: entries, the response
 // object rules, handle/retract, and the receipts they create and end.
 // All writes go through runThreadAction (L3 replay snapshots) inside
 // one transaction that first locks the thread row (L5 serialization

@@ -190,7 +190,7 @@ func TestContractRevisionBindsOnlyLaterEngagements(t *testing.T) {
 
 // TestWorkGetServesBoundVersionToEngagedAgent: while an agent holds
 // an active claim, work_get shows the contract version the claim
-// bound (kungfu.md §9); everyone else sees the current version.
+// bound (kungfu-protocol.md §9); everyone else sees the current version.
 // task_get reports the publisher's current version.
 func TestWorkGetServesBoundVersionToEngagedAgent(t *testing.T) {
 	pool := pubTestPool(t)

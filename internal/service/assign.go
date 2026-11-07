@@ -1,6 +1,6 @@
 package service
 
-// Room assignments (D4) — kungfu.md §6.4 with R-18. The lifecycle:
+// Room assignments (D4) — kungfu-protocol.md §6.4 with R-18. The lifecycle:
 // open → taken → delivered → adopted|rejected|undecided, plus
 // dropped / timed_out / voided exits. Content is fixed at creation
 // (fix = create a new assignment referencing the old one); every
@@ -521,6 +521,16 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	if len(out) == 0 {
 		res["next_action"] = "wait"
 		res["retry_after"] = 60
+		// bridge to the wake channel: an empty turn hands the caller
+		// todo_wait, which holds the next call server-side — kungfu
+		// is the relay, the agent needs no polling loop of its own
+		// (an opportunity hint, if present, keeps the first slot)
+		wait := map[string]any{"tool": "todo_wait", "args": map[string]any{"timeout": 20}}
+		if hints, ok := res["next"].([]map[string]any); ok {
+			res["next"] = append(hints, wait)
+		} else {
+			res["next"] = []map[string]any{wait}
+		}
 	}
 	return res, nil
 }

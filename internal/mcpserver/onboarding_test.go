@@ -85,7 +85,7 @@ func TestMCPGetMCP405CarriesBootstrapGuidance(t *testing.T) {
 		t.Fatalf("Allow = %q, want POST", allow)
 	}
 	body := m1ReadBody(t, resp)
-	for _, want := range []string{ProtocolVersion, "account_register", "https://kungfu.md/llms.txt", "kungfu_skill.md"} {
+	for _, want := range []string{ProtocolVersion, "account_register", "https://kungfu.md/llms.txt", "https://kungfu.md/kungfu.md"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("405 body missing %q", want)
 		}

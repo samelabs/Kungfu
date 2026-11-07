@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 
 	"kungfu.md/internal/delivery"
+	"kungfu.md/internal/repository"
 	"sync"
 	"testing"
 )
@@ -145,5 +146,48 @@ func TestNotifyRegisterAndDispatch(t *testing.T) {
 	}
 	if n := len(todo2["todos"].([]map[string]any)); n != 2 {
 		t.Fatalf("obligations changed by notify delete: %d", n)
+	}
+}
+
+// TestNotifyTestQueuesOnlyWithEndpoint: the self-test tool refuses
+// accounts without a registered endpoint and queues exactly one
+// kind="test" row when one exists — wiring verification without a
+// collaborator creating a real obligation.
+func TestNotifyTestQueuesOnlyWithEndpoint(t *testing.T) {
+	pool := revisionTestPool(t)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+
+	// no endpoint: refused, nothing queued
+	if _, err := NotifyTest(ctx, pool, a); err == nil {
+		t.Fatal("NotifyTest without endpoint must fail")
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM notify_outbox WHERE account_id = $1 AND kind = 'test'`, a).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("refused call queued %d rows", n)
+	}
+
+	// with an endpoint: one row, and the result carries the contract
+	if err := repository.UpsertAccountNotify(ctx, pool, a,
+		"https://endpoint.example/wake", "s3cret"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	res, err := NotifyTest(ctx, pool, a)
+	if err != nil {
+		t.Fatalf("NotifyTest: %v", err)
+	}
+	if res["queued"] != true || res["kind"] != "test" {
+		t.Fatalf("result = %v", res)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM notify_outbox WHERE account_id = $1 AND kind = 'test' AND sent_at IS NULL`, a).Scan(&n); err != nil {
+		t.Fatalf("count2: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("queued %d test rows, want 1", n)
 	}
 }

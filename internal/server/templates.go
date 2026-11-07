@@ -89,7 +89,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu_skill.md" title="Kungfu skill file">
+    <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu.md" title="Kungfu skill file">
     <link rel="stylesheet" href="/assets/site.css">
     <link rel="stylesheet" href="/assets/home.css">
     ` + homeJSONLD()

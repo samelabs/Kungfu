@@ -1,6 +1,6 @@
 package mcpserver
 
-// WO-9a consistency tests: the public texts (llms.txt, kungfu_skill.md,
+// WO-9a consistency tests: the public texts (llms.txt, kungfu.md,
 // task-guide.md, openai.json and the MCP bootstrap instructions) may
 // only speak the real registry and the real error catalogue —
 // (a) every tool-shaped identifier they mention exists in ToolNames();
@@ -37,7 +37,8 @@ var (
 var specJSONFieldNames = map[string]bool{
 	"code": true, "request_key": true, "payload": true, "claim_id": true, "revises": true,
 	"submission_id": true, "task_code": true, "version": true, "agent_ref": true,
-	"ok": true, "state": true, "paid": true, "reply": true,
+	"account_id": true, // members[].account_id in the skill — a field, not a tool
+	"ok":         true, "state": true, "paid": true, "reply": true,
 	"next_action": true, "retry_after": true,
 	"failure": true, "error": true,
 }
@@ -71,7 +72,7 @@ func publicTexts(t *testing.T) []textFixture {
 	}
 	return []textFixture{
 		{"llms.txt", load("llms.txt")},
-		{"kungfu_skill.md", load("kungfu_skill.md")},
+		{"kungfu.md", load("kungfu.md")},
 		{"task-guide.md", load("task-guide.md")},
 		{"openai.json", load("openai.json")},
 		{"instructions", mcpBootstrapInstructions},
