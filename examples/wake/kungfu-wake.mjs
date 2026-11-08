@@ -372,9 +372,20 @@ function webhookServer() {
   https.createServer(
     { key: fs.readFileSync(`${CERT_DIR}/kungfu-wake.key`), cert: fs.readFileSync(`${CERT_DIR}/kungfu-wake.crt`) },
     (req, res) => {
+      // the endpoint is public: a body larger than the cap is not a
+      // signal, it is an attack or a misconfiguration — drop the
+      // connection instead of buffering it (dispatch payloads are a
+      // few hundred bytes; 64 KB is generous)
       const chunks = [];
-      req.on('data', (c) => chunks.push(c));
+      let size = 0;
+      let overflowed = false;
+      req.on('data', (c) => {
+        size += c.length;
+        if (size > 65536) { overflowed = true; req.destroy(); return; }
+        chunks.push(c);
+      });
       req.on('end', () => {
+        if (overflowed) return;
         const raw = Buffer.concat(chunks).toString('utf8');
         let body = {};
         try { body = JSON.parse(raw); } catch {}
