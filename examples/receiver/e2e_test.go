@@ -156,7 +156,10 @@ func (e *e2eEnv) agent(tool string, args map[string]any) (int, map[string]any) {
 }
 
 func (e *e2eEnv) uniq(prefix string) string {
-	return fmt.Sprintf("%s%d%d", prefix, time.Now().UnixNano()%1_000_000, e.nextUnique.Add(1))
+	// full nanos + env-local counter: the old %1e6 bucket let two
+	// journeys' same-counter registrations collide when they landed in
+	// the same sub-millisecond offset
+	return fmt.Sprintf("%s%d%d", prefix, time.Now().UnixNano(), e.nextUnique.Add(1))
 }
 
 func newE2EEnv(t *testing.T) *e2eEnv {
@@ -225,7 +228,7 @@ func (e *e2eEnv) startReceiver(t *testing.T, cfgJSON string, env envConfig) {
 
 const e2eGoodPayload = `{"url":"https://example.com/a","bullets":["s1","s2","s3"]}`
 
-// e2eContract builds a task_create contract map; the receiver URL and
+// e2eContract builds a bounty_create contract map; the receiver URL and
 // the mutation come from the journey.
 func e2eContract(receiverURL string, mutate func(map[string]any)) map[string]any {
 	c := map[string]any{
@@ -251,18 +254,18 @@ func e2eContract(receiverURL string, mutate func(map[string]any)) map[string]any
 }
 
 // publishTask creates and opens a task through the publisher's own
-// /api/v1 tools (task_create → task_open; the open-time test delivery
+// /api/v1 tools (bounty_create → bounty_open; the open-time test delivery
 // must pass through the receiver).
 func (e *e2eEnv) publishTask(t *testing.T, contract map[string]any) string {
 	t.Helper()
-	env := e.mustCall(t, e.pubKey, "task_create", map[string]any{"contract": contract, "budget": 1000})
+	env := e.mustCall(t, e.pubKey, "bounty_create", map[string]any{"contract": contract, "budget": 1000})
 	code, _ := env["code"].(string)
 	if code == "" {
-		t.Fatalf("task_create returned no code: %v", env)
+		t.Fatalf("bounty_create returned no code: %v", env)
 	}
-	open := e.mustCall(t, e.pubKey, "task_open", map[string]any{"code": code})
+	open := e.mustCall(t, e.pubKey, "bounty_open", map[string]any{"code": code})
 	if open["status"] != "open" {
-		t.Fatalf("task_open: %v", open)
+		t.Fatalf("bounty_open: %v", open)
 	}
 	return code
 }
@@ -672,7 +675,7 @@ func TestE2EJourney6ReceiverFaultPause(t *testing.T) {
 	if errObj, _ := steps[0]["error"].(map[string]any); errObj["code"] != "TASK_NOT_OPEN" || steps[0]["next_action"] != "stop" {
 		t.Fatalf("after the pause: %v, want TASK_NOT_OPEN/stop", steps[0])
 	}
-	paused := e.mustCall(t, e.pubKey, "task_get", map[string]any{"code": code})
+	paused := e.mustCall(t, e.pubKey, "bounty_get", map[string]any{"code": code})
 	if paused["status"] != "paused" || paused["paused_reason"] != "RECEIVER_FAULT" {
 		t.Fatalf("task after faults: %v", paused)
 	}
