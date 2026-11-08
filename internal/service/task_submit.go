@@ -158,12 +158,27 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 		}
 	}
 
-	// (e) limits — same tallies as WO-3.
+	// (e) limits — same tallies as WO-3. The CAP follows the version
+	// that governs the submission: the claim's bound version when one
+	// is carried (§7.1 / Task 1.1 §1 — a publisher tightening
+	// max_rejected_per_agent in v2 must not reach back into a v1
+	// claim's submission), the current contract otherwise. Resolved
+	// QUIETLY here; the claim's validity is still step (f), so the
+	// §5.3 error precedence is unchanged.
+	capContract := contract
+	if claimID != nil {
+		if claim, err := repository.FindClaimByID(ctx, pool, *claimID); err == nil &&
+			claim != nil && claim.AgentID == agentID && claim.TaskID == t.ID {
+			if bound, bErr := contractVersionOf(ctx, pool, t.ID, claim.ContractVersion); bErr == nil {
+				capContract = bound
+			}
+		}
+	}
 	counts, err := repository.CountAgentSubmissions(ctx, pool, t.ID, agentID, rejectionsSince(now))
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if err := checkRejectionLimit(counts, contract, now); err != nil {
+	if err := checkRejectionLimit(counts, capContract, now); err != nil {
 		return SubmissionView{}, err
 	}
 
@@ -259,7 +274,15 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 	if err != nil {
 		return SubmissionView{}, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if err := checkRejectionLimit(lockedCounts, lockedContract, now); err != nil {
+	// the in-transaction cap check follows the same version rule as
+	// the pre-check: the claim's bound version for a carried claim
+	// (immutable, so the pre-check's resolution still governs here),
+	// the current contract for a claim-less submission
+	governingContract := lockedContract
+	if in.ClaimID != nil {
+		governingContract = boundContract
+	}
+	if err := checkRejectionLimit(lockedCounts, governingContract, now); err != nil {
 		return SubmissionView{}, err
 	}
 	amount := lockedContract.Price
