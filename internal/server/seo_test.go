@@ -38,7 +38,7 @@ func TestHomePageHeadSEOMeta(t *testing.T) {
 		`<link rel="alternate" hreflang="ko" href="https://kungfu.md/?lang=ko">`,
 		`<link rel="alternate" hreflang="es" href="https://kungfu.md/?lang=es">`,
 		`<link rel="alternate" hreflang="x-default" href="https://kungfu.md/">`,
-		`<meta property="og:title" content="Kungfu — A Protocol for Persistent Agent Work | Kungfu.md">`,
+		`<meta property="og:title" content="Kungfu — A Work Server for Agents | Kungfu.md">`,
 		`<meta property="og:url" content="https://kungfu.md/">`,
 		`<meta property="og:image" content="https://kungfu.md/assets/icons/app-icon-512.png">`,
 		`<meta property="og:image:width" content="512">`,
@@ -46,7 +46,7 @@ func TestHomePageHeadSEOMeta(t *testing.T) {
 		`<meta property="og:image:alt" content="Kungfu.md logo">`,
 		`<meta property="og:locale" content="en_US">`,
 		`<meta name="twitter:card" content="summary">`,
-		`<meta name="twitter:title" content="Kungfu — A Protocol for Persistent Agent Work | Kungfu.md">`,
+		`<meta name="twitter:title" content="Kungfu — A Work Server for Agents | Kungfu.md">`,
 		`<meta name="twitter:image" content="https://kungfu.md/assets/icons/app-icon-512.png">`,
 		`<html lang="en">`,
 		// JSON-LD (S2): WebSite SearchAction + Organization; the
@@ -55,7 +55,7 @@ func TestHomePageHeadSEOMeta(t *testing.T) {
 		`<script type="application/ld+json">`,
 		`"SearchAction"`,
 		`"urlTemplate":"https://kungfu.md/?q={search_term_string}"`,
-		`"description":"Kungfu is an open protocol for agent work that outlives the session: versioned memory, persistent threads and work contracts. kungfu.md runs its open-source reference implementation over MCP and HTTP."`,
+		`"description":"Kungfu is a work server for agents: versioned memory, persistent rooms and paid bounties — over MCP and HTTP, with the work facts that outlive any session."`,
 		`"Organization"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -137,13 +137,13 @@ func TestRobotsAndSitemap(t *testing.T) {
 		`<xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/?lang=zh"/>`,
 		`<xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/credits"/>`,
 	} {
-	// the protocol pages are off the public face (3.2.0): neither the
-	// URL nor any sitemap entry may point at them
-	for _, banned := range []string{"/protocol", "kungfu-protocol"} {
-		if strings.Contains(string(sitemap), banned) {
-			t.Fatalf("sitemap.xml still lists the retired protocol surface %q", banned)
+		// the protocol pages are off the public face (3.2.0): neither the
+		// URL nor any sitemap entry may point at them
+		for _, banned := range []string{"/protocol", "kungfu-protocol"} {
+			if strings.Contains(string(sitemap), banned) {
+				t.Fatalf("sitemap.xml still lists the retired protocol surface %q", banned)
+			}
 		}
-	}
 		if !strings.Contains(string(sitemap), want) {
 			t.Fatalf("sitemap.xml missing %q", want)
 		}

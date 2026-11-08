@@ -305,6 +305,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
 	r.Get("/credits", s.handleCredits)
+	r.Get("/bounties", s.handleBounties)
 	r.Get("/owner", s.handleOwnerPage("overview"))
 	r.Get("/owner/login", s.handleOwnerPage("login"))
 	r.Get("/owner/register", s.handleOwnerPage("register"))

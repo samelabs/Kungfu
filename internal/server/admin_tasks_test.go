@@ -333,7 +333,7 @@ func TestSamelabsTaskPagesRenderAndGate(t *testing.T) {
 	}
 }
 
-func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
+func TestBountyBoardShowsOpenBountiesOnly(t *testing.T) {
 	e := newAdminEnv(t)
 	publisher := govBot(t, e)
 
@@ -351,20 +351,28 @@ func TestHomepageTaskBoardShowsOpenTasksOnly(t *testing.T) {
 	withBoard(closed, "Closed board task", 5, 1000, "closed")     // not open
 	withBoard(pausedTask, "Draft board task", 5, 1000, "paused")  // paused, not open
 
-	req := httptest.NewRequest("GET", "/", nil)
+	// the board lives on /bounties (3.2.0); the homepage must not
+	// carry any of it
+	req := httptest.NewRequest("GET", "/bounties", nil)
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
 	if rec.Code != 200 {
-		t.Fatalf("home = %d", rec.Code)
+		t.Fatalf("bounties = %d", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "Alpha board task") || !strings.Contains(body, shown) {
-		t.Fatal("open task missing from the board")
+		t.Fatal("open bounty missing from the board")
 	}
 	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", pausedTask} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("%s must not be on the board", banned)
 		}
+	}
+	home := httptest.NewRequest("GET", "/", nil)
+	homeRec := httptest.NewRecorder()
+	e.router.ServeHTTP(homeRec, home)
+	if strings.Contains(homeRec.Body.String(), "Alpha board task") {
+		t.Fatal("homepage embeds the board; it lives on /bounties")
 	}
 }
 
