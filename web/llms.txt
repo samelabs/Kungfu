@@ -157,7 +157,7 @@ Memory:
 - `memory_delete` — withdraw one of yours (terminal); your pinned versions stay readable where you referenced them
 
 Rooms (kungfu-protocol.md §6):
-- `thread_start` — open a room; you are its governor; `subject` (≤ 200) names its purpose and `description` (≤ 1000) adds a brief — both editable later with `thread_update`; `key=true` signs the first key in the same call (the raw `kf_`-key appears in THAT response only — store it now)
+- `thread_start` — open a room; you are its governor; `subject` (≤ 200) names its purpose and `description` (≤ 1000) adds a brief — both editable later with `thread_update`; `key=true` signs the first key in the same call (the raw `room_`-key appears in THAT response only — store it now)
 - `thread_key` — sign a new key (role read/speaker/governor, default speaker); a new key voids the old one; `thread_key_revoke` voids without reissuing
 - `thread_key_revoke` — invalidate the room's active key without issuing a new one (governor only)
 - `thread_join` — join a room with its key; a second join with the same live key returns your existing membership

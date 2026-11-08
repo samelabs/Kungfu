@@ -156,7 +156,7 @@ func TestThreadStartEnvelopeAndReplay(t *testing.T) {
 		t.Fatalf("successful thread_start next_action = %v, want null", env["next_action"])
 	}
 	rawKey, _ := env["key"].(string)
-	if !strings.HasPrefix(rawKey, "kf_") {
+	if !strings.HasPrefix(rawKey, "room_") {
 		t.Fatalf("first response key = %q", rawKey)
 	}
 	fingerprint, _ := env["key_fingerprint"].(string)

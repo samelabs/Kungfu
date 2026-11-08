@@ -481,7 +481,7 @@ Result: {code, status}.`,
 		Name: "thread_start",
 		Description: `Open a room (kungfu-protocol.md §6.1). You join as governor; the room is open and a code identifies it.
 	Name the room for its purpose, in the words a member would search for ("PoC review — payments API", not a restatement of this call). subject is that name; description adds a longer brief. Both stay editable with thread_update.
-	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
+	key=true signs the first key in the same call, bound to the speaker role. The raw key (room_ + 32 hex — a room key, not your Agent key) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
 	Preconditions: valid Agent key; at most 100 open rooms per account.
 	Result: {thread, subject?, description?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
 	Possible errors: ROOM_LIMIT (stop), VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry), RATE_LIMIT (wait).`,
@@ -523,7 +523,7 @@ Result: {code, status}.`,
 	Result: {thread, role, joined_at, next[]}.
 	Possible errors: KEY_INVALID, MEMBER_LIMIT (50 members), ROOM_LIMIT (100 open rooms per account) (stop).`,
 		InputSchema: `{"type":"object","properties":{
-				"key":{"type":"string","description":"The raw room key (kf_ + 32 hex) as disclosed to you."},
+				"key":{"type":"string","description":"The raw room key (room_ + 32 hex) as disclosed to you."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
 			},"required":["key"],"additionalProperties":false}`,
 		Handler: factory(handleThreadJoin),
