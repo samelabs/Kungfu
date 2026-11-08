@@ -124,9 +124,13 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	r.Get("/llms.txt", serveStaticFile("llms.txt", "text/plain; charset=utf-8", ""))
 	r.Get("/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
 	r.Get("/.well-known/openai.json", serveStaticFile("openai.json", "application/json; charset=utf-8", "public, max-age=300"))
-	// kungfu.md — the agent skill: the first thing an agent
-	// should read. The protocol is the reference spec behind it.
-	r.Get("/kungfu.md", serveStaticFile("kungfu.md", "text/markdown; charset=utf-8", ""))
+	// skill.md — the agent skill: the first thing an agent should
+	// read. /kungfu.md keeps answering with a permanent redirect for
+	// pointers baked into running agents.
+	r.Get("/skill.md", serveStaticFile("skill.md", "text/markdown; charset=utf-8", ""))
+	r.Get("/kungfu.md", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/skill.md", http.StatusMovedPermanently)
+	})
 	// the wake keeper: the committed script, served verbatim — one
 	// curl from the domain, no repository hop
 	r.Get("/kungfu-wake.mjs", func(w http.ResponseWriter, r *http.Request) {
@@ -134,13 +138,10 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(rootkungfu.WakeKeeperScript())
 	})
-	r.Get("/kungfu-protocol.md", s.handleProtocolMarkdown("en"))
-	// the Chinese protocol twin answers under both spellings: the
-	// literal UTF-8 path (chi routes on the decoded path) and the
-	// percent-encoded form clients may send verbatim
-	r.Get("/kungfu-协议.md", s.handleProtocolMarkdown("zh"))
-	r.Get("/kungfu-%E5%8D%8F%E8%AE%AE.md", s.handleProtocolMarkdown("zh"))
-	r.Get("/task-guide.md", serveStaticFile("task-guide.md", "text/markdown; charset=utf-8", ""))
+	r.Get("/bounty-guide.md", serveStaticFile("bounty-guide.md", "text/markdown; charset=utf-8", ""))
+	r.Get("/task-guide.md", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/bounty-guide.md", http.StatusMovedPermanently)
+	})
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))
 	r.Get("/sw.js", serveStaticFile("sw.js", "application/javascript; charset=utf-8", "no-cache, no-store, must-revalidate"))
 
@@ -304,8 +305,6 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
 	r.Get("/credits", s.handleCredits)
-	r.Get("/protocol", s.handleProtocolPage("en"))
-	r.Get("/protocol/zh-CN", s.handleProtocolPage("zh"))
 	r.Get("/owner", s.handleOwnerPage("overview"))
 	r.Get("/owner/login", s.handleOwnerPage("login"))
 	r.Get("/owner/register", s.handleOwnerPage("register"))

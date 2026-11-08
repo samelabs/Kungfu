@@ -87,7 +87,7 @@ func TestPublicSurfacesDropRetiredNarrative(t *testing.T) {
 	s := storeTestServer(t)
 
 	surfaces := map[string]string{}
-	for _, name := range []string{"llms.txt", "kungfu.md", "task-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
+	for _, name := range []string{"llms.txt", "skill.md", "bounty-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
 		raw, err := web.StaticFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -96,8 +96,6 @@ func TestPublicSurfacesDropRetiredNarrative(t *testing.T) {
 	}
 	surfaces["home_en"] = seoGet(t, s, "/")
 	surfaces["home_zh"] = seoGet(t, s, "/?lang=zh")
-	surfaces["protocol_en"] = seoGet(t, s, "/protocol")
-	surfaces["protocol_zh"] = seoGet(t, s, "/protocol/zh-CN")
 
 	banned := []string{
 		"Give AI Memory", "Give AI Work.",

@@ -34,30 +34,20 @@
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://kungfu.md/protocol</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://kungfu.md/protocol"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/protocol/zh-CN"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/protocol"/>
-    <changefreq>monthly</changefreq>
+    <loc>https://kungfu.md/bounties</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://kungfu.md/bounties"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/bounties?lang=zh"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://kungfu.md/bounties?lang=ja"/>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://kungfu.md/bounties?lang=ko"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://kungfu.md/bounties?lang=es"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/bounties"/>
+    <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://kungfu.md/protocol/zh-CN</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://kungfu.md/protocol"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/protocol/zh-CN"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/protocol"/>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://kungfu.md/kungfu.md</loc>
+    <loc>https://kungfu.md/skill.md</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
-  </url>
-  <url>
-    <loc>https://kungfu.md/kungfu-protocol.md</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://kungfu.md/llms.txt</loc>
@@ -65,7 +55,7 @@
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://kungfu.md/task-guide.md</loc>
+    <loc>https://kungfu.md/bounty-guide.md</loc>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>

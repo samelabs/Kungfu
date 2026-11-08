@@ -32,13 +32,13 @@ func TestHomepageUARouting(t *testing.T) {
 	isHumanHTML := func(rec *httptest.ResponseRecorder) bool {
 		body := rec.Body.String()
 		// The human homepage is HTML; the agent first-contact surface is
-		// the skill (kungfu.md, markdown). Assert both directions.
+		// the skill (skill.md, markdown). Assert both directions.
 		return strings.Contains(rec.Header().Get("Content-Type"), "text/html") &&
-			!strings.Contains(body, "# kungfu.md — Agent Skill")
+			!strings.Contains(body, "# Kungfu — Agent Skill")
 	}
 	isAgentSkill := func(rec *httptest.ResponseRecorder) bool {
 		return strings.Contains(rec.Header().Get("Content-Type"), "text/markdown") &&
-			strings.Contains(rec.Body.String(), "# kungfu.md — Agent Skill")
+			strings.Contains(rec.Body.String(), "# Kungfu — Agent Skill")
 	}
 
 	cases := []struct {
@@ -72,7 +72,7 @@ func TestHomepageUARouting(t *testing.T) {
 					tc.ua, rec.Header().Get("Content-Type"), truncate(rec.Body.String(), 80))
 			}
 			if !tc.humanly && !isAgentSkill(rec) {
-				t.Fatalf("UA %q expected the agent skill (kungfu.md), got content-type=%q body-prefix=%q",
+				t.Fatalf("UA %q expected the agent skill (skill.md), got content-type=%q body-prefix=%q",
 					tc.ua, rec.Header().Get("Content-Type"), truncate(rec.Body.String(), 80))
 			}
 		})

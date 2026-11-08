@@ -93,7 +93,7 @@ func filepathExt(path string) string {
 }
 
 // agentHomeHandler routes explicit agent/CLI requests to the skill
-// (kungfu.md), browser requests (including search crawlers like
+// (skill.md), browser requests (including search crawlers like
 // Googlebot/Bingbot, which must see the canonical human homepage) to
 // HTML.
 //
@@ -129,7 +129,7 @@ func (s *Server) agentHomeHandler() http.HandlerFunc {
 		if isAgent {
 			// First contact with the domain gets the skill —
 			// it links onward to llms.txt for the full surface.
-			serveStaticFile("kungfu.md", "text/markdown; charset=utf-8", "")(w, r)
+			serveStaticFile("skill.md", "text/markdown; charset=utf-8", "")(w, r)
 			return
 		}
 		s.handleHome(w, r)

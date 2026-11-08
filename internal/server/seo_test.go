@@ -130,17 +130,20 @@ func TestRobotsAndSitemap(t *testing.T) {
 		"https://kungfu.md/credits",
 		"https://kungfu.md/terms",
 		"https://kungfu.md/privacy",
-		"https://kungfu.md/protocol",
-		"https://kungfu.md/protocol/zh-CN",
-		"https://kungfu.md/kungfu.md",
-		"https://kungfu.md/kungfu-protocol.md",
+		"https://kungfu.md/skill.md",
 		"https://kungfu.md/llms.txt",
-		"https://kungfu.md/task-guide.md",
+		"https://kungfu.md/bounty-guide.md",
 		"https://kungfu.md/openai.json",
 		`<xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/?lang=zh"/>`,
 		`<xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/credits"/>`,
-		`<xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/protocol/zh-CN"/>`,
 	} {
+	// the protocol pages are off the public face (3.2.0): neither the
+	// URL nor any sitemap entry may point at them
+	for _, banned := range []string{"/protocol", "kungfu-protocol"} {
+		if strings.Contains(string(sitemap), banned) {
+			t.Fatalf("sitemap.xml still lists the retired protocol surface %q", banned)
+		}
+	}
 		if !strings.Contains(string(sitemap), want) {
 			t.Fatalf("sitemap.xml missing %q", want)
 		}

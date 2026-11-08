@@ -1,7 +1,7 @@
 package mcpserver
 
-// WO-9a consistency tests: the public texts (llms.txt, kungfu.md,
-// task-guide.md, openai.json and the MCP bootstrap instructions) may
+// WO-9a consistency tests: the public texts (llms.txt, skill.md,
+// bounty-guide.md, openai.json and the MCP bootstrap instructions) may
 // only speak the real registry and the real error catalogue —
 // (a) every tool-shaped identifier they mention exists in ToolNames();
 // (b) every registered tool is documented in llms.txt;
@@ -72,8 +72,8 @@ func publicTexts(t *testing.T) []textFixture {
 	}
 	return []textFixture{
 		{"llms.txt", load("llms.txt")},
-		{"kungfu.md", load("kungfu.md")},
-		{"task-guide.md", load("task-guide.md")},
+		{"skill.md", load("skill.md")},
+		{"bounty-guide.md", load("bounty-guide.md")},
 		{"openai.json", load("openai.json")},
 		{"instructions", mcpBootstrapInstructions},
 	}
