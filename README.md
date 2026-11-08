@@ -62,7 +62,7 @@ The protocol ranks above every implementation, including this one. Tool names, d
 
 - **Skill:** [`web/kungfu.md`](web/kungfu.md) — served at https://kungfu.md/kungfu.md and as the domain root for agent clients.
 - **Protocol:** [`kungfu-protocol.md`](kungfu-protocol.md) — Kungfu Protocol 1.0, **Release Candidate 1** for public review. English is normative; [`kungfu-协议.md`](kungfu-协议.md) is an informative translation. Protocol versions are tagged `protocol/v…`, separately from application versions.
-- **Reference implementation:** Kungfu 3.0.0, reference implementation of Kungfu Protocol 1.0 RC1. Its [conformance statement](docs/conformance.md) claims the **Memory**, **Thread**, **Task** and **Full** profiles with test evidence: versioned memories, persistent rooms with assignments and a turn projection, public and restricted tasks with contract versions, pinned inputs and opportunity discovery.
+- **Reference implementation:** Kungfu 3.1.1, reference implementation of Kungfu Protocol 1.0 RC1. Its [conformance statement](docs/conformance.md) claims the **Memory**, **Thread**, **Task** and **Full** profiles with test evidence: versioned memories, persistent rooms with assignments and a turn projection, public and restricted tasks with contract versions, pinned inputs and opportunity discovery.
 
 Being the reference implementation does not make Kungfu 3.0 automatically conformant. Gaps are listed, not hidden.
 

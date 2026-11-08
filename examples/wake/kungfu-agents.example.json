@@ -6,7 +6,7 @@
     "name": "账户名（用于日志与锁文件名）",
     "secret": "该账户 notify_register 返回的一次性 HMAC secret（丢失只能重新注册换新）",
     "keyfile": "该账户 Agent key 文件路径（权限 0600）",
-    "wake_cmd": "被唤醒后执行的命令。%KEYFILE% %SERVER% 会被替换；$KF_KIND/$KF_COUNT 环境变量可用。留空 = 只记日志 + 桌面通知，零副作用（安全缺省）。"
+    "wake_cmd": "被唤醒后执行的命令。%KEYFILE% %SERVER% 会被替换；$KF_KIND/$KF_COUNT 环境变量可用。留空 = 只记日志 + 桌面通知，零副作用（安全缺省）。官方适配样例：./kungfu-agent.sh claude %KEYFILE% %SERVER%（也支持 opencode / glm 宿主）。"
   },
   "mode": "poll",
   "server": "https://kungfu.md",

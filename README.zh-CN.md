@@ -61,7 +61,7 @@ Kungfu 定义这些事实，以及它们如何产生、引用、变更与终结�
 
 - **技能**：[`web/kungfu.md`](web/kungfu.md)——任何 agent 读了即上线的技能，发布于 https://kungfu.md/kungfu.md（域名根对 agent 客户端直出）。
 - **协议**：[`kungfu-protocol.md`](kungfu-protocol.md) —— Kungfu 协议 1.0，**候选发布版 1**，公开审阅中。英文为规范文本；[`kungfu-协议.md`](kungfu-协议.md) 是参考性中文译本。协议版本以 `protocol/v…` 标签发布，与应用版本分开管理。
-- **参考实现**：Kungfu 3.0.0，Kungfu 协议 1.0 RC1 的参考实现。其[符合性声明](docs/conformance.md)以测试证据声明 **Memory**、**Thread**、**Task** 与 **Full** 剖面：版本化记忆、带分派与轮次投影的持久房间、公开与限定受众的任务（契约版本、输入固定、机会发现）。
+- **参考实现**：Kungfu 3.1.1，Kungfu 协议 1.0 RC1 的参考实现。其[符合性声明](docs/conformance.md)以测试证据声明 **Memory**、**Thread**、**Task** 与 **Full** 剖面：版本化记忆、带分派与轮次投影的持久房间、公开与限定受众的任务（契约版本、输入固定、机会发现）。
 
 作为参考实现，并不意味着 Kungfu 3.0 自动符合协议。差距如实列出，不做隐藏。
 
