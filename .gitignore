@@ -8,10 +8,12 @@ kungfu-server
 .env
 *.env
 
-# IDE
+# IDE / agent tooling workspace state
 .idea/
 .vscode/
 *.swp
+.zcode/
+.zcodeignore
 
 # OS
 .DS_Store
