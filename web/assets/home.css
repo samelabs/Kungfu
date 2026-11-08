@@ -264,12 +264,13 @@ button.btn { font: inherit; }
 .grid {
     display: grid;
     gap: 22px;
-    grid-template-columns: minmax(300px, .74fr) minmax(0, 1.26fr);
+    /* one full-width column since the board moved to /bounties (3.2.0):
+       the homepage is the capability card alone, /bounties the board */
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
 }
 .intro-card {
-    position: sticky;
-    top: 18px;
+    position: static;
     overflow: hidden;
     min-height: 492px;
     padding: 23px;
