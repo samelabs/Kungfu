@@ -208,3 +208,35 @@ func RetentionSweep(ctx context.Context, pool *pg.Pool, days int) (int, error) {
 	}
 	return n, nil
 }
+
+// PayloadSweep finishes what disposal deferred: a payload memory kept
+// alive at dispose time by a live engagement, contract or delivery
+// becomes deletable the moment that protection ends — this pass is
+// the retrigger (unlike rooms, orphaned payloads have no event left
+// to ride on). Always on; the eligibility core stays the single
+// judge, so a still-protected payload simply stays.
+func PayloadSweep(ctx context.Context, pool *pg.Pool, batch int) (int, error) {
+	ids, err := repository.OrphanThreadPayloadIDs(ctx, pool, batch)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		tx, err := pool.TxBegin(ctx)
+		if err != nil {
+			return n, err
+		}
+		gone, err := repository.DeleteUnreferencedPayload(ctx, tx, id)
+		if err != nil {
+			_ = pg.Rollback(tx)
+			continue // best effort per payload; the next sweep retries
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return n, err
+		}
+		if gone {
+			n++
+		}
+	}
+	return n, nil
+}

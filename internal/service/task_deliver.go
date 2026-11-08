@@ -188,6 +188,13 @@ func mapReply(res delivery.PostResult) replyOutcome {
 		case code >= 200 && code < 300:
 			return replyOutcome{event: task.EventDeliver2XX, opts: opts}
 		case code >= 400 && code < 500:
+			// a readable rejection reason independent of the reply
+			// body: an empty-body 4xx must still tell the executor
+			// WHAT happened (the raw reply stays recorded verbatim).
+			// Not a counting receiver fault — a rejection is the
+			// receiver working as designed.
+			reason := "REJECTED_BY_RECEIVER"
+			opts.Failure = &reason
 			return replyOutcome{event: task.EventDeliver4XX, opts: opts}
 		case code >= 500:
 			return fail("RECEIVER_FAULT")

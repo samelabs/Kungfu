@@ -282,7 +282,7 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	}
 	contractJSON := t.Contract
 	contractVersion := t.ContractVersion
-	if claim, err := repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err == nil && claim != nil {
+	if claim, err := repository.FindLiveClaimByTaskAgent(ctx, pool, t.ID, agentID, now); err == nil && claim != nil {
 		bound, err := repository.FindTaskContractVersion(ctx, pool, t.ID, claim.ContractVersion)
 		if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -400,7 +400,7 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 		if err != nil {
 			return nil, err
 		}
-	} else if engaged, err = repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
+	} else if engaged, err = repository.FindLiveClaimByTaskAgent(ctx, pool, t.ID, agentID, now); err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if err != nil {
 		engaged = nil

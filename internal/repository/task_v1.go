@@ -838,9 +838,22 @@ func RecentTerminalOutcomes(ctx context.Context, q pg.Querier, taskID int64, lim
 
 // FindActiveClaimByTaskAgent returns the agent's active claim on the
 // task, or nil (spec §5.2: at most one active claim per agent+task).
+// Status-raw: an expired-yet-unswept claim IS returned — the claim
+// path needs it to expire it and release the reservation in the same
+// transaction (ClaimTask). Read paths that treat a claim as a live
+// engagement use FindLiveClaimByTaskAgent instead.
 func FindActiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64) (*ClaimRow, error) {
 	return scanClaim(q.QueryRow(ctx, claimSelect+`
 		WHERE task_id = $1 AND agent_id = $2 AND status = 'active'`, taskID, agentID))
+}
+
+// FindLiveClaimByTaskAgent is the engagement-validity lookup the work
+// surface owes every reader (external audit: explicit and implicit
+// claim paths must share one validity rule): status 'active' AND
+// unexpired — exactly checkClaim's test, in SQL.
+func FindLiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64, now time.Time) (*ClaimRow, error) {
+	return scanClaim(q.QueryRow(ctx, claimSelect+`
+		WHERE task_id = $1 AND agent_id = $2 AND status = 'active' AND expires_at > $3`, taskID, agentID, now))
 }
 
 // ApplyClaimStatus validates `event` against the §5.2 kernel and

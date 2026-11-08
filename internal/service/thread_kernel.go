@@ -602,7 +602,7 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "left": true, "receipts_collected": collected,
-					"assigns_voided": len(voided)},
+					"assigns_voided": len(voided.Voided), "assigns_timed_out": len(voided.TimedOut)},
 				View: threadView([]string{}),
 			}, nil
 		})
@@ -639,7 +639,8 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true,
-					"receipts_collected": collected, "assigns_voided": len(voided)},
+					"receipts_collected": collected, "assigns_voided": len(voided.Voided),
+					"assigns_timed_out": len(voided.TimedOut)},
 				View: threadView(threadGovernorNextAfter(ctx, tx, th)),
 			}, nil
 		})
@@ -784,7 +785,8 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "status": repository.ThreadStatusClosed,
-					"receipts_collected": collected, "assigns_voided": len(voidedAssigns)},
+					"receipts_collected": collected, "assigns_voided": len(voidedAssigns.Voided),
+					"assigns_timed_out": len(voidedAssigns.TimedOut)},
 				View: threadView([]string{"thread_leave"}),
 			}, nil
 		})
@@ -971,7 +973,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 				"entry": f.ID, "seq": f.Seq, "author": f.Author,
 				"memory": f.Memory, "revision": f.Revision,
 				"summary": f.Summary, "asked": f.Asked, "at": f.CreatedAt,
-				"readable": f.Readable,
+				"readable": f.Readable, "redacted": f.Redacted,
 			}
 			if f.ReplyTo != nil {
 				row["reply_to"] = *f.ReplyTo

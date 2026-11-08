@@ -245,6 +245,11 @@ func TestDeliver4xxRejectsWithReplyVerbatim(t *testing.T) {
 		if view.Reply == nil || view.Reply.Status != tc.status || view.Reply.Body != tc.body {
 			t.Fatalf("%d: reply = %+v, want the receiver's reply verbatim", tc.status, view.Reply)
 		}
+		// a readable reason independent of the body: an EMPTY-body 4xx
+		// still tells the executor what happened
+		if view.Failure == nil || *view.Failure != "REJECTED_BY_RECEIVER" {
+			t.Fatalf("%d: failure = %v, want REJECTED_BY_RECEIVER", tc.status, view.Failure)
+		}
 		// work_status returns the same recorded reply
 		st, err := GetSubmissionStatus(ctx, pool, agent, &subID, "", "")
 		if err != nil {

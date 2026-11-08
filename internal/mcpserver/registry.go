@@ -280,12 +280,13 @@ Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
 Create a paused task and lock its budget (lock_task ledger row).
 Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. contract.audience (section 7.2) fixes who may see and take the task: absent or {"type":"open"} for every executor, or {"type":"restricted","agents":[...]} for 1–50 named agents — resolved to accounts now, immutable afterwards (a different audience is a new task; task_update rejects a changed audience). Publisher guide: https://kungfu.md/task-guide.md
 Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; audience names must resolve to accounts and must not include yourself; budget >= price (at least one unit); your balance covers the budget.
-Result: the task view: status "paused" (or "open" with open=true), the full contract (audience included), budget_locked, available, slots.
-Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, RATE_LIMIT (20 per hour per publisher).`,
+Result: the task view: status "paused" (or "open" with open=true — create and open commit in one transaction), the full contract (audience included), budget_locked, available, slots.
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, IDEMPOTENCY_CONFLICT (same idempotency_key, different request), RATE_LIMIT (20 per hour per publisher).`,
 		InputSchema: `{"type":"object","properties":{
 				"contract":` + contractInputSchema + `,
 				"budget":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits locked from your balance now; at least one price, at most 9007199254740991. slots = available / price."},
-				"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call."}
+				"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call (one transaction with the create)."},
+				"idempotency_key":{"type":"string","description":"Send a unique key per logical create (1-128 chars of A-Za-z0-9._~-): a network retry with the same key and request replays the original result instead of creating a second task."}
 			},"required":["contract","budget"],"additionalProperties":false}`,
 		Handler: factory(handleTaskCreate),
 	},

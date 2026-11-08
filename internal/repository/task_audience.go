@@ -105,14 +105,24 @@ const offeredWorkWhere = ` WHERE tb_task.status = 'open'
 // claim on. Pure count — todo_list reports it as the "tasks" side
 // of the opportunities projection.
 func CountOfferedWork(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, error) {
-	var n int64
+	n, _, err := OfferedWorkIdentity(ctx, q, agentID, now)
+	return n, err
+}
+
+// OfferedWorkIdentity is CountOfferedWork plus the identity half of
+// the wake channel: the sum of the offered task ids. Ids are
+// monotonic, so any membership change (added, taken, closed) moves
+// the sum even when the count does not — one aggregate, no paging,
+// no content. todo_wait fingerprints it into wake_token.
+func OfferedWorkIdentity(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, int64, error) {
+	var n, ids int64
 	err := q.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
-		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n)
+		SELECT COUNT(*), COALESCE(SUM(tb_task.id), 0) FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
+		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n, &ids)
 	if err != nil {
-		return 0, fmt.Errorf("count offered work: %w", err)
+		return 0, 0, fmt.Errorf("offered work identity: %w", err)
 	}
-	return n, nil
+	return n, ids, nil
 }
 
 // FindOfferedWorkPage returns ONE page of the agent's §8

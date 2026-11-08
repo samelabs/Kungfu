@@ -5,6 +5,57 @@ All notable changes to Kungfu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.1] — 2026-11-08
+
+Reliability closeout of 3.1.0's lifecycle and wake channel, from the
+external code audit: cross-object reference integrity in room
+disposal, an identity-bearing wake signal, recoverable wake
+execution, and the Task consistency leftovers.
+
+**Room disposal keeps live work readable (§6.6).** A payload memory
+now survives disposal while any LIVE reference needs it — an entry
+of another thread, an active unexpired engagement's pinned inputs, a
+not-yet-closed task contract's harness_refs, an unjudged assignment
+delivery. Pins of ended engagements no longer block their payload's
+deletion (nor turn a dissolve into an FK failure): they drop in the
+same transaction. A payload sweep finishes what disposal deferred —
+when a protection later ends, the memory is collected on the next
+pass. `thread_scrub`ed entries expand again: the shell (seq, author,
+reply relations, obligations) reports `redacted` instead of silently
+vanishing from `entries=[ids]`.
+
+**The wake signal carries identity, not just counts (§8).**
+`todo_list`/`todo_wait` responses carry an opaque `wake_token`
+fingerprinted from the turn and the opportunity identities (count +
+id sum — no content, no paging limit): one task replacing another at
+the same count now moves the token, so a resident process wakes for
+the NEW work instead of deduplicating it away.
+
+**Wake execution recovers from failure.** `kungfu-wake` distinguishes
+started from done: a wake command that fails to spawn or exits
+non-zero re-arms its still-open turn with bounded exponential backoff
+(10 s to 10 min, logged), a stale pid lock no longer stalls the poll
+loop, and the loop honors `retry_after` on the over-cap
+`changed:false` degradation instead of hot-looping into 429s.
+
+**Task consistency.** `task_create` and `open:true` commit in ONE
+transaction (a failed open can no longer strand a paused task with
+its budget locked), and `task_create` takes `idempotency_key`: a
+network retry replays the original result, never mints a second task
+or double-locks the budget. `work_harness`'s implicit claim discovery
+applies the same validity rule as an explicit claim id (active AND
+unexpired). A 4xx rejection records `failure: REJECTED_BY_RECEIVER`
+beside the verbatim reply — an empty-body 4xx finally says what
+happened. Deadlines now beat voiding and closing everywhere: an
+overdue assignment settles as timed out, never voided (single void,
+room close, departure).
+
+**Protocol.** §6.3 defines author redaction; new §6.6 defines
+disposal, its settlement and what a live reference protects; §6.4/§6.5
+state deadline precedence over void and close; §8 requires waiting
+reads to answer on identity, not size. Conformance statement updated
+to 3.1.1 with the new evidence rows.
+
 ## [3.1.0] — 2026-11-07
 
 kungfu.md, renamed as the agent skill; the wake channel

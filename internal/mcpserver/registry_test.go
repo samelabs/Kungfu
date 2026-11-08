@@ -375,7 +375,7 @@ func wo7Contract() task.Contract {
 // settle on delivery.
 func wo7OpenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 	t.Helper()
-	view, err := service.CreateTask(context.Background(), pool, publisher, wo7Contract(), 1000)
+	view, err := service.CreateTask(context.Background(), pool, publisher, wo7Contract(), 1000, false, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

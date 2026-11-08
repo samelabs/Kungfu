@@ -690,7 +690,9 @@ func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq
 
 // ThreadEntryFull is the expanded entry payload; Content is served
 // only when the pinned version is readable to members per §5/§9
-// (own pin: always; others' public pin: while public and valid).
+// (own pin: always; others' public pin: while public and valid). A
+// scrubbed entry keeps its shell here — Redacted marks the content
+// gone while seq, author, reply structure and obligations survive.
 type ThreadEntryFull struct {
 	ID         int64
 	Seq        int64
@@ -699,6 +701,7 @@ type ThreadEntryFull struct {
 	Memory     string
 	Revision   int64
 	Readable   bool
+	Redacted   bool
 	Content    *string
 	Summary    string
 	ReplyTo    *int64 // entry id of the reply target (same identifier as the timeline)
@@ -708,11 +711,14 @@ type ThreadEntryFull struct {
 }
 
 // ExpandThreadEntries loads full entries by id within one thread.
+// tb_kungfus is a LEFT join: a scrubbed entry (memory_id NULL) still
+// expands — shell facts only, never content.
 func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids []int64) ([]ThreadEntryFull, error) {
 	rows, err := q.Query(ctx, `
 		SELECT e.id, e.seq, e.author_id, b.bot_name,
-		       k.code, e.memory_revision,
-		       (k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')),
+		       COALESCE(k.code, ''), COALESCE(e.memory_revision, 0),
+		       COALESCE(k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public'), false),
+		       e.memory_id IS NULL,
 		       CASE WHEN k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')
 		            THEN CASE WHEN e.memory_revision = k.revision
 		                 THEN k.content ELSE mr.content END END,
@@ -720,7 +726,7 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		       (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM thread_entries e
 		JOIN tb_bots b ON b.id = e.author_id
-		JOIN tb_kungfus k ON k.id = e.memory_id
+		LEFT JOIN tb_kungfus k ON k.id = e.memory_id
 		LEFT JOIN memory_revisions mr
 		       ON mr.memory_id = e.memory_id AND mr.revision = e.memory_revision
 		WHERE e.thread_id = $1 AND e.id = ANY($2)
@@ -734,7 +740,7 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		var it ThreadEntryFull
 		var asked []byte
 		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
-			&it.Memory, &it.Revision, &it.Readable, &it.Content,
+			&it.Memory, &it.Revision, &it.Readable, &it.Redacted, &it.Content,
 			&it.Summary, &it.ReplyTo, &it.ReplyToSeq, &asked, &it.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -924,28 +930,75 @@ func SetAssignmentStateCAS(ctx context.Context, q pg.Querier, id int64, from, to
 	return tag.RowsAffected() == 1, nil
 }
 
-// VoidUndeliveredAssignsForMember voids the pre-delivery assigns of a
-// departing member — both sides (§6.2, R-18: as assignee AND as
-// creator). Returns the ids voided.
-func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID, accountID int64) ([]int64, error) {
+// VoidOutcome is what one batch pre-delivery settlement produced:
+// assigns that settled as timed_out under the deadline rule, and the
+// ones actually voided.
+type VoidOutcome struct {
+	TimedOut []int64
+	Voided   []int64
+}
+
+// settleUndelivered is the deadline-first core every batch void path
+// shares (L4: expiry beats void — an assign whose deliver clock ran
+// out settles as timed_out, never voided). scope is a WHERE fragment
+// over assigns ($1… args follow). Both parties of a timed_out assign
+// are notified like the recovery sweep ("exit").
+func settleUndelivered(ctx context.Context, q pg.Querier, scope string, args ...any) (VoidOutcome, error) {
+	var out VoidOutcome
 	rows, err := q.Query(ctx, `
-		UPDATE assigns SET state = 'voided', closed_at = NOW()
-		WHERE thread_id = $1 AND state IN ('open', 'taken')
-		  AND (assignee_id = $2 OR creator_id = $2)
-		RETURNING id`, threadID, accountID)
+		UPDATE assigns SET state = 'timed_out', closed_at = NOW()
+		WHERE state = 'taken' AND deliver_due_at <= NOW() AND (`+scope+`)
+		RETURNING id, assignee_id, creator_id`, args...)
 	if err != nil {
-		return nil, err
+		return out, err
+	}
+	// both parties of a timed_out assign learn ("exit", like the
+	// recovery sweep) — collected first: the notify writes must not
+	// ride the same connection as the still-open RETURNING set
+	type party struct{ assignee, creator int64 }
+	var parties []party
+	for rows.Next() {
+		var id, assignee, creator int64
+		if err := rows.Scan(&id, &assignee, &creator); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.TimedOut = append(out.TimedOut, id)
+		parties = append(parties, party{assignee, creator})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return out, err
+	}
+	rows.Close()
+	for _, p := range parties {
+		_ = InsertNotifyOutbox(ctx, q, p.assignee, "exit", 1)
+		_ = InsertNotifyOutbox(ctx, q, p.creator, "exit", 1)
+	}
+
+	rows, err = q.Query(ctx, `
+		UPDATE assigns SET state = 'voided', closed_at = NOW()
+		WHERE state IN ('open', 'taken') AND (`+scope+`)
+		RETURNING id`, args...)
+	if err != nil {
+		return out, err
 	}
 	defer rows.Close()
-	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return out, err
 		}
-		ids = append(ids, id)
+		out.Voided = append(out.Voided, id)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
+}
+
+// VoidUndeliveredAssignsForMember settles the pre-delivery assigns of
+// a departing member — both sides (§6.2, R-18: as assignee AND as
+// creator). Returns the ids settled.
+func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID, accountID int64) (VoidOutcome, error) {
+	return settleUndelivered(ctx, q, `thread_id = $1 AND (assignee_id = $2 OR creator_id = $2)`, threadID, accountID)
 }
 
 // ForfeitJudgmentsForCreator permanently removes the creator's right to
@@ -961,25 +1014,10 @@ func ForfeitJudgmentsForCreator(ctx context.Context, q pg.Querier, threadID, acc
 }
 
 // VoidUndeliveredAssigns closes every pre-delivery assign of a room
-// (thread close, §6.5).
-func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) ([]int64, error) {
-	rows, err := q.Query(ctx, `
-		UPDATE assigns SET state = 'voided', closed_at = NOW()
-		WHERE thread_id = $1 AND state IN ('open', 'taken')
-		RETURNING id`, threadID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+// (thread close and disposal, §6.5) under the deadline rule — see
+// settleUndelivered.
+func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) (VoidOutcome, error) {
+	return settleUndelivered(ctx, q, `thread_id = $1`, threadID)
 }
 
 // RecoverAssigns materializes deadline outcomes (L4: expiry beats
@@ -1397,6 +1435,23 @@ func AssignmentDeadlinePassed(ctx context.Context, q pg.Querier, assignID int64,
 		return false, err
 	}
 	return passed, nil
+}
+
+// ThreadOpenInviteIdentity is the open-assignment opportunity in
+// CountOfferedWork's identity terms: the count plus the sum of the
+// assign ids (monotonic — any membership change moves the sum even
+// when the count does not). One aggregate, no paging, no content.
+func ThreadOpenInviteIdentity(ctx context.Context, q pg.Querier, accountID int64) (int64, int64, error) {
+	var n, ids int64
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(a.id), 0)
+		FROM assigns a
+		JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = $1
+		WHERE a.assignee_id = $1 AND a.state = 'open'`, accountID).Scan(&n, &ids)
+	if err != nil {
+		return 0, 0, err
+	}
+	return n, ids, nil
 }
 
 // ThreadOpenInviteCounts counts, per room, the OPEN assignments

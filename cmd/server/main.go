@@ -92,10 +92,18 @@ func main() {
 	// Room retention sweep (migration 035): dispose closed rooms older
 	// than RETENTION_DAYS (0 = off, the default — disposal stays a
 	// deliberate act: governor, admin, or this configured policy).
+	// The same pass also runs the payload sweep (always on): it
+	// only finishes disposals deferred by live cross-object
+	// references, so it is not a new disposal decision.
 	retentionStop := make(chan struct{})
 	retentionDone := runPeriodic("room_retention", retentionStop, backgroundErrors, 5*time.Minute, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 		defer cancel()
+		if n, err := service.PayloadSweep(ctx, pool, 100); err != nil {
+			log.Printf("[kungfu.md] payload sweep pass failed (removed=%d): %v", n, err)
+		} else if n > 0 {
+			log.Printf("[kungfu.md] payload sweep removed %d orphaned payload memory/memories", n)
+		}
 		if n, err := service.RetentionSweep(ctx, pool, cfg.RetentionDays); err != nil {
 			log.Printf("[kungfu.md] room retention pass failed (disposed=%d): %v", n, err)
 		} else if n > 0 {

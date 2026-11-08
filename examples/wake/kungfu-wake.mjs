@@ -28,7 +28,10 @@
 // provide — this file is one):
 //   signal   : "the account's turn changed" — obligations added or
 //              settled (by action or deadline), or work addressed to
-//              the account appeared/disappeared (opportunities)
+//              the account appeared/disappeared (opportunities).
+//              Identity, not counts: the server's wake_token
+//              distinguishes "a different one of the same many" —
+//              dedup on it, never on the counts alone
 //   transport: POST /api/v1/todo_wait {"timeout":20} with Bearer
 //              Agent key, looped; changed:true carries the full turn,
 //              changed:false is the normal timeout answer — call again
@@ -36,14 +39,20 @@
 //              loss-harmless (a missed wake costs one loop interval),
 //              idempotent (waking twice for one turn state is the
 //              local process's bug, not the server's)
-//   limits   : honor 429 retry_after; one loop per account; never
+//   limits   : honor retry_after — on 429 AND on the over-cap
+//              changed:false degradation; one loop per account; never
 //              loop todo_list waiting for change
+//   failure  : started is not done. A wake command that fails to
+//              start or exits non-zero re-arms its (still open) turn
+//              for a bounded-backoff retry — a failed wake must never
+//              become "this turn never wakes again"
 //
 // Robustness: nothing here may fail silently. Startup validates the
 // roster (exit 2 on a broken one); every loop backs off on error;
 // uncaught errors are logged and the process exits 1 so the OS
 // supervisor (launchd KeepAlive / systemd Restart / Task Scheduler)
-// restarts it. Logs rotate at 5MB.
+// restarts it. Logs rotate at 5MB. A stale pid lock (its process
+// died) never stalls a loop.
 //
 // Security: wake commands come only from the local roster; kind/count
 // reach the command as env vars only; nothing from the wire is
@@ -140,16 +149,18 @@ function tryLock(name) {
   return { lock, held: false };
 }
 
-function runWake(agent, kind, count) {
+function runWake(agent, kind, count, onDone) {
   const { lock, held } = tryLock(agent.name);
   if (!held) {
     log({ event: 'skipped-busy', mode: MODE_FINAL, name: agent.name });
+    onDone && onDone(false);                        // busy is not a failure
     return;                                          // coalesce, never queue
   }
   if (!agent.wake_cmd || !agent.wake_cmd.trim()) {
     try { fs.unlinkSync(lock); } catch {}
     notify(`${agent.name}: ${kind} ×${count}`);
     log({ event: 'notify-only', mode: MODE_FINAL, name: agent.name });
+    onDone && onDone(false);                        // notified; nothing ran
     return;
   }
   const cmd = agent.wake_cmd.replaceAll('%KEYFILE%', agent.keyfile).replaceAll('%SERVER%', SERVER);
@@ -159,8 +170,23 @@ function runWake(agent, kind, count) {
   const child = spawn(cmd, { shell: true, detached: true, stdio: ['ignore', out, out],
     env: { ...process.env, KF_KIND: String(kind), KF_COUNT: String(count) } });
   try { fs.closeSync(out); } catch {}              // the child holds its own copy
+  let settled = false;                              // 'error' and 'exit' both end the child exactly once
+  const finish = (failed, detail) => {
+    if (settled) return;
+    settled = true;
+    try { fs.unlinkSync(lock); } catch {}
+    if (failed) log({ event: 'wake-failed', mode: MODE_FINAL, name: agent.name, ...detail });
+    onDone && onDone(failed);
+  };
+  if (!child.pid) {
+    // spawn refused outright (no shell, bad permission): no exit event
+    // would ever fire — settle here or the lock stalls the loop forever
+    finish(true, { reason: 'spawn-refused' });
+    return;
+  }
   fs.writeFileSync(lock, String(child.pid));       // the lock follows the child
-  child.on('exit', () => { try { fs.unlinkSync(lock); } catch {} });
+  child.on('error', (e) => finish(true, { reason: 'spawn-error', err: String(e).slice(0, 200) }));
+  child.on('exit', (code, signal) => finish(code !== 0, { code, signal }));
   child.unref();
   log({ event: 'spawned', mode: MODE_FINAL, name: agent.name, pid: child.pid });
 }
@@ -175,13 +201,18 @@ function runWake(agent, kind, count) {
 // 12/min bucket is the backstop, not the brake.
 const WAKE_SPACING_MS = 10_000;
 const WAKE_SPACING_MAX_MS = 60_000;
+const WAKE_FAIL_BASE_MS = 10_000;
+const WAKE_FAIL_MAX_MS = 600_000;
 
 // turnDigest fingerprints a wake answer: obligation handles (entry /
 // assign / claim ids are monotonic — a NEW obligation always changes
-// the digest) plus the opportunity counts.
+// the digest) plus the server's wake_token — the opaque identity of
+// the opportunity set. Counts alone cannot tell "task T2 arrived"
+// from "task T1 ended": both leave opportunities at the same number;
+// the token does not (external audit P1-03).
 function turnDigest(body) {
   const todos = (body.todos || []).map((t) => [t.kind, t.thread || t.task, t.entry ?? t.claim ?? '', t.assign ?? '']);
-  return JSON.stringify(todos) + '|' + JSON.stringify(body.opportunities || {});
+  return JSON.stringify(todos) + '|' + (body.wake_token || JSON.stringify(body.opportunities || {}));
 }
 
 function actionable(body) {
@@ -195,11 +226,22 @@ async function pollLoop(agent) {
   let backoff = 5_000;
   let lastWake = '';
   let spacing = WAKE_SPACING_MS;
+  let failStreak = 0;
   log({ event: 'watching', mode: 'poll', name: agent.name, server: SERVER });
   for (;;) {
-    if (fs.existsSync(lockPathOf(agent.name))) {    // a wake is still running
-      await sleep(2_000);
-      continue;
+    const lock = lockPathOf(agent.name);
+    if (fs.existsSync(lock)) {                       // a wake is still running…
+      // …unless the process that owned the child died between spawn
+      // and its exit handler: a lock naming a dead pid is stale, and
+      // an unrecovered stale lock would stall this loop forever
+      try {
+        const pid = Number(fs.readFileSync(lock, 'utf8').trim());
+        if (Number.isFinite(pid) && pid > 0 && !alive(pid)) fs.unlinkSync(lock);
+      } catch {}
+      if (fs.existsSync(lock)) {
+        await sleep(2_000);
+        continue;
+      }
     }
     if (!key) {
       try {
@@ -264,7 +306,17 @@ async function pollLoop(agent) {
         const todos = (body.todos || []).length;
         const opps = body.opportunities || {};
         log({ event: 'wake', mode: 'poll', name: agent.name, todos, opportunities: opps });
-        runWake(agent, 'turn', todos + (opps.tasks || 0) + (opps.assignments || 0));
+        // started is not done: a child that fails to start or exits
+        // non-zero re-arms the SAME turn for a bounded-backoff retry
+        // — "woken once" must never become "never woken again"
+        // (external audit P1-04)
+        runWake(agent, 'turn', todos + (opps.tasks || 0) + (opps.assignments || 0), (failed) => {
+          if (!failed) { failStreak = 0; return; }
+          failStreak++;
+          const retry = Math.min(WAKE_FAIL_BASE_MS * 2 ** (failStreak - 1), WAKE_FAIL_MAX_MS);
+          log({ event: 'wake-retry', mode: 'poll', name: agent.name, streak: failStreak, retry_ms: retry });
+          setTimeout(() => { lastWake = ''; }, retry);
+        });
       } else {
         // the SAME unhandled turn again: the woken command did not
         // drain it — back off, never re-spawn an identical state
@@ -274,7 +326,13 @@ async function pollLoop(agent) {
       await sleep(spacing);                         // give the woken agent room to act
       continue;
     }
-    // changed:false — normal timeout, loop
+    // changed:false — the server's own pacing answer: 1s after a
+    // normal held timeout, 5s when the global waiter cap degraded the
+    // call to an immediate empty answer. Honor it either way — an
+    // over-cap storm of instant re-calls buys nothing but 429s
+    // (external audit P2-05).
+    const ra = typeof body.retry_after === 'number' && body.retry_after > 0 ? body.retry_after : 1;
+    await sleep(ra * 1000);
   }
 }
 

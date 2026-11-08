@@ -4,8 +4,11 @@ package repository
 // transaction settles what is still open (close semantics plus
 // undecided for judgment clocks still running), removes the room
 // aggregate, and drops payload memories (origin='thread') that lost
-// their last referencing entry. Standalone memories never go — their
-// life is the author's (memory_delete), not the room's.
+// their last LIVE reference — entries anywhere, live engagements,
+// non-closed task contracts and unjudged deliveries all keep their
+// payload readable (DeleteUnreferencedPayload). Standalone memories
+// never go — their life is the author's (memory_delete), not the
+// room's.
 
 import (
 	"context"
@@ -39,8 +42,9 @@ func ForceUndecidedThreadAssigns(ctx context.Context, q pg.Querier, threadID int
 // DisposeThreadCascade removes one room's aggregate inside the
 // caller's transaction and returns what went. Payload memories are
 // reference-counted: an origin='thread' row is deleted only when no
-// entry anywhere still references it (the same payload may be pinned
-// in another room).
+// live object anywhere still needs it (DeleteUnreferencedPayload —
+// the same payload may be pinned in another room, by an engagement,
+// or by an undelivered-against task contract).
 func DisposeThreadCascade(ctx context.Context, q pg.Querier, threadID int64) (DisposalCounts, error) {
 	var c DisposalCounts
 
@@ -83,23 +87,17 @@ func DisposeThreadCascade(ctx context.Context, q pg.Querier, threadID int64) (Di
 		return c, err
 	}
 
-	// reference-counted payload disposal: an origin='thread' content
-	// row with no remaining entry reference anywhere goes, then its
-	// revision archive (a never-updated payload has no archived rows)
+	// reference-counted payload disposal: the shared eligibility core
+	// decides per payload whether its last live reference went with
+	// this room (a never-updated payload has no archived rows)
 	for _, m := range payloads {
-		tag, err := q.Exec(ctx, `
-			DELETE FROM tb_kungfus WHERE id = $1 AND origin = 'thread'
-			AND NOT EXISTS (SELECT 1 FROM thread_entries e WHERE e.memory_id = $1)`, m)
+		gone, err := DeleteUnreferencedPayload(ctx, q, m)
 		if err != nil {
 			return c, err
 		}
-		if tag.RowsAffected() == 0 {
-			continue
+		if gone {
+			c.PayloadMemories++
 		}
-		if _, err := q.Exec(ctx, `DELETE FROM memory_revisions WHERE memory_id = $1`, m); err != nil {
-			return c, err
-		}
-		c.PayloadMemories++
 	}
 	return c, nil
 }
@@ -188,14 +186,51 @@ func EntryPayload(ctx context.Context, q pg.Querier, entryID int64) (int64, erro
 	return m, err
 }
 
-// DeleteUnreferencedPayload removes a payload memory when nothing
-// references it anymore — the content row first (origin and refcount
-// guarded), then its revision archive (a never-updated payload has no
-// archived rows at all). Returns whether it went.
+// DeleteUnreferencedPayload removes one thread-payload memory when no
+// LIVE object still needs it, then its revision archive (a
+// never-updated payload has no archived rows at all). A reference is
+// live by its OWN object's lifecycle, not by existing:
+//
+//   - thread_entries   any entry anywhere (the payload may be pinned
+//     in another room) — always live while the row is
+//   - engagements      a claim pin (claim_harness_revisions) is live
+//     only while the claim is active AND unexpired;
+//     pins of ended engagements are dropped here in
+//     the same transaction (dead pins are the one FK
+//     that would otherwise block this delete forever)
+//   - task contracts   harness_refs of a non-closed task's current
+//     contract (a closed task can never reopen; its
+//     live engagements protect their own pins above)
+//   - room deliveries  memories_json of an assignment still awaiting
+//     judgment (state 'delivered'); once judged the
+//     delivery is history, not a live input
+//
+// Standalone memories never go by this path (origin predicate) —
+// their life is the author's (memory_delete).
 func DeleteUnreferencedPayload(ctx context.Context, q pg.Querier, memoryID int64) (bool, error) {
+	if _, err := q.Exec(ctx, `
+		DELETE FROM claim_harness_revisions p
+		USING tb_task_claim c
+		WHERE p.memory_id = $1 AND p.claim_id = c.claim_id
+		  AND NOT (c.status = 'active' AND c.expires_at > NOW())`, memoryID); err != nil {
+		return false, err
+	}
 	tag, err := q.Exec(ctx, `
-		DELETE FROM tb_kungfus WHERE id = $1 AND origin = 'thread'
-		AND NOT EXISTS (SELECT 1 FROM thread_entries e WHERE e.memory_id = $1)`, memoryID)
+		DELETE FROM tb_kungfus k
+		WHERE k.id = $1 AND k.origin = 'thread'
+		  AND NOT EXISTS (SELECT 1 FROM thread_entries e WHERE e.memory_id = k.id)
+		  AND NOT EXISTS (SELECT 1 FROM claim_harness_revisions p
+		                  JOIN tb_task_claim c ON c.claim_id = p.claim_id
+		                  WHERE p.memory_id = k.id
+		                    AND c.status = 'active' AND c.expires_at > NOW())
+		  AND NOT EXISTS (SELECT 1 FROM tb_task t
+		                  WHERE t.status <> 'closed'
+		                    AND t.contract->'harness_refs' ? k.code)
+		  AND NOT EXISTS (SELECT 1 FROM assign_deliveries d
+		                  JOIN assigns a ON a.id = d.assign_id
+		                  WHERE a.state = 'delivered'
+		                    AND d.memories_json @> jsonb_build_array(jsonb_build_object('code', k.code)))`,
+		memoryID)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
@@ -203,4 +238,31 @@ func DeleteUnreferencedPayload(ctx context.Context, q pg.Querier, memoryID int64
 		return false, err
 	}
 	return true, nil
+}
+
+// OrphanThreadPayloadIDs lists thread-payload memories that no entry
+// references at all — candidates whose cross-object protection may
+// have expired since their room went away (the deferred half of
+// DeleteUnreferencedPayload: protection lifted later still ends in
+// deletion, on the next sweep).
+func OrphanThreadPayloadIDs(ctx context.Context, q pg.Querier, limit int) ([]int64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT k.id FROM tb_kungfus k
+		WHERE k.origin = 'thread'
+		  AND NOT EXISTS (SELECT 1 FROM thread_entries e WHERE e.memory_id = k.id)
+		ORDER BY k.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }

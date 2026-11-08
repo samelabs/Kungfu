@@ -132,12 +132,71 @@ func ledgerSum(t *testing.T, pool *pg.Pool, botID int64, txnType string) int64 {
 
 func pubCreateForTest(t *testing.T, pool *pg.Pool, publisher int64, c task.Contract, budget int64) string {
 	t.Helper()
-	view, err := CreateTask(context.Background(), pool, publisher, c, budget)
+	view, err := CreateTask(context.Background(), pool, publisher, c, budget, false, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	code, _ := view["code"].(string)
 	return code
+}
+
+// -- §4 create: open rides the SAME transaction; a create retry with
+// an idempotency key replays, never mints twice (external audit) --
+
+func TestCreateTaskOpenIsAtomic(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	ctx := context.Background()
+
+	view, err := CreateTask(ctx, pool, publisher, pubContract(""), 1000, true, "")
+	if err != nil {
+		t.Fatalf("create+open: %v", err)
+	}
+	if view["status"] != "open" {
+		t.Fatalf("status = %v, want open in the same call", view["status"])
+	}
+	if view["budget_locked"] != int64(1000) {
+		t.Fatalf("budget_locked = %v", view["budget_locked"])
+	}
+	// one lock_task ledger row — nothing half-done exists (the lock
+	// debits the balance, so the ledger sum is negative)
+	if n := ledgerSum(t, pool, publisher, "lock_task"); n != -1000 {
+		t.Fatalf("lock_task ledger = %d, want -1000 (locked exactly once)", n)
+	}
+}
+
+func TestCreateTaskIdempotencyKey(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	ctx := context.Background()
+	c := pubContract("")
+
+	view1, err := CreateTask(ctx, pool, publisher, c, 1000, false, "create-key-1")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// the network drops the response; the publisher retries the SAME
+	// logical create: the original result replays, no second task,
+	// no second budget lock
+	view2, err := CreateTask(ctx, pool, publisher, c, 1000, false, "create-key-1")
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if view1["code"] != view2["code"] {
+		t.Fatalf("retry minted a new task: %v vs %v", view1["code"], view2["code"])
+	}
+	if n := ledgerSum(t, pool, publisher, "lock_task"); n != -1000 {
+		t.Fatalf("lock_task ledger = %d, want -1000 (locked exactly once)", n)
+	}
+	// the same key with a DIFFERENT request is a conflict, no effects
+	if _, err := CreateTask(ctx, pool, publisher, c, 2000, false, "create-key-1"); err == nil {
+		t.Fatal("same key different request must be IDEMPOTENCY_CONFLICT")
+	} else if ae := appErrOf(t, err); ae.Code != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("retry conflict = %s, want IDEMPOTENCY_CONFLICT", ae.Code)
+	}
+	if n := ledgerSum(t, pool, publisher, "lock_task"); n != -1000 {
+		t.Fatalf("conflict moved money: lock_task = %d", n)
+	}
 }
 
 func TestPublisherOpenHarnessNotOwned(t *testing.T) {
@@ -160,7 +219,7 @@ func TestPublisherOpenHarnessNotOwned(t *testing.T) {
 	// receiver is needed here
 	// M3: harness refs are validated at create time — the foreign and
 	// missing refs fail the CREATE itself
-	view, err := CreateTask(ctx, pool, publisher, c, 2000)
+	view, err := CreateTask(ctx, pool, publisher, c, 2000, false, "")
 	if err == nil {
 		// if create somehow succeeds, open must still reject
 		code, _ := view["code"].(string)

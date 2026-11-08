@@ -399,6 +399,12 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 			if a.CreatorID != botID {
 				return threadActionOutcome{}, errors.New(403, "NOT_YOURS", "Only the assignment creator voids")
 			}
+			// deadline beats void (L4): a taken assign whose deliver
+			// clock already ran out settles as timed_out, never voided
+			if deadlinePassed(ctx, tx, a) {
+				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
+					"Deliver deadline passed; the assignment settles as timed_out")
+			}
 			if a.State != "open" && a.State != "taken" {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
 					"Only undelivered assignments can be voided (state: "+a.State+")")
@@ -493,20 +499,21 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	// (they never enter todos). tasks = offered restricted work the
 	// caller could still take; assignments reuses thread_list's
 	// open_invites query (open assignments addressed to me while my
-	// membership lasts). Zero is reported like any other number.
-	offered, err := offeredWorkCount(ctx, pool, botID, time.Now())
+	// membership lasts). Zero is reported like any other number. The
+	// identity halves of the same queries feed wake_token — the opaque
+	// same-turn/different-turn fingerprint a resident wake process
+	// deduplicates on (counts alone cannot tell T2 arriving from T1
+	// ending).
+	offered, offeredIDs, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
 	}
-	invites, err := repository.ThreadOpenInviteCounts(ctx, pool, botID)
+	openAssignments, assignIDs, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
-	}
-	var openAssignments int64
-	for _, n := range invites {
-		openAssignments += n
 	}
 	res["opportunities"] = map[string]any{"tasks": offered, "assignments": openAssignments}
+	res["wake_token"] = wakeToken(turnSignature(items), opportunitySignature(offered, offeredIDs, openAssignments, assignIDs))
 	if offered > 0 || openAssignments > 0 {
 		// At most one opportunity hint, and never in place of an
 		// obligation's slot (义务优先): offered work points at

@@ -178,11 +178,20 @@ func validateHarnessRefs(ctx context.Context, pool *pg.Pool, publisherID int64, 
 	return nil
 }
 
-// CreateTask is the §4 create transition: a validated contract
-// budget lock (lock_task) in one transaction. budget must cover at
+// CreateTask is the §4 create transition: a validated contract, its
+// audience, the budget lock (lock_task) and — with open — the §4 open
+// transition, ALL in one transaction: a failed open can never leave a
+// paused task behind with its budget locked. budget must cover at
 // least one unit of the price (§4/§11, WO-11: no numeric minimum) and
 // the publisher's balance.
-func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract task.Contract, budget int64) (map[string]interface{}, error) {
+//
+// requestKey is the create idempotency key (L3, the same receipt
+// table the room tools use): a retry of the same key replays the
+// stored result verbatim, the same key with a different request is
+// IDEMPOTENCY_CONFLICT, and the unique constraint makes a network
+// retry after a lost response unable to mint a second task or lock
+// the budget twice.
+func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract task.Contract, budget int64, open bool, requestKey string) (map[string]interface{}, error) {
 	defaults := contract.WithDefaults()
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
@@ -226,12 +235,30 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Code generation failed")
 	}
+	requestHash := sha256Hex(fmt.Sprintf(`{"contract":%s,"budget":%d,"open":%t}`, contractJSON, budget, open))
 
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
+	if requestKey != "" {
+		rec, err := repository.FindThreadIdempotency(ctx, tx, publisherID, "task_create", requestKey)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if rec != nil {
+			if rec.RequestHash != requestHash {
+				return nil, errors.New(0, "IDEMPOTENCY_CONFLICT",
+					"This idempotency key was already used with a different request")
+			}
+			var facts map[string]any
+			if err := json.Unmarshal([]byte(rec.ResultSnapshot), &facts); err != nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			return facts, nil
+		}
+	}
 	taskID, err := repository.InsertTask(ctx, tx, repository.NewTaskRow{
 		Code: code, PublisherID: publisherID, Contract: contractJSON,
 	})
@@ -247,15 +274,55 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		}
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	if open {
+		// the same transition task_open applies, inside this
+		// transaction: create and open commit together or not at all
+		if err := repository.ApplyTaskStatus(ctx, tx, taskID, task.TaskPaused, task.EventOpen, nil); err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
 	}
-
-	t, err := repository.FindTaskByID(ctx, pool, taskID)
+	t, err := repository.FindTaskByID(ctx, tx, taskID)
 	if err != nil || t == nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return taskView(ctx, pool, t)
+	view, err := taskView(ctx, tx, t)
+	if err != nil {
+		return nil, err
+	}
+	if requestKey != "" {
+		snapshot, mErr := json.Marshal(view)
+		if mErr != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
+		}
+		if err := repository.InsertThreadIdempotency(ctx, tx, publisherID, "task_create", requestKey,
+			requestHash, string(snapshot)); err != nil {
+			if !repository.IsUniqueViolation(err) {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			// a concurrent retry with the same key committed first:
+			// this transaction's work rolls back — the key made the
+			// double execution impossible — and the loser resolves
+			// against the winner's receipt
+			_ = pg.Rollback(tx)
+			rec, findErr := repository.FindThreadIdempotency(ctx, pool, publisherID, "task_create", requestKey)
+			if findErr != nil || rec == nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			if rec.RequestHash != requestHash {
+				return nil, errors.New(0, "IDEMPOTENCY_CONFLICT",
+					"This idempotency key was already used with a different request")
+			}
+			var facts map[string]any
+			if err := json.Unmarshal([]byte(rec.ResultSnapshot), &facts); err != nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			return facts, nil
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	return view, nil
 }
 
 func isInsufficientCreditsErr(err error) bool {

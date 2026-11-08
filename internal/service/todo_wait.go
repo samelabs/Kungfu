@@ -72,10 +72,21 @@ func turnSignature(items []repository.TodoItem) string {
 		last.ProducedAt, last.Branch, last.RowID)
 }
 
-// opportunitySignature summarizes the work-addressed-to-me counts in
-// the same terms as todo_list's opportunities block.
-func opportunitySignature(offered, openAssignments int64) string {
-	return fmt.Sprintf("t%d/a%d", offered, openAssignments)
+// opportunitySignature summarizes the work-addressed-to-me side in
+// identity terms: per branch the count AND the id sum (ids are
+// monotonic — one task replacing another at the same count still
+// moves the sum, so "a different one of the same many" is a change).
+func opportunitySignature(offeredN, offeredIDs, assignN, assignIDs int64) string {
+	return fmt.Sprintf("t%d.%d/a%d.%d", offeredN, offeredIDs, assignN, assignIDs)
+}
+
+// wakeToken is the opaque fingerprint of one whole turn state — the
+// todo_list/todo_wait response carries it so a resident wake process
+// can tell "a NEW unhandled turn" from "the one it already showed its
+// agent" without any content (external audit P1-03: counts alone
+// cannot — T1 ending and T2 arriving leaves the counts identical).
+func wakeToken(turn, opps string) string {
+	return sha256Hex("wake\x1f" + turn + "\x1f" + opps)[:16]
 }
 
 // todoSnapshot is one full observation of what TodoWait watches.
@@ -91,23 +102,19 @@ func todoWaitSnapshot(ctx context.Context, pool *pg.Pool, botID int64) (todoSnap
 	if err != nil {
 		return todoSnapshot{}, err
 	}
-	offered, err := offeredWorkCount(ctx, pool, botID, time.Now())
+	offeredN, offeredIDs, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
 	if err != nil {
 		return todoSnapshot{}, err
 	}
-	invites, err := repository.ThreadOpenInviteCounts(ctx, pool, botID)
+	assignN, assignIDs, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
 	if err != nil {
 		return todoSnapshot{}, err
-	}
-	var openAssignments int64
-	for _, n := range invites {
-		openAssignments += n
 	}
 	return todoSnapshot{
 		turn:    turnSignature(items),
-		opps:    opportunitySignature(offered, openAssignments),
+		opps:    opportunitySignature(offeredN, offeredIDs, assignN, assignIDs),
 		empty:   len(items) == 0,
-		hasOpps: offered > 0 || openAssignments > 0,
+		hasOpps: offeredN > 0 || assignN > 0,
 	}, nil
 }
 

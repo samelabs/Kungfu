@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kungfu.md/internal/pg"
+	"kungfu.md/internal/task"
 )
 
 func waitReady(t *testing.T, pool *pg.Pool) (owner, a int64, code, raw string) {
@@ -176,6 +177,67 @@ func TestTodoWaitWakesOnOpportunity(t *testing.T) {
 		t.Fatalf("post+assign: %v", err)
 	}
 	wg.Wait()
+}
+
+// TestTodoWaitWakeTokenDistinguishesSameCountWork: the wake channel
+// must tell "a different one of the same many" from "the one already
+// shown" (external audit P1-03). T1 offered, T1 replaced by T2 — the
+// opportunity COUNTS are identical; only the identity (wake_token)
+// moves, and that movement is the wake signal.
+func TestTodoWaitWakeTokenDistinguishesSameCountWork(t *testing.T) {
+	pool := revisionTestPool(t)
+	publisher, _, _ := a7TestBot(t, pool, 100)
+	a, aName, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+
+	restricted := func() task.Contract {
+		c := pubContract("")
+		c.Audience = &task.Audience{Type: task.AudienceRestricted, Agents: []string{aName}}
+		return c
+	}
+	t1 := pubCreateForTest(t, pool, publisher, restricted(), 5)
+	if _, err := OpenTask(ctx, pool, publisher, t1); err != nil {
+		t.Fatalf("open t1: %v", err)
+	}
+
+	// cold start: the offered task answers immediately, with a token
+	res, err := TodoWait(ctx, pool, a, 3)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if res["changed"] != true || res["wake_token"] == "" || res["wake_token"] == nil {
+		t.Fatalf("offered work must answer changed=true with a wake_token, got %v", res)
+	}
+	token1 := res["wake_token"].(string)
+	opp1 := res["opportunities"].(map[string]any)
+	if opp1["tasks"].(int64) != 1 {
+		t.Fatalf("t1 offered: %v", opp1)
+	}
+
+	// T1 ends (closed), T2 arrives: the counts return to the SAME
+	// number — the token must NOT
+	if _, err := CloseTask(ctx, pool, publisher, t1); err != nil {
+		t.Fatalf("close t1: %v", err)
+	}
+	t2 := pubCreateForTest(t, pool, publisher, restricted(), 5)
+	if _, err := OpenTask(ctx, pool, publisher, t2); err != nil {
+		t.Fatalf("open t2: %v", err)
+	}
+	res2, err := TodoWait(ctx, pool, a, 3)
+	if err != nil {
+		t.Fatalf("wait2: %v", err)
+	}
+	if res2["changed"] != true {
+		t.Fatalf("t2 offered must answer changed=true, got %v", res2)
+	}
+	token2 := res2["wake_token"].(string)
+	opp2 := res2["opportunities"].(map[string]any)
+	if opp2["tasks"].(int64) != 1 {
+		t.Fatalf("t2 offered: %v", opp2)
+	}
+	if token1 == token2 {
+		t.Fatalf("same-count different work must move wake_token: %q == %q", token1, token2)
+	}
 }
 
 func TestTodoWaitWaiterCap(t *testing.T) {

@@ -11,7 +11,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
@@ -93,12 +92,4 @@ func requireOwnerOrAudience(ctx context.Context, q pg.Querier, t *repository.Tas
 		return err
 	}
 	return errors.New(0, "NOT_OWNER", "Not your task")
-}
-
-// offeredWorkCount is the §8 "tasks" side of the opportunities
-// projection: restricted tasks naming the agent that are still
-// offerable (open, slots, eligibility, no active claim, active
-// account). Offered, never owed — the number binds no one.
-func offeredWorkCount(ctx context.Context, pool *pg.Pool, agentID int64, now time.Time) (int64, error) {
-	return repository.CountOfferedWork(ctx, pool, agentID, now)
 }
