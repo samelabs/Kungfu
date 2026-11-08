@@ -257,7 +257,7 @@ func TestAPIV1LargeBodyReachesValidationNot413(t *testing.T) {
 	if len(body) < 500*1024 || len(body) > mcpserver.MaxRequestBodyBytes {
 		t.Fatalf("setup: body %d must be between 500 KB and the 1 MiB cap", len(body))
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/task_create", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/bounty_create", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
@@ -279,7 +279,7 @@ func TestAPIV1LargeBodyReachesValidationNot413(t *testing.T) {
 	// one byte over the shared cap: 413 before any decoding
 	over := append([]byte(`{"contract":{"padding":"`), bytes.Repeat([]byte("a"), mcpserver.MaxRequestBodyBytes)...)
 	over = append(over, []byte(`"}}`)...)
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/task_create", bytes.NewReader(over))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/bounty_create", bytes.NewReader(over))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
 	rec = httptest.NewRecorder()

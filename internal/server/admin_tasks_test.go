@@ -372,7 +372,7 @@ func TestOwnerToolBodyTooLarge413(t *testing.T) {
 	s, pool, name, _ := ownerConsoleEnv(t)
 	cookie := ocSessionCookie(t, s, pool, name)
 
-	rec, env := ocCall(t, s, cookie, "task_create", map[string]any{
+	rec, env := ocCall(t, s, cookie, "bounty_create", map[string]any{
 		"contract": map[string]any{"title": strings.Repeat("a", mcpserver.MaxRequestBodyBytes)},
 	})
 	if rec.Code != http.StatusRequestEntityTooLarge {

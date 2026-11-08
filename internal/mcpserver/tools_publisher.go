@@ -31,7 +31,7 @@ func decodeContract(raw json.RawMessage) (task.Contract, error) {
 		field := "contract"
 		if strings.HasPrefix(msg, "json: unknown field ") {
 			field = strings.Trim(strings.TrimPrefix(msg, "json: unknown field "), `"`)
-			msg = "unknown field (see the task_create input schema)"
+			msg = "unknown field (see the bounty_create input schema)"
 		}
 		return c, contractError(field, msg)
 	}
@@ -205,7 +205,7 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
-	// Same paging rules as work_list / task_list (WO-28 B8): below 1 →
+	// Same paging rules as work_list / bounty_list (WO-28 B8): below 1 →
 	// default 20, above the 100 maximum → 100.
 	if in.Page < 1 {
 		in.Page = 1

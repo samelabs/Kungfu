@@ -1,7 +1,7 @@
 package server
 
 // WO-11: the owner console's new-task page ships a simple mode, and
-// the console bridge carries task_create's open flag end to end.
+// the console bridge carries bounty_create's open flag end to end.
 
 import (
 	"encoding/json"
@@ -75,7 +75,7 @@ func TestOwnerToolTaskCreateOpen(t *testing.T) {
 	s, pool, name, _ := ownerConsoleEnv(t)
 	cookie := ocSessionCookie(t, s, pool, name)
 
-	rec, env := ocCall(t, s, cookie, "task_create", map[string]any{
+	rec, env := ocCall(t, s, cookie, "bounty_create", map[string]any{
 		"contract": map[string]any{
 			"title":        "Console minimal",
 			"requirements": "Three bullets.",
@@ -86,7 +86,7 @@ func TestOwnerToolTaskCreateOpen(t *testing.T) {
 		"open":   true,
 	})
 	if rec.Code != 200 || env["ok"] != true || env["status"] != "open" {
-		t.Fatalf("console task_create open=true: %d %v", rec.Code, env)
+		t.Fatalf("console bounty_create open=true: %d %v", rec.Code, env)
 	}
 	// the required-fields contract went through and opened (its
 	// sample test-delivered to the receiver)
