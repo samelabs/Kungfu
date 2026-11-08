@@ -47,6 +47,14 @@
 //              start or exits non-zero re-arms its (still open) turn
 //              for a bounded-backoff retry — a failed wake must never
 //              become "this turn never wakes again"
+//   states   : every wake is observable as exactly one of five log
+//              events — notify-only (no executor configured),
+//              spawned (submitted, running), skipped-busy (running,
+//              merged), wake-failed (failed to start / non-zero
+//              exit), wake-ended (process finished). ENDED is not
+//              "work done": business completion is a server fact,
+//              read back through todo_list, never assumed from an
+//              exit code
 //
 // Robustness: nothing here may fail silently. Startup validates the
 // roster (exit 2 on a broken one); every loop backs off on error;
@@ -187,7 +195,16 @@ function runWake(agent, kind, count, onDone) {
   }
   fs.writeFileSync(lock, String(child.pid));       // the lock follows the child
   child.on('error', (e) => finish(true, { reason: 'spawn-error', err: String(e).slice(0, 200) }));
-  child.on('exit', (code, signal) => finish(code !== 0, { code, signal }));
+  child.on('exit', (code, signal) => {
+    // the five observable wake states are distinct log events:
+    // notify-only (no executor) / spawned (submitted, running) /
+    // skipped-busy (still running, merged) / wake-failed (failed) /
+    // wake-ended (process finished). ENDED is not "work done" —
+    // business completion is a fact the server holds, read back
+    // through todo_list, never assumed from an exit code.
+    if (code === 0) log({ event: 'wake-ended', mode: MODE_FINAL, name: agent.name, code });
+    finish(code !== 0, { code, signal });
+  });
   child.unref();
   log({ event: 'spawned', mode: MODE_FINAL, name: agent.name, pid: child.pid });
 }

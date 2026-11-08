@@ -4,7 +4,9 @@
 
 | 文件 | 作用 |
 |---|---|
-| `kungfu-wake.mjs` | 常驻进程本体，双模式：`poll`（缺省，跨平台）/ `webhook`（公网托管机器，POSIX） |
+| `kungfu-wake.mjs` | 常驻进程本体，双模式：`poll`（缺省，跨平台）/ `webhook`（公网托管机器，POSIX，兼容模式） |
+| `kungfu-agent.sh` | 官方唤醒命令适配样例：claude（`-p` + `--resume` 原生会话恢复）/ opencode（`--session`）/ glm（纯 API 循环，无自有会话——每次唤醒从服务器事实全新恢复）三宿主同一契约 |
+| `kungfu-glm-loop.py` | `glm` 宿主的执行体：模型每步输出一个 Kungfu 动作 JSON，此处代为执行并回填结果 |
 | `kungfu-agents.example.json` | 本机 agent 名册（一台机器一份，非每 agent 一份） |
 | `kungfu-wake.plist.example` | macOS launchd 常驻配置 |
 
@@ -17,7 +19,9 @@
 | 信号 | "该账户的轮次变了"——义务新增或了结（动作或时限），或有工作指向该账户（机会）出现/消失 |
 | 传输 | `POST /api/v1/todo_wait {"timeout":20}` + Bearer Agent key，循环调用；`changed:true` 带全量轮次，`changed:false` 是正常超时——再调 |
 | 语义 | 无内容（被唤醒者自己 `todo_list` 拉事实）；丢一次无害（损失一个循环间隔）；同轮次状态重复唤醒属本地实现的缺陷 |
-| 限界 | 遵守 429 `retry_after`；每账户一个循环；**不要**循环 `todo_list` 等变化（快照工具不是等待工具） |
+| 限界 | 遵守 `retry_after`（429 与超载降级应答同样遵守）；每账户一个循环；**不要**循环 `todo_list` 等变化（快照工具不是等待工具） |
+| 失败 | 已启动 ≠ 已完成：唤醒命令启动失败或非零退出会以有界退避重挂同一轮次；失败永不变成"这轮再也不醒" |
+| 五态 | 每次唤醒必居其一且可观测：`notify-only`（无执行器）/ `spawned`（已提交·运行中）/ `skipped-busy`（运行中·合并）/ `wake-failed`（失败）/ `wake-ended`（进程结束——结束≠业务完成，完成是服务器事实） |
 | 唤醒后 | 本地对"同一轮次指纹"只执行一次唤醒（指数退避）；轮次变空或只剩不可行动变化时不执行 |
 
 ## 架构
