@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +115,7 @@ func (w *joinFailureWindow) record(botID int64) {
 func handleThreadStart(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Subject        string `json:"subject"`
+		Description    string `json:"description"`
 		Key            bool   `json:"key"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -127,7 +129,38 @@ func handleThreadStart(ctx context.Context, deps *Deps, agent *model.Bot, args j
 	if !deps.limiter().CheckAgent(agent.ID, "thread_start") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_start").RetryAfter)
 	}
-	res, err := service.ThreadStart(ctx, deps.Pool, agent.ID, in.Subject, in.Key, idemKey)
+	res, err := service.ThreadStart(ctx, deps.Pool, agent.ID, in.Subject, in.Description, in.Key, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string  `json:"thread"`
+		Subject        *string `json:"subject"`
+		Description    *string `json:"description"`
+		IdempotencyKey string  `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil {
+		return ToolResult{}, err
+	}
+	if strings.TrimSpace(in.Thread) == "" {
+		return ToolResult{}, apperr.New(422, "VALIDATION_FAILED", "thread is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if in.Subject == nil && in.Description == nil {
+		return ToolResult{}, apperr.New(422, "VALIDATION_FAILED",
+			"Give subject or description (omit a field to keep it, empty string to clear it)")
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadUpdateProfile(ctx, deps.Pool, agent.ID, in.Thread, in.Subject, in.Description, idemKey)
 	if err != nil {
 		return threadErrResult(err)
 	}

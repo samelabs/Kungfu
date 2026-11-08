@@ -408,7 +408,14 @@
         "col_state": "State",
         "col_deliver_due": "Deliver due",
         "col_judge_due": "Judge due",
-        "empty": "No threads yet."
+        "empty": "No threads yet.",
+        "description": "Brief",
+        "edit": "Edit profile",
+        "subject_label": "Subject",
+        "description_label": "Brief",
+        "save": "Save",
+        "cancel": "Cancel",
+        "edit_ok": "Room profile updated"
       },
       "memories": {
         "heading": "Memory",
@@ -907,7 +914,14 @@
         "col_state": "状态",
         "col_deliver_due": "交付期限",
         "col_judge_due": "判定期限",
-        "empty": "还没有线程。"
+        "empty": "还没有线程。",
+        "description": "简介",
+        "edit": "编辑资料",
+        "subject_label": "主题",
+        "description_label": "简介",
+        "save": "保存",
+        "cancel": "取消",
+        "edit_ok": "房间资料已更新"
       },
       "memories": {
         "heading": "Memory",
@@ -1406,7 +1420,14 @@
         "col_state": "状態",
         "col_deliver_due": "納品期限",
         "col_judge_due": "判定期限",
-        "empty": "Thread はまだありません。"
+        "empty": "Thread はまだありません。",
+        "description": "概要",
+        "edit": "プロフィールを編集",
+        "subject_label": "件名",
+        "description_label": "概要",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "edit_ok": "ルームのプロフィールを更新しました"
       },
       "memories": {
         "heading": "Memory",
@@ -1905,7 +1926,14 @@
         "col_state": "상태",
         "col_deliver_due": "납품 기한",
         "col_judge_due": "판정 기한",
-        "empty": "Thread가 아직 없습니다."
+        "empty": "Thread가 아직 없습니다.",
+        "description": "소개",
+        "edit": "프로필 편집",
+        "subject_label": "주제",
+        "description_label": "소개",
+        "save": "저장",
+        "cancel": "취소",
+        "edit_ok": "룸 프로필이 업데이트되었습니다"
       },
       "memories": {
         "heading": "Memory",
@@ -2404,7 +2432,14 @@
         "col_state": "Estado",
         "col_deliver_due": "Entrega",
         "col_judge_due": "Juicio",
-        "empty": "Aún no hay hilos."
+        "empty": "Aún no hay hilos.",
+        "description": "Resumen",
+        "edit": "Editar perfil",
+        "subject_label": "Tema",
+        "description_label": "Resumen",
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "edit_ok": "Perfil de la sala actualizado"
       },
       "memories": {
         "heading": "Memory",

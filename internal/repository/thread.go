@@ -43,21 +43,36 @@ func GenerateUniqueThreadCode(ctx context.Context, q pg.Querier) (string, error)
 	})
 }
 
-// InsertThread creates an open room; subject may be NULL. Returns
-// the new thread id. The creator's governor membership row is a
-// separate InsertThreadMember in the same caller transaction.
-func InsertThread(ctx context.Context, q pg.Querier, code string, subject *string) (int64, error) {
+// InsertThread creates an open room; subject and description may be
+// NULL. Returns the new thread id. The creator's governor membership
+// row is a separate InsertThreadMember in the same caller transaction.
+func InsertThread(ctx context.Context, q pg.Querier, code string, subject, description *string) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO threads (code, subject) VALUES ($1, $2) RETURNING id`,
-		code, subject).Scan(&id)
+		INSERT INTO threads (code, subject, description) VALUES ($1, $2, $3) RETURNING id`,
+		code, subject, description).Scan(&id)
 	return id, err
+}
+
+// UpdateThreadProfile rewrites the room's editable profile (subject,
+// description) on an OPEN room and stamps updated_at. Returns false
+// when the room is closed — profile writes are an open-room governor
+// action.
+func UpdateThreadProfile(ctx context.Context, q pg.Querier, threadID int64, subject, description *string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET subject = $1, description = $2, updated_at = NOW()
+		WHERE id = $3 AND status = 'open'`, subject, description, threadID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // FindThreadByCode returns the thread row, or nil when no such code.
 func FindThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE code = $1`, code))
 }
 
@@ -67,14 +82,14 @@ func FindThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Th
 // actions serialize (L5).
 func LockThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE code = $1 FOR UPDATE`, code))
 }
 
 // LockThreadByID is LockThreadByCode by id.
 func LockThreadByID(ctx context.Context, q pg.Querier, id int64) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE id = $1 FOR UPDATE`, id))
 }
 
@@ -83,7 +98,7 @@ func LockThreadByID(ctx context.Context, q pg.Querier, id int64) (*model.Thread,
 // closed rooms have no key (§6.5), so a dead key finds nothing.
 func FindOpenThreadByKeyHash(ctx context.Context, q pg.Querier, keyHash string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE key_hash = $1 AND status = 'open'`, keyHash))
 }
 
@@ -139,17 +154,22 @@ func scanThread(row pgx.Row) (*model.Thread, error) {
 	var (
 		t           model.Thread
 		createdAt   time.Time
+		updatedAt   *time.Time
 		closedAt    *time.Time
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&t.ID, &t.Code, &t.Subject, &t.Status,
-		&t.KeyHash, &t.KeyRole, &keyIssuedAt, &t.NextSeq, &createdAt, &closedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Code, &t.Subject, &t.Description, &t.Status,
+		&t.KeyHash, &t.KeyRole, &keyIssuedAt, &t.NextSeq, &createdAt, &updatedAt, &closedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	t.CreatedAt = timeToStr(createdAt)
+	if updatedAt != nil {
+		s := timeToStr(*updatedAt)
+		t.UpdatedAt = &s
+	}
 	if closedAt != nil {
 		s := timeToStr(*closedAt)
 		t.ClosedAt = &s
@@ -295,6 +315,7 @@ func ListThreadMembers(ctx context.Context, q pg.Querier, threadID int64) ([]Thr
 type ThreadListItem struct {
 	Code             string
 	Subject          *string
+	Description      *string
 	Status           string
 	Role             string
 	JoinedViaKeyHash *string
@@ -307,7 +328,7 @@ type ThreadListItem struct {
 // last item id); status "" means both. limit ≤ 50 (§2).
 func ListThreadsForMember(ctx context.Context, q pg.Querier, accountID int64, status string, beforeID int64, limit int) ([]ThreadListItem, error) {
 	rows, err := q.Query(ctx, `
-		SELECT t.id, t.code, t.subject, t.status, m.role, m.joined_via_key_hash, m.joined_at
+		SELECT t.id, t.code, t.subject, t.description, t.status, m.role, m.joined_via_key_hash, m.joined_at
 		FROM thread_members m
 		JOIN threads t ON t.id = m.thread_id
 		WHERE m.account_id = $1
@@ -323,7 +344,7 @@ func ListThreadsForMember(ctx context.Context, q pg.Querier, accountID int64, st
 	for rows.Next() {
 		var it ThreadListItem
 		var joinedAt time.Time
-		if err := rows.Scan(&it.ID, &it.Code, &it.Subject, &it.Status, &it.Role,
+		if err := rows.Scan(&it.ID, &it.Code, &it.Subject, &it.Description, &it.Status, &it.Role,
 			&it.JoinedViaKeyHash, &joinedAt); err != nil {
 			return nil, err
 		}

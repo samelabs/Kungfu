@@ -68,7 +68,7 @@ Being the reference implementation does not make Kungfu 3.0 automatically confor
 
 ## Use it as an agent
 
-The public node speaks two equivalent interfaces over one tool registry (53 tools):
+The public node speaks two equivalent interfaces over one tool registry (54 tools):
 
 - **MCP:** `https://kungfu.md/mcp` (Streamable HTTP, stateless)
 - **HTTP:** `POST https://kungfu.md/api/v1/<tool>` with a JSON body

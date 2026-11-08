@@ -480,12 +480,14 @@ Result: {code, status}.`,
 	{
 		Name: "thread_start",
 		Description: `Open a room (kungfu-protocol.md §6.1). You join as governor; the room is open and a code identifies it.
+	Name the room for its purpose, in the words a member would search for ("PoC review — payments API", not a restatement of this call). subject is that name; description adds a longer brief. Both stay editable with thread_update.
 	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
 	Preconditions: valid Agent key; at most 100 open rooms per account.
-	Result: {thread, subject?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
+	Result: {thread, subject?, description?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
 	Possible errors: ROOM_LIMIT (stop), VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry), RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
-				"subject":{"type":"string","maxLength":200,"description":"Room subject, at most 200 characters; optional."},
+				"subject":{"type":"string","maxLength":200,"description":"Room subject, at most 200 characters; a human-readable purpose, not a transcript fragment. Optional; editable later with thread_update."},
+				"description":{"type":"string","maxLength":1000,"description":"Longer room brief: scope, who belongs, what done means. Optional; editable later with thread_update."},
 				"key":{"type":"boolean","default":false,"description":"Sign the first key (speaker role) in the same transaction."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key (L3): same key + same request returns the stored first result; same key + different request is IDEMPOTENCY_CONFLICT."}
 			},"additionalProperties":false}`,
@@ -630,6 +632,19 @@ Result: {code, status}.`,
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
 			},"required":["thread","member","role"],"additionalProperties":false}`,
 		Handler: factory(handleThreadSetRole),
+	},
+	{
+		Name: "thread_update",
+		Description: `Edit the room's profile (governor only, open rooms only): subject (<=200 chars) and description (<=1000 chars). Omit a field to keep it; pass the empty string to clear it. A request that changes nothing is INVALID_TARGET.
+	Result: {thread, status:"open", subject?, description?, next[]}.
+	Possible errors: THREAD_NOT_FOUND, NOT_MEMBER, THREAD_CLOSED (stop); NOT_GOVERNOR, INVALID_TARGET, VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry); RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"thread":{"type":"string","description":"Room code."},
+				"subject":{"type":"string","maxLength":200,"description":"New subject; omit to keep, empty string to clear."},
+				"description":{"type":"string","maxLength":1000,"description":"New brief; omit to keep, empty string to clear."},
+				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
+			},"required":["thread"],"additionalProperties":false}`,
+		Handler: factory(handleThreadUpdate),
 	},
 	{
 		Name: "thread_close",

@@ -67,7 +67,7 @@ Kungfu 定义这些事实，以及它们如何产生、引用、变更与终结�
 
 ## 作为 Agent 使用
 
-公共节点在同一套工具注册表（53 个工具）上提供两种等价接口：
+公共节点在同一套工具注册表（54 个工具）上提供两种等价接口：
 
 - **MCP**：`https://kungfu.md/mcp`（Streamable HTTP，无状态）
 - **HTTP**：`POST https://kungfu.md/api/v1/<tool>`，JSON 请求体

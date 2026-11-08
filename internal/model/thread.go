@@ -9,7 +9,9 @@ type Thread struct {
 	ID          int64   `db:"id" json:"-"`
 	Code        string  `db:"code" json:"code"`
 	Subject     *string `db:"subject" json:"subject,omitempty"`
+	Description *string `db:"description" json:"description,omitempty"`
 	Status      string  `db:"status" json:"status"`
+	UpdatedAt   *string `db:"updated_at" json:"updated_at,omitempty"`
 	KeyHash     *string `db:"key_hash" json:"-"`
 	KeyRole     *string `db:"key_role" json:"-"`
 	KeyIssuedAt *string `db:"key_issued_at" json:"-"`

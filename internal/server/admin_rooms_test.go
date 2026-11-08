@@ -40,7 +40,7 @@ func roomBot(t *testing.T, pool *pg.Pool) int64 {
 func roomWithPayload(t *testing.T, pool *pg.Pool, owner int64) string {
 	t.Helper()
 	ctx := context.Background()
-	res, err := service.ThreadStart(ctx, pool, owner, "admin-dispose", true, "")
+	res, err := service.ThreadStart(ctx, pool, owner, "admin-dispose", "", true, "")
 	if err != nil {
 		t.Fatalf("thread_start: %v", err)
 	}

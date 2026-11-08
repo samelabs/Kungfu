@@ -46,7 +46,7 @@ func threadSeed(t *testing.T, q pg.Querier, creator int64, keyRole string) *seed
 	if err != nil {
 		t.Fatalf("code: %v", err)
 	}
-	id, err := InsertThread(ctx, q, code, nil)
+	id, err := InsertThread(ctx, q, code, nil, nil)
 	if err != nil {
 		t.Fatalf("insert thread: %v", err)
 	}

@@ -659,6 +659,20 @@ func ownerThreadDetailHTML(d *tmplData) string {
     <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/threads") + `">&larr; ` + d.T("owner.threads.back") + `</a>
     <h2 id="threadHeading">` + d.T("owner.js.state_loading") + `</h2>
     <p id="threadMeta" class="muted"></p>
+    <p id="threadDescription" class="muted"></p>
+    <div class="actions" id="threadEditToggle" hidden>
+        <button class="btn" id="threadEditBtn" type="button">` + d.T("owner.threads.edit") + `</button>
+    </div>
+    <form id="threadEditForm" hidden novalidate>
+        <label for="threadEditSubject">` + d.T("owner.threads.subject_label") + `</label>
+        <input id="threadEditSubject" name="subject" maxlength="200">
+        <label for="threadEditDescription">` + d.T("owner.threads.description_label") + `</label>
+        <textarea id="threadEditDescription" name="description" maxlength="1000" rows="3"></textarea>
+        <div class="actions">
+            <button class="btn primary" type="submit">` + d.T("owner.threads.save") + `</button>
+            <button class="btn" id="threadEditCancel" type="button">` + d.T("owner.threads.cancel") + `</button>
+        </div>
+    </form>
 </section>
 <section class="panel">
     <h3>` + d.T("owner.threads.timeline") + `</h3>

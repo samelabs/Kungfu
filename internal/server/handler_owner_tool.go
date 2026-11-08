@@ -4,12 +4,15 @@ package server
 // the unified tool registry (WO-8a). No business logic lives here:
 // ownerMutation enforces the JSON/CSRF gate, requireOwnerAuth resolves
 // the session bot, and mcpserver.CallTool runs the tool with the §8.2
-// envelope. The allowlist is the §8.1 publisher task_* column plus the
-// read-only projections the console renders (WO-30 §3): memory_list /
-// memory_get for the Memory view, todo_list for the Turn view,
-// thread_list / thread_get for the Threads view. Every other name —
-// including all executor, account and thread mutation tools — is 404
-// UNKNOWN_TOOL: the console has no write path into threads or memory.
+// envelope. The allowlist is the §8.1 publisher task_* column, the one
+// thread write the console's room detail page offers (thread_update:
+// the governor-only profile edit, 3.2.0) and the read-only projections
+// the console renders (WO-30 §3): memory_list / memory_get for the
+// Memory view, todo_list for the Turn view, thread_list / thread_get
+// for the Threads view. Every other name — including all executor,
+// account and the remaining thread mutation tools — is 404
+// UNKNOWN_TOOL: the console's thread write path is the profile edit
+// and nothing else.
 
 import (
 	"encoding/json"
@@ -22,14 +25,16 @@ import (
 	"kungfu.md/internal/mcpserver"
 )
 
-// ownerTools is the console allowlist: the §8.1 publisher column and
-// the read-only tools the workbench views render.
+// ownerTools is the console allowlist: the §8.1 publisher column, the
+// thread profile edit (thread_update, governor-checked by the tool
+// itself), and the read-only tools the workbench views render.
 var ownerTools = map[string]bool{
 	"task_create": true, "task_update": true, "task_open": true,
 	"task_pause": true, "task_close": true, "task_fund": true,
 	"task_refund": true, "task_get": true, "task_list": true,
 	"task_submissions": true, "memory_list": true, "memory_get": true,
 	"todo_list": true, "thread_list": true, "thread_get": true,
+	"thread_update": true,
 }
 
 func (s *Server) handleOwnerTool(w http.ResponseWriter, r *http.Request) {
