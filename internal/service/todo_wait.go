@@ -57,27 +57,25 @@ var todoWaitWaiters atomic.Int64
 // todoWaitWaiterCount exposes the in-flight wait count for tests.
 func todoWaitWaiterCount() int64 { return todoWaitWaiters.Load() }
 
-// turnSignature summarizes the open turn: the count and the keyset
-// boundaries of the oldest and newest items. Any addition, removal or
-// boundary change produces a different string. Truth-based (the live
-// projection, not the notify outbox) so time-driven changes — a task
-// claim passing expires_at — are caught with no event row at all.
-func turnSignature(items []repository.TodoItem) string {
-	if len(items) == 0 {
-		return "0"
+// turnSignature is the whole-set identity of the open turn: the
+// count plus the database-side digest over every item (branch:row
+// id) — no page limit, no boundary-only sampling. Truth-based (the
+// live projection, not the notify outbox) so time-driven changes —
+// a task claim passing expires_at — are caught with no event row.
+func turnSignature(ctx context.Context, q pg.Querier, botID int64) (string, bool, error) {
+	n, digest, err := repository.TodoTurnIdentity(ctx, q, botID, 0)
+	if err != nil {
+		return "", false, err
 	}
-	first, last := items[0], items[len(items)-1]
-	return fmt.Sprintf("%d|%s,%d,%d|%s,%d,%d", len(items),
-		first.ProducedAt, first.Branch, first.RowID,
-		last.ProducedAt, last.Branch, last.RowID)
+	return fmt.Sprintf("%d:%s", n, digest), n == 0, nil
 }
 
 // opportunitySignature summarizes the work-addressed-to-me side in
-// identity terms: per branch the count AND the id sum (ids are
-// monotonic — one task replacing another at the same count still
-// moves the sum, so "a different one of the same many" is a change).
-func opportunitySignature(offeredN, offeredIDs, assignN, assignIDs int64) string {
-	return fmt.Sprintf("t%d.%d/a%d.%d", offeredN, offeredIDs, assignN, assignIDs)
+// whole-set identity terms: per branch the count AND the digest over
+// every qualifying id — "a different one of the same many" is a
+// change, without collision-prone id arithmetic.
+func opportunitySignature(offeredN int64, offeredDigest string, assignN int64, assignDigest string) string {
+	return fmt.Sprintf("t%d.%s/a%d.%s", offeredN, offeredDigest, assignN, assignDigest)
 }
 
 // wakeToken is the opaque fingerprint of one whole turn state — the
@@ -98,22 +96,22 @@ type todoSnapshot struct {
 }
 
 func todoWaitSnapshot(ctx context.Context, pool *pg.Pool, botID int64) (todoSnapshot, error) {
-	items, err := repository.TodoItemsForAccount(ctx, pool, botID, 0, "", 0, 0, 51)
+	turn, empty, err := turnSignature(ctx, pool, botID)
 	if err != nil {
 		return todoSnapshot{}, err
 	}
-	offeredN, offeredIDs, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
+	offeredN, offeredDigest, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
 	if err != nil {
 		return todoSnapshot{}, err
 	}
-	assignN, assignIDs, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
+	assignN, assignDigest, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
 	if err != nil {
 		return todoSnapshot{}, err
 	}
 	return todoSnapshot{
-		turn:    turnSignature(items),
-		opps:    opportunitySignature(offeredN, offeredIDs, assignN, assignIDs),
-		empty:   len(items) == 0,
+		turn:    turn,
+		opps:    opportunitySignature(offeredN, offeredDigest, assignN, assignDigest),
+		empty:   empty,
 		hasOpps: offeredN > 0 || assignN > 0,
 	}, nil
 }

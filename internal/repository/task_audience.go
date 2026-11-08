@@ -110,19 +110,21 @@ func CountOfferedWork(ctx context.Context, q pg.Querier, agentID int64, now time
 }
 
 // OfferedWorkIdentity is CountOfferedWork plus the identity half of
-// the wake channel: the sum of the offered task ids. Ids are
-// monotonic, so any membership change (added, taken, closed) moves
-// the sum even when the count does not — one aggregate, no paging,
-// no content. todo_wait fingerprints it into wake_token.
-func OfferedWorkIdentity(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, int64, error) {
-	var n, ids int64
+// the wake channel: a digest over every offered task id — one
+// aggregate, no paging, no content, no collision-prone arithmetic
+// (one task replacing another at the same count moves it).
+// todo_wait fingerprints it into wake_token.
+func OfferedWorkIdentity(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, string, error) {
+	var n int64
+	var digest string
 	err := q.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(tb_task.id), 0) FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
-		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n, &ids)
+		SELECT COUNT(*), COALESCE(md5(string_agg(tb_task.id::text, ',' ORDER BY tb_task.id)), '')
+		FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
+		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n, &digest)
 	if err != nil {
-		return 0, 0, fmt.Errorf("offered work identity: %w", err)
+		return 0, "", fmt.Errorf("offered work identity: %w", err)
 	}
-	return n, ids, nil
+	return n, digest, nil
 }
 
 // FindOfferedWorkPage returns ONE page of the agent's §8

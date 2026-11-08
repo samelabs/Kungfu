@@ -371,8 +371,9 @@ func SubmitWork(ctx context.Context, pool *pg.Pool, agentID int64, in SubmitInpu
 }
 
 // checkClaim is §5.3 step 6 for a carried claim: this agent's ACTIVE
-// claim on this task, unexpired. It returns the claim row — the
-// caller reads the bound contract version off it.
+// claim on this task, unexpired — a used claim consumes itself at
+// submission and can never carry a NEW one. It returns the claim row
+// — the caller reads the bound contract version off it.
 func checkClaim(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int64, now time.Time) (*repository.ClaimRow, error) {
 	claim, err := repository.FindClaimByID(ctx, pool, claimID)
 	if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
@@ -386,6 +387,38 @@ func checkClaim(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int
 		return nil, errors.New(0, "CLAIM_INVALID", "Claim is not active for you on this task")
 	}
 	return claim, nil
+}
+
+// checkClaimForRead is the read-side engagement test work_harness
+// owes an explicit claim_id: the same live-engagement validity the
+// implicit discovery (FindLiveClaimByTaskAgent) and the payload
+// recycler's storage protection apply — an active, unexpired claim,
+// or a used one whose submission is still in flight (its bound
+// inputs remain the executor's working material while the delivery
+// is unresolved). Storage protection and readable pins must never
+// disagree.
+func checkClaimForRead(ctx context.Context, pool *pg.Pool, claimID, agentID, taskID int64, now time.Time) (*repository.ClaimRow, error) {
+	claim, err := repository.FindClaimByID(ctx, pool, claimID)
+	if goerrors.Is(err, pgx.ErrNoRows) || claim == nil {
+		return nil, errors.New(0, "CLAIM_INVALID", "Claim not found")
+	}
+	if err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	if claim.AgentID != agentID || claim.TaskID != taskID {
+		return nil, errors.New(0, "CLAIM_INVALID", "Claim is not active for you on this task")
+	}
+	if claim.Status == task.ClaimActive && claim.ExpiresAt.After(now) {
+		return claim, nil
+	}
+	if claim.Status == task.ClaimUsed {
+		if inflight, err := repository.ClaimHasInflightSubmission(ctx, pool, claimID); err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		} else if inflight {
+			return claim, nil
+		}
+	}
+	return nil, errors.New(0, "CLAIM_INVALID", "Claim is not active for you on this task")
 }
 
 // contractVersionOf decodes one immutable contract version of a task

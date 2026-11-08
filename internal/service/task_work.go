@@ -392,11 +392,12 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 	}
 
 	// the engagement, if any: an explicit claim_id must be the
-	// caller's active claim on this task; without one, an active
-	// claim of the caller on this task serves the same read
+	// caller's live engagement on this task (an active unexpired
+	// claim, or a used one whose submission is still in flight);
+	// without one, the same validity discovers the engagement
 	var engaged *repository.ClaimRow
 	if claimID != nil {
-		engaged, err = checkClaim(ctx, pool, *claimID, agentID, t.ID, now)
+		engaged, err = checkClaimForRead(ctx, pool, *claimID, agentID, t.ID, now)
 		if err != nil {
 			return nil, err
 		}

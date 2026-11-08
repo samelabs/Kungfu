@@ -161,7 +161,10 @@ func assignMemoriesCheck(ctx context.Context, tx pgx.Tx, botID int64, memories s
 		if strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.Code) == "" {
 			return "", errors.New(422, "VALIDATION_FAILED", "memories entries need name and code")
 		}
-		k, err := repository.FindKungfuByCodeAnyStatus(ctx, tx, r.Code)
+		// KEY SHARE: the delivery is about to pin this memory by code
+		// in JSON — the row lock serializes the pin against a
+		// concurrent payload disposal until this transaction commits
+		k, err := repository.FindKungfuByCodeAnyStatusForShare(ctx, tx, r.Code)
 		if err != nil {
 			return "", errors.New(500, "INTERNAL_ERROR", "Error loading memory")
 		}
@@ -504,16 +507,20 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	// same-turn/different-turn fingerprint a resident wake process
 	// deduplicates on (counts alone cannot tell T2 arriving from T1
 	// ending).
-	offered, offeredIDs, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
+	offered, offeredDigest, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
 	}
-	openAssignments, assignIDs, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
+	openAssignments, assignDigest, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
 	}
 	res["opportunities"] = map[string]any{"tasks": offered, "assignments": openAssignments}
-	res["wake_token"] = wakeToken(turnSignature(items), opportunitySignature(offered, offeredIDs, openAssignments, assignIDs))
+	turn, _, err := turnSignature(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading turn")
+	}
+	res["wake_token"] = wakeToken(turn, opportunitySignature(offered, offeredDigest, openAssignments, assignDigest))
 	if offered > 0 || openAssignments > 0 {
 		// At most one opportunity hint, and never in place of an
 		// obligation's slot (义务优先): offered work points at

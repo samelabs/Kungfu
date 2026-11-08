@@ -189,15 +189,20 @@ func EntryPayload(ctx context.Context, q pg.Querier, entryID int64) (int64, erro
 // DeleteUnreferencedPayload removes one thread-payload memory when no
 // LIVE object still needs it, then its revision archive (a
 // never-updated payload has no archived rows at all). A reference is
-// live by its OWN object's lifecycle, not by existing:
+// live by its OWN object's recorded state, never by a clock the
+// deleter compares:
 //
 //   - thread_entries   any entry anywhere (the payload may be pinned
 //     in another room) — always live while the row is
 //   - engagements      a claim pin (claim_harness_revisions) is live
-//     only while the claim is active AND unexpired;
-//     pins of ended engagements are dropped here in
-//     the same transaction (dead pins are the one FK
-//     that would otherwise block this delete forever)
+//     while the claim row says active (an expired claim stays
+//     protected until the recovery worker materializes the expiry —
+//     the row is the fact) or the claim is used with its submission
+//     still in flight (delivering/uncertain — the bound inputs
+//     remain the executor's working material); pins of ended
+//     engagements are dropped here in the same transaction (dead
+//     pins are the one FK that would otherwise block this delete
+//     forever)
 //   - task contracts   harness_refs of a non-closed task's current
 //     contract (a closed task can never reopen; its
 //     live engagements protect their own pins above)
@@ -212,7 +217,7 @@ func DeleteUnreferencedPayload(ctx context.Context, q pg.Querier, memoryID int64
 		DELETE FROM claim_harness_revisions p
 		USING tb_task_claim c
 		WHERE p.memory_id = $1 AND p.claim_id = c.claim_id
-		  AND NOT (c.status = 'active' AND c.expires_at > NOW())`, memoryID); err != nil {
+		  AND NOT (`+liveEngagement+`)`, memoryID); err != nil {
 		return false, err
 	}
 	tag, err := q.Exec(ctx, `
@@ -221,8 +226,7 @@ func DeleteUnreferencedPayload(ctx context.Context, q pg.Querier, memoryID int64
 		  AND NOT EXISTS (SELECT 1 FROM thread_entries e WHERE e.memory_id = k.id)
 		  AND NOT EXISTS (SELECT 1 FROM claim_harness_revisions p
 		                  JOIN tb_task_claim c ON c.claim_id = p.claim_id
-		                  WHERE p.memory_id = k.id
-		                    AND c.status = 'active' AND c.expires_at > NOW())
+		                  WHERE p.memory_id = k.id AND (`+liveEngagement+`))
 		  AND NOT EXISTS (SELECT 1 FROM tb_task t
 		                  WHERE t.status <> 'closed'
 		                    AND t.contract->'harness_refs' ? k.code)

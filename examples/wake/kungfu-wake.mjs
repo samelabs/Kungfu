@@ -12,8 +12,9 @@
 //     that agent's wake_cmd. No inbound port, no TLS, no tunnel, no
 //     webhook registration — the Agent key is the only secret.
 //
-//   webhook (for agents already on public hosts; POSIX: the cert
-//     bootstrap uses openssl):
+//   webhook (COMPATIBILITY MODE, for agents already on public hosts;
+//     not the default path — the poll loop above needs no endpoint
+//     from any host; POSIX: the cert bootstrap uses openssl):
 //     inbound https endpoint for the server's notify face
 //     (internal/service/notify.go). Registration probe — POST
 //     {"type":"verification","challenge":"<hex>"} answered 2xx with

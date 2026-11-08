@@ -197,6 +197,19 @@ func TestCreateTaskIdempotencyKey(t *testing.T) {
 	if n := ledgerSum(t, pool, publisher, "lock_task"); n != -1000 {
 		t.Fatalf("conflict moved money: lock_task = %d", n)
 	}
+	// replay beats mutable state: the balance has since moved below
+	// the budget — a retry of the SAME logical create still replays
+	// the original result; it must not re-fail on INSUFFICIENT_CREDITS
+	if _, err := pool.Exec(ctx, `UPDATE tb_bots SET balance = 0 WHERE id = $1`, publisher); err != nil {
+		t.Fatal(err)
+	}
+	view3, err := CreateTask(ctx, pool, publisher, c, 1000, false, "create-key-1")
+	if err != nil {
+		t.Fatalf("replay after balance moved: %v", err)
+	}
+	if view3["code"] != view1["code"] {
+		t.Fatalf("replay after balance moved minted a new task: %v", view3["code"])
+	}
 }
 
 func TestPublisherOpenHarnessNotOwned(t *testing.T) {

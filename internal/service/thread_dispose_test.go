@@ -9,12 +9,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"kungfu.md/internal/delivery"
 	"kungfu.md/internal/errors"
 	"kungfu.md/internal/pg"
 	"kungfu.md/internal/repository"
+	"kungfu.md/internal/task"
 )
 
 func disposeRoom(t *testing.T, pool *pg.Pool, owner, worker int64, code string) {
@@ -457,6 +460,273 @@ func TestDissolveKeepsUnjudgedDeliveryPayload(t *testing.T) {
 	}
 	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, memCode); n != 0 {
 		t.Fatal("payload of a judged delivery must be reclaimed by the sweep")
+	}
+}
+
+// TestDissolveKeepsExpiredUnsweptClaimPin: the claim ROW is the fact.
+// A claim past expires_at that the recovery worker has not swept yet
+// still says active — its pins stay protected until recovery
+// materializes the expiry; the sweep then finishes the release.
+func TestDissolveKeepsExpiredUnsweptClaimPin(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	w, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, _ := threadStart(t, pool, owner, "exp", true, "")
+	defer cleanupDisposed(t, pool, code)
+	memCode, taskCode := harnessTaskOnPayload(t, pool, owner, code)
+
+	if _, err := ClaimTask(ctx, pool, w, taskCode, time.Now()); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claimID := countRow(t, pool, `SELECT claim_id FROM tb_task_claim c
+		JOIN tb_task t ON t.id = c.task_id WHERE t.code=$1`, taskCode)
+	// the clock ran out; the sweeper has NOT run — the row still says
+	// active, and that row is the fact
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_task_claim SET expires_at = NOW() - INTERVAL '1 second' WHERE claim_id = $1`, claimID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CloseTask(ctx, pool, owner, taskCode); err != nil {
+		t.Fatalf("close task: %v", err)
+	}
+	disposeRoom(t, pool, owner, w, code)
+	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, memCode); n != 1 {
+		t.Fatal("payload pinned by an expired-but-unswept claim must survive dissolution")
+	}
+	// recovery materializes the expiry; the sweep finishes the release
+	if _, err := ExpireClaims(ctx, pool, time.Now(), 50); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if _, err := PayloadSweep(ctx, pool, 100); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, memCode); n != 0 {
+		t.Fatal("payload of a materialized-expired claim must be reclaimed by the sweep")
+	}
+}
+
+// TestDissolveKeepsInflightSubmissionPayload is the §4 closeout
+// scenario end to end: task v1 references a thread payload M; the
+// executor claims v1; the publisher pauses and revises to v2 without
+// M; the executor submits under the OLD claim and the delivery goes
+// uncertain; THEN the source thread dissolves. The submission
+// recovers against its bound version, the executor's pinned-input
+// read stays legal while the delivery is unresolved, and M is
+// collected only after the engagement fully ends.
+func TestDissolveKeepsInflightSubmissionPayload(t *testing.T) {
+	pool := pubTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	executor := pubSeedBot(t, pool, 0)
+	rcv := startProgReceiver(t)
+	ctx := context.Background()
+
+	code, _ := threadStart(t, pool, owner, "inflight", true, "")
+	defer cleanupDisposed(t, pool, code)
+	if _, err := ThreadPost(ctx, pool, owner, code, "v1 harness payload", "", "", nil, nil, nil, "i1"); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	memCode := firstPayloadCode(t, pool, owner)
+
+	v1 := pubContract(rcv.url)
+	v1.HarnessRefs = []string{memCode}
+	taskCode := pubCreateForTest(t, pool, owner, v1, 5)
+	if _, err := OpenTask(ctx, pool, owner, taskCode); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	claim, err := ClaimTask(ctx, pool, executor, taskCode, time.Now())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// pause + revise to v2 without the harness ref
+	if _, err := PauseTask(ctx, pool, owner, taskCode); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	v2 := pubContract(rcv.url)
+	if _, err := UpdateTask(ctx, pool, owner, taskCode, v2); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// submit under the OLD claim (paused tasks still accept active
+	// claims); the receiver sleeps past the HTTP budget → uncertain
+	rcv.mu.Lock()
+	rcv.sleep = 3 * time.Second
+	rcv.mu.Unlock()
+	delivery.SetRequestTimeoutForTest(400 * time.Millisecond)
+	defer delivery.SetRequestTimeoutForTest(0)
+	claimRef := claim.ClaimID
+	view, err := SubmitWork(ctx, pool, executor, SubmitInput{
+		Code: taskCode, ClaimID: &claimRef,
+		RequestKey: fmt.Sprintf("inflight-%d", time.Now().UnixNano()),
+		Payload:    []byte(submitPayloadOK),
+	}, testAgentRefKey, time.Now())
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if view.State != task.SubUncertain {
+		t.Fatalf("state = %s, want uncertain", view.State)
+	}
+	delivery.SetRequestTimeoutForTest(0)
+
+	// the hammer falls on the source thread
+	disposeRoom(t, pool, owner, executor, code)
+	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, memCode); n != 1 {
+		t.Fatal("payload under an in-flight submission must survive dissolution")
+	}
+	// storage protection and the read interface agree: the used claim
+	// still serves its pinned v1 harness while the delivery is
+	// unresolved — explicit and implicit alike
+	gh, err := GetHarness(ctx, pool, executor, taskCode, memCode, claim.ClaimID.Int64Ptr(), time.Now())
+	if err != nil {
+		t.Fatalf("harness under used claim: %v", err)
+	}
+	if gh["pinned"] != true || gh["content"] != "v1 harness payload" {
+		t.Fatalf("pinned read under in-flight submission = %v", gh)
+	}
+	gh2, err := GetHarness(ctx, pool, executor, taskCode, memCode, nil, time.Now())
+	if err != nil || gh2["pinned"] != true {
+		t.Fatalf("implicit pinned read = %v err=%v", gh2, err)
+	}
+	// the engaged view still shows the bound version
+	wv, err := GetWork(ctx, pool, executor, taskCode, time.Now())
+	if err != nil {
+		t.Fatalf("work get: %v", err)
+	}
+	if wv["contract_version"] != int64(1) {
+		t.Fatalf("engaged view version = %v, want the bound 1", wv["contract_version"])
+	}
+
+	// recovery completes the delivery against the bound version; the
+	// engagement ends; the sweep collects M and its pins
+	rcv.mu.Lock()
+	rcv.sleep = 0
+	rcv.mu.Unlock()
+	ageSubmission(t, pool, view.SubmissionID.Int64())
+	if _, err := RecoverSubmissions(ctx, pool, testAgentRefKey, time.Now(), 50); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	sub, _ := repository.FindSubmissionByID(ctx, pool, view.SubmissionID.Int64())
+	if sub.State != task.SubSettled {
+		t.Fatalf("recovered submission = %s, want settled", sub.State)
+	}
+	if _, err := PayloadSweep(ctx, pool, 100); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, memCode); n != 0 {
+		t.Fatal("payload of an ended engagement must be reclaimed by the sweep")
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM claim_harness_revisions p
+		JOIN tb_task_claim c ON c.claim_id = p.claim_id WHERE c.claim_id = $1`, claim.ClaimID.Int64()); n != 0 {
+		t.Fatal("pins of an ended engagement must be dropped")
+	}
+}
+
+// TestAuthorAdoptsThreadPayload: the moment the author manages a
+// thread payload as an independent knowledge asset — an explicit
+// memory_put update, or publishing it — its life detaches from the
+// room's: dissolution stops being a way for it to die.
+func TestAuthorAdoptsThreadPayload(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	w, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	codeA, _ := threadStart(t, pool, owner, "adoptA", true, "")
+	codeB, _ := threadStart(t, pool, owner, "adoptB", true, "")
+	defer cleanupDisposed(t, pool, codeA)
+	defer cleanupDisposed(t, pool, codeB)
+
+	// room A: an explicit memory_put update adopts the payload
+	if _, err := ThreadPost(ctx, pool, owner, codeA, "curated payload A", "", "", nil, nil, nil, "a1"); err != nil {
+		t.Fatalf("postA: %v", err)
+	}
+	memA := firstPayloadCode(t, pool, owner)
+	if _, err := Push(ctx, pool, owner, map[string]interface{}{
+		"code": memA, "title": "curated A", "tags": []interface{}{"howto"},
+		"content": strings.Repeat("curated standalone content ", 4),
+	}, 128, 10, 32, 500, 100*1024); err != nil {
+		t.Fatalf("adopting update: %v", err)
+	}
+	// room B: publishing adopts the payload
+	if _, err := ThreadPost(ctx, pool, owner, codeB, "published payload B", "", "", nil, nil, nil, "b1"); err != nil {
+		t.Fatalf("postB: %v", err)
+	}
+	var memB string
+	if err := pool.QueryRow(ctx,
+		`SELECT code FROM tb_kungfus WHERE origin='thread' AND bot_id=$1 AND code <> $2 LIMIT 1`, owner, memA).Scan(&memB); err != nil {
+		t.Fatalf("memB: %v", err)
+	}
+	if _, err := Share(ctx, pool, owner, memB); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+
+	disposeRoom(t, pool, owner, w, codeA)
+	disposeRoom(t, pool, owner, w, codeB)
+	for _, mem := range []string{memA, memB} {
+		if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, mem); n != 1 {
+			t.Fatalf("adopted payload %s must survive its room's dissolution", mem)
+		}
+		if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1 AND origin='standalone'`, mem); n != 1 {
+			t.Fatalf("adopted payload %s must be standalone", mem)
+		}
+	}
+	// the sweep never touches adopted payloads
+	if _, err := PayloadSweep(ctx, pool, 100); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	for _, mem := range []string{memA, memB} {
+		if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE code=$1`, mem); n != 1 {
+			t.Fatalf("sweep collected the adopted payload %s", mem)
+		}
+	}
+}
+
+// TestPayloadDeleteSerializesWithReferenceLocks: a transaction that
+// holds a KEY SHARE lock on a payload memory (what harness validation
+// and delivery pinning take) blocks the disposal's delete until it
+// commits — reference establishment and physical deletion serialize
+// on the row, never on a lock-free read-then-use.
+func TestPayloadDeleteSerializesWithReferenceLocks(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	w, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, _ := threadStart(t, pool, owner, "lock", true, "")
+	defer cleanupDisposed(t, pool, code)
+	if _, err := ThreadPost(ctx, pool, owner, code, "locked payload", "", "", nil, nil, nil, "l1"); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	memID := countRow(t, pool, `SELECT id FROM tb_kungfus WHERE origin='thread' AND bot_id=$1`, owner)
+
+	// a referencing transaction holds the row
+	tx, err := pool.TxBegin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM tb_kungfus WHERE id = $1 FOR KEY SHARE`, memID); err != nil {
+		t.Fatal(err)
+	}
+
+	// the disposal cannot delete past the reference holder: with a
+	// short budget it fails; the room stays
+	shortCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+	if _, err := ThreadDissolve(shortCtx, pool, owner, code, ""); err == nil {
+		_ = tx.Rollback(ctx)
+		t.Fatal("disposal must serialize against a KEY SHARE reference holder")
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM threads WHERE code=$1`, code); n != 1 {
+		_ = tx.Rollback(ctx)
+		t.Fatal("blocked disposal must leave the room intact")
+	}
+
+	// the reference commits; the disposal goes through
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	disposeRoom(t, pool, owner, w, code)
+	if n := countRow(t, pool, `SELECT count(*) FROM tb_kungfus WHERE id=$1`, memID); n != 0 {
+		t.Fatal("payload must follow its room once the reference commits")
 	}
 }
 

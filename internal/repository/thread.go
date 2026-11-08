@@ -972,8 +972,8 @@ func settleUndelivered(ctx context.Context, q pg.Querier, scope string, args ...
 	}
 	rows.Close()
 	for _, p := range parties {
-		_ = InsertNotifyOutbox(ctx, q, p.assignee, "exit", 1)
-		_ = InsertNotifyOutbox(ctx, q, p.creator, "exit", 1)
+		InsertNotifyOutboxIfRegistered(ctx, q, p.assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(ctx, q, p.creator, "exit", 1)
 	}
 
 	rows, err = q.Query(ctx, `
@@ -1041,8 +1041,8 @@ func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (
 			return 0, err
 		}
 		n++
-		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
-		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, creator, "exit", 1)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1069,8 +1069,8 @@ func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (
 			return n, err
 		}
 		n++
-		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
-		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, creator, "exit", 1)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1110,20 +1110,13 @@ type TodoItem struct {
 	RowID      int64 // cursor component
 }
 
-// TodoItemsForAccount pages the account's open obligations, oldest
-// first, with a stable (produced, branch, id) keyset cursor — an
-// obligation settling between pages never skips or dups its
-// neighbours. threadID > 0 scopes the projection to one room (the
-// room's working-set slice; Task claims are not room facts and never
-// appear in a scoped slice); judge items only appear while the
-// creator is still a member (R-18). The assign id rides thread deliver
-// and judge items: it is the handle the next action needs. The task
-// code + claim id ride Task-engagement items for work_submit. The
-// summary of a Task item is the task title; the publisher's identity
-// is never part of the projection (task-spec §10 item 7).
-func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
-	rows, err := q.Query(ctx, `
-		SELECT * FROM (
+// todoOpenItems is the §8 open-turn projection body shared by the
+// paged read (TodoItemsForAccount) and the whole-set identity digest
+// (TodoTurnIdentity): receipts pending, taken assigns before their
+// deliver deadline, delivered assigns awaiting the creator's judgment,
+// and active unexpired Task claims. $1 = account, $2 = thread scope
+// (0 = all rooms).
+const todoOpenItems = `
 		(SELECT 1 AS branch, 'reply' AS kind, t.code AS thread, NULL::text AS task, e.id AS entry_id,
 		        r.id AS row_id, e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
 		        NULL::text AS due, to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS produced
@@ -1158,8 +1151,39 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		        to_char(c.expires_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(c.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM tb_task_claim c
 		 JOIN tb_task t ON t.id = c.task_id
-		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)
-		) items
+		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)`
+
+// TodoTurnIdentity summarizes the account's WHOLE open turn as one
+// aggregate: the count plus a digest over every item's identity,
+// computed in the database — no page limit (a change beyond the first
+// 50 still moves it), no boundary-only sampling (a change in the
+// middle still moves it), no content.
+func TodoTurnIdentity(ctx context.Context, q pg.Querier, accountID, threadID int64) (int64, string, error) {
+	var n int64
+	var digest string
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(md5(string_agg(branch || ':' || row_id, ',' ORDER BY produced, branch, row_id)), '')
+		FROM (`+todoOpenItems+`) items`, accountID, threadID).Scan(&n, &digest)
+	if err != nil {
+		return 0, "", err
+	}
+	return n, digest, nil
+}
+
+// TodoItemsForAccount pages the account's open obligations, oldest
+// first, with a stable (produced, branch, id) keyset cursor — an
+// obligation settling between pages never skips or dups its
+// neighbours. threadID > 0 scopes the projection to one room (the
+// room's working-set slice; Task claims are not room facts and never
+// appear in a scoped slice); judge items only appear while the
+// creator is still a member (R-18). The assign id rides thread deliver
+// and judge items: it is the handle the next action needs. The task
+// code + claim id ride Task-engagement items for work_submit. The
+// summary of a Task item is the task title; the publisher's identity
+// is never part of the projection (task-spec §10 item 7).
+func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
+	rows, err := q.Query(ctx, `
+		SELECT * FROM (`+todoOpenItems+`) items
 		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
 		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
 		LIMIT $6`, accountID, threadID, cursorProduced, cursorBranch, cursorID, limit)
@@ -1229,6 +1253,19 @@ func InsertNotifyOutbox(ctx context.Context, q pg.Querier, accountID int64, kind
 	return err
 }
 
+// InsertNotifyOutboxIfRegistered is the one gated enqueue every fact
+// writer uses: an account without a registered endpoint is never
+// written at all — a signal nobody can receive is meaningless
+// production, and registering later simply starts from the next fact
+// (a lost push is always harmless by design). Best-effort by
+// contract: a failed lookup writes nothing.
+func InsertNotifyOutboxIfRegistered(ctx context.Context, q pg.Querier, accountID int64, kind string, count int) {
+	if _, _, ok, err := FindAccountNotify(ctx, q, accountID); err != nil || !ok {
+		return
+	}
+	_ = InsertNotifyOutbox(ctx, q, accountID, kind, count)
+}
+
 type OutboxRow struct {
 	ID        int64
 	AccountID int64
@@ -1264,6 +1301,23 @@ func MarkOutboxSent(ctx context.Context, q pg.Querier, id int64, sent bool) erro
 		return err
 	}
 	_, err := q.Exec(ctx, `UPDATE notify_outbox SET attempts = attempts + 1 WHERE id = $1`, id)
+	return err
+}
+
+// DeleteOutboxRow removes one finished outbox row — a delivered
+// signal, or one that died because its account has no endpoint. The
+// outbox is an accelerator, not a log: completed work leaves nothing
+// behind (bounded recycling).
+func DeleteOutboxRow(ctx context.Context, q pg.Querier, id int64) error {
+	_, err := q.Exec(ctx, `DELETE FROM notify_outbox WHERE id = $1`, id)
+	return err
+}
+
+// DeleteAbandonedOutbox removes rows whose delivery attempts ran out
+// (attempts >= 5 and still unsent): abandoned work leaves nothing
+// behind either — a lost push is always harmless by design.
+func DeleteAbandonedOutbox(ctx context.Context, q pg.Querier) error {
+	_, err := q.Exec(ctx, `DELETE FROM notify_outbox WHERE sent_at IS NULL AND attempts >= 5`)
 	return err
 }
 
@@ -1438,20 +1492,21 @@ func AssignmentDeadlinePassed(ctx context.Context, q pg.Querier, assignID int64,
 }
 
 // ThreadOpenInviteIdentity is the open-assignment opportunity in
-// CountOfferedWork's identity terms: the count plus the sum of the
-// assign ids (monotonic — any membership change moves the sum even
-// when the count does not). One aggregate, no paging, no content.
-func ThreadOpenInviteIdentity(ctx context.Context, q pg.Querier, accountID int64) (int64, int64, error) {
-	var n, ids int64
+// whole-set identity terms: the count plus a digest over every
+// qualifying assign id — one aggregate, no paging, no content, no
+// collision-prone arithmetic.
+func ThreadOpenInviteIdentity(ctx context.Context, q pg.Querier, accountID int64) (int64, string, error) {
+	var n int64
+	var digest string
 	err := q.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(a.id), 0)
+		SELECT COUNT(*), COALESCE(md5(string_agg(a.id::text, ',' ORDER BY a.id)), '')
 		FROM assigns a
 		JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = $1
-		WHERE a.assignee_id = $1 AND a.state = 'open'`, accountID).Scan(&n, &ids)
+		WHERE a.assignee_id = $1 AND a.state = 'open'`, accountID).Scan(&n, &digest)
 	if err != nil {
-		return 0, 0, err
+		return 0, "", err
 	}
-	return n, ids, nil
+	return n, digest, nil
 }
 
 // ThreadOpenInviteCounts counts, per room, the OPEN assignments

@@ -7,6 +7,8 @@ package service
 import (
 	"context"
 	"testing"
+
+	"kungfu.md/internal/repository"
 )
 
 func TestPM001InviteDiscoveryExperiment(t *testing.T) {
@@ -18,6 +20,12 @@ func TestPM001InviteDiscoveryExperiment(t *testing.T) {
 	defer threadCleanup(t, pool, []int64{lead, w}, code)
 	if _, err := ThreadJoin(ctx, pool, w, raw, ""); err != nil {
 		t.Fatalf("join: %v", err)
+	}
+
+	// w can receive: a registered endpoint is the precondition for
+	// outbox writes (unregistered accounts are never written)
+	if err := repository.UpsertAccountNotify(ctx, pool, w, "https://endpoint.example/wake", "s3cret"); err != nil {
+		t.Fatalf("register: %v", err)
 	}
 
 	// Path 1 — with the notification: the invite lands in the outbox

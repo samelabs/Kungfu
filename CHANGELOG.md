@@ -51,10 +51,34 @@ overdue assignment settles as timed out, never voided (single void,
 room close, departure).
 
 **Protocol.** §6.3 defines author redaction; new §6.6 defines
-disposal, its settlement and what a live reference protects; §6.4/§6.5
-state deadline precedence over void and close; §8 requires waiting
-reads to answer on identity, not size. Conformance statement updated
-to 3.1.1 with the new evidence rows.
+disposal, its settlement, what a live reference protects, and the
+adoption rule (a payload the author updates or publishes through the
+Memory surface detaches from its room's life); §6.4/§6.5 state
+deadline precedence over void and close; §8 requires waiting reads to
+answer on identity, not size. Conformance statement updated to 3.1.1
+with the new evidence rows.
+
+**Business closed-loop round (second audit).** Engagement pins live
+by ROW state, not a deleter-side clock: an expired-but-unswept claim
+stays protected until recovery materializes the expiry, and a used
+claim stays protected while its submission is in flight
+(delivering/uncertain) — and `work_harness` serves the pinned
+revision under exactly the same rule (a used claim never carries a
+new submission), so storage protection and legal reads never
+disagree. `wake_token` is now a digest over the WHOLE turn's and
+both opportunity branches' full id sets (database-side md5): no id
+arithmetic, no first-page cap — a change past the 50th obligation
+still moves it. `task_create`'s idempotency receipt is read BEFORE
+every mutable check, so a replay never loses to a balance that has
+moved. Reference establishment now locks what it references: harness
+validation and delivery pinning run inside their transactions with
+FOR KEY SHARE on the memory rows, serializing against payload
+deletion. An author adopting a thread payload (memory_put update or
+memory_share) detaches it from its room's lifecycle. The notify
+outbox is gated and bounded: unregistered accounts are never written,
+delivered signals are deleted (not archived), abandoned ones are
+recycled; webhook remains a compatibility mode with an explicit
+reconcile-with-todo_list duty.
 
 ## [3.1.0] — 2026-11-07
 

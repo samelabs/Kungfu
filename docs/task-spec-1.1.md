@@ -19,7 +19,7 @@
 ## 2. 输入固定（§7.1、§7.3、§9）
 
 - Claim 创建时，为绑定版本契约 `harness_refs` 中每条**当时存在**的发布者记忆固定 revision（`claim_harness_revisions(claim_id, memory_id, revision)`）；已删除的记忆不固定（读取行为与 1.0 一致：`HARNESS_REF_NOT_FOUND`）。
-- `work_harness(code, ref_id, claim_id?)`：带 `claim_id`、或调用方持有该任务的 active Claim 时，返回固定的 revision——即使发布者此后更新或撤回该记忆（§9 "input versions bound by an engagement" 对承接者恒可读）。不带 Claim 时行为同 1.0：实时读取当前内容（浏览用途）。
+- `work_harness(code, ref_id, claim_id?)`：带 `claim_id`、或调用方持有该任务的活跃承接时，返回固定的 revision——即使发布者此后更新或撤回该记忆（§9 "input versions bound by an engagement" 对承接者恒可读）。活跃承接 = active 且未过期，或已 used 但其 Submission 仍在途（delivering/uncertain：投递未决期间，绑定输入仍是执行者的工作材料）——显式 `claim_id` 与隐式发现共用这一判定，且与存储侧的回收保护一致：受保护即可读，不再保护即可回收。不带 Claim 时行为同 1.0：实时读取当前内容（浏览用途）。used 承接只读不可交：新提交仍要求 active 承接。
 - 无 Claim 的提交在 Submission 上记录提交时刻各 harness 的 revision（`harness_json`）。
 - 迁移前已存在的 Claim 没有固定记录，保持 1.0 的实时读取行为（向后兼容）。
 

@@ -8,6 +8,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -237,6 +238,82 @@ func TestTodoWaitWakeTokenDistinguishesSameCountWork(t *testing.T) {
 	}
 	if token1 == token2 {
 		t.Fatalf("same-count different work must move wake_token: %q == %q", token1, token2)
+	}
+
+	// A → empty → A again: pausing un-offers T2, re-opening offers it
+	// again — the token returns to the T2 state and leaves the empty
+	// state, so a resident process that saw every step re-wakes (the
+	// token is an identity, not a movement counter)
+	if _, err := PauseTask(ctx, pool, publisher, t2); err != nil {
+		t.Fatalf("pause t2: %v", err)
+	}
+	empty, err := TodoList(ctx, pool, a, 0, "")
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	tokenEmpty := empty["wake_token"].(string)
+	if tokenEmpty == token2 {
+		t.Fatal("un-offering the work must move the token")
+	}
+	if _, err := OpenTask(ctx, pool, publisher, t2); err != nil {
+		t.Fatalf("reopen t2: %v", err)
+	}
+	again, err := TodoWait(ctx, pool, a, 3)
+	if err != nil {
+		t.Fatalf("wait again: %v", err)
+	}
+	if again["wake_token"].(string) != token2 {
+		t.Fatal("the same work offered again must return the same token")
+	}
+}
+
+// TestTodoWaitSeesChangesBeyondTheFirstPage: the wake signal is the
+// WHOLE turn's identity. With more open obligations than one page
+// (50), a change entirely beyond the first page — an obligation
+// settling out there — must still move wake_token; a fingerprint
+// capped at the first page cannot see it, and the resident process
+// would deduplicate the settled turn away.
+func TestTodoWaitSeesChangesBeyondTheFirstPage(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, a, code, raw := waitReady(t, pool)
+	defer threadCleanup(t, pool, []int64{owner, a}, code)
+	ctx := context.Background()
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	// 55 pending receipts toward a: obligations 51..55 live past the
+	// first page
+	for i := 0; i < 55; i++ {
+		if _, err := ThreadPost(ctx, pool, owner, code, fmt.Sprintf("obligation %d", i), "", "", nil, []int64{a}, nil, fmt.Sprintf("pg-%d", i)); err != nil {
+			t.Fatalf("post %d: %v", i, err)
+		}
+	}
+	before, err := TodoList(ctx, pool, a, 0, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	tokenBefore := before["wake_token"].(string)
+
+	// settle the newest receipt — the obligation farthest beyond page
+	// one; the oldest 50 are untouched
+	var newest int64
+	if err := pool.QueryRow(ctx, `
+		SELECT e.id FROM thread_entries e JOIN threads th ON th.id = e.thread_id
+		WHERE th.code = $1 ORDER BY e.id DESC LIMIT 1`, code).Scan(&newest); err != nil {
+		t.Fatal(err)
+	}
+	replyTo := newest
+	if _, err := ThreadPost(ctx, pool, a, code, "settling the far one", "", "", &replyTo, []int64{}, nil, "pg-settle"); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+
+	after, err := TodoList(ctx, pool, a, 0, "")
+	if err != nil {
+		t.Fatalf("list2: %v", err)
+	}
+	if after["wake_token"].(string) == tokenBefore {
+		t.Fatal("a change beyond the first page must move wake_token")
 	}
 }
 

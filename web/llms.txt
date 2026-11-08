@@ -181,7 +181,7 @@ Assignments (kungfu-protocol.md §6.4):
 - `assign_void` — creator terminates an undelivered assignment, accepted or not
 
 Notify (accelerator only):
-- `notify_register` — register an https endpoint (public only: the SSRF-hardened outbound path refuses loopback/private targets; must answer 2xx AND echo the verification challenge); best-effort pushes of {account, kind, count} arrive signed with X-Kungfu-Signature; no content is ever pushed; the secret is disclosed once; losing a push is harmless — todo_list is the truth. Wake process (served by this server): https://kungfu.md/kungfu-wake.mjs — full kit (roster example, OS keepalive recipes): https://github.com/samelabs/Kungfu/tree/main/examples/wake
+- `notify_register` — register an https endpoint (public only: the SSRF-hardened outbound path refuses loopback/private targets; must answer 2xx AND echo the verification challenge); best-effort pushes of {account, kind, count} arrive signed with X-Kungfu-Signature; no content is ever pushed; the secret is disclosed once; losing a push is harmless — todo_list is the truth. COMPATIBILITY MODE, not the default wake path: pushes are content-free hints, never a complete Task+Thread wake solution — a webhook user must still reconcile with todo_list periodically, and the same todo_wait wait works from any host with no endpoint at all. Outbox writes happen only for registered accounts; delivered and abandoned signals are deleted. Wake process (served by this server): https://kungfu.md/kungfu-wake.mjs — full kit (roster example, OS keepalive recipes): https://github.com/samelabs/Kungfu/tree/main/examples/wake
 - `notify_test` — queue a kind="test" signal to your endpoint (verify wiring end to end, dispatched within ~30s)
 - `notify_delete` — drop the endpoint
 

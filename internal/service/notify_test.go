@@ -191,3 +191,77 @@ func TestNotifyTestQueuesOnlyWithEndpoint(t *testing.T) {
 		t.Fatalf("queued %d test rows, want 1", n)
 	}
 }
+
+// TestNotifyOutboxIsGatedAndBounded: an account without a registered
+// endpoint is never written at all; a delivered signal is deleted,
+// not archived; an abandoned one (attempts run out) is deleted too —
+// the outbox is an accelerator, and finished or hopeless work leaves
+// nothing behind.
+func TestNotifyOutboxIsGatedAndBounded(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	a, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "gate", true, "")
+	defer cleanupDisposed(t, pool, code)
+	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	// unregistered addressee: the fact exists, the outbox records
+	// nothing — a signal nobody can receive is meaningless production
+	if _, err := ThreadPost(ctx, pool, owner, code, "no endpoint", "", "", nil, []int64{a}, nil, "g1"); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM notify_outbox WHERE account_id=$1`, a); n != 0 {
+		t.Fatal("unregistered account must not produce outbox rows")
+	}
+
+	// registered addressee: the row exists, and a successful dispatch
+	// DELETES it (bounded recycling — sent rows are not archived)
+	if err := repository.UpsertAccountNotify(ctx, pool, a, "https://endpoint.example/wake", "s3cret"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := ThreadPost(ctx, pool, owner, code, "with endpoint", "", "", nil, []int64{a}, nil, "g2"); err != nil {
+		t.Fatalf("post2: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM notify_outbox WHERE account_id=$1 AND sent_at IS NULL`, a); n != 1 {
+		t.Fatal("registered account must get exactly one queued row")
+	}
+	// point the endpoint at the working test receiver, dispatch
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(srv.Close)
+	// pin the TLS roots for the self-signed test server (loopback is
+	// already allowed for the whole binary by TestMain)
+	t.Cleanup(delivery.TrustRootsForTest(tlsRoots(srv)))
+	if err := repository.UpsertAccountNotify(ctx, pool, a, srv.URL, "s3cret"); err != nil {
+		t.Fatalf("reregister: %v", err)
+	}
+	if _, err := DispatchNotifyOutbox(ctx, pool); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM notify_outbox WHERE account_id=$1`, a); n != 0 {
+		t.Fatal("delivered signal must be deleted, not archived")
+	}
+
+	// abandoned: attempts run out, the pass drops the row
+	if err := repository.InsertNotifyOutbox(ctx, pool, a, "reply", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE notify_outbox SET attempts = 5 WHERE account_id=$1`, a); err != nil {
+		t.Fatal(err)
+	}
+	// the endpoint no longer matters: the row's attempts are spent
+	if err := repository.UpsertAccountNotify(ctx, pool, a, "https://endpoint.example/dead", "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DispatchNotifyOutbox(ctx, pool); err != nil {
+		t.Fatalf("dispatch2: %v", err)
+	}
+	if n := countRow(t, pool, `SELECT count(*) FROM notify_outbox WHERE account_id=$1`, a); n != 0 {
+		t.Fatal("abandoned signal must be recycled")
+	}
+}
