@@ -402,7 +402,11 @@ function webhookServer() {
           return send(401, 'bad signature');
         }
         log({ event: 'wake', mode: 'webhook', account: agent.account, name: agent.name, kind: body.kind, count: body.count });
-        runWake(agent, body.kind, body.count);
+        // compatibility mode's reliability boundary: a wake command
+        // failure here does NOT re-arm a retry (the poll loop owns
+        // failure recovery; a lost push is always harmless because
+        // the account's next todo_wait catches the same turn)
+        runWake(agent, body.kind, body.count, null);
         send(200, 'ok');
       });
     }

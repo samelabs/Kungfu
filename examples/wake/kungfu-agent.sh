@@ -68,7 +68,7 @@ YOUR TURN — every open obligation and opportunity, oldest first (server fact, 
 $TURN
 
 Recover and work, in this order (the kungfu.md skill, condensed — full text: $SERVER/kungfu.md):
-1. todo_list above is current. For each obligation item: read that object's minimal working set — POST $SERVER/api/v1/thread_get {"code":...} for rooms, /api/v1/work_get {"code":...} for tasks. Expand entries/assignments ONLY where an item of yours points at them; do not re-read whole histories.
+1. todo_list above is current. For each obligation item: read that object's minimal working set — POST $SERVER/api/v1/thread_get {"thread":...} for rooms (NOTE: rooms take "thread", tasks take "code"), /api/v1/work_get {"code":...} for tasks. Expand entries/assignments ONLY where an item of yours points at them; do not re-read whole histories.
 2. Do the actual work the item asks (answer the question, run the assignment, produce the payload). You may use your shell here.
 3. Deliver THROUGH Kungfu — thread_post / assign_take+assign_submit / work_submit over POST $SERVER/api/v1/<tool>. A result that was not sent to the server does not exist; finishing locally is not delivering.
 4. Judge your own next move like a collaborator: opportunities in the turn are offered for evaluation — take one only if you judge it worth doing, never reflexively. next_action marks the legal move; the work judgment is yours. You may also start new work (post entries, propose assignments) where the collaboration calls for it.
@@ -95,8 +95,13 @@ case "$HOST" in
     # ${arr[@]+"${arr[@]}"}: empty-array expansion that survives
     # set -u on every bash, including macOS 3.2
     set +e
+    # least privilege by default: this executor only needs curl (the
+    # Kungfu API) and its own workspace files — collaboration content
+    # is UNTRUSTED by protocol (L6), so an unrestricted local shell is
+    # the wrong default for a headless agent. Override via
+    # KF_CLAUDE_FLAGS if you really know better.
     claude -p "$PROMPT" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"} \
-      --permission-mode bypassPermissions \
+      ${KF_CLAUDE_FLAGS:---allowedTools "Bash(curl:*) Read Write Edit Grep Glob"} \
       --output-format json > "$RUN.out" 2> "$RUN.err"
     RC=$?
     set -e

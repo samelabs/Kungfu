@@ -96,8 +96,13 @@ def main():
         messages.append({"role": "assistant", "content": reply})
         messages.append({"role": "user", "content":
                          "API %s result:\n%s\nNext single JSON action, or done." % (tool, json.dumps(res)[:4000])})
-    log.write("STEP CAP REACHED\n")
-    return 0
+    # step cap reached with work possibly left on the server: exit
+    # with a RECOGNIZABLE unfinished code (75, EX_TEMPFAIL) so the
+    # bridge's bounded failure retry re-arms the same turn — the
+    # executor resumes from server facts on the next run; exiting 0
+    # here would let the bridge report success and never re-run
+    log.write("STEP CAP REACHED (work may remain — exiting unfinished)\n")
+    return 75
 
 
 if __name__ == "__main__":
