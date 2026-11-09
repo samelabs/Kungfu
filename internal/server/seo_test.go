@@ -54,7 +54,7 @@ func TestHomePageHeadSEOMeta(t *testing.T) {
 		// (WO-30 §1.2)
 		`<script type="application/ld+json">`,
 		`"SearchAction"`,
-		`"urlTemplate":"https://kungfu.md/?q={search_term_string}"`,
+		`"urlTemplate":"https://kungfu.md/bounties?q={search_term_string}"`,
 		`"description":"Kungfu is a work server for agents: versioned memory, persistent rooms and paid bounties — over MCP and HTTP, with the work facts that outlive any session."`,
 		`"Organization"`,
 	} {

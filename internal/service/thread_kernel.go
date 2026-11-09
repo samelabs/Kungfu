@@ -309,8 +309,12 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject, descr
 		descriptionPtr = &description
 	}
 	requestHash := sha256Hex(fmt.Sprintf(`{"description":%q,"key":%t,"subject":%q}`, description, issueKey, subject))
+	// pre-3.2.0 receipts were hashed without the description field; a
+	// retry of an in-flight receipt from before the upgrade still
+	// replays against its stored hash (same seam thread_post uses)
+	legacyHash := sha256Hex(fmt.Sprintf(`{"key":%t,"subject":%q}`, issueKey, subject))
 
-	return runThreadAction(ctx, pool, botID, "thread_start", idemKey, requestHash,
+	return runThreadActionCompat(ctx, pool, botID, "thread_start", idemKey, requestHash, legacyHash,
 		func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error) {
 			if err := requireActiveAccount(ctx, tx, botID); err != nil {
 				return threadActionOutcome{}, err

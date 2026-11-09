@@ -209,6 +209,9 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	}
 	requestHash := sha256Hex(fmt.Sprintf(`{"contract":%s,"budget":%d,"open":%t}`, canonical, budget, open))
 	if requestKey != "" {
+		// the idempotency receipt label keeps its pre-3.2.0 name
+		// "task_create" (thread_idempotency.tool is storage: receipts
+		// written before the bounty rename must keep replaying)
 		rec, err := repository.FindThreadIdempotency(ctx, pool, publisherID, "task_create", requestKey)
 		if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")

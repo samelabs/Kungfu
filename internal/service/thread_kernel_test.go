@@ -728,6 +728,39 @@ func TestThreadIdempotencyConcurrentSameKey(t *testing.T) {
 // writes a description; a non-governor member cannot; a no-change
 // request is INVALID_TARGET; the empty string clears; a closed room is
 // read-only; thread_get and thread_list surface the new profile.
+// TestThreadStartLegacyReceiptReplays (3.2.0): the thread_start request
+// hash gained the description field; a receipt written before that
+// change (stored with the old no-description hash) must still replay
+// on retry — the same seam thread_post uses for encoding changes.
+func TestThreadStartLegacyReceiptReplays(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	first, err := ThreadStart(ctx, pool, owner, "legacy subject", "legacy brief", false, "idem-legacy")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	code := first["thread"].(string)
+	defer threadCleanup(t, pool, []int64{owner}, code)
+
+	// rewrite the stored receipt's hash to the pre-3.2.0 encoding —
+	// exactly what an in-flight receipt from before the upgrade holds
+	legacy := sha256Hex(fmt.Sprintf(`{"key":%t,"subject":%q}`, false, "legacy subject"))
+	if _, err := pool.Exec(ctx,
+		`UPDATE thread_idempotency SET request_hash = $1 WHERE account_id = $2 AND tool = 'thread_start' AND key = 'idem-legacy'`,
+		legacy, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := ThreadStart(ctx, pool, owner, "legacy subject", "legacy brief", false, "idem-legacy")
+	if err != nil {
+		t.Fatalf("legacy replay: %v", err)
+	}
+	if replay["thread"] != code {
+		t.Fatalf("legacy replay = %v, want the stored first result for %s", replay, code)
+	}
+}
+
 func TestThreadUpdateProfile(t *testing.T) {
 	pool := revisionTestPool(t)
 	owner, _, _ := a7TestBot(t, pool, 5)

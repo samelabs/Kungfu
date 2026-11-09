@@ -46,6 +46,9 @@ func contractError(field, message string) error {
 func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	// §11: 20 creates per hour per publisher. Publisher tools carry a
 	// null next_action (WO-7b), so NoAction overrides RATE_LIMIT→wait.
+	// the rate-limit bucket keeps its pre-3.2.0 label "task_create"
+	// (config keys are storage: renaming it would silently lift the
+	// 20/hour cap for every deployed deployment mid-upgrade)
 	if !deps.limiter().CheckAgent(agent.ID, "task_create") {
 		retry := deps.limiter().CheckAgentWithDetails(agent.ID, "task_create").RetryAfter
 		return ToolResult{NoAction: true}, &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded",
