@@ -73,7 +73,7 @@ func TestOwnerToolAuthAndCSRF(t *testing.T) {
 	s, pool, name, botID := ownerConsoleEnv(t)
 
 	// no session → 401 UNAUTHORIZED envelope
-	rec, env := ocCall(t, s, nil, "bounty_list", map[string]any{})
+	rec, env := ocCall(t, s, nil, "task_list", map[string]any{})
 	if rec.Code != 401 || env["error"].(map[string]any)["code"] != "UNAUTHORIZED" {
 		t.Fatalf("no session: %d %v", rec.Code, env)
 	}
@@ -82,7 +82,7 @@ func TestOwnerToolAuthAndCSRF(t *testing.T) {
 	cookie := ocSessionCookie(t, s, pool, name)
 
 	// no Content-Type (form-encoded) → the ownerMutation gate rejects 415
-	req := httptest.NewRequest(http.MethodPost, "/api/owner/tool/bounty_list",
+	req := httptest.NewRequest(http.MethodPost, "/api/owner/tool/task_list",
 		strings.NewReader("x=1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
@@ -140,7 +140,7 @@ func TestOwnerToolMemoryListIsReadOnly(t *testing.T) {
 	}
 }
 
-// TestOwnerToolLifecycleAndParity: bounty_create → bounty_open → bounty_list
+// TestOwnerToolLifecycleAndParity: task_create → task_open → task_list
 // through the console; the returned envelopes equal CallTool's for the
 // same input (same code path, verified on create).
 func TestOwnerToolLifecycleAndParity(t *testing.T) {
@@ -151,13 +151,13 @@ func TestOwnerToolLifecycleAndParity(t *testing.T) {
 	contract := ocContract()
 	// route first (builds the router, wiring mcpDepsValue), then the
 	// same call through the registry directly for parity
-	routeRec, routeEnv := ocCall(t, s, cookie, "bounty_create", map[string]any{"contract": contract, "budget": 2000})
+	routeRec, routeEnv := ocCall(t, s, cookie, "task_create", map[string]any{"contract": contract, "budget": 2000})
 	deps := s.mcpDeps()
 	botRow, err := repository.FindActiveBotAccountByID(ctx, pool, botID)
 	if err != nil || botRow == nil {
 		t.Fatalf("bot lookup: %v", err)
 	}
-	directEnv, directStatus := mcpserver.CallTool(ctx, deps, "bounty_create", botRow,
+	directEnv, directStatus := mcpserver.CallTool(ctx, deps, "task_create", botRow,
 		mustJSON(t, map[string]any{"contract": contract, "budget": 2000}))
 	if routeRec.Code != directStatus || routeRec.Code != 200 {
 		t.Fatalf("create: route %d vs direct %d", routeRec.Code, directStatus)
@@ -169,10 +169,10 @@ func TestOwnerToolLifecycleAndParity(t *testing.T) {
 	}
 	code, _ := routeEnv["code"].(string)
 
-	if _, env := ocCall(t, s, cookie, "bounty_open", map[string]any{"code": code}); env["ok"] != true || env["status"] != "open" {
+	if _, env := ocCall(t, s, cookie, "task_open", map[string]any{"code": code}); env["ok"] != true || env["status"] != "open" {
 		t.Fatalf("open: %v", env)
 	}
-	rec, env := ocCall(t, s, cookie, "bounty_list", map[string]any{})
+	rec, env := ocCall(t, s, cookie, "task_list", map[string]any{})
 	if rec.Code != 200 || env["ok"] != true {
 		t.Fatalf("list: %d %v", rec.Code, env)
 	}
@@ -183,7 +183,7 @@ func TestOwnerToolLifecycleAndParity(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("bounty_list missing %s", code)
+		t.Fatalf("task_list missing %s", code)
 	}
 	if err := task.CheckInvariants(ctx, pool, ocTaskID(t, pool, code)); err != nil {
 		t.Fatalf("CheckInvariants: %v", err)
@@ -242,12 +242,12 @@ func TestOwnerConsoleEndToEnd(t *testing.T) {
 	cookie := ocSessionCookie(t, s, pool, name)
 
 	// create + open a task on the accept-everything receiver
-	_, env := ocCall(t, s, cookie, "bounty_create", map[string]any{"contract": ocContract(), "budget": 2000})
+	_, env := ocCall(t, s, cookie, "task_create", map[string]any{"contract": ocContract(), "budget": 2000})
 	if env["ok"] != true {
 		t.Fatalf("create: %v", env)
 	}
 	code := env["code"].(string)
-	if _, env = ocCall(t, s, cookie, "bounty_open", map[string]any{"code": code}); env["ok"] != true {
+	if _, env = ocCall(t, s, cookie, "task_open", map[string]any{"code": code}); env["ok"] != true {
 		t.Fatalf("open: %v", env)
 	}
 
@@ -270,7 +270,7 @@ func TestOwnerConsoleEndToEnd(t *testing.T) {
 	subID := parseWireID(t, subEnv["submission_id"])
 
 	// console queue shows the settled row with agent_ref + the reply
-	_, env = ocCall(t, s, cookie, "bounty_submissions", map[string]any{"code": code, "state": "settled"})
+	_, env = ocCall(t, s, cookie, "task_submissions", map[string]any{"code": code, "state": "settled"})
 	if env["ok"] != true || env["total"].(float64) != 1 {
 		t.Fatalf("submissions: %v", env)
 	}

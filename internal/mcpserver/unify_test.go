@@ -34,8 +34,8 @@ func TestRegistryComplete(t *testing.T) {
 		"work_list", "work_get", "work_harness", "work_claim", "work_claim_renew",
 		"work_release", "work_submit", "work_status", "work_history", "work_report",
 		// 10 publisher
-		"bounty_create", "bounty_update", "bounty_open", "bounty_pause", "bounty_close",
-		"bounty_fund", "bounty_refund", "bounty_get", "bounty_list", "bounty_submissions",
+		"task_create", "task_update", "task_open", "task_pause", "task_close",
+		"task_fund", "task_refund", "task_get", "task_list", "task_submissions",
 		// 2 account
 		"account_register", "account_status",
 		// 6 memory

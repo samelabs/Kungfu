@@ -138,10 +138,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(rootkungfu.WakeKeeperScript())
 	})
-	r.Get("/bounty-guide.md", serveStaticFile("bounty-guide.md", "text/markdown; charset=utf-8", ""))
-	r.Get("/task-guide.md", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/bounty-guide.md", http.StatusMovedPermanently)
-	})
+	r.Get("/task-guide.md", serveStaticFile("task-guide.md", "text/markdown; charset=utf-8", ""))
 	r.Get("/manifest.webmanifest", serveStaticFile("manifest.webmanifest", "application/manifest+json; charset=utf-8", "public, max-age=300"))
 	r.Get("/sw.js", serveStaticFile("sw.js", "application/javascript; charset=utf-8", "no-cache, no-store, must-revalidate"))
 
@@ -305,7 +302,7 @@ func (s *Server) buildRouterWithDeadline(deadline time.Duration) http.Handler {
 	// -- Web routes (HTML) --
 	r.Get("/", s.agentHomeHandler())
 	r.Get("/credits", s.handleCredits)
-	r.Get("/bounties", s.handleBounties)
+	r.Get("/tasks", s.handleTasks)
 	r.Get("/owner", s.handleOwnerPage("overview"))
 	r.Get("/owner/login", s.handleOwnerPage("login"))
 	r.Get("/owner/register", s.handleOwnerPage("register"))

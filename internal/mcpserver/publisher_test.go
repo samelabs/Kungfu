@@ -81,49 +81,49 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 		}
 	}
 
-	// bounty_create on twins
-	e1m, i1 := mcpP("bounty_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
-	e1h, s1 := httpP("bounty_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
+	// task_create on twins
+	e1m, i1 := mcpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
+	e1h, s1 := httpP("task_create", map[string]any{"contract": pubContractArg(), "budget": 2000})
 	if i1 || s1 != 200 || e1m["status"] != task.TaskPaused || e1m["next_action"] != nil {
-		t.Fatalf("bounty_create: %+v isError=%v http=%d", e1m, i1, s1)
+		t.Fatalf("task_create: %+v isError=%v http=%d", e1m, i1, s1)
 	}
-	assertCodes("bounty_create", e1m, e1h, e1m["code"].(string), e1h["code"].(string))
+	assertCodes("task_create", e1m, e1h, e1m["code"].(string), e1h["code"].(string))
 	codeA, codeB := e1m["code"].(string), e1h["code"].(string)
 
-	// bounty_get (draft twins)
-	e2m, i2 := mcpP("bounty_get", map[string]any{"code": codeA})
-	e2h, s2 := httpP("bounty_get", map[string]any{"code": codeB})
+	// task_get (draft twins)
+	e2m, i2 := mcpP("task_get", map[string]any{"code": codeA})
+	e2h, s2 := httpP("task_get", map[string]any{"code": codeB})
 	if i2 || s2 != 200 || e2m["status"] != task.TaskPaused {
-		t.Fatalf("bounty_get: %v %d", i2, s2)
+		t.Fatalf("task_get: %v %d", i2, s2)
 	}
-	assertCodes("bounty_get", e2m, e2h, codeA, codeB)
+	assertCodes("task_get", e2m, e2h, codeA, codeB)
 
-	// bounty_update (draft twins; the view carries status/counters — the
+	// task_update (draft twins; the view carries status/counters — the
 	// edited contract is asserted via the stored draft in the flow test)
 	updated := pubContractArg()
 	updated["title"] = "Pub task v2"
-	e3m, i3 := mcpP("bounty_update", map[string]any{"code": codeA, "contract": updated})
-	e3h, s3 := httpP("bounty_update", map[string]any{"code": codeB, "contract": updated})
+	e3m, i3 := mcpP("task_update", map[string]any{"code": codeA, "contract": updated})
+	e3h, s3 := httpP("task_update", map[string]any{"code": codeB, "contract": updated})
 	if i3 || s3 != 200 || e3m["status"] != task.TaskPaused {
-		t.Fatalf("bounty_update: %v %d %+v", i3, s3, e3m)
+		t.Fatalf("task_update: %v %d %+v", i3, s3, e3m)
 	}
-	assertCodes("bounty_update", e3m, e3h, codeA, codeB)
+	assertCodes("task_update", e3m, e3h, codeA, codeB)
 
-	// bounty_open (twins: the sample test-delivers to the accept-everything receiver)
-	e4m, i4 := mcpP("bounty_open", map[string]any{"code": codeA})
-	e4h, s4 := httpP("bounty_open", map[string]any{"code": codeB})
+	// task_open (twins: the sample test-delivers to the accept-everything receiver)
+	e4m, i4 := mcpP("task_open", map[string]any{"code": codeA})
+	e4h, s4 := httpP("task_open", map[string]any{"code": codeB})
 	if i4 || s4 != 200 || e4m["status"] != task.TaskOpen {
-		t.Fatalf("bounty_open: %+v isError=%v http=%d", e4m, i4, s4)
+		t.Fatalf("task_open: %+v isError=%v http=%d", e4m, i4, s4)
 	}
-	assertCodes("bounty_open", e4m, e4h, codeA, codeB)
+	assertCodes("task_open", e4m, e4h, codeA, codeB)
 
-	// bounty_fund (twins)
-	e5m, i5 := mcpP("bounty_fund", map[string]any{"code": codeA, "amount": 500})
-	e5h, s5 := httpP("bounty_fund", map[string]any{"code": codeB, "amount": 500})
+	// task_fund (twins)
+	e5m, i5 := mcpP("task_fund", map[string]any{"code": codeA, "amount": 500})
+	e5h, s5 := httpP("task_fund", map[string]any{"code": codeB, "amount": 500})
 	if i5 || s5 != 200 || numOff(e5m["budget_locked"]) != 2500 {
-		t.Fatalf("bounty_fund: %+v", e5m)
+		t.Fatalf("task_fund: %+v", e5m)
 	}
-	assertCodes("bounty_fund", e5m, e5h, codeA, codeB)
+	assertCodes("task_fund", e5m, e5h, codeA, codeB)
 
 	// executor submissions on both twins (settle on the receiver's 200)
 	for _, code := range []string{codeA, codeB} {
@@ -135,58 +135,58 @@ func TestPublisherToolsBothChannels(t *testing.T) {
 		}
 	}
 
-	// bounty_submissions (twins)
-	e6m, i6 := mcpP("bounty_submissions", map[string]any{"code": codeA})
-	e6h, s6 := httpP("bounty_submissions", map[string]any{"code": codeB})
+	// task_submissions (twins)
+	e6m, i6 := mcpP("task_submissions", map[string]any{"code": codeA})
+	e6h, s6 := httpP("task_submissions", map[string]any{"code": codeB})
 	if i6 || s6 != 200 || numOff(e6m["total"]) != 1 {
-		t.Fatalf("bounty_submissions: %+v", e6m)
+		t.Fatalf("task_submissions: %+v", e6m)
 	}
-	assertCodes("bounty_submissions", e6m, e6h, codeA, codeB)
+	assertCodes("task_submissions", e6m, e6h, codeA, codeB)
 	rowsA, _ := e6m["submissions"].([]any)
 	if len(rowsA) != 1 {
-		t.Fatalf("bounty_submissions rows: %+v", e6m)
+		t.Fatalf("task_submissions rows: %+v", e6m)
 	}
 	row, _ := rowsA[0].(map[string]any)
 	reply, _ := row["reply"].(map[string]any)
 	if row["state"] != task.SubSettled || reply == nil || reply["body"] != `{"message":"accepted"}` {
-		t.Fatalf("bounty_submissions row: %+v", row)
+		t.Fatalf("task_submissions row: %+v", row)
 	}
 
-	// bounty_pause (twins, both open)
-	e8m, i8 := mcpP("bounty_pause", map[string]any{"code": codeA})
-	e8h, s8 := httpP("bounty_pause", map[string]any{"code": codeB})
+	// task_pause (twins, both open)
+	e8m, i8 := mcpP("task_pause", map[string]any{"code": codeA})
+	e8h, s8 := httpP("task_pause", map[string]any{"code": codeB})
 	if i8 || s8 != 200 || e8m["status"] != task.TaskPaused {
-		t.Fatalf("bounty_pause: %v %d", i8, s8)
+		t.Fatalf("task_pause: %v %d", i8, s8)
 	}
-	assertCodes("bounty_pause", e8m, e8h, codeA, codeB)
+	assertCodes("task_pause", e8m, e8h, codeA, codeB)
 
-	// bounty_close (twins, paused)
-	e9m, i9 := mcpP("bounty_close", map[string]any{"code": codeA})
-	e9h, s9 := httpP("bounty_close", map[string]any{"code": codeB})
+	// task_close (twins, paused)
+	e9m, i9 := mcpP("task_close", map[string]any{"code": codeA})
+	e9h, s9 := httpP("task_close", map[string]any{"code": codeB})
 	if i9 || s9 != 200 || e9m["status"] != task.TaskClosed {
-		t.Fatalf("bounty_close: %v %d", i9, s9)
+		t.Fatalf("task_close: %v %d", i9, s9)
 	}
-	assertCodes("bounty_close", e9m, e9h, codeA, codeB)
+	assertCodes("task_close", e9m, e9h, codeA, codeB)
 
-	// bounty_refund (twins: 2500 − 5 settled = 2495 refunded)
-	e10m, i10 := mcpP("bounty_refund", map[string]any{"code": codeA})
-	e10h, s10 := httpP("bounty_refund", map[string]any{"code": codeB})
+	// task_refund (twins: 2500 − 5 settled = 2495 refunded)
+	e10m, i10 := mcpP("task_refund", map[string]any{"code": codeA})
+	e10h, s10 := httpP("task_refund", map[string]any{"code": codeB})
 	if i10 || s10 != 200 || numOff(e10m["refunded"]) != 2495 {
-		t.Fatalf("bounty_refund: %+v isError=%v http=%d", e10m, i10, s10)
+		t.Fatalf("task_refund: %+v isError=%v http=%d", e10m, i10, s10)
 	}
-	assertCodes("bounty_refund", e10m, e10h, codeA, codeB)
+	assertCodes("task_refund", e10m, e10h, codeA, codeB)
 
-	// bounty_list (read)
-	e11m, i11 := mcpP("bounty_list", map[string]any{})
-	e11h, s11 := httpP("bounty_list", map[string]any{})
+	// task_list (read)
+	e11m, i11 := mcpP("task_list", map[string]any{})
+	e11h, s11 := httpP("task_list", map[string]any{})
 	if i11 || s11 != 200 || numOff(e11m["total"]) < 2 {
-		t.Fatalf("bounty_list: %+v", e11m)
+		t.Fatalf("task_list: %+v", e11m)
 	}
 	// twin codes normalized; other tasks' codes also vary between
 	// channels only by set — strip the whole tasks array for this read
 	{
 		m, h := map[string]any{"total": e11m["total"], "ok": e11m["ok"]}, map[string]any{"total": e11h["total"], "ok": e11h["ok"]}
-		assertJSONEqual(t, "bounty_list-meta", m, h)
+		assertJSONEqual(t, "task_list-meta", m, h)
 	}
 
 	for _, code := range []string{codeA, codeB} {
@@ -354,22 +354,22 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 		}},
 		// publisher side
 		{"NOT_OWNER", "", 403, func() (map[string]any, int) {
-			return call(agentBot, "bounty_pause", map[string]any{"code": code}) // agent is not the publisher
+			return call(agentBot, "task_pause", map[string]any{"code": code}) // agent is not the publisher
 		}},
 		{"INSUFFICIENT_CREDITS", "", 402, func() (map[string]any, int) {
-			return call(agentBot, "bounty_create", map[string]any{"contract": pubContractArg(), "budget": 1_000_000})
+			return call(agentBot, "task_create", map[string]any{"contract": pubContractArg(), "budget": 1_000_000})
 		}},
 		{"INVALID_STATE", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
 			if _, err := service.CloseTask(ctx, pool, pubID, c); err != nil {
 				t.Fatalf("close: %v", err)
 			}
-			return call(pubBot, "bounty_pause", map[string]any{"code": c})
+			return call(pubBot, "task_pause", map[string]any{"code": c})
 		}},
 		{"VALIDATION_FAILED", "", 422, func() (map[string]any, int) {
 			bad := pubContractArg()
 			bad["title"] = ""
-			return call(pubBot, "bounty_create", map[string]any{"contract": bad, "budget": 2000})
+			return call(pubBot, "task_create", map[string]any{"contract": bad, "budget": 2000})
 		}},
 		{"HAS_RESERVATIONS", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
@@ -380,7 +380,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("close: %v", err)
 			}
-			return call(pubBot, "bounty_refund", map[string]any{"code": c})
+			return call(pubBot, "task_refund", map[string]any{"code": c})
 		}},
 		{"NOTHING_TO_REFUND", "", 409, func() (map[string]any, int) {
 			c := wo7OpenTask(t, pool, pubID)
@@ -390,7 +390,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 			if _, err := service.RefundTask(ctx, pool, pubID, c); err != nil {
 				t.Fatalf("first refund: %v", err)
 			}
-			return call(pubBot, "bounty_refund", map[string]any{"code": c})
+			return call(pubBot, "task_refund", map[string]any{"code": c})
 		}},
 	}
 
@@ -419,7 +419,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 	// same structuredContent shape
 	for _, tc := range []struct{ tool, code string }{
 		{"work_get", "TASK_NOT_FOUND"},
-		{"bounty_pause", "NOT_OWNER"},
+		{"task_pause", "NOT_OWNER"},
 		{"work_submit", "SCHEMA_MISMATCH"},
 	} {
 		var env map[string]any
@@ -427,8 +427,8 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 		switch tc.tool {
 		case "work_get":
 			env, isErr, _ = mcpCall(t, srv, agentKey, "work_get", map[string]any{"code": "nope00000000"})
-		case "bounty_pause":
-			env, isErr, _ = mcpCall(t, srv, agentKey, "bounty_pause", map[string]any{"code": code})
+		case "task_pause":
+			env, isErr, _ = mcpCall(t, srv, agentKey, "task_pause", map[string]any{"code": code})
 		case "work_submit":
 			env, isErr, _ = mcpCall(t, srv, agentKey, "work_submit", map[string]any{
 				"code": code, "request_key": fmt.Sprintf("mcpbad-%d", time.Now().UnixNano()),
@@ -515,9 +515,9 @@ func syncBrokenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 	return view["code"].(string)
 }
 
-// TestPublisherLifecycle: bounty_create → bounty_open (test delivery 2xx
-// via the TLS receiver) → work_submit → settled → bounty_close →
-// bounty_refund, all through the registry, ending with CheckInvariants.
+// TestPublisherLifecycle: task_create → task_open (test delivery 2xx
+// via the TLS receiver) → work_submit → settled → task_close →
+// task_refund, all through the registry, ending with CheckInvariants.
 func TestPublisherLifecycle(t *testing.T) {
 	pool, deps, srv := registryEnv(t)
 	ctx := context.Background()
@@ -545,14 +545,14 @@ func TestPublisherLifecycle(t *testing.T) {
 	// create (contract against the receiver)
 	contract := wo7Contract()
 	contract.Receiver = task.Receiver{URL: rcv.URL}
-	env, status := call(pubBot, "bounty_create", map[string]any{"contract": asContractMap(t, contract), "budget": 2000})
+	env, status := call(pubBot, "task_create", map[string]any{"contract": asContractMap(t, contract), "budget": 2000})
 	if status != 200 || env["status"] != task.TaskPaused {
 		t.Fatalf("create: %d %v", status, env)
 	}
 	code := env["code"].(string)
 
 	// open — the test delivery hits the 2xx receiver
-	env, status = call(pubBot, "bounty_open", map[string]any{"code": code})
+	env, status = call(pubBot, "task_open", map[string]any{"code": code})
 	if status != 200 || env["status"] != task.TaskOpen {
 		t.Fatalf("open: %d %v", status, env)
 	}
@@ -567,11 +567,11 @@ func TestPublisherLifecycle(t *testing.T) {
 	}
 
 	// close (reserved drained by settlement) then refund
-	env, status = call(pubBot, "bounty_close", map[string]any{"code": code})
+	env, status = call(pubBot, "task_close", map[string]any{"code": code})
 	if status != 200 || env["status"] != task.TaskClosed {
 		t.Fatalf("close: %d %v", status, env)
 	}
-	env, status = call(pubBot, "bounty_refund", map[string]any{"code": code})
+	env, status = call(pubBot, "task_refund", map[string]any{"code": code})
 	if status != 200 || numOff(env["refunded"]) != 1995 {
 		t.Fatalf("refund: %d %v", status, env)
 	}
@@ -646,7 +646,7 @@ func TestTaskCreateRejectsSampleByName(t *testing.T) {
 	arg := pubContractArg()
 	arg["sample"] = map[string]any{"url": "https://example.com/a"}
 	raw, _ := json.Marshal(map[string]any{"contract": arg, "budget": 10})
-	env, status := CallTool(context.Background(), &deps, "bounty_create", pub, raw)
+	env, status := CallTool(context.Background(), &deps, "task_create", pub, raw)
 	if status != http.StatusUnprocessableEntity || env["ok"] != false {
 		t.Fatalf("sample contract: %d %v", status, env)
 	}

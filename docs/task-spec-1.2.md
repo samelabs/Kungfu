@@ -1,6 +1,6 @@
 # Kungfu Task 机制 1.2
 
-本文件只记录 Task 机制（[`task-spec-1.0.md`](task-spec-1.0.md)、[`task-spec-1.1.md`](task-spec-1.1.md)）之上的**变更点与兼容性**；1.0/1.1 的全部规则继续有效，与本文冲突处以本文为准。
+本文件只记录 Task 机制（[`task-spec-1.0.md`](history/task-spec-1.0.md)、[`task-spec-1.1.md`](task-spec-1.1.md)）之上的**变更点与兼容性**；1.0/1.1 的全部规则继续有效，与本文冲突处以本文为准。
 依据：`kungfu.md` §7.2（Audience）、§8（Turn and recovery：opportunities）、§9（Visibility）、§12（最小披露）。差距的关闭情况见 [`conformance.md`](conformance.md) 的 Task profile 表。
 
 ---

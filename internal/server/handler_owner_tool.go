@@ -29,10 +29,10 @@ import (
 // thread profile edit (thread_update, governor-checked by the tool
 // itself), and the read-only tools the workbench views render.
 var ownerTools = map[string]bool{
-	"bounty_create": true, "bounty_update": true, "bounty_open": true,
-	"bounty_pause": true, "bounty_close": true, "bounty_fund": true,
-	"bounty_refund": true, "bounty_get": true, "bounty_list": true,
-	"bounty_submissions": true, "memory_list": true, "memory_get": true,
+	"task_create": true, "task_update": true, "task_open": true,
+	"task_pause": true, "task_close": true, "task_fund": true,
+	"task_refund": true, "task_get": true, "task_list": true,
+	"task_submissions": true, "memory_list": true, "memory_get": true,
 	"todo_list": true, "thread_list": true, "thread_get": true,
 	"thread_update": true,
 }

@@ -13,26 +13,26 @@ import (
 )
 
 // TestTask12SchemaAndDescriptions: the declared surface names what
-// it does — bounty_create's contract schema has the audience property,
+// it does — task_create's contract schema has the audience property,
 // work_list's schema has offered_to_me, and the descriptions state
 // the immutability and the opportunity semantics.
 func TestTask12SchemaAndDescriptions(t *testing.T) {
-	create, ok := Tool("bounty_create")
+	create, ok := Tool("task_create")
 	if !ok {
-		t.Fatal("bounty_create missing")
+		t.Fatal("task_create missing")
 	}
 	if !strings.Contains(create.InputSchema, `"audience"`) ||
 		!strings.Contains(create.InputSchema, `"restricted"`) {
-		t.Fatal("bounty_create contract schema does not declare the audience property")
+		t.Fatal("task_create contract schema does not declare the audience property")
 	}
 	if !strings.Contains(create.Description, "immutable") ||
 		!strings.Contains(create.Description, "1–50 named agents") {
-		t.Fatal("bounty_create description does not state audience immutability and the 50 cap")
+		t.Fatal("task_create description does not state audience immutability and the 50 cap")
 	}
 
-	update, _ := Tool("bounty_update")
+	update, _ := Tool("task_update")
 	if !strings.Contains(update.Description, "audience is immutable") {
-		t.Fatal("bounty_update description does not state audience immutability")
+		t.Fatal("task_update description does not state audience immutability")
 	}
 
 	list, _ := Tool("work_list")
@@ -50,7 +50,7 @@ func TestTask12SchemaAndDescriptions(t *testing.T) {
 	}
 }
 
-// TestTask12RestrictedTaskThroughTools: bounty_create with a restricted
+// TestTask12RestrictedTaskThroughTools: task_create with a restricted
 // audience through the registry, then the named agent discovers it
 // (work_list, offered_to_me, todo_list opportunities) while an
 // outsider gets TASK_NOT_FOUND from work_get.
@@ -67,7 +67,7 @@ func TestTask12RestrictedTaskThroughTools(t *testing.T) {
 
 	// strict decoding: an unknown field inside the audience still
 	// names the field
-	env, status := CallTool(ctx, &deps, "bounty_create", pub, []byte(`{
+	env, status := CallTool(ctx, &deps, "task_create", pub, []byte(`{
 		"contract": {"title":"t","requirements":"r","receiver":{"url":"`+okReceiverURL+`"},"price":5,
 			"audience":{"type":"restricted","agents":["`+namedName+`"],"extra":1}},
 		"budget": 10, "open": true}`))
@@ -90,13 +90,13 @@ func TestTask12RestrictedTaskThroughTools(t *testing.T) {
 		"budget": 10,
 		"open":   true,
 	})
-	env, status = CallTool(ctx, &deps, "bounty_create", pub, args)
+	env, status = CallTool(ctx, &deps, "task_create", pub, args)
 	if status != 200 || env["ok"] != true {
-		t.Fatalf("bounty_create: %d %v", status, env["error"])
+		t.Fatalf("task_create: %d %v", status, env["error"])
 	}
 	aud, _ := env["audience"].(map[string]any)
 	if aud["type"] != "restricted" {
-		t.Fatalf("bounty_create audience = %#v", env["audience"])
+		t.Fatalf("task_create audience = %#v", env["audience"])
 	}
 	code, _ := env["code"].(string)
 

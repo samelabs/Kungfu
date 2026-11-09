@@ -578,7 +578,7 @@ function tcvWriteListStateToURL() {
 
 function tcvLoadList() {
     tcvReadListStateFromURL();
-    tcvCall('bounty_list', {
+    tcvCall('task_list', {
         q: tcvListState.q || undefined,
         status: tcvListState.status === 'all' ? undefined : tcvListState.status,
         page: tcvListState.page,
@@ -656,7 +656,7 @@ function tcvRenderSimpleForm() {
         // is capped at 2^53-1 server-side (task.MaxAmount); anything
         // larger is silently corrupted by JS Number, so refuse it here.
         if (!Number.isSafeInteger(budget)) { tcvOpText(tcvT('total_too_large'), false); return; }
-        tcvCall('bounty_create', {
+        tcvCall('task_create', {
             contract: r.contract,
             budget,
             open: qs('#tcvSOpen').checked
@@ -668,8 +668,8 @@ function tcvRenderSimpleForm() {
 }
 
 // ---- the task workspace pages (WO-20): one section per page. The
-// overview (/) and edit (/edit) pages load bounty_get only; the
-// deliveries page (/deliveries) loads bounty_submissions only; nothing
+// overview (/) and edit (/edit) pages load task_get only; the
+// deliveries page (/deliveries) loads task_submissions only; nothing
 // else is requested on any of them. ----
 
 // tcvTaskCodeFromPath reads {code} out of /owner/tasks/{code}[/edit |
@@ -696,7 +696,7 @@ function tcvEditorInit() {
         return;
     }
     // task_detail — the overview
-    tcvCall('bounty_get', {code}).then((env) => {
+    tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { tcvRenderEditorError(env); return; }
         tcvRenderOverview(code, env);
     }).catch((error) => {
@@ -815,12 +815,12 @@ function tcvContractSummaryHTML(view) {
 `;
 }
 
-// tcvRenderOverview is /owner/tasks/{code}: ONLY bounty_get. The task
+// tcvRenderOverview is /owner/tasks/{code}: ONLY task_get. The task
 // itself leads — header, the ALWAYS-visible edit affordance (primary
 // while paused, grayed out otherwise), the read-only contract summary
 // and the lifecycle actions; budget and statistics follow as the side
 // rail (left on wide screens, stacked after the task on phones). No
-// contract form, no memory_list, no bounty_submissions.
+// contract form, no memory_list, no task_submissions.
 function tcvRenderOverview(code, view) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
@@ -859,27 +859,27 @@ function tcvRenderOverview(code, view) {
     </div>`;
 
     const on = (id, fn) => { const el = qs(id); if (el) el.addEventListener('click', fn); };
-    on('#tcvOpen', () => tcvAskConfirm(tcvT('confirm_open'), () => tcvLifecycle(code, 'bounty_open')));
-    on('#tcvPause', () => tcvAskConfirm(tcvT('confirm_pause'), () => tcvLifecycle(code, 'bounty_pause')));
-    on('#tcvClose', () => tcvAskConfirm(tcvT('confirm_close'), () => tcvLifecycle(code, 'bounty_close')));
+    on('#tcvOpen', () => tcvAskConfirm(tcvT('confirm_open'), () => tcvLifecycle(code, 'task_open')));
+    on('#tcvPause', () => tcvAskConfirm(tcvT('confirm_pause'), () => tcvLifecycle(code, 'task_pause')));
+    on('#tcvClose', () => tcvAskConfirm(tcvT('confirm_close'), () => tcvLifecycle(code, 'task_close')));
     on('#tcvRefund', () => tcvAskConfirm(
         tcvT('confirm_refund', {amount: Number(view.available ?? 0)}),
-        () => tcvLifecycle(code, 'bounty_refund')));
+        () => tcvLifecycle(code, 'task_refund')));
     on('#tcvFund', () => {
         const amount = Number(qs('#tcvFundAmount').value || 0);
-        tcvLifecycle(code, 'bounty_fund', {code, amount});
+        tcvLifecycle(code, 'task_fund', {code, amount});
     });
 
 }
 
-// tcvRenderEditPage is /owner/tasks/{code}/edit: ONLY bounty_get, then
+// tcvRenderEditPage is /owner/tasks/{code}/edit: ONLY task_get, then
 // the contract form while the task is paused. Anything else explains
 // why editing is unavailable.
 function tcvRenderEditPage(code) {
     const root = qs('#taskEditorRoot');
     if (!root) return;
     const back = `<p><a class="btn" href="/owner/tasks/${tcvEscapeHtml(code)}">${escapeHtml(tcvT('back_to_overview'))}</a></p>`;
-    tcvCall('bounty_get', {code}).then((env) => {
+    tcvCall('task_get', {code}).then((env) => {
         if (!env.ok) { root.innerHTML = back + tcvStatusLine(env); return; }
         const status = env.status || 'paused';
         if (status !== 'paused') {
@@ -911,7 +911,7 @@ function tcvRenderEditPage(code) {
             const r = form.read();
             tcvClearFieldErrors();
             if (!r.ok) { tcvClientInvalid(r); return; }
-            tcvCall('bounty_update', {code, contract: r.contract}).then((saveEnv) => {
+            tcvCall('task_update', {code, contract: r.contract}).then((saveEnv) => {
                 if (!saveEnv.ok) { tcvOpFailure(saveEnv); return; }
                 // back to the overview with the saved notice
                 window.location.href = `/owner/tasks/${code}?saved=1`;
@@ -923,7 +923,7 @@ function tcvRenderEditPage(code) {
 }
 
 // tcvRenderDeliveriesPage is /owner/tasks/{code}/deliveries: ONLY
-// bounty_submissions, with the state filter and page carried in the URL
+// task_submissions, with the state filter and page carried in the URL
 // (?state=&page=). The API returns no title, so the code heads the
 // page.
 function tcvRenderDeliveriesPage(code) {
@@ -994,7 +994,7 @@ function tcvLoadSubmissions(code, state, page) {
     history.replaceState(null, '', `/owner/tasks/${code}/deliveries` + (query ? `?${query}` : ''));
     const args = {code, page, page_size: 20};
     if (state) args.state = state;
-    tcvCall('bounty_submissions', args).then((env) => {
+    tcvCall('task_submissions', args).then((env) => {
         if (!env.ok) { box.innerHTML = tcvStatusLine(env); return; }
         const rows = env.submissions || [];
         const total = Number(env.total ?? rows.length);

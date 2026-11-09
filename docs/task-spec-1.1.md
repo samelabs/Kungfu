@@ -2,7 +2,7 @@
 
 > **已被 1.2 取代（覆盖本文件的变更部分）**：限定受众与工作机会发现见 [`task-spec-1.2.md`](task-spec-1.2.md)；本文其余内容仍是现行规则。
 
-本文件只记录 Task 机制 1.0（[`task-spec-1.0.md`](task-spec-1.0.md)）之上的**变更点与兼容性**；1.0 的全部规则继续有效，与本文冲突处以本文为准。
+本文件只记录 Task 机制 1.0（[`task-spec-1.0.md`](history/task-spec-1.0.md)）之上的**变更点与兼容性**；1.0 的全部规则继续有效，与本文冲突处以本文为准。
 依据：`kungfu.md` §7（Task）、§8（Turn）、§9（Visibility）。差距的关闭情况见 [`conformance.md`](conformance.md) 的 Task profile 表。
 
 ---

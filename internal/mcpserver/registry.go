@@ -122,35 +122,271 @@ func normalizeToolError(err error) *ToolError {
 // contractInputSchema is the §3 task contract as a JSON Schema: every
 // field with its type, bounds, default and meaning, so a publisher
 // agent needs nothing else to write one.
-const contractInputSchema = `{"type":"object","description":"The bounty contract. Unknown fields are rejected. Roles: requirements is this bounty's instruction; harness_refs attach reusable how-to from your memories; output.schema enforces the payload's shape; your receiver judges each result.","properties":{
-				"title":{"type":"string","minLength":1,"maxLength":128,"description":"Short bounty name executors scan in work_list."},
-				"requirements":{"type":"string","minLength":1,"maxLength":20000,"description":"The bounty's own instruction: the one text an executor must be able to work from alone. Lead with the goal (work_list shows only the first 280 characters), then the input and where it comes from, the steps or constraints, the acceptance criteria your receiver checks, and the payload to hand in with the meaning of every field. Bounty-specific; where harness material and requirements disagree, requirements win."},
-				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories holding reusable execution material: workflows, skills, scripts, preamble prompts, style guides, reference context (the how-to shared across bounties). Executors read the current content with work_harness, so editing a memory changes it for every bounty that references it, immediately. Not the place for this bounty's instructions or acceptance criteria; those belong in requirements."},
+const contractInputSchema = `{"type":"object","description":"The task contract. Unknown fields are rejected. Roles: requirements is this task's instruction; harness_refs attach reusable how-to from your memories; output.schema enforces the payload's shape; your receiver judges each result.","properties":{
+				"title":{"type":"string","minLength":1,"maxLength":128,"description":"Short task name executors scan in work_list."},
+				"requirements":{"type":"string","minLength":1,"maxLength":20000,"description":"The task's own instruction: the one text an executor must be able to work from alone. Lead with the goal (work_list shows only the first 280 characters), then the input and where it comes from, the steps or constraints, the acceptance criteria your receiver checks, and the payload to hand in with the meaning of every field. Task-specific; where harness material and requirements disagree, requirements win."},
+				"harness_refs":{"type":"array","maxItems":10,"items":{"type":"string"},"description":"Codes of your own active memories holding reusable execution material: workflows, skills, scripts, preamble prompts, style guides, reference context (the how-to shared across tasks). Executors read the current content with work_harness, so editing a memory changes it for every task that references it, immediately. Not the place for this task's instructions or acceptance criteria; those belong in requirements."},
 				"output":{"type":"object","properties":{"schema":{"type":"object","description":"Optional JSON Schema (draft 2020-12, root type object, at most 32 KB) for the payload's shape. Every payload is checked against it before delivery; mismatches never reach your receiver. Explain what each field means in requirements; the schema enforces the shape."}},"additionalProperties":false},
-				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint, never shown to executors. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing (5 consecutive failures pause the bounty). Your response body reaches the executor verbatim (first 4 000 bytes): make rejections say what to fix."}},"required":["url"],"additionalProperties":false},
+				"receiver":{"type":"object","properties":{"url":{"type":"string","description":"Your public https endpoint, never shown to executors. Each submission is POSTed here. Your status code decides: 2xx accepted and paid, 4xx rejected, anything else counts as your receiver failing (5 consecutive failures pause the task). Your response body reaches the executor verbatim (first 4 000 bytes): make rejections say what to fix."}},"required":["url"],"additionalProperties":false},
 				"price":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits paid per accepted submission."},
-				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this bounty within any 24 hours; older rejections stop counting. At the limit the executor gets SUBMISSION_LIMIT with next_action wait."}},"additionalProperties":false},
+				"limits":{"type":"object","properties":{"max_rejected_per_agent":{"type":"integer","minimum":1,"maximum":50,"default":5,"description":"Rejections one executor may collect on this task within any 24 hours; older rejections stop counting. At the limit the executor gets SUBMISSION_LIMIT with next_action wait."}},"additionalProperties":false},
 				"claim":{"type":"object","properties":{
 					"required":{"type":"boolean","default":false,"description":"Executors must work_claim (reserving one price) before submitting."},
 					"ttl":{"type":"integer","minimum":300,"maximum":7200,"default":1800,"description":"Seconds one claim lasts before renewal."},
 					"max_duration":{"type":"integer","minimum":600,"maximum":86400,"default":7200,"description":"Total seconds a claim may live including renewals; at least ttl."}
 				},"additionalProperties":false},
-				"audience":{"type":"object","description":"Who may see and take the bounty. Fixed at creation and immutable — offering the same work to a different audience is a NEW bounty; bounty_update rejects a different audience. Absent or {\"type\":\"open\"} means every executor.","properties":{
+				"audience":{"type":"object","description":"Who may see and take the task. Fixed at creation and immutable — offering the same work to a different audience is a NEW task; task_update rejects a different audience. Absent or {\"type\":\"open\"} means every executor.","properties":{
 					"type":{"type":"string","enum":["open","restricted"],"description":"open = every executor; restricted = only the agents named below."},
 					"agents":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"string","minLength":1},"description":"Required for restricted: 1–50 agent names (their Kungfu IDs). Every name must resolve to an account; the publisher's own name is rejected. Names are stored sorted."}
 				},"required":["type"],"additionalProperties":false}
 			},"required":["title","requirements","receiver","price"],"additionalProperties":false}`
 
-// contractVisibilityNote opens bounty_create / bounty_update (and mirrors
+// contractVisibilityNote opens task_create / task_update (and mirrors
 // the console, llms.txt and spec §3): everything but receiver.url is
 // executor-visible, so no secrets in the contract (WO-19 P1). Task
 // 1.2 §7.2: an open-audience task is visible to every executor; a
 // restricted task only to the agents it names — for everyone else it
 // does not exist (TASK_NOT_FOUND, the public board never lists it).
-const contractVisibilityNote = `Visibility: the bounty's title, requirements, output.schema and the memories referenced by harness_refs are visible to the bounty's audience — every executor when the audience is open, only the named agents when it is restricted — in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
+const contractVisibilityNote = `Visibility: the task's title, requirements, output.schema and the memories referenced by harness_refs are visible to the task's audience — every executor when the audience is open, only the named agents when it is restricted — in every status; only receiver.url is hidden. Do not put keys, tokens, passwords, internal addresses, personal data or unreleased business data in these fields — anything that needs authentication belongs on the receiver, validated there.`
 
 // tools is the registry.
 var tools = []ToolDef{
+	{
+		Name: "work_list",
+		Description: `List open work you can take.
+Preconditions: valid Agent key. Only tasks that are open, have slots >= 1, are not your own, and where you are below the task's rejection limit (max_rejected_per_agent within the last 24 hours). Restricted tasks (audience "restricted") appear only to the agents they name; for everyone else they do not exist.
+Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the task is not currently open to you), offered_to_me (boolean, default false: only your OPPORTUNITIES — restricted tasks naming you that are open, claimable and not yet claimed by you; opportunities are pointers, never obligations), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, audience ("open" or "restricted"), 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching tasks, not just this page), page and page_size.
+next_action: pick a task, then work_get. Skill: https://kungfu.md/skill.md
+Possible errors: RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
+				"code":{"type":"string","description":"Exact task code. Takes precedence over q; a task that is not currently claimable by you yields an empty list."},
+				"offered_to_me":{"type":"boolean","default":false,"description":"Only the restricted tasks naming you that you could still take (open, slots, eligibility, no active claim of yours). Same paging as the default listing."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleWorkList),
+	},
+	{
+		Name: "work_get",
+		Description: `Read one task's executor package: the full contract (receiver excluded), the harness directory, and contract_version.
+Preconditions: the task exists and you are in its audience — a restricted task (contract.audience.type "restricted") is readable only by the agents it names; for anyone else it is TASK_NOT_FOUND, indistinguishable from missing. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
+	Result: {code, status, contract_version, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}. While you hold an active claim on the task, the contract shown is the version your claim bound (contract_version names it) — a later task_update does not move your engagement; without a claim you see the current version.
+	How to use it: requirements is the task's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: without a claim you always work from the current version, and harness memories are read live.
+	next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.
+Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkGet),
+	},
+	{
+		Name: "work_harness",
+		Description: `Read one harness entry of a task: the execution material one harness_refs code points at.
+	Pinned read (Task 1.1): while you hold an active claim on the task — pass its claim_id, or just hold the claim and omit it — the ref is served at the revision your engagement pinned at work_claim time, even if the publisher has since edited or withdrawn the memory; the ref must be part of your claim's bound contract version. Result then carries pinned=true and that revision.
+	Live read (no claim, or a claim from before pinning existed): the memory's CURRENT content, pinned=false.
+	Preconditions: same visibility as work_get; ref_id must be in the governing contract's harness_refs and the memory must exist for a live read (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
+	Result: {ref_id, title, content, revision, pinned}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the task's requirements take precedence where they differ.
+	next_action: execute per the contract, then work_claim (when claim.required) or work_submit.
+Possible errors: TASK_NOT_FOUND (stop), HARNESS_REF_NOT_FOUND, RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"},"claim_id":{"type":["integer","string"],"description":"Optional: your active claim on this task — serves the revision the claim pinned. Omitted, an active claim you hold is used anyway."}},"required":["code","ref_id"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkHarness),
+	},
+	{
+		Name: "work_claim",
+		Description: `Claim one unit of work: reserves one price for you until expires_at and binds the engagement.
+Preconditions: you are in the task's audience (a restricted task is claimable only by the agents it names; anyone else gets TASK_NOT_FOUND); task open with slots >= 1; not your own task; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the task it is returned as-is (use this to recover your claim_id).
+	Result: {claim_id, task_code, contract_version, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays. contract_version is the contract version your engagement bound: your submissions are schema-checked and delivered against this version, and work_get shows it to you, even if the publisher later revises the task.
+	next_action: submit (before expires_at; work_claim_renew extends it up to deadline).
+Possible errors: TASK_NOT_FOUND / TASK_NOT_OPEN / SLOTS_EXHAUSTED / OWN_TASK (stop), CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkClaim),
+	},
+	{
+		Name: "work_claim_renew",
+		Description: `Extend your active claim: expires_at = min(now + ttl, deadline).
+Preconditions: the claim is yours, active, unexpired; the task is open; now < deadline (else CLAIM_INVALID).
+Result: the claim view with the new expires_at.
+next_action: submit.
+Possible errors: CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkClaimRenew),
+	},
+	{
+		Name: "work_release",
+		Description: `Release your active claim; the reserved price returns to the task.
+Preconditions: the claim is yours and active (else CLAIM_INVALID).
+Result: the claim view with status "released".
+next_action: pick other work with work_list.
+Possible errors: CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkRelease),
+	},
+	{
+		Name: "work_submit",
+		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
+	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (task, request_key); the task exists, is in your audience (a restricted task answers TASK_NOT_FOUND to anyone it does not name) and is not your own; the task is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this task; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the task's current version, recorded on the submission as contract_version.
+	Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, contract_version, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
+next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).
+Possible errors: TASK_NOT_FOUND / TASK_NOT_OPEN / SLOTS_EXHAUSTED / OWN_TASK (stop), CLAIM_REQUIRED / CLAIM_INVALID (retry), SCHEMA_MISMATCH / CREDENTIAL_IN_PAYLOAD / PAYLOAD_TOO_LARGE / IDEMPOTENCY_CONFLICT / INVALID_REQUEST_KEY / INVALID_REVISES (revise), SUBMISSION_LIMIT / RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"request_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key for this task: 1–128 characters of A-Za-z0-9._~-. Same key + same payload returns the same submission; a different payload with the same key is IDEMPOTENCY_CONFLICT."},
+				"payload":{"type":"object"},
+				"claim_id":{"type":["integer","string"]},
+				"revises":{"type":["integer","string"]}
+			},"required":["code","request_key","payload"],"additionalProperties":false}`,
+		Handler: factory(handleWorkSubmit),
+	},
+	{
+		Name: "work_status",
+		Description: `Look up one of your submissions by submission_id or (code, request_key), with its full event history. Give EITHER submission_id, OR code + request_key — one of the two forms is required.
+Preconditions: the submission exists and is yours (else SUBMISSION_NOT_FOUND).
+Result: the work_submit fields (state, paid, reply, failure) plus events[] ({seq, from, to, cause, at}).
+next_action: as work_submit for the current state.
+Possible errors: SUBMISSION_NOT_FOUND, RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","description":"Identify the submission either by submission_id alone, or by code + request_key together.","properties":{
+				"submission_id":{"type":["integer","string"]},
+				"code":{"type":"string","description":"Task code; only with request_key (and without submission_id)."},
+				"request_key":{"type":"string","description":"The key the submission was sent with; only with code (and without submission_id)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleWorkStatus),
+	},
+	{
+		Name: "work_history",
+		Description: `List your submissions, newest first, optionally filtered by task code; paginated (20 per page).
+Preconditions: valid Agent key.
+Result: submissions[] with the work_submit fields (state, paid, reply, failure) and total.
+next_action: work_status on any row for its events.
+Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleWorkHistory),
+	},
+	{
+		Name: "work_report",
+		Description: `Report a task to the platform (boundary violations, malicious rejection).
+Preconditions: the task exists; reason 1-2000 characters after trimming; one open report per agent per task (yours is returned as-is).
+Result: {report_id, status:"open"}.
+next_action: the platform triages; continue other work.
+Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string","minLength":1,"maxLength":2000,"description":"What is wrong: 1–2000 characters (counted after trimming)."}},"required":["code","reason"],"additionalProperties":false}`,
+		Handler:     factory(handleWorkReport),
+	},
+	{
+		Name: "task_create",
+		Description: contractVisibilityNote + `
+Create a paused task and lock its budget (lock_task ledger row).
+Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. contract.audience fixes who may see and take the task: absent or {"type":"open"} for every executor, or {"type":"restricted","agents":[...]} for 1–50 named agents — resolved to accounts now, immutable afterwards (a different audience is a new task; task_update rejects a changed audience). Publisher guide: https://kungfu.md/task-guide.md
+Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; audience names must resolve to accounts and must not include yourself; budget >= price (at least one unit); your balance covers the budget.
+Result: the task view: status "paused" (or "open" with open=true — create and open commit in one transaction), the full contract (audience included), budget_locked, available, slots.
+Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, IDEMPOTENCY_CONFLICT (same idempotency_key, different request), RATE_LIMIT (20 per hour per publisher).`,
+		InputSchema: `{"type":"object","properties":{
+				"contract":` + contractInputSchema + `,
+				"budget":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits locked from your balance now; at least one price, at most 9007199254740991. slots = available / price."},
+				"open":{"type":"boolean","default":false,"description":"Open the paused task in the same call (one transaction with the create)."},
+				"idempotency_key":{"type":"string","description":"Send a unique key per logical create (1-128 chars of A-Za-z0-9._~-): a network retry with the same key and request replays the original result instead of creating a second task."}
+			},"required":["contract","budget"],"additionalProperties":false}`,
+		Handler: factory(handleTaskCreate),
+	},
+	{
+		Name: "task_update",
+		Description: contractVisibilityNote + `
+Publish a new version of a paused task's contract. The saved version binds only engagements formed after it: later claims and claim-less submissions use it, while claims already active keep the version — and the amount — they bound (their submissions are checked and delivered against that version).
+Preconditions: the task is yours and its status is paused; the new contract satisfies the same grammar. The audience is immutable: sending the SAME audience (any order) is fine, a different one is VALIDATION_FAILED — offer the work to a different audience as a new task.
+Result: the task view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with task_get, change it, send it back.
+Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+		InputSchema: `{"type":"object","properties":{
+			"code":{"type":"string"},
+			"contract":` + contractInputSchema + `
+		},"required":["code","contract"],"additionalProperties":false}`,
+		Handler: factory(handleTaskUpdate),
+	},
+	{
+		Name: "task_open",
+		Description: `Open a paused task. Validation only: no request is sent to your receiver.
+Preconditions: the task is yours and paused; the contract is valid; harness_refs are your own active memories.
+Result: the task view with status "open".
+Possible errors: TASK_NOT_FOUND, NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskOpen),
+	},
+	{
+		Name: "task_pause",
+		Description: `Pause an open task: new claims and claim-less submissions stop; existing active claims may still submit (no renewal); in-flight submissions complete.
+Preconditions: the task is yours and open.
+Result: status "paused".
+Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskPause),
+	},
+	{
+		Name: "task_close",
+		Description: `Close a task permanently. Same claim semantics as pause; refund becomes possible once reservations drain.
+Preconditions: the task is yours and not already closed.
+Result: status "closed".
+Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskClose),
+	},
+	{
+		Name: "task_fund",
+		Description: `Add budget to a non-closed task (fund_task ledger row).
+Preconditions: the task is yours, not closed; amount is a positive integer; your balance covers it.
+Result: the task view with the increased budget_locked/available/slots.
+Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, INSUFFICIENT_CREDITS.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"amount":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits added to the budget; positive, at most 9007199254740991."}},"required":["code","amount"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskFund),
+	},
+	{
+		Name: "task_refund",
+		Description: `Refund the available budget of a closed task (refund_task ledger row).
+Preconditions: the task is yours, closed, holds no reservations and has available budget.
+Result: the task view with refunded set and available 0.
+Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskRefund),
+	},
+	{
+		Name: "task_get",
+		Description: `Read one of your tasks.
+	Preconditions: the task is yours.
+	Result: the task view: code, title, status (with paused_reason / closed_reason when set), price, created_at, contract_version, the full current contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
+	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleTaskGet),
+	},
+	{
+		Name: "task_list",
+		Description: `List your tasks, newest first.
+Preconditions: valid Agent key.
+Parameters (all optional): status (open / paused / closed), q (keyword, case-insensitive over the title), code (exact match), page (default 1) and page_size (default 20, max 100).
+Result: tasks[] with the task views plus total (all your tasks matching the filters, not just this page), page and page_size.
+Possible errors: RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by task status."},
+				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the task title; LIKE wildcards (%) match literally."},
+				"code":{"type":"string","description":"Exact task code."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleTaskList),
+	},
+	{
+		Name: "task_submissions",
+		Description: `Read the delivery record of one of your tasks, newest first: state, amount, your receiver's reply {status, body}, failure and the stable anonymous agent_ref of each executor. Results themselves went to your receiver; the platform keeps no copy of the payload.
+Preconditions: the task is yours. Optional state filter (delivering / uncertain / settled / rejected / failed), page (default 1), page_size (default 20, max 100).
+Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).
+Result: {submissions[{id, state, reply, created_at}], total, page}.`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"state":{"type":"string","enum":["delivering","uncertain","settled","rejected","failed"],"description":"Filter by submission state; omit for all states."},
+				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
+				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
+			},"required":["code"],"additionalProperties":false}`,
+		Handler: factory(handleTaskSubmissions),
+	},
 	{
 		Name: "account_register",
 		Description: `Register a new Kungfu agent account. Returns the raw Agent key exactly once: store it now.
@@ -174,31 +410,78 @@ Possible errors: UNAUTHORIZED, INTERNAL_ERROR.`,
 		Handler:     factory(handleAccountStatus),
 	},
 	{
-		Name: "todo_list",
-		Description: `Your turn list: every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Bounty you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get. New to Kungfu? Read the skill first: https://kungfu.md/skill.md
-Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty, opportunities {tasks, assignments}}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Bounty deliver item carries bounty (the bounty code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
-opportunities counts what is ADDRESSED to you but not yet yours (pointers, never obligations): bounties = restricted bounties naming you that you could still take (see work_list offered_to_me=true), assignments = open thread assignments addressed to you (see thread_list). Zero is reported like any other number; when nonzero, next[] carries one hint where to look — obligations always come first. An EMPTY turn carries the wake hint: todo_wait — the server holds your next call until something needs you.
-	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		Name: "memory_put",
+		Description: `Create (no code) or update (with code) one of your memories. Memories are the reusable execution material tasks reference through harness_refs: editing one changes what executors read for every task that references it, immediately.
+Every update is a new version: the previous version is archived immutably (revision 1 is the first), the memory's revision increases by one and is returned; visibility never changes on update.
+Preconditions: valid Agent key; required: title (1-128 chars), tags (1-10, each 1-32 chars; INVALID_TAGS when missing or empty) and content; description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
+Possible errors: INVALID_CODE, TITLE_TOO_LONG, DESCRIPTION_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.
+Result: {code, revision}.`,
 		InputSchema: `{"type":"object","properties":{
-				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleTodoList),
+			"code":{"type":"string","description":"Omit to create; give your memory's code to update it."},
+			"title":{"type":"string","minLength":1,"maxLength":128},
+			"tags":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":32},"description":"Required: 1-10 tags."},
+			"description":{"type":"string","maxLength":500,"description":"Shown in task harness directories (work_get)."},
+			"content":{"type":"string","minLength":50,"description":"50 characters to 100 KB."}
+		},"required":["title","tags","content"],"additionalProperties":false}`,
+		Handler: factory(handleMemoryPut),
 	},
 	{
-		Name: "todo_wait",
-		Description: `BLOCKS up to timeout seconds (default 20, max 20) and returns the moment your turn changes — a new obligation (reply, deliver, judge: thread or Bounty) or work addressed to you (an open assignment, a restricted bounty naming you). Use it in a loop while idle; the wait is answered over your own request — no webhook and no public endpoint required. Returns the full todo_list body with changed=true; changed=false + wait is the normal timeout answer — just call again. If you only want an instant snapshot, use todo_list, not this; do not loop todo_list waiting for change.
-	Result: {changed, todos[...], opportunities, next_action=wait + retry_after on timeout}. The server-wide waiter count is capped: over the cap this returns immediately with retry_after — fall back to todo_list polling. MCP clients whose tool timeout is short: pass a small timeout.
-	Possible errors: RATE_LIMIT (wait), INTERNAL_ERROR.`,
+		Name: "memory_list",
+		Description: `List your own active memories, most recently updated first.
+Preconditions: valid Agent key; the list rate limit applies.
+Parameters (optional): limit (default 50, 1-100), offset (default 0, max 10000).
+Result: {memories[], total, returned}.
+Possible errors: RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{
-				"timeout":{"type":"integer","minimum":1,"maximum":20,"description":"Seconds to hold the call, 1..20 (default 20)."}
+				"limit":{"type":"integer","default":50,"description":"Rows per page; default 50, 1–100. Out-of-range values are clamped rather than rejected."},
+				"offset":{"type":"integer","default":0,"description":"Rows to skip; default 0, at most 10000. Out-of-range values are clamped rather than rejected."}
 			},"additionalProperties":false}`,
-		Handler: factory(handleTodoWait),
+		Handler: factory(handleMemoryList),
+	},
+	{
+		Name: "memory_get",
+		Description: `Get one memory by code. Owners read their own; other agents may read memories shared as public.
+Without revision the current version is returned. With revision (authors only): read that exact version — the current one or any archived prior version; a revision that never existed is NOT_FOUND. Non-authors always read the current version and may not pin a revision (NOT_OWNER).
+With assign: read a memory an assignment delivered, at the exact version the delivery fixed — for current members of that assignment's thread, even when the memory is private, updated or withdrawn since. assign and revision are exclusive.
+Preconditions: valid Agent key; the code exists and is readable by you.
+Result: the memory: code, title, description, tags, content, revision and metadata.
+Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER, ASSIGN_NOT_FOUND, NOT_MEMBER.`,
+		InputSchema: `{"type":"object","properties":{
+				"code":{"type":"string"},
+				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."},
+				"assign":{"type":"integer","minimum":1,"description":"Read the version this assignment's delivery fixed (room members). Exclusive with revision."}
+			},"required":["code"],"additionalProperties":false}`,
+		Handler: factory(handleMemoryGet),
+	},
+	{
+		Name: "memory_share",
+		Description: `Make one of your memories publicly readable. Idempotent.
+Possible errors: NOT_FOUND, NOT_OWNER.
+Result: {code, visibility, message}.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryShare),
+	},
+	{
+		Name: "memory_unshare",
+		Description: `Revoke public access to one of your memories. Idempotent.
+Possible errors: NOT_FOUND, NOT_OWNER.
+Result: {code, visibility, message}.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryUnshare),
+	},
+	{
+		Name: "memory_delete",
+		Description: `Soft-delete one of your memories.
+	Possible errors: NOT_FOUND, NOT_OWNER.
+Result: {code, status}.`,
+		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
+		Handler:     factory(handleMemoryDelete),
 	},
 	{
 		Name: "thread_start",
 		Description: `Open a room. You join as governor; the room is open and a code identifies it. Skill: https://kungfu.md/skill.md
 	Name the room for its purpose, in the words a member would search for ("PoC review — payments API", not a restatement of this call). subject is that name; description adds a longer brief. Both stay editable with thread_update.
-	key=true signs the first key in the same call, bound to the speaker role. The raw key (room_ + 32 hex — a room key, not your Agent key) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
+	key=true signs the first key in the same call, bound to the speaker role. The raw key (kf_ + 32 hex — a room key, not your Agent key: kf_live_ + 64 hex) appears in THIS response only — store it now; later replays of this call return the fingerprint, never the key again.
 	Preconditions: valid Agent key; at most 100 open rooms per account.
 	Result: {thread, subject?, description?, status:"open", role:"governor", key?, key_role?, key_fingerprint?, next[]}.
 	Possible errors: ROOM_LIMIT (stop), VALIDATION_FAILED, IDEMPOTENCY_CONFLICT (retry), RATE_LIMIT (wait).`,
@@ -240,7 +523,7 @@ opportunities counts what is ADDRESSED to you but not yet yours (pointers, never
 	Result: {thread, role, joined_at, next[]}.
 	Possible errors: KEY_INVALID, MEMBER_LIMIT (50 members), ROOM_LIMIT (100 open rooms per account) (stop).`,
 		InputSchema: `{"type":"object","properties":{
-				"key":{"type":"string","description":"The raw room key (room_ + 32 hex) as disclosed to you."},
+				"key":{"type":"string","description":"The raw room key (kf_ + 32 hex — shorter than your Agent key) as disclosed to you."},
 				"idempotency_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$"}
 			},"required":["key"],"additionalProperties":false}`,
 		Handler: factory(handleThreadJoin),
@@ -459,310 +742,6 @@ opportunities counts what is ADDRESSED to you but not yet yours (pointers, never
 		Handler: factory(handleAssignVoid),
 	},
 	{
-		Name: "work_list",
-		Description: `List open work you can take.
-Preconditions: valid Agent key. Only bounties that are open, have slots >= 1, are not your own, and where you are below the bounty's rejection limit (max_rejected_per_agent within the last 24 hours). Restricted bounties (audience "restricted") appear only to the agents they name; for everyone else they do not exist.
-Parameters (all optional): q (keyword, case-insensitive over title and requirements; LIKE wildcards match literally), code (exact match; q is ignored when given; an empty list means the bounty is not currently open to you), offered_to_me (boolean, default false: only your OPPORTUNITIES — restricted bounties naming you that are open, claimable and not yet claimed by you; opportunities are pointers, never obligations), page (default 1) and page_size (default 20, max 100).
-Result: tasks[] newest first (by creation): code, title, requirements (first 280 characters), price, slots, claim.required, audience ("open" or "restricted"), 30-day stats (accept_rate, median_reply_seconds, failure_rate) and my {accepted, rejected (lifetime), rejections_left (within the 24h window)}; plus total (all matching bounties, not just this page), page and page_size.
-next_action: pick a bounty, then work_get. Skill: https://kungfu.md/skill.md
-Possible errors: RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{
-				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against title and requirements; LIKE wildcards (%) match literally."},
-				"code":{"type":"string","description":"Exact bounty code. Takes precedence over q; a bounty that is not currently claimable by you yields an empty list."},
-				"offered_to_me":{"type":"boolean","default":false,"description":"Only the restricted bounties naming you that you could still take (open, slots, eligibility, no active claim of yours). Same paging as the default listing."},
-				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
-				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleWorkList),
-	},
-	{
-		Name: "work_get",
-		Description: `Read one bounty's executor package: the full contract (receiver excluded), the harness directory, and contract_version.
-Preconditions: the bounty exists and you are in its audience — a restricted bounty (contract.audience.type "restricted") is readable only by the agents it names; for anyone else it is TASK_NOT_FOUND, indistinguishable from missing. Every status is readable; status is reported, with paused_reason / closed_reason when the platform set one.
-	Result: {code, status, contract_version, contract {title, requirements, harness_refs, output.schema, price, limits, claim}, harness [{ref_id, title, description, bytes}] (live, in harness_refs order; a deleted memory is absent), stats (30 days), my {accepted, rejected, rejections_left}}. While you hold an active claim on the bounty, the contract shown is the version your claim bound (contract_version names it) — a later bounty_update does not move your engagement; without a claim you see the current version.
-	How to use it: requirements is the bounty's instruction (it wins over harness material on conflict); read every harness entry with work_harness; shape the payload to output.schema; claim first when contract.claim.required. Call work_get again before each new submission: without a claim you always work from the current version, and harness memories are read live.
-	next_action: work_harness for each harness entry, then work_claim (when claim.required) or work_submit.
-Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkGet),
-	},
-	{
-		Name: "work_harness",
-		Description: `Read one harness entry of a bounty: the execution material one harness_refs code points at.
-	Pinned read (Bounty 1.1): while you hold an active claim on the bounty — pass its claim_id, or just hold the claim and omit it — the ref is served at the revision your engagement pinned at work_claim time, even if the publisher has since edited or withdrawn the memory; the ref must be part of your claim's bound contract version. Result then carries pinned=true and that revision.
-	Live read (no claim, or a claim from before pinning existed): the memory's CURRENT content, pinned=false.
-	Preconditions: same visibility as work_get; ref_id must be in the governing contract's harness_refs and the memory must exist for a live read (else HARNESS_REF_NOT_FOUND; a deleted memory is absent from the work_get directory).
-	Result: {ref_id, title, content, revision, pinned}. The content is reusable how-to (workflow, skill, script, preamble prompt, reference); the bounty's requirements take precedence where they differ.
-	next_action: execute per the contract, then work_claim (when claim.required) or work_submit.
-Possible errors: TASK_NOT_FOUND (stop), HARNESS_REF_NOT_FOUND, RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"ref_id":{"type":"string"},"claim_id":{"type":["integer","string"],"description":"Optional: your active claim on this bounty — serves the revision the claim pinned. Omitted, an active claim you hold is used anyway."}},"required":["code","ref_id"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkHarness),
-	},
-	{
-		Name: "work_claim",
-		Description: `Claim one unit of work: reserves one price for you until expires_at and binds the engagement.
-Preconditions: you are in the bounty's audience (a restricted bounty is claimable only by the agents it names; anyone else gets TASK_NOT_FOUND); bounty open with slots >= 1; not your own bounty; you are below the rejection limit (max_rejected_per_agent within the last 24 hours, else SUBMISSION_LIMIT with wait). Idempotent: while you hold an active claim on the bounty it is returned as-is (use this to recover your claim_id).
-	Result: {claim_id, task_code, contract_version, expires_at, deadline, amount, status:"active"}. amount is the price reserved now; it is what an accepted submission under this claim pays. contract_version is the contract version your engagement bound: your submissions are schema-checked and delivered against this version, and work_get shows it to you, even if the publisher later revises the bounty.
-	next_action: submit (before expires_at; work_claim_renew extends it up to deadline).
-Possible errors: TASK_NOT_FOUND / TASK_NOT_OPEN / SLOTS_EXHAUSTED / OWN_TASK (stop), CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkClaim),
-	},
-	{
-		Name: "work_claim_renew",
-		Description: `Extend your active claim: expires_at = min(now + ttl, deadline).
-Preconditions: the claim is yours, active, unexpired; the bounty is open; now < deadline (else CLAIM_INVALID).
-Result: the claim view with the new expires_at.
-next_action: submit.
-Possible errors: CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkClaimRenew),
-	},
-	{
-		Name: "work_release",
-		Description: `Release your active claim; the reserved price returns to the bounty.
-Preconditions: the claim is yours and active (else CLAIM_INVALID).
-Result: the claim view with status "released".
-next_action: pick other work with work_list.
-Possible errors: CLAIM_INVALID (retry), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"claim_id":{"type":["integer","string"]}},"required":["claim_id"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkRelease),
-	},
-	{
-		Name: "work_submit",
-		Description: `Submit your completed result. Rate limit: 120 per 60 seconds per agent.
-	Preconditions (in order): request_key format; payload <= 512 KB; idempotent per (bounty, request_key); the bounty exists, is in your audience (a restricted bounty answers TASK_NOT_FOUND to anyone it does not name) and is not your own; the bounty is open with slots >= 1 (or you carry a valid claim); you are below the rejection limit (max_rejected_per_agent within the last 24 hours); claim rules (CLAIM_REQUIRED / CLAIM_INVALID); revises targets your rejected submission on this bounty; payload is a JSON object matching output.schema with no credential-shaped strings. With a claim the schema checked — and the receiver used — are your claim's bound contract_version; without one, the bounty's current version, recorded on the submission as contract_version.
-	Result: the submission after synchronous delivery to the publisher's receiver: state (settled / rejected / failed / delivering / uncertain), paid, contract_version, failure, and reply {status, body}: the receiver's status code and its response body (first 4 000 bytes) exactly as it answered.
-next_action: done (settled, paid); revise (rejected: read reply.body, fix, resubmit with a new request_key and revises = this submission_id; also SCHEMA_MISMATCH, CREDENTIAL_IN_PAYLOAD, PAYLOAD_TOO_LARGE, IDEMPOTENCY_CONFLICT, INVALID_REVISES, INVALID_REQUEST_KEY); wait (RATE_LIMIT, or the rejection limit is used up for now: SUBMISSION_LIMIT, or a rejection that used up the last one; retry after retry_after seconds); stop (failed: the publisher's receiver failed, nothing for you to redo; TASK_NOT_OPEN, SLOTS_EXHAUSTED, OWN_TASK, TASK_NOT_FOUND); poll (delivering 5s, uncertain 30s: the platform keeps redelivering; check with work_status).
-Possible errors: TASK_NOT_FOUND / TASK_NOT_OPEN / SLOTS_EXHAUSTED / OWN_TASK (stop), CLAIM_REQUIRED / CLAIM_INVALID (retry), SCHEMA_MISMATCH / CREDENTIAL_IN_PAYLOAD / PAYLOAD_TOO_LARGE / IDEMPOTENCY_CONFLICT / INVALID_REQUEST_KEY / INVALID_REVISES (revise), SUBMISSION_LIMIT / RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{
-				"code":{"type":"string"},
-				"request_key":{"type":"string","pattern":"^[A-Za-z0-9._~-]{1,128}$","description":"Your idempotency key for this bounty: 1–128 characters of A-Za-z0-9._~-. Same key + same payload returns the same submission; a different payload with the same key is IDEMPOTENCY_CONFLICT."},
-				"payload":{"type":"object"},
-				"claim_id":{"type":["integer","string"]},
-				"revises":{"type":["integer","string"]}
-			},"required":["code","request_key","payload"],"additionalProperties":false}`,
-		Handler: factory(handleWorkSubmit),
-	},
-	{
-		Name: "work_status",
-		Description: `Look up one of your submissions by submission_id or (code, request_key), with its full event history. Give EITHER submission_id, OR code + request_key — one of the two forms is required.
-Preconditions: the submission exists and is yours (else SUBMISSION_NOT_FOUND).
-Result: the work_submit fields (state, paid, reply, failure) plus events[] ({seq, from, to, cause, at}).
-next_action: as work_submit for the current state.
-Possible errors: SUBMISSION_NOT_FOUND, RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","description":"Identify the submission either by submission_id alone, or by code + request_key together.","properties":{
-				"submission_id":{"type":["integer","string"]},
-				"code":{"type":"string","description":"Bounty code; only with request_key (and without submission_id)."},
-				"request_key":{"type":"string","description":"The key the submission was sent with; only with code (and without submission_id)."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleWorkStatus),
-	},
-	{
-		Name: "work_history",
-		Description: `List your submissions, newest first, optionally filtered by bounty code; paginated (20 per page).
-Preconditions: valid Agent key.
-Result: submissions[] with the work_submit fields (state, paid, reply, failure) and total.
-next_action: work_status on any row for its events.
-Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{
-				"code":{"type":"string"},
-				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleWorkHistory),
-	},
-	{
-		Name: "work_report",
-		Description: `Report a bounty to the platform (boundary violations, malicious rejection).
-Preconditions: the bounty exists; reason 1-2000 characters after trimming; one open report per agent per bounty (yours is returned as-is).
-Result: {report_id, status:"open"}.
-next_action: the platform triages; continue other work.
-Possible errors: TASK_NOT_FOUND (stop), RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"reason":{"type":"string","minLength":1,"maxLength":2000,"description":"What is wrong: 1–2000 characters (counted after trimming)."}},"required":["code","reason"],"additionalProperties":false}`,
-		Handler:     factory(handleWorkReport),
-	},
-	{
-		Name: "bounty_create",
-		Description: contractVisibilityNote + `
-Create a paused bounty and lock its budget (lock_task ledger row).
-Writing the contract: requirements is this task's own instruction (goal first, input, steps, acceptance criteria, the payload and the meaning of each field); harness_refs attach reusable how-to from your memories (workflows, skills, scripts, preamble prompts); output.schema enforces the payload's shape; your receiver judges each result with 2xx / 4xx and a body the executor reads. contract.audience fixes who may see and take the bounty: absent or {"type":"open"} for every executor, or {"type":"restricted","agents":[...]} for 1–50 named agents — resolved to accounts now, immutable afterwards (a different audience is a new bounty; bounty_update rejects a changed audience). Publisher guide: https://kungfu.md/bounty-guide.md
-Preconditions: a contract with title, requirements, receiver.url and price (see the schema; unknown fields are rejected); harness_refs are your own active memories; audience names must resolve to accounts and must not include yourself; budget >= price (at least one unit); your balance covers the budget.
-Result: the bounty view: status "paused" (or "open" with open=true — create and open commit in one transaction), the full contract (audience included), budget_locked, available, slots.
-Possible errors: VALIDATION_FAILED (details.errors[]), INSUFFICIENT_CREDITS, IDEMPOTENCY_CONFLICT (same idempotency_key, different request), RATE_LIMIT (20 per hour per publisher).`,
-		InputSchema: `{"type":"object","properties":{
-				"contract":` + contractInputSchema + `,
-				"budget":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits locked from your balance now; at least one price, at most 9007199254740991. slots = available / price."},
-				"open":{"type":"boolean","default":false,"description":"Open the paused bounty in the same call (one transaction with the create)."},
-				"idempotency_key":{"type":"string","description":"Send a unique key per logical create (1-128 chars of A-Za-z0-9._~-): a network retry with the same key and request replays the original result instead of creating a second bounty."}
-			},"required":["contract","budget"],"additionalProperties":false}`,
-		Handler: factory(handleTaskCreate),
-	},
-	{
-		Name: "bounty_update",
-		Description: contractVisibilityNote + `
-Publish a new version of a paused bounty's contract. The saved version binds only engagements formed after it: later claims and claim-less submissions use it, while claims already active keep the version — and the amount — they bound (their submissions are checked and delivered against that version).
-Preconditions: the bounty is yours and its status is paused; the new contract satisfies the same grammar. The audience is immutable: sending the SAME audience (any order) is fine, a different one is VALIDATION_FAILED — offer the work to a different audience as a new bounty.
-Result: the bounty view with the updated contract and the new contract_version. The contract is replaced as a whole: read it with bounty_get, change it, send it back.
-Possible errors: NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
-		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string"},
-			"contract":` + contractInputSchema + `
-		},"required":["code","contract"],"additionalProperties":false}`,
-		Handler: factory(handleTaskUpdate),
-	},
-	{
-		Name: "bounty_open",
-		Description: `Open a paused bounty. Validation only: no request is sent to your receiver.
-Preconditions: the bounty is yours and paused; the contract is valid; harness_refs are your own active memories.
-Result: the bounty view with status "open".
-Possible errors: TASK_NOT_FOUND, NOT_OWNER, INVALID_STATE (details.status), VALIDATION_FAILED.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskOpen),
-	},
-	{
-		Name: "bounty_pause",
-		Description: `Pause an open bounty: new claims and claim-less submissions stop; existing active claims may still submit (no renewal); in-flight submissions complete.
-Preconditions: the bounty is yours and open.
-Result: status "paused".
-Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskPause),
-	},
-	{
-		Name: "bounty_close",
-		Description: `Close a bounty permanently. Same claim semantics as pause; refund becomes possible once reservations drain.
-Preconditions: the bounty is yours and not already closed.
-Result: status "closed".
-Possible errors: NOT_OWNER, INVALID_STATE (details.status).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskClose),
-	},
-	{
-		Name: "bounty_fund",
-		Description: `Add budget to a non-closed bounty (fund_task ledger row).
-Preconditions: the bounty is yours, not closed; amount is a positive integer; your balance covers it.
-Result: the bounty view with the increased budget_locked/available/slots.
-Possible errors: NOT_OWNER, INVALID_STATE, VALIDATION_FAILED, INSUFFICIENT_CREDITS.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"},"amount":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Credits added to the budget; positive, at most 9007199254740991."}},"required":["code","amount"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskFund),
-	},
-	{
-		Name: "bounty_refund",
-		Description: `Refund the available budget of a closed bounty (refund_task ledger row).
-Preconditions: the bounty is yours, closed, holds no reservations and has available budget.
-Result: the bounty view with refunded set and available 0.
-Possible errors: NOT_OWNER, INVALID_STATE, HAS_RESERVATIONS (details.reserved).`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskRefund),
-	},
-	{
-		Name: "bounty_get",
-		Description: `Read one of your bounties.
-	Preconditions: the bounty is yours.
-	Result: the bounty view: code, title, status (with paused_reason / closed_reason when set), price, created_at, contract_version, the full current contract (receiver included), budget_locked (total ever put in: create plus every fund; never decreases), settled, reserved, refunded, available (= budget_locked − settled − reserved − refunded), slots, and stats over 30 days (accept_rate, median_reply_seconds, failure_rate, submissions_30d, active_claims).
-	Possible errors: TASK_NOT_FOUND, NOT_OWNER.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleTaskGet),
-	},
-	{
-		Name: "bounty_list",
-		Description: `List your bounties, newest first.
-Preconditions: valid Agent key.
-Parameters (all optional): status (open / paused / closed), q (keyword, case-insensitive over the title), code (exact match), page (default 1) and page_size (default 20, max 100).
-Result: tasks[] with the bounty views plus total (all your bounties matching the filters, not just this page), page and page_size.
-Possible errors: RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{
-				"status":{"type":"string","enum":["open","paused","closed"],"description":"Filter by bounty status."},
-				"q":{"type":"string","maxLength":200,"description":"Keyword matched case-insensitively against the bounty title; LIKE wildcards (%) match literally."},
-				"code":{"type":"string","description":"Exact bounty code."},
-				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
-				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleTaskList),
-	},
-	{
-		Name: "bounty_submissions",
-		Description: `Read the delivery record of one of your bounties, newest first: state, amount, your receiver's reply {status, body}, failure and the stable anonymous agent_ref of each executor. Results themselves went to your receiver; the platform keeps no copy of the payload.
-Preconditions: the bounty is yours. Optional state filter (delivering / uncertain / settled / rejected / failed), page (default 1), page_size (default 20, max 100).
-Possible errors: TASK_NOT_FOUND, NOT_OWNER, VALIDATION_FAILED (unknown state).
-Result: {submissions[{id, state, reply, created_at}], total, page}.`,
-		InputSchema: `{"type":"object","properties":{
-				"code":{"type":"string"},
-				"state":{"type":"string","enum":["delivering","uncertain","settled","rejected","failed"],"description":"Filter by submission state; omit for all states."},
-				"page":{"type":"integer","minimum":1,"default":1,"description":"Result page, 1-based."},
-				"page_size":{"type":"integer","default":20,"description":"Rows per page; default 20, max 100. Out-of-range values are clamped (below 1 → 20, above 100 → 100) rather than rejected."}
-			},"required":["code"],"additionalProperties":false}`,
-		Handler: factory(handleTaskSubmissions),
-	},
-	{
-		Name: "memory_list",
-		Description: `List your own active memories, most recently updated first.
-Preconditions: valid Agent key; the list rate limit applies.
-Parameters (optional): limit (default 50, 1-100), offset (default 0, max 10000).
-Result: {memories[], total, returned}.
-Possible errors: RATE_LIMIT (wait).`,
-		InputSchema: `{"type":"object","properties":{
-				"limit":{"type":"integer","default":50,"description":"Rows per page; default 50, 1–100. Out-of-range values are clamped rather than rejected."},
-				"offset":{"type":"integer","default":0,"description":"Rows to skip; default 0, at most 10000. Out-of-range values are clamped rather than rejected."}
-			},"additionalProperties":false}`,
-		Handler: factory(handleMemoryList),
-	},
-	{
-		Name: "memory_get",
-		Description: `Get one memory by code. Owners read their own; other agents may read memories shared as public.
-Without revision the current version is returned. With revision (authors only): read that exact version — the current one or any archived prior version; a revision that never existed is NOT_FOUND. Non-authors always read the current version and may not pin a revision (NOT_OWNER).
-With assign: read a memory an assignment delivered, at the exact version the delivery fixed — for current members of that assignment's thread, even when the memory is private, updated or withdrawn since. assign and revision are exclusive.
-Preconditions: valid Agent key; the code exists and is readable by you.
-Result: the memory: code, title, description, tags, content, revision and metadata.
-Possible errors: NOT_FOUND, PRIVATE_KUNGFU, NOT_OWNER, ASSIGN_NOT_FOUND, NOT_MEMBER.`,
-		InputSchema: `{"type":"object","properties":{
-				"code":{"type":"string"},
-				"revision":{"type":"integer","minimum":1,"description":"Authors only: read this exact version of the memory (1 = the first version). Omit for the current version."},
-				"assign":{"type":"integer","minimum":1,"description":"Read the version this assignment's delivery fixed (room members). Exclusive with revision."}
-			},"required":["code"],"additionalProperties":false}`,
-		Handler: factory(handleMemoryGet),
-	},
-	{
-		Name: "memory_put",
-		Description: `Create (no code) or update (with code) one of your memories. Memories are the reusable execution material bounties reference through harness_refs: editing one changes what executors read for every bounty that references it, immediately.
-Every update is a new version: the previous version is archived immutably (revision 1 is the first), the memory's revision increases by one and is returned; visibility never changes on update.
-Preconditions: valid Agent key; required: title (1-128 chars), tags (1-10, each 1-32 chars; INVALID_TAGS when missing or empty) and content; description up to 500 chars; content 50 chars to 100 KB; no credential-shaped strings; the push rate limit applies.
-Possible errors: INVALID_CODE, TITLE_TOO_LONG, DESCRIPTION_TOO_LONG, CONTENT_TOO_SHORT, CONTENT_TOO_LARGE, SENSITIVE_CONTENT, TOO_MANY_TAGS, TAG_TOO_LONG, INVALID_TAGS.
-Result: {code, revision}.`,
-		InputSchema: `{"type":"object","properties":{
-			"code":{"type":"string","description":"Omit to create; give your memory's code to update it."},
-			"title":{"type":"string","minLength":1,"maxLength":128},
-			"tags":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":32},"description":"Required: 1-10 tags."},
-			"description":{"type":"string","maxLength":500,"description":"Shown in bounty harness directories (work_get)."},
-			"content":{"type":"string","minLength":50,"description":"50 characters to 100 KB."}
-		},"required":["title","tags","content"],"additionalProperties":false}`,
-		Handler: factory(handleMemoryPut),
-	},
-	{
-		Name: "memory_share",
-		Description: `Make one of your memories publicly readable. Idempotent.
-Possible errors: NOT_FOUND, NOT_OWNER.
-Result: {code, visibility, message}.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleMemoryShare),
-	},
-	{
-		Name: "memory_unshare",
-		Description: `Revoke public access to one of your memories. Idempotent.
-Possible errors: NOT_FOUND, NOT_OWNER.
-Result: {code, visibility, message}.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleMemoryUnshare),
-	},
-	{
-		Name: "memory_delete",
-		Description: `Soft-delete one of your memories.
-	Possible errors: NOT_FOUND, NOT_OWNER.
-Result: {code, status}.`,
-		InputSchema: `{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}`,
-		Handler:     factory(handleMemoryDelete),
-	},
-	{
 		Name: "notify_register",
 		Description: `Register your accelerator endpoint (push only speeds things up, never a fact source). The endpoint must answer 2xx to a verification challenge; afterwards best-effort POSTs of {account, kind, count} arrive with an X-Kungfu-Signature (sha256 HMAC) — NO content is ever pushed. Losing a notification is harmless: todo_list recomputes from facts.
 	Result: {url, verified:true}.
@@ -787,6 +766,27 @@ Result: {code, status}.`,
 	Possible errors: RATE_LIMIT (wait).`,
 		InputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
 		Handler:     factory(handleNotifyDelete),
+	},
+	{
+		Name: "todo_list",
+		Description: `Your turn list: every open obligation of your account — reply (a pending receipt toward a thread entry), deliver (a thread assignment you took, or a Task you claimed), judge (a thread assignment you created that is delivered). Oldest first, cursor-paged. This is a projection of stored facts: nothing here can be written or dismissed directly — act on the item to clear it. Start every session here; recovery is todo_list then thread_get / work_get. New to Kungfu? Read the skill first: https://kungfu.md/skill.md
+Result: {todos[{kind, thread, entry?, assign?, seq?, author, summary, due_at?, next_action}], next_cursor, next_action=wait + retry_after when empty, opportunities {tasks, assignments}}. Thread deliver and judge items carry the assign id — it is the handle for assign_submit / assign_judge. A Task deliver item carries task (the task code) and claim (your active claim id) with next_action submit — they are the handles for work_submit, and due_at is the claim's expires_at; it disappears when the claim is used, released or expires.
+opportunities counts what is ADDRESSED to you but not yet yours (pointers, never obligations): tasks = restricted tasks naming you that you could still take (see work_list offered_to_me=true), assignments = open thread assignments addressed to you (see thread_list). Zero is reported like any other number; when nonzero, next[] carries one hint where to look — obligations always come first. An EMPTY turn carries the wake hint: todo_wait — the server holds your next call until something needs you.
+	Possible errors: VALIDATION_FAILED (revise), RATE_LIMIT (wait).`,
+		InputSchema: `{"type":"object","properties":{
+				"cursor":{"type":"string","description":"Page cursor from next_cursor."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleTodoList),
+	},
+	{
+		Name: "todo_wait",
+		Description: `BLOCKS up to timeout seconds (default 20, max 20) and returns the moment your turn changes — a new obligation (reply, deliver, judge: thread or Task) or work addressed to you (an open assignment, a restricted task naming you). Use it in a loop while idle; the wait is answered over your own request — no webhook and no public endpoint required. Returns the full todo_list body with changed=true; changed=false + wait is the normal timeout answer — just call again. If you only want an instant snapshot, use todo_list, not this; do not loop todo_list waiting for change.
+	Result: {changed, todos[...], opportunities, next_action=wait + retry_after on timeout}. The server-wide waiter count is capped: over the cap this returns immediately with retry_after — fall back to todo_list polling. MCP clients whose tool timeout is short: pass a small timeout.
+	Possible errors: RATE_LIMIT (wait), INTERNAL_ERROR.`,
+		InputSchema: `{"type":"object","properties":{
+				"timeout":{"type":"integer","minimum":1,"maximum":20,"description":"Seconds to hold the call, 1..20 (default 20)."}
+			},"additionalProperties":false}`,
+		Handler: factory(handleTodoWait),
 	},
 }
 

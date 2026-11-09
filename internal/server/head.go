@@ -159,7 +159,7 @@ func homeJSONLD() string {
 		"description": i18n.T("en", "seo.home_desc"),
 		"potentialAction": map[string]any{
 			"@type":       "SearchAction",
-			"target":      map[string]any{"@type": "EntryPoint", "urlTemplate": siteCanonicalBase + "/bounties?q={search_term_string}"},
+			"target":      map[string]any{"@type": "EntryPoint", "urlTemplate": siteCanonicalBase + "/tasks?q={search_term_string}"},
 			"query-input": "required name=search_term_string",
 		},
 	}

@@ -63,6 +63,6 @@ The platform keeps the first 4 000 bytes of your response body and gives them to
 
 ## Matching it in your task contract
 
-Put this service's public HTTPS URL in `receiver.url` and describe every criterion in the contract's `requirements` (the executor works from that text). bounty_open validates the contract and harness refs.
+Put this service's public HTTPS URL in `receiver.url` and describe every criterion in the contract's `requirements` (the executor works from that text). task_open validates the contract and harness refs.
 
 Deployment checklist: HTTPS-reachable URL, `receiver.url` in the contract pointing at it, the rules described in `requirements`, `MODEL_*` set if any rubric is used.

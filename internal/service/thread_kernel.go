@@ -38,23 +38,23 @@ const (
 
 // -- keys (§6.1, §2) --
 
-// generateThreadKey mints one key: raw "room_"+32hex (disclosed in
-// the first successful response only), sha256 hex digest (the only
-// stored form), and a non-secret fingerprint that survives idempotent
-// replay. The room_ prefix (3.2.0) keeps a room key visually distinct
-// from the Agent key (kf_live_+64hex): one admits you to a room, the
-// other IS the account. Join resolves by sha256 lookup, so keys
-// minted under the old kf_ prefix keep working unchanged.
+// generateThreadKey mints one key: raw "kf_"+32hex (disclosed in the
+// first successful response only), sha256 hex digest (the only stored
+// form), and a non-secret fingerprint that survives idempotent replay.
+// The room key and the Agent key share the kf_ family by design
+// (3.2.0 governance: no vocabulary variants on the wire); they differ
+// in shape — kf_+32hex admits to ONE room, kf_live_+64hex IS the
+// account — and the skill teaches the difference.
 func generateThreadKey() (raw, hash, fingerprint string, err error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", "", "", err
 	}
 	body := hex.EncodeToString(b)
-	raw = "room_" + body
+	raw = "kf_" + body
 	sum := sha256.Sum256([]byte(raw))
 	hash = hex.EncodeToString(sum[:])
-	fingerprint = "room_" + body[:4] + "…" + body[28:]
+	fingerprint = "kf_" + body[:4] + "…" + body[28:]
 	return raw, hash, fingerprint, nil
 }
 

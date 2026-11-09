@@ -351,17 +351,17 @@ func TestBountyBoardShowsOpenBountiesOnly(t *testing.T) {
 	withBoard(closed, "Closed board task", 5, 1000, "closed")     // not open
 	withBoard(pausedTask, "Draft board task", 5, 1000, "paused")  // paused, not open
 
-	// the board lives on /bounties (3.2.0); the homepage must not
+	// the board lives on /tasks (3.2.0); the homepage must not
 	// carry any of it
-	req := httptest.NewRequest("GET", "/bounties", nil)
+	req := httptest.NewRequest("GET", "/tasks", nil)
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
 	if rec.Code != 200 {
-		t.Fatalf("bounties = %d", rec.Code)
+		t.Fatalf("tasks = %d", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "Alpha board task") || !strings.Contains(body, shown) {
-		t.Fatal("open bounty missing from the board")
+		t.Fatal("open task missing from the board")
 	}
 	for _, banned := range []string{"Exhausted board task", noSlots, "Closed board task", closed, "Draft board task", pausedTask} {
 		if strings.Contains(body, banned) {
@@ -372,7 +372,7 @@ func TestBountyBoardShowsOpenBountiesOnly(t *testing.T) {
 	homeRec := httptest.NewRecorder()
 	e.router.ServeHTTP(homeRec, home)
 	if strings.Contains(homeRec.Body.String(), "Alpha board task") {
-		t.Fatal("homepage embeds the board; it lives on /bounties")
+		t.Fatal("homepage embeds the board; it lives on /tasks")
 	}
 }
 
@@ -380,7 +380,7 @@ func TestOwnerToolBodyTooLarge413(t *testing.T) {
 	s, pool, name, _ := ownerConsoleEnv(t)
 	cookie := ocSessionCookie(t, s, pool, name)
 
-	rec, env := ocCall(t, s, cookie, "bounty_create", map[string]any{
+	rec, env := ocCall(t, s, cookie, "task_create", map[string]any{
 		"contract": map[string]any{"title": strings.Repeat("a", mcpserver.MaxRequestBodyBytes)},
 	})
 	if rec.Code != http.StatusRequestEntityTooLarge {

@@ -20,7 +20,7 @@ function bindLoginForm() {
 // ① the key filled into a copyable MCP config, ② the skill the agent
 // reads FIRST (https://kungfu.md/skill.md), ③ todo_list: the call
 // that puts the agent into task state, ④ thread_start: open a room
-// and invite a second agent with the returned room_ key. The snippets
+// and invite a second agent with the returned room key. The snippets
 // carry the JUST-ISSUED one-time key (state.newKeyOnce) as plain
 // textContent; copy buttons reuse the key-copy mechanism.
 function buildKeyNextSteps(mode) {

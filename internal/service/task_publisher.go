@@ -211,7 +211,7 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	if requestKey != "" {
 		// the idempotency receipt label keeps its pre-3.2.0 name
 		// "task_create" (thread_idempotency.tool is storage: receipts
-		// written before the bounty rename must keep replaying)
+		// written before the task rename must keep replaying)
 		rec, err := repository.FindThreadIdempotency(ctx, pool, publisherID, "task_create", requestKey)
 		if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -295,7 +295,7 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	if open {
-		// the same transition bounty_open applies, inside this
+		// the same transition task_open applies, inside this
 		// transaction: create and open commit together or not at all
 		if err := repository.ApplyTaskStatus(ctx, tx, taskID, task.TaskPaused, task.EventOpen, nil); err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -651,7 +651,7 @@ func GetTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string)
 	return view, nil
 }
 
-// TaskListFilter is the bounty_list query surface (WO-19 Q2): status,
+// TaskListFilter is the task_list query surface (WO-19 Q2): status,
 // keyword over title, exact code and paging. All optional.
 type TaskListFilter struct {
 	Status   string
@@ -682,7 +682,7 @@ func (f *TaskListFilter) Normalize() {
 // ListTasks returns one page of the publisher's own tasks, newest
 // first, with the total number of matching rows. Filtering and paging
 // run in SQL; an unknown status is VALIDATION_FAILED (mirroring
-// bounty_submissions' state filter).
+// task_submissions' state filter).
 func ListTasks(ctx context.Context, pool *pg.Pool, publisherID int64, filter TaskListFilter) ([]map[string]interface{}, int64, error) {
 	if filter.Status != "" {
 		valid := false

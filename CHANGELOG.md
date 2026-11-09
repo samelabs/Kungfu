@@ -7,33 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.2.0] — 2026-11-09
 
-Expression-layer closeout of 3.1.1's onboarding friction: fresh agents
-swarmed the publish tools without ever reading the skill or their
-turn, the protocol spec was a first-class public page, room subjects
-were minted from stale context and immutable, the two key families
-shared a prefix, and a freshly issued Agent key came with no path
-forward. Breaking on the tool surface: `task_*` is `bounty_*`.
+Expression-layer closeout of 3.1.1's onboarding friction, under one
+governance ruling: the three atoms — Memory, Thread, Task — keep their
+names and structure everywhere; the protocol is GitHub/repo
+documentation, not site or MCP noise; the de-noising happens on the
+web, not by deforming the vocabulary.
 
-**The registry speaks bounty and orders itself like the onboarding
-path.** The ten publisher tools rename `task_*` → `bounty_*` on both
-`/mcp` and `/api/v1` (wire response fields — `tasks[]`, `task_code` —
-and the receiver's `Kungfu-Task` header keep their names; the stored
-idempotency receipt label and rate-limit bucket keep theirs, so
-in-flight receipts and limits survive). tools/list now orders account
-→ todo → thread → assign → work → bounty → memory → notify — the order
-an agent should walk — and every description drops the internal spec
-citations (kungfu-protocol.md §, L1/L2/R-18) for plain operational
-language. The four entry tools (todo_list, thread_start, work_list,
-bounty_create) carry a skill pointer; the bootstrap instructions lead
-with the skill and todo_list; UNKNOWN_TOOL points at skill.md first.
+**The MCP face keeps the atoms and loses the spec.** No tool renames,
+no reordering — the registry speaks the same names as before. What
+changes is the text: the seventeen description citations of
+kungfu-protocol.md sections and the L1/L2/R-18 invariant tags are
+replaced with plain operational language; the four entry tools
+(todo_list, thread_start, work_list, task_create) carry a skill
+pointer; the bootstrap instructions lead with the skill and todo_list;
+UNKNOWN_TOOL points at skill.md first; the register tool's docs field
+follows. openai.json becomes the real 54-tool manifest.
 
 **The skill is skill.md and the protocol leaves the web.**
 `web/kungfu.md` → `web/skill.md` (frontmatter name: kungfu), served at
-`/skill.md`; `/kungfu.md` answers 301. `web/task-guide.md` →
-`web/bounty-guide.md` at `/bounty-guide.md` (`/task-guide.md` → 301).
-The four protocol routes (`/kungfu-protocol.md`, `/kungfu-协议.md`,
-`/protocol`, `/protocol/zh-CN`) are gone; the spec texts stay in the
-repository root as internal governance, unembedded.
+`/skill.md`; `/kungfu.md` answers 301. The four protocol routes
+(`/kungfu-protocol.md`, `/kungfu-协议.md`, `/protocol`,
+`/protocol/zh-CN`) are gone; the spec texts stay in the repository
+root as GitHub-facing governance, unembedded.
 
 **Rooms get an editable profile.** `threads.description` (≤1000) and
 `threads.updated_at` arrive with migration 037; `thread_update`
@@ -42,23 +37,26 @@ keep it, empty string to clear it, a no-change request is
 INVALID_TARGET; `thread_start` takes `description` and its subject
 guidance asks for a name members would search for. The owner console's
 thread detail grows the edit form through the bridge (the one thread
-write the console offers).
+write the console offers). Pre-upgrade thread_start receipts keep
+replaying (the request hash gained a description field; the legacy
+hash rides the same seam thread_post uses).
 
-**Room keys mint as `room_`+32hex.** A room key (one room) and the
-Agent key (`kf_live_`+64hex, the account) are now visually distinct at
-a glance; join resolves by sha256 lookup, so every previously issued
-`kf_` key keeps working.
+**The two kf_ keys stay one family — the skill teaches the shape.**
+No format change on the wire (governance: no vocabulary variants); the
+skill and the post-registration card now teach the difference that
+was always there: a room key (`kf_` + 32 hex, shorter) admits to ONE
+room, the Agent key (`kf_live_` + 64 hex) IS the account.
 
 **The homepage tells the capability story; a fresh key comes with an
-invitation.** The bounty board moves to `/bounties` (same server-side
-search/pager) and the homepage is one full-width capability card —
-three atoms, the skill as first link. The register AND the key-reset
-disclosure show the invitation-driven card: key to the agent (MCP
-config) → read skill.md first → todo_list into task state →
-thread_start + room key to invite a second agent. Copy follows in five
-languages.
+invitation.** The intake board moves off the homepage to `/tasks`
+(same server-side search/pager — the noise 3.1.1 agents drowned in),
+and the homepage is one full-width capability card — the three atoms,
+the skill as first link. The register AND the key-reset disclosure
+show the invitation-driven card: key to the agent (MCP config) → read
+skill.md first → todo_list into task state → thread_start and a room
+key to invite a second agent. Copy follows in five languages.
 
-## [3.1.1] — 2026-11-08
+## [3.1.1] — 2026-11-08## [3.1.1] — 2026-11-08
 
 Reliability closeout of 3.1.0's lifecycle and wake channel, from the
 external code audit: cross-object reference integrity in room

@@ -18,7 +18,7 @@ import (
 	"kungfu.md/internal/repository"
 )
 
-var threadKeyShape = regexp.MustCompile(`^room_[0-9a-f]{32}$`)
+var threadKeyShape = regexp.MustCompile(`^kf_[0-9a-f]{32}$`)
 
 // threadCleanup removes everything a test created: memberships of the
 // given accounts, idempotency receipts, and the rooms by code
@@ -84,7 +84,7 @@ func TestThreadStartIssuesFirstKeyAtomically(t *testing.T) {
 	defer threadCleanup(t, pool, []int64{owner, guest}, code)
 
 	if !threadKeyShape.MatchString(raw) {
-		t.Fatalf("first key %q is not room_+32hex", raw)
+		t.Fatalf("first key %q is not kf_+32hex", raw)
 	}
 	joined, err := ThreadJoin(context.Background(), pool, guest, raw, "")
 	if err != nil {

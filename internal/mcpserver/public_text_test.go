@@ -1,7 +1,7 @@
 package mcpserver
 
 // WO-9a consistency tests: the public texts (llms.txt, skill.md,
-// bounty-guide.md, openai.json and the MCP bootstrap instructions) may
+// task-guide.md, openai.json and the MCP bootstrap instructions) may
 // only speak the real registry and the real error catalogue —
 // (a) every tool-shaped identifier they mention exists in ToolNames();
 // (b) every registered tool is documented in llms.txt;
@@ -21,7 +21,7 @@ import (
 
 var (
 	// toolIdent matches every tool-shaped identifier in prose.
-	textToolIdent = regexp.MustCompile(`\b(?:work|bounty|task|account|memory)_[a-z_]+\b`)
+	textToolIdent = regexp.MustCompile(`\b(?:work|task|account|memory)_[a-z_]+\b`)
 	// backtickCode matches a backtick-quoted ALL_CAPS_UNDERSCORE token.
 	backtickCode = regexp.MustCompile("`([A-Z][A-Z_]+[A-Z])`")
 )
@@ -73,7 +73,7 @@ func publicTexts(t *testing.T) []textFixture {
 	return []textFixture{
 		{"llms.txt", load("llms.txt")},
 		{"skill.md", load("skill.md")},
-		{"bounty-guide.md", load("bounty-guide.md")},
+		{"task-guide.md", load("task-guide.md")},
 		{"openai.json", load("openai.json")},
 		{"instructions", mcpBootstrapInstructions},
 	}

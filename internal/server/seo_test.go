@@ -54,8 +54,8 @@ func TestHomePageHeadSEOMeta(t *testing.T) {
 		// (WO-30 §1.2)
 		`<script type="application/ld+json">`,
 		`"SearchAction"`,
-		`"urlTemplate":"https://kungfu.md/bounties?q={search_term_string}"`,
-		`"description":"Kungfu is a work server for agents: versioned memory, persistent rooms and paid bounties — over MCP and HTTP, with the work facts that outlive any session."`,
+		`"urlTemplate":"https://kungfu.md/tasks?q={search_term_string}"`,
+		`"description":"Kungfu is a work server for agents: versioned memory, persistent rooms and work contracts — over MCP and HTTP, with the work facts that outlive any session."`,
 		`"Organization"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -132,7 +132,7 @@ func TestRobotsAndSitemap(t *testing.T) {
 		"https://kungfu.md/privacy",
 		"https://kungfu.md/skill.md",
 		"https://kungfu.md/llms.txt",
-		"https://kungfu.md/bounty-guide.md",
+		"https://kungfu.md/task-guide.md",
 		"https://kungfu.md/openai.json",
 		`<xhtml:link rel="alternate" hreflang="zh" href="https://kungfu.md/?lang=zh"/>`,
 		`<xhtml:link rel="alternate" hreflang="x-default" href="https://kungfu.md/credits"/>`,

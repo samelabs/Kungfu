@@ -42,8 +42,8 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 	switch page {
 	case "home":
 		s.renderHome(w, r, data)
-	case "bounties":
-		s.renderBounties(w, r, data)
+	case "tasks":
+		s.renderTasks(w, r, data)
 	case "credits":
 		s.renderCredits(w, r, data)
 	case "owner":
@@ -61,7 +61,7 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 
 // renderHome renders the capability-focused homepage (3.2.0): the
 // three atoms, the skill entry point and the todo_list start block —
-// the intake board moved to /bounties, one click away. The credits
+// the intake board moved to /tasks, one click away. The credits
 // purchase moved into the board's title row as a JS-free
 // <details> overlay, and the bottom credits block removed (the
 // /credits page keeps its own).
@@ -69,7 +69,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/")
 
-	extra := `<meta name="keywords" content="AI agent memory, agent storage, agent bounties, agent work, agent skills, llms.txt, openai.json, agent API">
+	extra := `<meta name="keywords" content="AI agent memory, agent storage, agent tasks, agent work, agent skills, llms.txt, openai.json, agent API">
     <meta name="application-name" content="Kungfu.md">
     <meta name="theme-color" content="#2f7c73">
     <meta name="msapplication-TileColor" content="#2f7c73">
@@ -119,7 +119,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
             <p class="intro-lede">` + data.T("home.intro_lede") + `</p>
             <div class="intro-links">
                 <a href="/skill.md"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l6 6v14H6V2zm7 1.5V9h5.5L13 3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg><span>` + data.T("home.skill_link") + `</span></a>
-                <a href="` + i18n.LocaleURL(data.Locale, "/bounties") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7Zm-3 19h6v-1H9v1Z"/></svg><span>` + data.T("home.bounties_link") + `</span></a>
+                <a href="` + i18n.LocaleURL(data.Locale, "/tasks") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7Zm-3 19h6v-1H9v1Z"/></svg><span>` + data.T("home.tasks_link") + `</span></a>
                 <a href="https://github.com/samelabs/Kungfu" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.1.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.58 9.58 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85V21c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg><span>` + data.T("home.source_link") + `</span></a>
             </div>
             <div class="capability-tags" aria-label="` + data.T("home.features_aria") + `">
@@ -150,10 +150,10 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
-// renderBounties is the public bounty board page (3.2.0): the intake
+// renderTasks is the public task board page (3.2.0): the intake
 // surface the homepage carried until it drowned the capability story —
 // now one click away, still fully searchable server-side.
-func (s *Server) renderBounties(w http.ResponseWriter, r *http.Request, data *tmplData) {
+func (s *Server) renderTasks(w http.ResponseWriter, r *http.Request, data *tmplData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	page := getQueryInt(r, "page", 1)
@@ -161,8 +161,8 @@ func (s *Server) renderBounties(w http.ResponseWriter, r *http.Request, data *tm
 		page = 1
 	}
 	page = clampPage(page, homeBoardPageSize)
-	board := s.buildBountyBoardHTML(r.Context(), data.Locale, q, page, "/bounties")
-	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/bounties")
+	board := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page, "/tasks")
+	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/tasks")
 
 	extra := `<link rel="stylesheet" href="/assets/site.css">
     <link rel="stylesheet" href="/assets/home.css">
@@ -170,9 +170,9 @@ func (s *Server) renderBounties(w http.ResponseWriter, r *http.Request, data *tm
 
 	html := buildHead(headInput{
 		Locale:    data.Locale,
-		Path:      "/bounties",
-		TitleKey:  "seo.bounties_title",
-		DescKey:   "seo.bounties_desc",
+		Path:      "/tasks",
+		TitleKey:  "seo.tasks_title",
+		DescKey:   "seo.tasks_desc",
 		ExtraHead: extra,
 	}) + `
 <body>
@@ -186,7 +186,7 @@ func (s *Server) renderBounties(w http.ResponseWriter, r *http.Request, data *tm
                 </div>
             </div>
             <div class="top-links">
-                <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("bounties.back_home") + `</a>
+                <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("tasks.back_home") + `</a>
                 <a class="btn owner-link" href="` + i18n.LocaleURL(data.Locale, "/owner") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z"/></svg><span>Owner</span></a>
             </div>
         </div>
@@ -258,15 +258,15 @@ func homeBoardURL(base, locale, q string, page int) string {
 	return base + "?" + params.Encode()
 }
 
-// buildBountyBoardHTML renders the public bounty board (WO-19 H1,
-// moved to /bounties in 3.2.0): the anonymous work_list SQL — open,
+// buildTaskBoardHTML renders the public task board (WO-19 H1,
+// moved to /tasks in 3.2.0): the anonymous work_list SQL — open,
 // at least one free slot — searched and paged server-side. A 12-hex
-// input is tried as an exact bounty code first and falls back to the
+// input is tried as an exact task code first and falls back to the
 // keyword search; each row shows the title, unit price, remaining
 // slots, a copyable code and a 140-rune requirements excerpt; the
 // pager keeps the query. Empty results of a search and a genuinely
 // empty board read differently.
-func (s *Server) buildBountyBoardHTML(ctx context.Context, locale, q string, page int, base string) string {
+func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page int, base string) string {
 	t := func(key string) string { return html.EscapeString(i18n.T(locale, key)) }
 
 	var rows []service.WorkBoardRow
@@ -283,7 +283,7 @@ func (s *Server) buildBountyBoardHTML(ctx context.Context, locale, q string, pag
 		rows, total, err = service.ListWorkBoard(ctx, s.Pool, q, "", page, homeBoardPageSize)
 	}
 	if err != nil {
-		log.Printf("bounty board: %v", err)
+		log.Printf("task board: %v", err)
 		return "<p>" + t("home.task_unavailable") + "</p>"
 	}
 
@@ -875,7 +875,7 @@ func ownerTasksConsoleHTML(d *tmplData) string {
             <p>` + d.T("owner.tasks.summary") + `</p>
         </div>
         <div class="section-head-actions">
-            <a class="btn" href="/bounty-guide.md">` + d.T("owner.nav.task_guide") + `</a>
+            <a class="btn" href="/task-guide.md">` + d.T("owner.nav.task_guide") + `</a>
             <a class="btn primary" href="` + i18n.LocaleURL(d.Locale, "/owner/tasks/new") + `" id="newTaskBtn">` + d.T("owner.tasks.new_task") + `</a>
         </div>
     </div>

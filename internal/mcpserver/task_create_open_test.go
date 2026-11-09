@@ -1,6 +1,6 @@
 package mcpserver
 
-// WO-11: bounty_create gains open=true (create + open in one call) and a
+// WO-11: task_create gains open=true (create + open in one call) and a
 // 20-per-hour publisher rate limit.
 
 import (
@@ -54,9 +54,9 @@ func TestTaskCreateOpenInOneCall(t *testing.T) {
 	pubKey, _, pubID := w11Register(t, pool)
 	ctx := context.Background()
 
-	env, status := CallTool(ctx, &deps, "bounty_create", wo7Bot(t, pool, pubID), w11Args(5, true))
+	env, status := CallTool(ctx, &deps, "task_create", wo7Bot(t, pool, pubID), w11Args(5, true))
 	if status != 200 || env["ok"] != true || env["status"] != task.TaskOpen {
-		t.Fatalf("bounty_create open=true: %d %v", status, env)
+		t.Fatalf("task_create open=true: %d %v", status, env)
 	}
 	code, _ := env["code"].(string)
 	// the version snapshot landed in the same call
@@ -70,9 +70,9 @@ func TestTaskCreateOpenInOneCall(t *testing.T) {
 	_ = pubKey
 
 	// open=false keeps the draft (the default)
-	env, status = CallTool(ctx, &deps, "bounty_create", wo7Bot(t, pool, pubID), w11Args(5, false))
+	env, status = CallTool(ctx, &deps, "task_create", wo7Bot(t, pool, pubID), w11Args(5, false))
 	if status != 200 || env["status"] != task.TaskPaused {
-		t.Fatalf("bounty_create open=false: %d %v", status, env)
+		t.Fatalf("task_create open=false: %d %v", status, env)
 	}
 }
 
@@ -88,12 +88,12 @@ func TestTaskCreateRateLimit20PerHour(t *testing.T) {
 
 	// 20 publishes pass, the 21st is RATE_LIMIT
 	for i := 0; i < 20; i++ {
-		env, status := CallTool(context.Background(), &deps, "bounty_create", bot, w11Args(5, false))
+		env, status := CallTool(context.Background(), &deps, "task_create", bot, w11Args(5, false))
 		if status != 200 || env["ok"] != true {
 			t.Fatalf("create %d: %d %v", i+1, status, env)
 		}
 	}
-	env, status := CallTool(context.Background(), &deps, "bounty_create", bot, w11Args(5, false))
+	env, status := CallTool(context.Background(), &deps, "task_create", bot, w11Args(5, false))
 	if status != 429 || env["ok"] != false || env["error"].(map[string]any)["code"] != "RATE_LIMIT" {
 		t.Fatalf("21st create: %d %v, want 429 RATE_LIMIT", status, env)
 	}

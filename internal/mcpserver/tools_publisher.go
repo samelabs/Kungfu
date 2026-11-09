@@ -31,7 +31,7 @@ func decodeContract(raw json.RawMessage) (task.Contract, error) {
 		field := "contract"
 		if strings.HasPrefix(msg, "json: unknown field ") {
 			field = strings.Trim(strings.TrimPrefix(msg, "json: unknown field "), `"`)
-			msg = "unknown field (see the bounty_create input schema)"
+			msg = "unknown field (see the task_create input schema)"
 		}
 		return c, contractError(field, msg)
 	}
@@ -46,9 +46,6 @@ func contractError(field, message string) error {
 func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	// §11: 20 creates per hour per publisher. Publisher tools carry a
 	// null next_action (WO-7b), so NoAction overrides RATE_LIMIT→wait.
-	// the rate-limit bucket keeps its pre-3.2.0 label "task_create"
-	// (config keys are storage: renaming it would silently lift the
-	// 20/hour cap for every deployed deployment mid-upgrade)
 	if !deps.limiter().CheckAgent(agent.ID, "task_create") {
 		retry := deps.limiter().CheckAgentWithDetails(agent.ID, "task_create").RetryAfter
 		return ToolResult{NoAction: true}, &ToolError{Code: "RATE_LIMIT", Message: "Rate limit exceeded",
@@ -208,7 +205,7 @@ func handleTaskSubmissions(ctx context.Context, deps *Deps, agent *model.Bot, ar
 	if err := decodeArgs(args, &in); err != nil || in.Code == "" {
 		return ToolResult{}, argError("code is required")
 	}
-	// Same paging rules as work_list / bounty_list (WO-28 B8): below 1 →
+	// Same paging rules as work_list / task_list (WO-28 B8): below 1 →
 	// default 20, above the 100 maximum → 100.
 	if in.Page < 1 {
 		in.Page = 1

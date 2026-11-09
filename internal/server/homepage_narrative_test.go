@@ -1,11 +1,11 @@
 package server
 
 // 3.2.0 homepage narrative: the homepage is the capability story — the
-// three atoms render in the fixed order Memory → Thread → Bounty
-// (then "Publish a bounty"), the title area links the skill and the
+// three atoms render in the fixed order Memory → Thread → Task
+// (then "Publish a task"), the title area links the skill and the
 // reference implementation (the protocol pages are off the public
 // face), the todo_list call example sits in the start block, the
-// intake board lives on /bounties (linked, not embedded), and no
+// intake board lives on /tasks (linked, not embedded), and no
 // public surface carries the retired slogans or describes Kungfu
 // itself as a harness/runtime/orchestration.
 
@@ -24,19 +24,19 @@ func TestHomePageThreeAtomsInOrder(t *testing.T) {
 	// "Publish a bounty" extending Bounty
 	mem := strings.Index(body, "<b>Memory</b>")
 	thr := strings.Index(body, "<b>Thread</b>")
-	bounty := strings.Index(body, "<b>Bounty</b>")
-	pub := strings.Index(body, "<b>Publish a bounty</b>")
-	for name, at := range map[string]int{"Memory": mem, "Thread": thr, "Bounty": bounty, "Publish a bounty": pub} {
+	task := strings.Index(body, "<b>Task</b>")
+	pub := strings.Index(body, "<b>Publish a task</b>")
+	for name, at := range map[string]int{"Memory": mem, "Thread": thr, "Task": task, "Publish a task": pub} {
 		if at < 0 {
 			t.Fatalf("homepage missing the %s card", name)
 		}
 	}
-	if !(mem < thr && thr < bounty && bounty < pub) {
-		t.Fatalf("atom cards out of order: Memory@%d Thread@%d Bounty@%d Publish@%d", mem, thr, bounty, pub)
+	if !(mem < thr && thr < task && task < pub) {
+		t.Fatalf("atom cards out of order: Memory@%d Thread@%d Task@%d Publish@%d", mem, thr, task, pub)
 	}
 
 	// the three short capability tags
-	for _, tag := range []string{">Memory</span>", ">Thread</span>", ">Bounty</span>"} {
+	for _, tag := range []string{">Memory</span>", ">Thread</span>", ">Task</span>"} {
 		if !strings.Contains(body, tag) {
 			t.Fatalf("homepage missing capability tag %q", tag)
 		}
@@ -46,7 +46,7 @@ func TestHomePageThreeAtomsInOrder(t *testing.T) {
 	// is retired and must not be linked
 	for _, want := range []string{
 		`<a href="/skill.md"`, "Read the skill</span>",
-		`href="/bounties`, "Browse bounties</span>",
+		`href="/tasks`, "Browse tasks</span>",
 		`href="https://github.com/samelabs/Kungfu"`, "Reference implementation on GitHub</span>",
 	} {
 		if !strings.Contains(body, want) {
@@ -60,11 +60,11 @@ func TestHomePageThreeAtomsInOrder(t *testing.T) {
 	// the intake board is its own page now: the homepage links it,
 	// the board markup stays off the capability story
 	if strings.Contains(body, "task-board-list") {
-		t.Fatal("homepage embeds the bounty board; it belongs on /bounties")
+		t.Fatal("homepage embeds the task board; it belongs on /tasks")
 	}
-	board := seoGet(t, s, "/bounties")
+	board := seoGet(t, s, "/tasks")
 	if !strings.Contains(board, "task-board-list") && !strings.Contains(board, "task-board-empty") {
-		t.Fatal("/bounties does not render the board")
+		t.Fatal("/tasks does not render the board")
 	}
 
 	// the start block: todo_list copy plus the literal MCP call (the
@@ -85,7 +85,7 @@ func TestHomePageThreeAtomsInOrder(t *testing.T) {
 	zh := seoGet(t, s, "/?lang=zh")
 	for _, want := range []string{
 		"Agent 工作服务器",
-		"<b>Memory</b>", "<b>Thread</b>", "<b>悬赏</b>", "<b>发布悬赏</b>",
+		"<b>Memory</b>", "<b>Thread</b>", "<b>Task</b>", "<b>发布任务</b>",
 		"每次会话从 todo_list 开始",
 		"阅读 skill", "GitHub 上的参考实现",
 	} {
@@ -104,7 +104,7 @@ func TestPublicSurfacesDropRetiredNarrative(t *testing.T) {
 	s := storeTestServer(t)
 
 	surfaces := map[string]string{}
-	for _, name := range []string{"llms.txt", "skill.md", "bounty-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
+	for _, name := range []string{"llms.txt", "skill.md", "task-guide.md", "openai.json", "sitemap.xml", "robots.txt"} {
 		raw, err := web.StaticFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
