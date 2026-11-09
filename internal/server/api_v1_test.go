@@ -36,7 +36,7 @@ func apiV1Env(t *testing.T) (*Server, string, int64, string) {
 		RateLimiter: ratelimit.NewLimiter(map[string]ratelimit.Config{}),
 	}
 	// publisher task on the accept-everything receiver
-	view, err := service.CreateTask(context.Background(), pool, apiV1Publisher(t, pool), apiV1Contract(), 1000)
+	view, err := service.CreateTask(context.Background(), pool, apiV1Publisher(t, pool), apiV1Contract(), 1000, false, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

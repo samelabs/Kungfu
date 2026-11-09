@@ -2,7 +2,7 @@
 
 > **已被 1.2 取代（覆盖本文件的变更部分）**：限定受众与工作机会发现见 [`task-spec-1.2.md`](task-spec-1.2.md)；本文其余内容仍是现行规则。
 
-本文件只记录 Task 机制 1.0（[`task-spec-1.0.md`](task-spec-1.0.md)）之上的**变更点与兼容性**；1.0 的全部规则继续有效，与本文冲突处以本文为准。
+本文件只记录 Task 机制 1.0（[`task-spec-1.0.md`](history/task-spec-1.0.md)）之上的**变更点与兼容性**；1.0 的全部规则继续有效，与本文冲突处以本文为准。
 依据：`kungfu.md` §7（Task）、§8（Turn）、§9（Visibility）。差距的关闭情况见 [`conformance.md`](conformance.md) 的 Task profile 表。
 
 ---
@@ -19,7 +19,7 @@
 ## 2. 输入固定（§7.1、§7.3、§9）
 
 - Claim 创建时，为绑定版本契约 `harness_refs` 中每条**当时存在**的发布者记忆固定 revision（`claim_harness_revisions(claim_id, memory_id, revision)`）；已删除的记忆不固定（读取行为与 1.0 一致：`HARNESS_REF_NOT_FOUND`）。
-- `work_harness(code, ref_id, claim_id?)`：带 `claim_id`、或调用方持有该任务的 active Claim 时，返回固定的 revision——即使发布者此后更新或撤回该记忆（§9 "input versions bound by an engagement" 对承接者恒可读）。不带 Claim 时行为同 1.0：实时读取当前内容（浏览用途）。
+- `work_harness(code, ref_id, claim_id?)`：带 `claim_id`、或调用方持有该任务的活跃承接时，返回固定的 revision——即使发布者此后更新或撤回该记忆（§9 "input versions bound by an engagement" 对承接者恒可读）。活跃承接 = active 且未过期，或已 used 但其 Submission 仍在途（delivering/uncertain：投递未决期间，绑定输入仍是执行者的工作材料）——显式 `claim_id` 与隐式发现共用这一判定，且与存储侧的回收保护一致：受保护即可读，不再保护即可回收。不带 Claim 时行为同 1.0：实时读取当前内容（浏览用途）。used 承接只读不可交：新提交仍要求 active 承接。
 - 无 Claim 的提交在 Submission 上记录提交时刻各 harness 的 revision（`harness_json`）。
 - 迁移前已存在的 Claim 没有固定记录，保持 1.0 的实时读取行为（向后兼容）。
 

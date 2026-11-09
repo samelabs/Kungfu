@@ -101,7 +101,7 @@ func TestTaskAudienceCreateValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := pubContract("")
 			c.Audience = tc.audience
-			_, err := CreateTask(ctx, pool, publisher, c, 100)
+			_, err := CreateTask(ctx, pool, publisher, c, 100, false, "")
 			appErr := appErrOf(t, err)
 			if appErr.Code != "VALIDATION_FAILED" {
 				t.Fatalf("code = %s, want VALIDATION_FAILED", appErr.Code)

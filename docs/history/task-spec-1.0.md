@@ -1,6 +1,6 @@
 # Kungfu Task 机制 1.0
 
-> **历史文本**：本文件描述 Task 1.0。现行机制为 [Task 1.1](task-spec-1.1.md)（契约版本、输入固定、承接事实、轮次融合）；与 1.1 的变更点冲突处，以 1.1 为准。1.0 的其余规则继续有效。
+> **历史文本**：本文件描述 Task 1.0。现行机制为 [Task 1.1](../task-spec-1.1.md)（契约版本、输入固定、承接事实、轮次融合）；与 1.1 的变更点冲突处，以 1.1 为准。1.0 的其余规则继续有效。
 
 本文件在 1.0 时是任务机制的唯一依据。实现、MCP / HTTP 表达、对外文本均由本文件导出。
 「必须」为强制；「可」为可选。
@@ -214,7 +214,7 @@ Kungfu-Task: <code>
 | 应答 | 结局 | `failure` |
 |---|---|---|
 | 2xx | `settled`，支付 `amount` | — |
-| 4xx | `rejected`，释放预留 | — |
+| 4xx | `rejected`，释放预留 | `REJECTED_BY_RECEIVER`（独立于响应体的可读原因，空响应体也有；原始应答照原样保留；不计入接收端故障治理） |
 | 5xx | `failed`，释放预留 | `RECEIVER_FAULT` |
 | 1xx；3xx | `failed`，释放预留 | `RECEIVER_PROTOCOL` |
 | 连接被拒；DNS 失败；TLS 握手失败（请求未发出） | `failed`，释放预留 | `RECEIVER_UNREACHABLE` |

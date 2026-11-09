@@ -190,7 +190,7 @@ func TestContractRevisionBindsOnlyLaterEngagements(t *testing.T) {
 
 // TestWorkGetServesBoundVersionToEngagedAgent: while an agent holds
 // an active claim, work_get shows the contract version the claim
-// bound (kungfu.md §9); everyone else sees the current version.
+// bound (kungfu-protocol.md §9); everyone else sees the current version.
 // task_get reports the publisher's current version.
 func TestWorkGetServesBoundVersionToEngagedAgent(t *testing.T) {
 	pool := pubTestPool(t)
@@ -451,4 +451,73 @@ func TestTask11ContractVersionUpgradeDrill(t *testing.T) {
 // nanoSuffix names the throwaway database of one drill run.
 func nanoSuffix() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000_000)
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
+// TestClaimBoundRejectionCapSurvivesRevision (launch-admission
+// finding): a claim's submission is governed by the contract version
+// it bound (Task 1.1 §1 / §7.1) — including the rejection cap. Two
+// rejections accumulated under v1 (cap 5) must NOT block a later
+// submission carried by a still-active v1 claim after the publisher
+// revises v2 with max_rejected_per_agent=1.
+func TestClaimBoundRejectionCapSurvivesRevision(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	rcv := startProgReceiver(t)
+	ctx := context.Background()
+
+	v1 := pubContract(rcv.url)
+	code := pubCreateForTest(t, pool, publisher, v1, 15)
+	if _, err := OpenTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	// two rejections under v1 (v1's default cap is 5)
+	for i := 1; i <= 2; i++ {
+		claim, err := ClaimTask(ctx, pool, agent, code, time.Now())
+		if err != nil {
+			t.Fatalf("claim %d: %v", i, err)
+		}
+		rcv.set(t, 422, `{"message":"missing source"}`)
+		ref := claim.ClaimID
+		view, err := SubmitWork(ctx, pool, agent, SubmitInput{
+			Code: code, ClaimID: &ref,
+			RequestKey: fmt.Sprintf("cap-rev-%d", i), Payload: []byte(submitPayloadOK),
+		}, testAgentRefKey, time.Now())
+		if err != nil || view.State != task.SubRejected {
+			t.Fatalf("submit %d: state=%s err=%v, want rejected", i, view.State, err)
+		}
+	}
+	// a third active claim still bound to v1
+	claim3, err := ClaimTask(ctx, pool, agent, code, time.Now())
+	if err != nil {
+		t.Fatalf("claim3: %v", err)
+	}
+
+	// the publisher revises: v2 tightens the cap to 1
+	if _, err := PauseTask(ctx, pool, publisher, code); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	v2 := pubContract(rcv.url)
+	v2.Limits.MaxRejectedPerAgent = ptrInt64(1)
+	if _, err := UpdateTask(ctx, pool, publisher, code, v2); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// the OLD claim's submission follows v1 (cap 5, counts 2): intake
+	// must succeed — not die on v2's cap of 1
+	rcv.set(t, 200, `{"message":"accepted"}`)
+	ref := claim3.ClaimID
+	view, err := SubmitWork(ctx, pool, agent, SubmitInput{
+		Code: code, ClaimID: &ref,
+		RequestKey: "cap-rev-3", Payload: []byte(submitPayloadOK),
+	}, testAgentRefKey, time.Now())
+	if err != nil {
+		t.Fatalf("bound submission blocked by the revised cap: %v", err)
+	}
+	if view.State != task.SubSettled {
+		t.Fatalf("state = %s, want settled", view.State)
+	}
 }

@@ -368,7 +368,7 @@ func InsertClaim(ctx context.Context, q pg.Querier, in NewClaimRow) (int64, erro
 
 const claimSelect = `
 	SELECT claim_id, task_id, agent_id, contract_version, expires_at, deadline, amount, status, created_at, updated_at
-	FROM tb_task_claim`
+	FROM tb_task_claim c`
 
 func scanClaim(row pgx.Row) (*ClaimRow, error) {
 	var c ClaimRow
@@ -838,9 +838,57 @@ func RecentTerminalOutcomes(ctx context.Context, q pg.Querier, taskID int64, lim
 
 // FindActiveClaimByTaskAgent returns the agent's active claim on the
 // task, or nil (spec §5.2: at most one active claim per agent+task).
+// Status-raw: an expired-yet-unswept claim IS returned — the claim
+// path needs it to expire it and release the reservation in the same
+// transaction (ClaimTask). Read paths that treat a claim as a live
+// engagement use FindLiveClaimByTaskAgent instead.
 func FindActiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64) (*ClaimRow, error) {
 	return scanClaim(q.QueryRow(ctx, claimSelect+`
 		WHERE task_id = $1 AND agent_id = $2 AND status = 'active'`, taskID, agentID))
+}
+
+// liveEngagement is the ONE engagement-validity predicate shared by
+// storage protection (thread_dispose.go) and reads (this file): a
+// claim row (alias c) is a live engagement while it says active — an
+// expired claim stays one until the recovery worker materializes the
+// expiry, because the row is the fact — or is used with its
+// submission still in flight (delivering/uncertain: the bound inputs
+// remain the executor's working material). Storage protection and
+// readable pins must never disagree.
+const liveEngagement = `(c.status = 'active'
+		OR (c.status = 'used' AND EXISTS (SELECT 1 FROM tb_task_submission s
+		        WHERE s.claim_id = c.claim_id
+		          AND s.state IN ('delivering', 'uncertain'))))`
+
+// ClaimHasInflightSubmission reports whether the claim's submission
+// is still in flight (delivering/uncertain) — the used-claim half of
+// liveEngagement, for service-layer validity checks.
+func ClaimHasInflightSubmission(ctx context.Context, q pg.Querier, claimID int64) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM tb_task_submission
+		               WHERE claim_id = $1 AND state IN ('delivering', 'uncertain'))`, claimID).Scan(&ok)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+// FindLiveClaimByTaskAgent is the engagement-validity lookup the work
+// surface owes every reader (external audit: explicit and implicit
+// claim paths must share one validity rule). It is liveEngagement
+// with the read-side expiry guard: an active claim must also be
+// unexpired (an expired-but-unswept claim stays storage-protected
+// until recovery materializes it, but its engagement is over in
+// fact); a used claim stays readable while its submission is in
+// flight.
+func FindLiveClaimByTaskAgent(ctx context.Context, q pg.Querier, taskID, agentID int64, now time.Time) (*ClaimRow, error) {
+	return scanClaim(q.QueryRow(ctx, claimSelect+`
+		WHERE task_id = $1 AND agent_id = $2
+		  AND ((c.status = 'active' AND c.expires_at > $3)
+		       OR (c.status = 'used' AND EXISTS (SELECT 1 FROM tb_task_submission s
+		              WHERE s.claim_id = c.claim_id
+		                AND s.state IN ('delivering', 'uncertain'))))`, taskID, agentID, now))
 }
 
 // ApplyClaimStatus validates `event` against the §5.2 kernel and

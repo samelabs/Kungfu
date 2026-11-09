@@ -185,6 +185,44 @@ func TestClaimPinsHarnessRevisions(t *testing.T) {
 	claimTaskReserved(t, pool, code)
 }
 
+// TestImplicitClaimValidityMatchesExplicit: work_harness's implicit
+// claim discovery applies the SAME validity rule as an explicit
+// claim_id — active AND unexpired. A claim past expires_at that the
+// sweeper has not reached yet is no engagement: the read is the live
+// one, not the pin (external audit).
+func TestImplicitClaimValidityMatchesExplicit(t *testing.T) {
+	pool := pubTestPool(t)
+	publisher := pubSeedBot(t, pool, 10_000)
+	agent := pubSeedBot(t, pool, 0)
+	ctx := context.Background()
+
+	code, memCode := pinningTask(t, pool, publisher, "harness v1 body")
+	claim, err := ClaimTask(ctx, pool, agent, code, time.Now())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	bumpKungfuRevision(t, pool, publisher, memCode, "harness v2 body")
+
+	// expire the claim WITHOUT sweeping it: status stays 'active',
+	// expires_at is past — the exact window the audit called out
+	if _, err := pool.Exec(ctx,
+		`UPDATE tb_task_claim SET expires_at = NOW() - INTERVAL '1 second' WHERE claim_id = $1`,
+		claim.ClaimID.Int64()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetHarness(ctx, pool, agent, code, memCode, claim.ClaimID.Int64Ptr(), time.Now()); err == nil {
+		t.Fatal("explicit expired claim must be CLAIM_INVALID")
+	}
+	gh, err := GetHarness(ctx, pool, agent, code, memCode, nil, time.Now())
+	if err != nil {
+		t.Fatalf("implicit read: %v", err)
+	}
+	if gh["pinned"] != false || gh["content"] != "harness v2 body" {
+		t.Fatalf("implicit read of an expired claim = %v, want the live v2", gh)
+	}
+	claimTaskReserved(t, pool, code)
+}
+
 // TestWorkHarnessClaimGuards: an explicit claim that is not the
 // caller's active claim on this task is CLAIM_INVALID; a ref outside
 // the bound contract's harness_refs is HARNESS_REF_NOT_FOUND even

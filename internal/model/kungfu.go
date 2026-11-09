@@ -11,7 +11,7 @@ type Kungfu struct {
 	Checksum    string  `db:"checksum" json:"checksum"`
 	Visibility  string  `db:"visibility" json:"visibility"`
 	Status      string  `db:"status" json:"-"`
-	// Revision is the memory's current version (kungfu.md §5):
+	// Revision is the memory's current version (kungfu-protocol.md §5):
 	// creation is revision 1; every author update archives the
 	// previous version in memory_revisions and bumps this by 1.
 	Revision int64 `db:"revision" json:"-"`

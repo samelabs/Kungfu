@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.samelabs.kungfu-wake</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/USERNAME/.kungfu/kungfu-wake.mjs</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AGENTS</key>
+        <string>/Users/USERNAME/.kungfu/kungfu-agents.json</string>
+        <key>PORT</key>
+        <string>8443</string>
+        <key>BIND</key>
+        <string>127.0.0.1</string>
+        <key>LOGFILE</key>
+        <string>/Users/USERNAME/.kungfu/kungfu-wake.log</string>
+        <key>CERT_DIR</key>
+        <string>/Users/USERNAME/.kungfu</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/Users/USERNAME/.kungfu</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/.kungfu/kungfu-wake.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/USERNAME/.kungfu/kungfu-wake.stderr.log</string>
+</dict>
+</plist>

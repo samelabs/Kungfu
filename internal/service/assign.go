@@ -1,6 +1,6 @@
 package service
 
-// Room assignments (D4) — kungfu.md §6.4 with R-18. The lifecycle:
+// Room assignments (D4) — kungfu-protocol.md §6.4 with R-18. The lifecycle:
 // open → taken → delivered → adopted|rejected|undecided, plus
 // dropped / timed_out / voided exits. Content is fixed at creation
 // (fix = create a new assignment referencing the old one); every
@@ -161,7 +161,10 @@ func assignMemoriesCheck(ctx context.Context, tx pgx.Tx, botID int64, memories s
 		if strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.Code) == "" {
 			return "", errors.New(422, "VALIDATION_FAILED", "memories entries need name and code")
 		}
-		k, err := repository.FindKungfuByCodeAnyStatus(ctx, tx, r.Code)
+		// KEY SHARE: the delivery is about to pin this memory by code
+		// in JSON — the row lock serializes the pin against a
+		// concurrent payload disposal until this transaction commits
+		k, err := repository.FindKungfuByCodeAnyStatusForShare(ctx, tx, r.Code)
 		if err != nil {
 			return "", errors.New(500, "INTERNAL_ERROR", "Error loading memory")
 		}
@@ -399,6 +402,12 @@ func AssignVoid(ctx context.Context, pool *pg.Pool, botID, assignID int64, idemK
 			if a.CreatorID != botID {
 				return threadActionOutcome{}, errors.New(403, "NOT_YOURS", "Only the assignment creator voids")
 			}
+			// deadline beats void (L4): a taken assign whose deliver
+			// clock already ran out settles as timed_out, never voided
+			if deadlinePassed(ctx, tx, a) {
+				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
+					"Deliver deadline passed; the assignment settles as timed_out")
+			}
 			if a.State != "open" && a.State != "taken" {
 				return threadActionOutcome{}, errors.New(409, "INVALID_STATE",
 					"Only undelivered assignments can be voided (state: "+a.State+")")
@@ -493,20 +502,25 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	// (they never enter todos). tasks = offered restricted work the
 	// caller could still take; assignments reuses thread_list's
 	// open_invites query (open assignments addressed to me while my
-	// membership lasts). Zero is reported like any other number.
-	offered, err := offeredWorkCount(ctx, pool, botID, time.Now())
+	// membership lasts). Zero is reported like any other number. The
+	// identity halves of the same queries feed wake_token — the opaque
+	// same-turn/different-turn fingerprint a resident wake process
+	// deduplicates on (counts alone cannot tell T2 arriving from T1
+	// ending).
+	offered, offeredDigest, err := repository.OfferedWorkIdentity(ctx, pool, botID, time.Now())
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
 	}
-	invites, err := repository.ThreadOpenInviteCounts(ctx, pool, botID)
+	openAssignments, assignDigest, err := repository.ThreadOpenInviteIdentity(ctx, pool, botID)
 	if err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading opportunities")
-	}
-	var openAssignments int64
-	for _, n := range invites {
-		openAssignments += n
 	}
 	res["opportunities"] = map[string]any{"tasks": offered, "assignments": openAssignments}
+	turn, _, err := turnSignature(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error loading turn")
+	}
+	res["wake_token"] = wakeToken(turn, opportunitySignature(offered, offeredDigest, openAssignments, assignDigest))
 	if offered > 0 || openAssignments > 0 {
 		// At most one opportunity hint, and never in place of an
 		// obligation's slot (义务优先): offered work points at
@@ -521,6 +535,16 @@ func TodoList(ctx context.Context, pool *pg.Pool, botID int64, threadID int64, c
 	if len(out) == 0 {
 		res["next_action"] = "wait"
 		res["retry_after"] = 60
+		// bridge to the wake channel: an empty turn hands the caller
+		// todo_wait, which holds the next call server-side — kungfu
+		// is the relay, the agent needs no polling loop of its own
+		// (an opportunity hint, if present, keeps the first slot)
+		wait := map[string]any{"tool": "todo_wait", "args": map[string]any{"timeout": 20}}
+		if hints, ok := res["next"].([]map[string]any); ok {
+			res["next"] = append(hints, wait)
+		} else {
+			res["next"] = []map[string]any{wait}
+		}
 	}
 	return res, nil
 }

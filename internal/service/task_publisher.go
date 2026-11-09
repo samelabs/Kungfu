@@ -153,15 +153,18 @@ func taskView(ctx context.Context, q pg.Querier, t *repository.TaskRow) (map[str
 
 // validateHarnessRefs checks that every harness_ref is one of the
 // publisher's own active memories (M3): max 10, ownership enforced,
-// all violations reported at once. Pure read; the caller runs it
-// inside or beside its transaction.
-func validateHarnessRefs(ctx context.Context, pool *pg.Pool, publisherID int64, refs []string) error {
+// all violations reported at once. Run it INSIDE the transaction that
+// persists the reference: each lookup takes a KEY SHARE lock on the
+// memory row, so a concurrent payload disposal cannot delete the
+// memory between the check and the commit (reference creation and
+// physical deletion serialize on the row).
+func validateHarnessRefs(ctx context.Context, q pg.Querier, publisherID int64, refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
 	var errs []task.FieldError
 	for i, ref := range refs {
-		k, err := repository.FindOwnedActiveKungfuByCode(ctx, pool, publisherID, ref)
+		k, err := repository.FindOwnedActiveKungfuByCodeForShare(ctx, q, publisherID, ref)
 		if err != nil {
 			return errors.New(0, "INTERNAL_ERROR", "Database error")
 		}
@@ -178,12 +181,54 @@ func validateHarnessRefs(ctx context.Context, pool *pg.Pool, publisherID int64, 
 	return nil
 }
 
-// CreateTask is the §4 create transition: a validated contract
-// budget lock (lock_task) in one transaction. budget must cover at
+// CreateTask is the §4 create transition: a validated contract, its
+// audience, the budget lock (lock_task) and — with open — the §4 open
+// transition, ALL in one transaction: a failed open can never leave a
+// paused task behind with its budget locked. budget must cover at
 // least one unit of the price (§4/§11, WO-11: no numeric minimum) and
 // the publisher's balance.
-func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract task.Contract, budget int64) (map[string]interface{}, error) {
+//
+// requestKey is the create idempotency key (L3, the same receipt
+// table the room tools use): a retry of the same key replays the
+// stored result verbatim — BEFORE any mutable balance, memory or
+// audience check runs (a replay must not lose to a balance that has
+// since moved) — the same key with a different request is
+// IDEMPOTENCY_CONFLICT, and the unique constraint makes a network
+// retry after a lost response unable to mint a second task or lock
+// the budget twice.
+func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract task.Contract, budget int64, open bool, requestKey string) (map[string]interface{}, error) {
+	// the canonical request identity and the receipt read come FIRST:
+	// the hash is over the effective contract (pure transforms — no
+	// mutable state), so semantically equal retries replay, and an
+	// existing receipt is answered before every check that reads
+	// mutable state
 	defaults := contract.WithDefaults()
+	canonical, cErr := marshalContract(defaults)
+	if cErr != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
+	}
+	requestHash := sha256Hex(fmt.Sprintf(`{"contract":%s,"budget":%d,"open":%t}`, canonical, budget, open))
+	if requestKey != "" {
+		// the idempotency receipt label keeps its pre-3.2.0 name
+		// "task_create" (thread_idempotency.tool is storage: receipts
+		// written before the task rename must keep replaying)
+		rec, err := repository.FindThreadIdempotency(ctx, pool, publisherID, "task_create", requestKey)
+		if err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
+		if rec != nil {
+			if rec.RequestHash != requestHash {
+				return nil, errors.New(0, "IDEMPOTENCY_CONFLICT",
+					"This idempotency key was already used with a different request")
+			}
+			var facts map[string]any
+			if err := json.Unmarshal([]byte(rec.ResultSnapshot), &facts); err != nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			return facts, nil
+		}
+	}
+
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
@@ -204,9 +249,6 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 	} else if balance < budget {
 		return nil, errors.New(0, "INSUFFICIENT_CREDITS",
 			fmt.Sprintf("Insufficient credits. Need %d, have %d", budget, balance))
-	}
-	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
-		return nil, err
 	}
 	// §7.2: the audience is resolved to account ids at creation and
 	// persisted with the task in its own transaction. Resolution runs
@@ -232,6 +274,11 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
 	defer func() { _ = pg.Rollback(tx) }()
+	// inside the transaction: the KEY SHARE locks taken here hold the
+	// harness memories until this create commits
+	if err := validateHarnessRefs(ctx, tx, publisherID, defaults.HarnessRefs); err != nil {
+		return nil, err
+	}
 	taskID, err := repository.InsertTask(ctx, tx, repository.NewTaskRow{
 		Code: code, PublisherID: publisherID, Contract: contractJSON,
 	})
@@ -247,15 +294,55 @@ func CreateTask(ctx context.Context, pool *pg.Pool, publisherID int64, contract 
 		}
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	if open {
+		// the same transition task_open applies, inside this
+		// transaction: create and open commit together or not at all
+		if err := repository.ApplyTaskStatus(ctx, tx, taskID, task.TaskPaused, task.EventOpen, nil); err != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+		}
 	}
-
-	t, err := repository.FindTaskByID(ctx, pool, taskID)
+	t, err := repository.FindTaskByID(ctx, tx, taskID)
 	if err != nil || t == nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	}
-	return taskView(ctx, pool, t)
+	view, err := taskView(ctx, tx, t)
+	if err != nil {
+		return nil, err
+	}
+	if requestKey != "" {
+		snapshot, mErr := json.Marshal(view)
+		if mErr != nil {
+			return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
+		}
+		if err := repository.InsertThreadIdempotency(ctx, tx, publisherID, "task_create", requestKey,
+			requestHash, string(snapshot)); err != nil {
+			if !repository.IsUniqueViolation(err) {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			// a concurrent retry with the same key committed first:
+			// this transaction's work rolls back — the key made the
+			// double execution impossible — and the loser resolves
+			// against the winner's receipt
+			_ = pg.Rollback(tx)
+			rec, findErr := repository.FindThreadIdempotency(ctx, pool, publisherID, "task_create", requestKey)
+			if findErr != nil || rec == nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			if rec.RequestHash != requestHash {
+				return nil, errors.New(0, "IDEMPOTENCY_CONFLICT",
+					"This idempotency key was already used with a different request")
+			}
+			var facts map[string]any
+			if err := json.Unmarshal([]byte(rec.ResultSnapshot), &facts); err != nil {
+				return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+			}
+			return facts, nil
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
+	}
+	return view, nil
 }
 
 func isInsufficientCreditsErr(err error) bool {
@@ -277,9 +364,6 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
-	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
-		return nil, err
-	}
 	contractJSON, err := marshalContract(defaults)
 	if err != nil {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Internal error")
@@ -296,6 +380,11 @@ func UpdateTask(ctx context.Context, pool *pg.Pool, publisherID int64, code stri
 	}
 	if t.Status != task.TaskPaused {
 		return nil, invalidTaskState(t.Status)
+	}
+	// inside the transaction: the KEY SHARE locks taken here hold the
+	// harness memories until this version commits
+	if err := validateHarnessRefs(ctx, tx, publisherID, defaults.HarnessRefs); err != nil {
+		return nil, err
 	}
 	var stored task.Contract
 	if err := json.Unmarshal(t.Contract, &stored); err != nil {
@@ -341,7 +430,9 @@ func OpenTask(ctx context.Context, pool *pg.Pool, publisherID int64, code string
 	if errs := task.ValidateContract(defaults); len(errs) > 0 {
 		return nil, validationFailed(errs)
 	}
-	if err := validateHarnessRefs(ctx, pool, publisherID, defaults.HarnessRefs); err != nil {
+	// inside the transaction: the KEY SHARE locks taken here hold the
+	// harness memories until the open commits
+	if err := validateHarnessRefs(ctx, tx, publisherID, defaults.HarnessRefs); err != nil {
 		return nil, err
 	}
 	if err := repository.ApplyTaskStatus(ctx, tx, t.ID, t.Status, task.EventOpen, nil); err != nil {

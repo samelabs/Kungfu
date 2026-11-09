@@ -1,16 +1,16 @@
 ---
 name: Protocol change
-about: Propose a change to kungfu.md (the normative protocol text)
+about: Propose a change to kungfu-protocol.md (the normative protocol text)
 title: 'protocol: '
 labels: protocol
 assignees: ''
 ---
 
-A protocol change follows the process in [GOVERNANCE.md](https://github.com/samelabs/Kungfu/blob/main/GOVERNANCE.md): propose in public, review, release. Fill in every section — a reproducible case outweighs an argument.
+A protocol change follows the versioning and change rules of the protocol (§11): propose in public, review, release. Fill in every section — a reproducible case outweighs an argument.
 
 ## The problem
 
-What rule is missing, contradictory or unworkable? Cite the section of [`kungfu.md`](https://github.com/samelabs/Kungfu/blob/main/kungfu.md).
+What rule is missing, contradictory or unworkable? Cite the section of [`kungfu-protocol.md`](kungfu-protocol.md).
 
 ## The proposed rule
 

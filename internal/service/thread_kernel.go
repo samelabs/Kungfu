@@ -1,6 +1,6 @@
 package service
 
-// Thread kernel (D2) — kungfu.md §6.1, §6.2, §6.5, §4, L2–L5.
+// Thread kernel (D2) — kungfu-protocol.md §6.1, §6.2, §6.5, §4, L2–L5.
 // Room skeleton: start (with optional first key in the same
 // transaction), key issue/revoke, join by key, leave, member
 // governance, close; every write runs through the L3 idempotency
@@ -30,6 +30,7 @@ import (
 // PRD §2 application values (L4 caps; cursor page ≤ 50).
 const (
 	threadMaxSubjectRunes        = 200
+	threadMaxDescriptionRunes    = 1000
 	threadMaxMembers             = 50
 	threadMaxOpenRoomsPerAccount = 100
 	threadPageSize               = 50
@@ -40,6 +41,10 @@ const (
 // generateThreadKey mints one key: raw "kf_"+32hex (disclosed in the
 // first successful response only), sha256 hex digest (the only stored
 // form), and a non-secret fingerprint that survives idempotent replay.
+// The room key and the Agent key share the kf_ family by design
+// (3.2.0 governance: no vocabulary variants on the wire); they differ
+// in shape — kf_+32hex admits to ONE room, kf_live_+64hex IS the
+// account — and the skill teaches the difference.
 func generateThreadKey() (raw, hash, fingerprint string, err error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -227,6 +232,7 @@ func threadNextActions(th *model.Thread, role string, members, governors int64) 
 		if th.KeyHash != nil {
 			next = append(next, "thread_key_revoke")
 		}
+		next = append(next, "thread_update")
 		if members > 1 {
 			next = append(next, "thread_remove", "thread_set_role")
 		}
@@ -279,7 +285,7 @@ func loadRoomForGovernor(ctx context.Context, tx pgx.Tx, code string, botID int6
 // ThreadStart creates an open room; the creator joins as governor.
 // key=true issues the first key in the same transaction (L2), bound
 // to the default speaker role (§6.1).
-func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string, issueKey bool, idemKey string) (map[string]any, error) {
+func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject, description string, issueKey bool, idemKey string) (map[string]any, error) {
 	subject = strings.TrimSpace(subject)
 	if utf8.RuneCountInString(subject) > threadMaxSubjectRunes {
 		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "subject exceeds 200 characters",
@@ -287,13 +293,28 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string
 				{"field": "subject", "message": "subject is limited to 200 characters"},
 			}})
 	}
+	description = strings.TrimSpace(description)
+	if utf8.RuneCountInString(description) > threadMaxDescriptionRunes {
+		return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "description exceeds 1000 characters",
+			map[string]interface{}{"errors": []map[string]string{
+				{"field": "description", "message": "description is limited to 1000 characters"},
+			}})
+	}
 	var subjectPtr *string
 	if subject != "" {
 		subjectPtr = &subject
 	}
-	requestHash := sha256Hex(fmt.Sprintf(`{"key":%t,"subject":%q}`, issueKey, subject))
+	var descriptionPtr *string
+	if description != "" {
+		descriptionPtr = &description
+	}
+	requestHash := sha256Hex(fmt.Sprintf(`{"description":%q,"key":%t,"subject":%q}`, description, issueKey, subject))
+	// pre-3.2.0 receipts were hashed without the description field; a
+	// retry of an in-flight receipt from before the upgrade still
+	// replays against its stored hash (same seam thread_post uses)
+	legacyHash := sha256Hex(fmt.Sprintf(`{"key":%t,"subject":%q}`, issueKey, subject))
 
-	return runThreadAction(ctx, pool, botID, "thread_start", idemKey, requestHash,
+	return runThreadActionCompat(ctx, pool, botID, "thread_start", idemKey, requestHash, legacyHash,
 		func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error) {
 			if err := requireActiveAccount(ctx, tx, botID); err != nil {
 				return threadActionOutcome{}, err
@@ -314,7 +335,7 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_start")
 			}
-			id, err := repository.InsertThread(ctx, tx, code, subjectPtr)
+			id, err := repository.InsertThread(ctx, tx, code, subjectPtr, descriptionPtr)
 			if err != nil {
 				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_start")
 			}
@@ -346,6 +367,9 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string
 			if subjectPtr != nil {
 				facts["subject"] = subject
 			}
+			if descriptionPtr != nil {
+				facts["description"] = description
+			}
 			// fresh room: one member (the creator-governor), one governor
 			room, err := repository.FindThreadByCode(ctx, tx, code)
 			if err != nil || room == nil {
@@ -357,6 +381,107 @@ func ThreadStart(ctx context.Context, pool *pg.Pool, botID int64, subject string
 				View:      threadView(threadNextActions(room, repository.ThreadRoleGovernor, 1, 1)),
 			}, nil
 		})
+}
+
+// -- thread_update (room profile) --
+
+// ThreadUpdateProfile rewrites the room's editable profile. A nil
+// argument leaves that field unchanged; a non-nil one sets it — the
+// empty string clears subject/description back to none. Governor of
+// an open room only. A request that would change nothing is
+// INVALID_TARGET (the protocol allows no extra no-effect successes).
+func ThreadUpdateProfile(ctx context.Context, pool *pg.Pool, botID int64, code string, subject, description *string, idemKey string) (map[string]any, error) {
+	if subject != nil {
+		s := strings.TrimSpace(*subject)
+		if utf8.RuneCountInString(s) > threadMaxSubjectRunes {
+			return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "subject exceeds 200 characters",
+				map[string]interface{}{"errors": []map[string]string{
+					{"field": "subject", "message": "subject is limited to 200 characters"},
+				}})
+		}
+		subject = &s
+	}
+	if description != nil {
+		d := strings.TrimSpace(*description)
+		if utf8.RuneCountInString(d) > threadMaxDescriptionRunes {
+			return nil, errors.NewWithDetails(422, "VALIDATION_FAILED", "description exceeds 1000 characters",
+				map[string]interface{}{"errors": []map[string]string{
+					{"field": "description", "message": "description is limited to 1000 characters"},
+				}})
+		}
+		description = &d
+	}
+	requestHash := sha256Hex(fmt.Sprintf(`{"description":%v,"subject":%v,"thread":%q}`,
+		ptrJSON(subject), ptrJSON(description), code))
+
+	return runThreadAction(ctx, pool, botID, "thread_update", idemKey, requestHash,
+		func(ctx context.Context, tx pgx.Tx) (threadActionOutcome, error) {
+			if err := requireActiveAccount(ctx, tx, botID); err != nil {
+				return threadActionOutcome{}, err
+			}
+			th, _, err := loadRoomForGovernor(ctx, tx, code, botID)
+			if err != nil {
+				return threadActionOutcome{}, err
+			}
+			// subject/description nil = unchanged; "" = cleared to none
+			newSubject, newDescription := th.Subject, th.Description
+			if subject != nil {
+				newSubject = nil
+				if *subject != "" {
+					newSubject = subject
+				}
+			}
+			if description != nil {
+				newDescription = nil
+				if *description != "" {
+					newDescription = description
+				}
+			}
+			if sameStringPtr(newSubject, th.Subject) && sameStringPtr(newDescription, th.Description) {
+				return threadActionOutcome{}, errors.New(422, "INVALID_TARGET",
+					"Profile already holds these values; nothing to update")
+			}
+			ok, err := repository.UpdateThreadProfile(ctx, tx, th.ID, newSubject, newDescription)
+			if err != nil {
+				return threadActionOutcome{}, errors.New(500, "INTERNAL_ERROR", "Error occurred during thread_update")
+			}
+			if !ok {
+				return threadActionOutcome{}, errors.New(409, "THREAD_CLOSED", "Thread is closed and read-only")
+			}
+			facts := map[string]any{
+				"thread": th.Code,
+				"status": repository.ThreadStatusOpen,
+			}
+			if newSubject != nil {
+				facts["subject"] = *newSubject
+			}
+			if newDescription != nil {
+				facts["description"] = *newDescription
+			}
+			return threadActionOutcome{
+				Facts: facts,
+				View:  threadView(threadGovernorNextAfter(ctx, tx, th)),
+			}, nil
+		})
+}
+
+// ptrJSON renders a *string for the canonical request hash: the JSON
+// literal of the value, or null when the pointer is nil.
+func ptrJSON(s *string) string {
+	if s == nil {
+		return "null"
+	}
+	b, _ := json.Marshal(*s)
+	return string(b)
+}
+
+// sameStringPtr reports whether two *string values are equal (nil ==
+// nil; pointees compared when both set).
+func sameStringPtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // -- thread_key / thread_key_revoke (§6.1) --
@@ -602,7 +727,7 @@ func ThreadLeave(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "left": true, "receipts_collected": collected,
-					"assigns_voided": len(voided)},
+					"assigns_voided": len(voided.Voided), "assigns_timed_out": len(voided.TimedOut)},
 				View: threadView([]string{}),
 			}, nil
 		})
@@ -639,7 +764,8 @@ func ThreadRemoveMember(ctx context.Context, pool *pg.Pool, botID int64, code st
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "member": member, "removed": true,
-					"receipts_collected": collected, "assigns_voided": len(voided)},
+					"receipts_collected": collected, "assigns_voided": len(voided.Voided),
+					"assigns_timed_out": len(voided.TimedOut)},
 				View: threadView(threadGovernorNextAfter(ctx, tx, th)),
 			}, nil
 		})
@@ -784,7 +910,8 @@ func ThreadClose(ctx context.Context, pool *pg.Pool, botID int64, code, idemKey 
 			}
 			return threadActionOutcome{
 				Facts: map[string]any{"thread": th.Code, "status": repository.ThreadStatusClosed,
-					"receipts_collected": collected, "assigns_voided": len(voidedAssigns)},
+					"receipts_collected": collected, "assigns_voided": len(voidedAssigns.Voided),
+					"assigns_timed_out": len(voidedAssigns.TimedOut)},
 				View: threadView([]string{"thread_leave"}),
 			}, nil
 		})
@@ -971,7 +1098,7 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 				"entry": f.ID, "seq": f.Seq, "author": f.Author,
 				"memory": f.Memory, "revision": f.Revision,
 				"summary": f.Summary, "asked": f.Asked, "at": f.CreatedAt,
-				"readable": f.Readable,
+				"readable": f.Readable, "redacted": f.Redacted,
 			}
 			if f.ReplyTo != nil {
 				row["reply_to"] = *f.ReplyTo
@@ -989,6 +1116,9 @@ func ThreadGet(ctx context.Context, pool *pg.Pool, botID int64, code string, cur
 	room := map[string]any{"code": th.Code, "status": th.Status}
 	if th.Subject != nil {
 		room["subject"] = *th.Subject
+	}
+	if th.Description != nil {
+		room["description"] = *th.Description
 	}
 	// the assignments section (§9) — BOUNDED: the digest pages by id
 	// (50/page, cursor); assignments=[ids] expands requirements,
@@ -1167,6 +1297,9 @@ func ThreadList(ctx context.Context, pool *pg.Pool, botID int64, status, cursor 
 		room := map[string]any{"code": r.Code, "status": r.Status}
 		if r.Subject != nil {
 			room["subject"] = *r.Subject
+		}
+		if r.Description != nil {
+			room["description"] = *r.Description
 		}
 		items = append(items, map[string]any{
 			"thread":       room,

@@ -24,6 +24,10 @@ func (s *Server) handleCredits(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, r, "credits", "")
 }
 
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, r, "tasks", "")
+}
+
 func (s *Server) handleOwnerPage(section string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.renderTemplate(w, r, "owner", section)

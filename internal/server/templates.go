@@ -42,6 +42,8 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 	switch page {
 	case "home":
 		s.renderHome(w, r, data)
+	case "tasks":
+		s.renderTasks(w, r, data)
 	case "credits":
 		s.renderCredits(w, r, data)
 	case "owner":
@@ -57,20 +59,14 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, page, se
 // public content pages (/terms, /privacy, /credits) share one legal
 // document shell there.
 
-// renderHome renders the homepage with the server-rendered task board
-// (WO-19 H1/H2): ?q= and ?page= search over ALL claimable tasks, the
-// credits purchase moved into the board's title row as a JS-free
+// renderHome renders the capability-focused homepage (3.2.0): the
+// three atoms, the skill entry point and the todo_list start block —
+// the intake board moved to /tasks, one click away. The credits
+// purchase moved into the board's title row as a JS-free
 // <details> overlay, and the bottom credits block removed (the
 // /credits page keeps its own).
 func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	page := getQueryInt(r, "page", 1)
-	if page < 1 {
-		page = 1
-	}
-	page = clampPage(page, homeBoardPageSize)
-	taskBoard := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page)
 	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/")
 
 	extra := `<meta name="keywords" content="AI agent memory, agent storage, agent tasks, agent work, agent skills, llms.txt, openai.json, agent API">
@@ -89,7 +85,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
     <link rel="alternate" type="text/plain" href="https://kungfu.md/llms.txt" title="Agent Guide">
     <link rel="alternate" type="application/json" href="https://kungfu.md/openai.json" title="openai.json">
-    <link rel="alternate" type="text/markdown" href="https://kungfu.md/kungfu_skill.md" title="Kungfu skill file">
+    <link rel="alternate" type="text/markdown" href="https://kungfu.md/skill.md" title="Kungfu skill file">
     <link rel="stylesheet" href="/assets/site.css">
     <link rel="stylesheet" href="/assets/home.css">
     ` + homeJSONLD()
@@ -112,7 +108,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
                 </div>
             </div>
             <div class="top-links">
-                <a class="btn primary" href="/llms.txt">Agent</a>
+                <a class="btn primary" href="/skill.md">Agent</a>
                 <a class="btn owner-link" href="` + i18n.LocaleURL(data.Locale, "/owner") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z"/></svg><span>Owner</span></a>
             </div>
         </div>
@@ -122,7 +118,8 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
             <h2>` + data.T("home.intro_title") + `</h2>
             <p class="intro-lede">` + data.T("home.intro_lede") + `</p>
             <div class="intro-links">
-                <a href="/protocol"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l6 6v14H6V2zm7 1.5V9h5.5L13 3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg><span>` + data.T("home.protocol_link") + `</span></a>
+                <a href="/skill.md"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l6 6v14H6V2zm7 1.5V9h5.5L13 3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg><span>` + data.T("home.skill_link") + `</span></a>
+                <a href="` + i18n.LocaleURL(data.Locale, "/tasks") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7Zm-3 19h6v-1H9v1Z"/></svg><span>` + data.T("home.tasks_link") + `</span></a>
                 <a href="https://github.com/samelabs/Kungfu" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.1.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.58 9.58 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85V21c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg><span>` + data.T("home.source_link") + `</span></a>
             </div>
             <div class="capability-tags" aria-label="` + data.T("home.features_aria") + `">
@@ -142,15 +139,67 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
                 <pre class="start-example"><code>` + html.EscapeString(homeTodoListExample) + `</code></pre>
             </div>
         </div>
+    </div>
+    ` + siteFooter(data.Locale, langOpts, "home-lang-switch") + `
+</div>
+<script src="/assets/home.js"></script>
+<script src="/assets/pwa-register.js"></script>
+</body>
+</html>`
+
+	w.Write(web.FingerprintHTML([]byte(html)))
+}
+
+// renderTasks is the public task board page (3.2.0): the intake
+// surface the homepage carried until it drowned the capability story —
+// now one click away, still fully searchable server-side.
+func (s *Server) renderTasks(w http.ResponseWriter, r *http.Request, data *tmplData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	page := getQueryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	page = clampPage(page, homeBoardPageSize)
+	board := s.buildTaskBoardHTML(r.Context(), data.Locale, q, page, "/tasks")
+	langOpts := buildLangOptionsHTML(data.LangOptions, data.Locale, "/tasks")
+
+	extra := `<link rel="stylesheet" href="/assets/site.css">
+    <link rel="stylesheet" href="/assets/home.css">
+    `
+
+	html := buildHead(headInput{
+		Locale:    data.Locale,
+		Path:      "/tasks",
+		TitleKey:  "seo.tasks_title",
+		DescKey:   "seo.tasks_desc",
+		ExtraHead: extra,
+	}) + `
+<body>
+<div class="wrap">
+    <div class="card hero-card" data-backdrop="AI AGENT WORKFLOW">
+        <div class="hero-top">
+            <div class="hero-lead">
+                <div class="brand">
+                    <div class="logo" aria-hidden="true">🥋</div>
+                    <div><h1>` + data.T("home.task_board_title") + `</h1></div>
+                </div>
+            </div>
+            <div class="top-links">
+                <a class="btn" href="` + i18n.LocaleURL(data.Locale, "/") + `">` + data.T("tasks.back_home") + `</a>
+                <a class="btn owner-link" href="` + i18n.LocaleURL(data.Locale, "/owner") + `"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z"/></svg><span>Owner</span></a>
+            </div>
+        </div>
+    </div>
+    <div class="grid">
         <div class="task-panel">
             <div class="task-board-head">
                 <span class="task-kicker">` + data.T("home.task_kicker") + `</span>
                 <div class="task-title-row">
-                    <h2>` + data.T("home.task_board_title") + `</h2>
                     ` + s.homeCreditsPopHTML(r.Context(), data.Locale) + `
                 </div>
             </div>
-            <div class="stream-panel active" data-stream-panel="tasks">` + taskBoard + `</div>
+            <div class="stream-panel active" data-stream-panel="tasks">` + board + `</div>
         </div>
     </div>
     ` + siteFooter(data.Locale, langOpts, "home-lang-switch") + `
@@ -163,7 +212,7 @@ func (s *Server) renderHome(w http.ResponseWriter, r *http.Request, data *tmplDa
 	w.Write(web.FingerprintHTML([]byte(html)))
 }
 
-// homeBoardPageSize is the homepage board page size (WO-19 H1).
+// homeBoardPageSize is the public board page size (WO-19 H1).
 const homeBoardPageSize = 20
 
 // homeTodoListExample is the MCP call the homepage shows beside the
@@ -190,9 +239,9 @@ func homeTaskCodeQuery(q string) string {
 	return strings.ToLower(q)
 }
 
-// homeBoardURL builds a homepage URL that carries the current board
-// query and the locale switch (?q=&page=, plus ?lang= except en).
-func homeBoardURL(locale, q string, page int) string {
+// homeBoardURL builds a board URL that carries the current query and
+// the locale switch (?q=&page=, plus ?lang= except en).
+func homeBoardURL(base, locale, q string, page int) string {
 	params := url.Values{}
 	if q != "" {
 		params.Set("q", q)
@@ -204,19 +253,20 @@ func homeBoardURL(locale, q string, page int) string {
 		params.Set("lang", locale)
 	}
 	if len(params) == 0 {
-		return "/"
+		return base
 	}
-	return "/?" + params.Encode()
+	return base + "?" + params.Encode()
 }
 
-// buildTaskBoardHTML renders the homepage task board (WO-19 H1): the
-// anonymous work_list SQL — open, at least one free slot — searched
-// and paged server-side. A 12-hex input is tried as an exact task
-// code first and falls back to the keyword search; each row shows
-// the title, unit price, remaining slots, a copyable code and a
-// 140-rune requirements excerpt; the pager keeps the query. Empty
-// results of a search and a genuinely empty board read differently.
-func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page int) string {
+// buildTaskBoardHTML renders the public task board (WO-19 H1,
+// moved to /tasks in 3.2.0): the anonymous work_list SQL — open,
+// at least one free slot — searched and paged server-side. A 12-hex
+// input is tried as an exact task code first and falls back to the
+// keyword search; each row shows the title, unit price, remaining
+// slots, a copyable code and a 140-rune requirements excerpt; the
+// pager keeps the query. Empty results of a search and a genuinely
+// empty board read differently.
+func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page int, base string) string {
 	t := func(key string) string { return html.EscapeString(i18n.T(locale, key)) }
 
 	var rows []service.WorkBoardRow
@@ -242,7 +292,7 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page 
 	if locale != "" && locale != "en" {
 		langHidden = `<input type="hidden" name="lang" value="` + html.EscapeString(locale) + `">`
 	}
-	b.WriteString(`<form class="task-search" action="/" method="get" role="search">` + langHidden +
+	b.WriteString(`<form class="task-search" action="` + base + `" method="get" role="search">` + langHidden +
 		`<input type="search" name="q" value="` + html.EscapeString(q) + `" placeholder="` + t("home.search_placeholder") + `" aria-label="` + t("home.search_placeholder") + `">` +
 		`<button class="btn primary" type="submit">` + t("home.search_submit") + `</button></form>`)
 
@@ -251,7 +301,7 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page 
 		// and link back to page 1, never "no tasks yet".
 		if total > 0 {
 			b.WriteString(`<p class="task-board-empty">` + t("home.task_page_empty") + `</p>` +
-				`<p class="task-board-empty-actions"><a class="btn" href="` + homeBoardURL(locale, q, 1) + `">` + t("home.task_first_page") + `</a></p>`)
+				`<p class="task-board-empty-actions"><a class="btn" href="` + homeBoardURL(base, locale, q, 1) + `">` + t("home.task_first_page") + `</a></p>`)
 			return b.String()
 		}
 		emptyKey := "home.task_empty"
@@ -291,12 +341,12 @@ func (s *Server) buildTaskBoardHTML(ctx context.Context, locale, q string, page 
 	// pager: prev/next anchors that keep q (and lang); ends disable
 	prev, next := "", ""
 	if page > 1 {
-		prev = `<a class="btn" href="` + homeBoardURL(locale, q, page-1) + `" rel="prev">` + t("home.task_pager_prev") + `</a>`
+		prev = `<a class="btn" href="` + homeBoardURL(base, locale, q, page-1) + `" rel="prev">` + t("home.task_pager_prev") + `</a>`
 	} else {
 		prev = `<span class="btn is-disabled" aria-disabled="true">` + t("home.task_pager_prev") + `</span>`
 	}
 	if page < pages {
-		next = `<a class="btn" href="` + homeBoardURL(locale, q, page+1) + `" rel="next">` + t("home.task_pager_next") + `</a>`
+		next = `<a class="btn" href="` + homeBoardURL(base, locale, q, page+1) + `" rel="next">` + t("home.task_pager_next") + `</a>`
 	} else {
 		next = `<span class="btn is-disabled" aria-disabled="true">` + t("home.task_pager_next") + `</span>`
 	}
@@ -659,6 +709,20 @@ func ownerThreadDetailHTML(d *tmplData) string {
     <a class="btn" href="` + i18n.LocaleURL(d.Locale, "/owner/threads") + `">&larr; ` + d.T("owner.threads.back") + `</a>
     <h2 id="threadHeading">` + d.T("owner.js.state_loading") + `</h2>
     <p id="threadMeta" class="muted"></p>
+    <p id="threadDescription" class="muted"></p>
+    <div class="actions" id="threadEditToggle" hidden>
+        <button class="btn" id="threadEditBtn" type="button">` + d.T("owner.threads.edit") + `</button>
+    </div>
+    <form id="threadEditForm" hidden novalidate>
+        <label for="threadEditSubject">` + d.T("owner.threads.subject_label") + `</label>
+        <input id="threadEditSubject" name="subject" maxlength="200">
+        <label for="threadEditDescription">` + d.T("owner.threads.description_label") + `</label>
+        <textarea id="threadEditDescription" name="description" maxlength="1000" rows="3"></textarea>
+        <div class="actions">
+            <button class="btn primary" type="submit">` + d.T("owner.threads.save") + `</button>
+            <button class="btn" id="threadEditCancel" type="button">` + d.T("owner.threads.cancel") + `</button>
+        </div>
+    </form>
 </section>
 <section class="panel">
     <h3>` + d.T("owner.threads.timeline") + `</h3>

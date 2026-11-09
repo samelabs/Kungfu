@@ -43,7 +43,7 @@ func handleAccountRegister(ctx context.Context, deps *Deps, agent *model.Bot, ar
 		"api_key":      res.Key, // one-time disclosure — never logged
 		"mcp_endpoint": "https://kungfu.md/mcp",
 		"api_base":     "https://kungfu.md/api/v1/",
-		"docs":         "https://kungfu.md/llms.txt",
+		"docs":         "https://kungfu.md/skill.md",
 		"message":      res.Message,
 		"key_recovery": "Store the key now. If it is lost, the owner signs in at /owner/key and resets it.",
 	})

@@ -129,6 +129,18 @@ func TestTodoListAggregatesAndRecovers(t *testing.T) {
 	if n := len(empty["todos"].([]map[string]any)); n != 0 || empty["next_action"] != "wait" {
 		t.Fatalf("empty todo = %d items, next_action=%v", n, empty["next_action"])
 	}
+	// the empty turn hands the caller the wake tool (todo_wait hint)
+	hinted := false
+	if next, ok := empty["next"].([]map[string]any); ok {
+		for _, h := range next {
+			if h["tool"] == "todo_wait" {
+				hinted = true
+			}
+		}
+	}
+	if !hinted {
+		t.Fatalf("empty turn must hint todo_wait, got next=%v", empty["next"])
+	}
 }
 
 func TestTodoListCursorPages(t *testing.T) {

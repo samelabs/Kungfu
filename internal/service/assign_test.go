@@ -329,6 +329,31 @@ func TestAssignDeadlines(t *testing.T) {
 		t.Fatalf("late judge assign = %s, want undecided after sweep", got)
 	}
 
+	// creator void past deliver deadline: beaten by expiry like submit
+	// — the assign settles as timed_out, never voided
+	_, s3 := assignPost(t, pool, owner, code, "late void", a, "e3")
+	if _, err := AssignTake(ctx, pool, a, s3, "", "", "t3"); err != nil {
+		t.Fatalf("take3: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE assigns SET deliver_due_at = NOW() - INTERVAL '1 second' WHERE id = $1`, s3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AssignVoid(ctx, pool, owner, s3, "v1"); err == nil {
+		t.Fatal("void past deliver deadline must be beaten by expiry (L4)")
+	} else {
+		threadErrIs(t, err, 409, "INVALID_STATE")
+	}
+	if got := assignState(t, pool, s3); got != "taken" {
+		t.Fatalf("rejected void must leave the assign untouched: %s", got)
+	}
+	if _, err := RecoverAssigns(ctx, pool, "now", 50); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if got := assignState(t, pool, s3); got != "timed_out" {
+		t.Fatalf("late-voided assign = %s, want timed_out after sweep", got)
+	}
+
 	// sweeper pass over a fresh batch: both transitions recoverable
 	if _, err := RecoverAssigns(ctx, pool, "now", 50); err != nil {
 		t.Fatalf("recover: %v", err)
@@ -349,14 +374,27 @@ func TestAssignClosedRoom(t *testing.T) {
 	}
 	_, s1 := assignPost(t, pool, owner, code, "judged after close", a, "c1")
 	_, s2 := assignPost(t, pool, owner, code, "voided by close", a, "c2")
+	_, s3 := assignPost(t, pool, owner, code, "overdue at close", a, "c3")
 	if _, err := AssignTake(ctx, pool, a, s1, `{"done":1}`, "", "t1"); err != nil {
 		t.Fatalf("take: %v", err)
+	}
+	// s3's deliver clock already ran out when the room closes: the
+	// deadline rule wins over the close's void (L4 precedence)
+	if _, err := AssignTake(ctx, pool, a, s3, "", "", "t3"); err != nil {
+		t.Fatalf("take3: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE assigns SET deliver_due_at = NOW() - INTERVAL '1 second' WHERE id = $1`, s3); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := ThreadClose(ctx, pool, owner, code, "cl1"); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if got := assignState(t, pool, s2); got != "voided" {
 		t.Fatalf("close must void undelivered: %s", got)
+	}
+	if got := assignState(t, pool, s3); got != "timed_out" {
+		t.Fatalf("overdue assign at close = %s, want timed_out (deadline beats void)", got)
 	}
 	if got := assignState(t, pool, s1); got != "delivered" {
 		t.Fatalf("close must not touch delivered: %s", got)

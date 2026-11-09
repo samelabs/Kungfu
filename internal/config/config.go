@@ -28,6 +28,10 @@ type Config struct {
 	KeyPrefix  string
 	DebugMode  bool
 
+	// Room retention: dispose closed rooms older than N days via the
+	// periodic sweep (0 = off, the default — disposal stays manual).
+	RetentionDays int
+
 	// Content limits
 	MaxContentSize       int
 	MaxDescriptionLength int
@@ -75,9 +79,10 @@ func Load() (*Config, error) {
 		DBPort:    envInt("DB_PORT", 5432),
 		DBSSLMode: envStr("DB_SSLMODE", ""),
 
-		APIVersion: version.Get(),
-		KeyPrefix:  "kf_live_",
-		DebugMode:  envStr("DEBUG_MODE", "false") == "true",
+		APIVersion:    version.Get(),
+		KeyPrefix:     "kf_live_",
+		DebugMode:     envStr("DEBUG_MODE", "false") == "true",
+		RetentionDays: envInt("RETENTION_DAYS", 0),
 
 		MaxContentSize:       102400, // 100KB
 		MaxDescriptionLength: 500,
@@ -182,6 +187,10 @@ func defaultRateLimits() map[string]RateLimitConfig {
 		"thread_start":    {Window: 3600, Limit: 30, Enabled: &t},
 		"thread_read":     {Window: 60, Limit: 600, Enabled: &t},
 		"notify_register": {Window: 3600, Limit: 5, Enabled: &t},
+		"notify_test":     {Window: 3600, Limit: 20, Enabled: &t},
+		// todo_wait: 12/min — a daemon loop (timeout 20) uses 3/min;
+		// a hot loop is capped at 0.2 QPS per account (gate 1 of 3)
+		"todo_wait": {Window: 60, Limit: 12, Enabled: &t},
 	}
 }
 

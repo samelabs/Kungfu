@@ -27,15 +27,15 @@ func TestBudgetFloorIsOnePrice(t *testing.T) {
 	// a fresh 66-credit account publishes price=10 budget=60
 	c := minimalContract()
 	c.Price = 10
-	if _, err := CreateTask(ctx, pool, fresh, c, 60); err != nil {
+	if _, err := CreateTask(ctx, pool, fresh, c, 60, false, ""); err != nil {
 		t.Fatalf("create with budget=60: %v", err)
 	}
 	// budget below one price unit → VALIDATION_FAILED(field=budget)
-	if _, err := CreateTask(ctx, pool, fresh, c, 9); appErrOf(t, err).Code != "VALIDATION_FAILED" {
+	if _, err := CreateTask(ctx, pool, fresh, c, 9, false, ""); appErrOf(t, err).Code != "VALIDATION_FAILED" {
 		t.Fatalf("budget<price: %v, want VALIDATION_FAILED", err)
 	}
 	// balance below the budget → INSUFFICIENT_CREDITS
-	if _, err := CreateTask(ctx, pool, fresh, c, 1000); appErrOf(t, err).Code != "INSUFFICIENT_CREDITS" {
+	if _, err := CreateTask(ctx, pool, fresh, c, 1000, false, ""); appErrOf(t, err).Code != "INSUFFICIENT_CREDITS" {
 		t.Fatalf("insufficient: %v, want INSUFFICIENT_CREDITS", err)
 	}
 }

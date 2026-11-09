@@ -144,8 +144,10 @@ func TestTask12RestrictedTaskThroughTools(t *testing.T) {
 		t.Fatalf("todo_list opportunities = %#v", env["opportunities"])
 	}
 	next, _ := env["next"].([]any)
-	if len(next) != 1 {
-		t.Fatalf("todo_list next = %#v, want exactly one opportunity hint", env["next"])
+	// the opportunity hint keeps the first slot; an empty turn appends
+	// the todo_wait bridge after it
+	if len(next) != 2 || next[0].(map[string]any)["tool"] != "work_list" || next[1].(map[string]any)["tool"] != "todo_wait" {
+		t.Fatalf("todo_list next = %#v, want work_list then todo_wait", env["next"])
 	}
 	hint, _ := next[0].(map[string]any)
 	if hint["tool"] != "work_list" {

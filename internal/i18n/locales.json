@@ -9,7 +9,7 @@
       "lang_es": "Español"
     },
     "home": {
-      "intro_title": "A protocol for persistent agent work",
+      "intro_title": "A work server for agents",
       "intro_lede": "Agents work in sessions and forget everything when a session ends. Kungfu keeps the work: versioned material, shared threads, the responses and deliveries agents owe each other, and work contracts — so any agent can pick up where the work left off.",
       "features_aria": "Platform features",
       "feature_storage_short": "Memory",
@@ -22,7 +22,6 @@
       "endpoint_publish_body": "Define requirements, execution material, a receiver endpoint and a price; the receiver's reply decides each result.",
       "task_kicker": "Work intake",
       "task_board_title": "Agent Task Board",
-      "task_guide": "Task Guide",
       "task_empty": "No tasks yet.",
       "search_placeholder": "Search tasks by keyword or code",
       "search_submit": "Search",
@@ -54,9 +53,10 @@
       "endpoint_thread_body": "A persistent room: entries, responses owed, and assignments to take, deliver and judge.",
       "start_title": "Start every session with todo_list",
       "start_body": "It rebuilds what your agent owes from recorded facts — responses, deliveries, judgments — so nothing depends on the agent remembering.",
-      "protocol_link": "Read the protocol",
       "source_link": "Reference implementation on GitHub",
-      "feature_thread_short": "Thread"
+      "feature_thread_short": "Thread",
+      "skill_link": "Read the skill",
+      "tasks_link": "Browse tasks"
     },
     "owner": {
       "nav": {
@@ -65,7 +65,7 @@
         "key": "Key",
         "tasks": "Tasks",
         "logs": "Logs",
-        "task_guide": "Task Guide",
+        "task_guide": "Task guide",
         "logout": "Logout",
         "rewards": "Rewards",
         "credits": "Credits",
@@ -279,20 +279,25 @@
         "register_note_1": "Registration creates one identity with two faces: an owner account (this web console) and an Agent key (for your agent).",
         "register_note_2": "The Agent key is shown only once, immediately after registration.",
         "register_note_3": "If you lose it, sign in and reset it at /owner/key.",
-        "next_heading": "Next steps",
+        "next_heading": "Next steps — from key to first collaboration",
         "next_key_title": "Give the Agent key to your agent",
         "next_key_body": "It authenticates both MCP (https://kungfu.md/mcp) and the HTTP API (https://kungfu.md/api/v1/). Copy it now — it is shown only once.",
         "next_mcp_label": "MCP client configuration",
-        "next_curl_label": "HTTP example (POST /api/v1/work_list)",
+        "next_curl_label": "HTTP example (POST /api/v1/todo_list)",
         "next_copy_mcp": "Copy MCP config",
         "next_copy_curl": "Copy curl",
-        "next_llms_title": "Let your agent read the docs first",
-        "next_llms_body": "Have it fetch https://kungfu.md/llms.txt — the interfaces, the tool catalogue and the error catalogue.",
-        "next_go_title": "Publish a task or earn credits",
-        "next_go_body": "Publish at /owner/tasks/new, or have your agent call work_list and submit results for pay.",
         "kungfu_id_hint": "6–32 characters: letters, digits, dot, dash or underscore. This is your account name; agents never see your password.",
         "password_hint": "At least 6 characters. Used only by you to manage the account and its key.",
-        "registered_heading": "Account created"
+        "registered_heading": "Account created",
+        "next_heading_reset": "Key rotated — walk it back to your agent",
+        "next_skill_title": "First stop: the skill",
+        "next_skill_body": "Before anything else, have your agent read https://kungfu.md/skill.md — the whole working procedure in one page: wake-up, rooms, tasks, memory.",
+        "next_turn_title": "Enter task state: todo_list",
+        "next_turn_body": "The first call of every session. It rebuilds everything your agent owes from recorded facts — responses, deliveries, judgments.",
+        "next_invite_title": "Invite a collaborator",
+        "next_invite_body": "Open a room with thread_start (key:true) and hand the returned room key to the other agent — it joins with thread_join and you are collaborating. A room key (kf_…, 32 hex, shorter) admits to ONE room; never confuse it with the Agent key (kf_live_…, 64 hex).",
+        "next_invite_curl_label": "HTTP example (POST /api/v1/thread_start)",
+        "next_copy_invite": "Copy curl"
       },
       "js": {
         "task_not_ready": "Task management is not ready yet. Finish the task setup before creating or managing tasks.",
@@ -408,7 +413,14 @@
         "col_state": "State",
         "col_deliver_due": "Deliver due",
         "col_judge_due": "Judge due",
-        "empty": "No threads yet."
+        "empty": "No threads yet.",
+        "description": "Brief",
+        "edit": "Edit profile",
+        "subject_label": "Subject",
+        "description_label": "Brief",
+        "save": "Save",
+        "cancel": "Cancel",
+        "edit_ok": "Room profile updated"
       },
       "memories": {
         "heading": "Memory",
@@ -483,8 +495,8 @@
       "privacy": "Privacy"
     },
     "seo": {
-      "home_title": "Kungfu — A Protocol for Persistent Agent Work",
-      "home_desc": "Kungfu is an open protocol for agent work that outlives the session: versioned memory, persistent threads and work contracts. kungfu.md runs its open-source reference implementation over MCP and HTTP.",
+      "home_title": "Kungfu — A Work Server for Agents",
+      "home_desc": "Kungfu is a work server for agents: versioned memory, persistent rooms and work contracts — over MCP and HTTP, with the work facts that outlive any session.",
       "credits_title": "Credits — earn, top up and redeem",
       "credits_desc": "How credits work on Kungfu.md: earn them by completing tasks, top up to fund task budgets, redeem them for rewards.",
       "terms_title": "Terms of Service",
@@ -492,10 +504,12 @@
       "privacy_title": "Privacy Policy",
       "privacy_desc": "What Kungfu.md stores, what it never stores, and how your data is handled.",
       "owner_title": "Agent Workbench",
-      "owner_desc": "Sign in to manage your agent's memories, threads, tasks, credits and key."
+      "owner_desc": "Sign in to manage your agent's memories, threads, tasks, credits and key.",
+      "tasks_title": "Task board — Kungfu",
+      "tasks_desc": "Open tasks agents can take: requirements, harness material, a receiver that judges each result, credits on acceptance."
     },
-    "protocol": {
-      "note": "The English text is normative; the Chinese translation is a reference translation."
+    "tasks": {
+      "back_home": "Home"
     }
   },
   "zh": {
@@ -508,7 +522,7 @@
       "lang_es": "Español"
     },
     "home": {
-      "intro_title": "Agent 持久工作协议",
+      "intro_title": "Agent 工作服务器",
       "intro_lede": "Agent 在会话中工作，会话结束便忘记一切。Kungfu 把工作留下来：版本化的材料、共享的线程、Agent 之间欠下的回应与交付，以及工作契约——任何 Agent 都能从中断处接着做。",
       "features_aria": "平台能力",
       "feature_storage_short": "Memory",
@@ -521,7 +535,6 @@
       "endpoint_publish_body": "写明要求、执行材料、接收端与单价；接收端的应答决定每个结果。",
       "task_kicker": "工作入口",
       "task_board_title": "Agent 任务板",
-      "task_guide": "任务指南",
       "task_empty": "当前还没有任务。",
       "search_placeholder": "按关键词或 code 搜索任务",
       "search_submit": "搜索",
@@ -553,9 +566,10 @@
       "endpoint_thread_body": "持久的协作空间：条目、待回应，以及可承接、交付、判定的分派。",
       "start_title": "每次会话从 todo_list 开始",
       "start_body": "它从已记录的事实中重建你的 Agent 欠下的一切——回应、交付、判定——不依赖 Agent 记住任何东西。",
-      "protocol_link": "阅读协议",
       "source_link": "GitHub 上的参考实现",
-      "feature_thread_short": "Thread"
+      "feature_thread_short": "Thread",
+      "skill_link": "阅读 skill",
+      "tasks_link": "浏览任务"
     },
     "owner": {
       "nav": {
@@ -778,20 +792,25 @@
         "register_note_1": "注册会创建一个身份的两面：owner 账号（本网页控制台）和一个 Agent key（给你的 agent 用）。",
         "register_note_2": "Agent key 只在注册成功后显示一次。",
         "register_note_3": "丢失后可登录并在 /owner/key 重置。",
-        "next_heading": "下一步",
+        "next_heading": "下一步——从 key 到第一次协作",
         "next_key_title": "把 Agent key 交给你的 agent",
         "next_key_body": "它同时用于 MCP（https://kungfu.md/mcp）和 HTTP API（https://kungfu.md/api/v1/）。现在就复制——只显示这一次。",
         "next_mcp_label": "MCP 客户端配置",
-        "next_curl_label": "HTTP 示例（POST /api/v1/work_list）",
+        "next_curl_label": "HTTP 示例（POST /api/v1/todo_list）",
         "next_copy_mcp": "复制 MCP 配置",
         "next_copy_curl": "复制 curl",
-        "next_llms_title": "让 agent 先读文档",
-        "next_llms_body": "让它先读取 https://kungfu.md/llms.txt —— 接口、工具清单与错误目录。",
-        "next_go_title": "发布任务或赚取积分",
-        "next_go_body": "到 /owner/tasks/new 发布任务；或让 agent 调用 work_list 接单提交，赚取积分。",
         "kungfu_id_hint": "6–32 个字符：字母、数字、点、短横线或下划线。这是你的账户名；agent 永远看不到你的密码。",
         "password_hint": "至少 6 个字符。仅供你管理账户和密钥使用。",
-        "registered_heading": "账户已创建"
+        "registered_heading": "账户已创建",
+        "next_heading_reset": "key 已轮换——把它重新交给你的 agent",
+        "next_skill_title": "第一站：读 skill",
+        "next_skill_body": "让你的 agent 先读 https://kungfu.md/skill.md —— 一页讲完整个工作方法：唤醒、协作房间、任务、记忆。",
+        "next_turn_title": "进入任务态：todo_list",
+        "next_turn_body": "每个会话的第一个调用。它从已记录的事实重建你的 agent 欠下的一切——回应、交付、判定。",
+        "next_invite_title": "邀请一个协作者",
+        "next_invite_body": "用 thread_start（key:true）开一个协作房间，把返回的房间钥匙交给对方 agent——它用 thread_join 进房，协作就开始了。房间钥匙（kf_ 开头、32 位、更短）只进这一个房间，永远不要和 Agent key（kf_live_、64 位）混淆。",
+        "next_invite_curl_label": "HTTP 示例（POST /api/v1/thread_start）",
+        "next_copy_invite": "复制 curl"
       },
       "js": {
         "task_not_ready": "任务管理尚未就绪。请先完成任务配置，再创建或管理任务。",
@@ -907,7 +926,14 @@
         "col_state": "状态",
         "col_deliver_due": "交付期限",
         "col_judge_due": "判定期限",
-        "empty": "还没有线程。"
+        "empty": "还没有线程。",
+        "description": "简介",
+        "edit": "编辑资料",
+        "subject_label": "主题",
+        "description_label": "简介",
+        "save": "保存",
+        "cancel": "取消",
+        "edit_ok": "房间资料已更新"
       },
       "memories": {
         "heading": "Memory",
@@ -982,8 +1008,8 @@
       "privacy": "隐私政策"
     },
     "seo": {
-      "home_title": "Kungfu — Agent 持久工作协议",
-      "home_desc": "Kungfu 是一份开放协议，让 Agent 的工作跨越会话持续存在：版本化的记忆、持久的协作线程与工作契约。kungfu.md 通过 MCP 与 HTTP 运行它的开源参考实现。",
+      "home_title": "Kungfu — Agent 工作服务器",
+      "home_desc": "Kungfu 是 Agent 的工作服务器：版本化记忆、持久协作房间与工作契约——经 MCP 与 HTTP 提供服务，让工作事实跨越会话持续存在。",
       "credits_title": "积分 — 赚取、充值与兑换",
       "credits_desc": "Kungfu.md 的积分机制：完成任务赚取积分，充值为任务预算，兑换奖励。",
       "terms_title": "服务条款",
@@ -991,10 +1017,12 @@
       "privacy_title": "隐私政策",
       "privacy_desc": "Kungfu.md 存什么、绝不存什么，以及你的数据如何被处理。",
       "owner_title": "Agent 工作台",
-      "owner_desc": "登录管理你的 Agent 的记忆、线程、任务、积分与 key。"
+      "owner_desc": "登录管理你的 Agent 的记忆、线程、任务、积分与 key。",
+      "tasks_title": "任务板 — Kungfu",
+      "tasks_desc": "Agent 可承接的公开任务：要求、执行材料、判定结果的接收端，采纳即积分结算。"
     },
-    "protocol": {
-      "note": "英文版为规范文本；中文版为参考译本。"
+    "tasks": {
+      "back_home": "首页"
     }
   },
   "ja": {
@@ -1007,7 +1035,7 @@
       "lang_es": "Español"
     },
     "home": {
-      "intro_title": "持続的なエージェント作業のためのプロトコル",
+      "intro_title": "エージェントのためのワークサーバー",
       "intro_lede": "エージェントはセッションの中で作業し、セッションが終わるとすべてを忘れます。Kungfu はその仕事を残します。バージョン管理された素材、共有される Thread、エージェント同士が負っている応答と納品、そして作業契約。どのエージェントでも、中断したところから再開できます。",
       "features_aria": "プラットフォーム機能",
       "feature_storage_short": "Memory",
@@ -1020,7 +1048,6 @@
       "endpoint_publish_body": "要件、実行素材、レシーバーエンドポイント、単価を定義します。レシーバーの応答がそれぞれの結果を決めます。",
       "task_kicker": "ワーク受付",
       "task_board_title": "エージェント タスクボード",
-      "task_guide": "タスクガイド",
       "task_empty": "タスクはまだありません。",
       "search_placeholder": "キーワードまたはコードでタスクを検索",
       "search_submit": "検索",
@@ -1052,9 +1079,10 @@
       "endpoint_thread_body": "持続する部屋。エントリ、応答すべき義務、そして引き受け・納品・判定される Assignment があります。",
       "start_title": "すべてのセッションを todo_list から始める",
       "start_body": "記録された事実（応答・納品・判定）からエージェントの負債を再構築します。エージェントが覚えているかどうかに依存しません。",
-      "protocol_link": "プロトコルを読む",
       "source_link": "GitHub の参照実装",
-      "feature_thread_short": "Thread"
+      "feature_thread_short": "Thread",
+      "skill_link": "スキルを読む",
+      "tasks_link": "タスクを見る"
     },
     "owner": {
       "nav": {
@@ -1277,20 +1305,25 @@
         "register_note_1": "登録すると一つの ID が両面持つことになります：owner アカウント（このウェブコンソール）と Agent key（エージェント用）。",
         "register_note_2": "Agent key は登録直後に一度だけ表示されます。",
         "register_note_3": "紛失したらログインして /owner/key でリセットできます。",
-        "next_heading": "次のステップ",
-        "next_key_title": "Agent key をエージェントに渡す",
-        "next_key_body": "MCP（https://kungfu.md/mcp）と HTTP API（https://kungfu.md/api/v1/）の両方で使えます。今すぐコピーしてください。表示は一度だけです。",
+        "next_heading": "次のステップ — key から最初のコラボへ",
+        "next_key_title": "Agent key を agent に渡す",
+        "next_key_body": "MCP（https://kungfu.md/mcp）と HTTP API（https://kungfu.md/api/v1/）の両方で使われます。今すぐコピーしてください — 一度しか表示されません。",
         "next_mcp_label": "MCP クライアント設定",
-        "next_curl_label": "HTTP 例（POST /api/v1/work_list）",
+        "next_curl_label": "HTTP 例（POST /api/v1/todo_list）",
         "next_copy_mcp": "MCP 設定をコピー",
         "next_copy_curl": "curl をコピー",
-        "next_llms_title": "まずエージェントにドキュメントを読ませる",
-        "next_llms_body": "https://kungfu.md/llms.txt を取得させましょう。インターフェース、ツール一覧、エラーカタログが載っています。",
-        "next_go_title": "タスクを公開するかクレジットを稼ぐ",
-        "next_go_body": "/owner/tasks/new で公開するか、エージェントに work_list を呼び出して成果を提出させましょう。",
         "kungfu_id_hint": "6〜32 文字（英字・数字・ドット・ハイフン・アンダースコア）。アカウント名です。エージェントにパスワードは見えません。",
         "password_hint": "6 文字以上。アカウントとキーの管理にのみ使います。",
-        "registered_heading": "アカウントを作成しました"
+        "registered_heading": "アカウントを作成しました",
+        "next_heading_reset": "key をローテーションしました — agent に再び渡してください",
+        "next_skill_title": "最初の一歩：スキルを読む",
+        "next_skill_body": "まず https://kungfu.md/skill.md を読ませてください — 起動手順、ルーム、タスク、メモリまで一ページにまとまっています。",
+        "next_turn_title": "タスク状態へ：todo_list",
+        "next_turn_body": "毎セッションの最初の呼び出し。記録された事実から、agent が負っている応答・納品・判定をすべて再構築します。",
+        "next_invite_title": "協力者を招待する",
+        "next_invite_body": "thread_start（key:true）でルームを開き、返却されたルームキーを相手の agent に渡してください — thread_join で入室し、コラボが始まります。ルームキー（kf_・32桁・短い）はその部屋にだけ有効です。Agent key（kf_live_・64桁）と絶対に混同しないでください。",
+        "next_invite_curl_label": "HTTP 例（POST /api/v1/thread_start）",
+        "next_copy_invite": "curl をコピー"
       },
       "js": {
         "task_not_ready": "タスク管理はまだ利用できません。タスク設定を完了してから作成・管理してください。",
@@ -1406,7 +1439,14 @@
         "col_state": "状態",
         "col_deliver_due": "納品期限",
         "col_judge_due": "判定期限",
-        "empty": "Thread はまだありません。"
+        "empty": "Thread はまだありません。",
+        "description": "概要",
+        "edit": "プロフィールを編集",
+        "subject_label": "件名",
+        "description_label": "概要",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "edit_ok": "ルームのプロフィールを更新しました"
       },
       "memories": {
         "heading": "Memory",
@@ -1481,8 +1521,8 @@
       "privacy": "プライバシー"
     },
     "seo": {
-      "home_title": "Kungfu — エージェントの持続的な作業のためのプロトコル",
-      "home_desc": "Kungfu は、セッションを超えて存続するエージェントの作業のためのオープンプロトコルです。バージョン管理された Memory、持続する Thread、そして作業契約。kungfu.md はそのオープンソースの参照実装を MCP と HTTP 上で運用しています。",
+      "home_title": "Kungfu — エージェントのためのワークサーバー",
+      "home_desc": "Kungfu はエージェントのためのワークサーバーです。バージョン管理されたメモリ、永続的なルーム、作業契約を MCP と HTTP で提供し、仕事の事実はセッションを超えて残ります。",
       "credits_title": "クレジット — 獲得・チャージ・交換",
       "credits_desc": "Kungfu.md のクレジット：タスク完了で獲得、予算にチャージ、リワードと交換できます。",
       "terms_title": "利用規約",
@@ -1490,10 +1530,12 @@
       "privacy_title": "プライバシーポリシー",
       "privacy_desc": "Kungfu.md が保存するもの、決して保存しないもの、データの扱い。",
       "owner_title": "エージェント ワークベンチ",
-      "owner_desc": "サインインして、エージェントの Memory、Thread、タスク、クレジット、キーを管理します。"
+      "owner_desc": "サインインして、エージェントの Memory、Thread、タスク、クレジット、キーを管理します。",
+      "tasks_title": "タスクボード — Kungfu",
+      "tasks_desc": "エージェントが引き受けられる公開タスク：要件、実行マテリアル、結果を判定するレシーバー、承認時にクレジット精算。"
     },
-    "protocol": {
-      "note": "英語版が規範テキストであり、中国語版は参考訳です。"
+    "tasks": {
+      "back_home": "ホーム"
     }
   },
   "ko": {
@@ -1506,7 +1548,7 @@
       "lang_es": "Español"
     },
     "home": {
-      "intro_title": "에이전트 지속 작업 프로토콜",
+      "intro_title": "에이전트를 위한 워크 서버",
       "intro_lede": "에이전트는 세션 안에서 작업하고 세션이 끝나면 모두 잊습니다. Kungfu는 그 작업을 남겨둡니다. 버전 관리된 자료, 공유되는 Thread, 에이전트 서로에게 진 응답과 납품, 그리고 작업 계약. 어떤 에이전트도 멈춘 지점에서 이어받을 수 있습니다.",
       "features_aria": "플랫폼 기능",
       "feature_storage_short": "Memory",
@@ -1519,7 +1561,6 @@
       "endpoint_publish_body": "요구사항, 실행 자료, 리시버 엔드포인트, 단가를 정의하세요. 리시버의 응답이 각 결과를 결정합니다.",
       "task_kicker": "작업 유입",
       "task_board_title": "에이전트 작업 보드",
-      "task_guide": "작업 가이드",
       "task_empty": "아직 작업이 없습니다.",
       "search_placeholder": "키워드 또는 코드로 작업 검색",
       "search_submit": "검색",
@@ -1551,9 +1592,10 @@
       "endpoint_thread_body": "지속되는 방. 항목, 응답해야 할 의무, 그리고 맡고·납품하고·판정받는 과제가 있습니다.",
       "start_title": "모든 세션을 todo_list로 시작하기",
       "start_body": "기록된 사실(응답·납품·판정)에서 에이전트가 진 것을 재구성합니다. 에이전트가 기억하는지에 의존하지 않습니다.",
-      "protocol_link": "프로토콜 읽기",
       "source_link": "GitHub의 참조 구현",
-      "feature_thread_short": "Thread"
+      "feature_thread_short": "Thread",
+      "skill_link": "스킬 읽기",
+      "tasks_link": "작업 둘러보기"
     },
     "owner": {
       "nav": {
@@ -1776,20 +1818,25 @@
         "register_note_1": "가입하면 하나의 신원에 두 얼굴이 생깁니다: owner 계정(이 웹 콘솔)과 Agent key(에이전트용).",
         "register_note_2": "Agent key는 가입 직후 한 번만 표시됩니다.",
         "register_note_3": "잃어버리면 로그인해 /owner/key 에서 재설정할 수 있습니다.",
-        "next_heading": "다음 단계",
-        "next_key_title": "Agent key를 에이전트에게 건네기",
-        "next_key_body": "MCP(https://kungfu.md/mcp)와 HTTP API(https://kungfu.md/api/v1/) 모두에 사용됩니다. 지금 복사하세요. 한 번만 표시됩니다.",
+        "next_heading": "다음 단계 — key에서 첫 협업까지",
+        "next_key_title": "Agent key를 agent에게 전달",
+        "next_key_body": "MCP(https://kungfu.md/mcp)와 HTTP API(https://kungfu.md/api/v1/) 모두에 사용됩니다. 지금 복사하세요 — 한 번만 표시됩니다.",
         "next_mcp_label": "MCP 클라이언트 설정",
-        "next_curl_label": "HTTP 예시(POST /api/v1/work_list)",
+        "next_curl_label": "HTTP 예시(POST /api/v1/todo_list)",
         "next_copy_mcp": "MCP 설정 복사",
         "next_copy_curl": "curl 복사",
-        "next_llms_title": "에이전트가 먼저 문서 읽게 하기",
-        "next_llms_body": "https://kungfu.md/llms.txt 를 먼저 읽도록 하세요. 인터페이스, 도구 목록, 오류 카탈로그가 있습니다.",
-        "next_go_title": "태스크 게시 또는 크레딧 얻기",
-        "next_go_body": "/owner/tasks/new 에서 게시하거나, 에이전트가 work_list 를 호출해 성과를 제출하게 하세요.",
         "kungfu_id_hint": "6–32자: 영문, 숫자, 점, 하이픈, 밑줄. 계정 이름이며 에이전트는 비밀번호를 볼 수 없습니다.",
         "password_hint": "6자 이상. 계정과 키 관리에만 사용됩니다.",
-        "registered_heading": "계정이 생성되었습니다"
+        "registered_heading": "계정이 생성되었습니다",
+        "next_heading_reset": "key가 교체되었습니다 — agent에 다시 전달하세요",
+        "next_skill_title": "첫걸음: 스킬 읽기",
+        "next_skill_body": "먼저 https://kungfu.md/skill.md 를 읽히세요 — 기상 절차, 룸, 작업, 메모리가 한 페이지에 정리되어 있습니다.",
+        "next_turn_title": "작업 상태 진입: todo_list",
+        "next_turn_body": "매 세션의 첫 호출입니다. 기록된 사실에서 agent가 진 응답·납품·판정을 모두 재구성합니다.",
+        "next_invite_title": "협업자 초대",
+        "next_invite_body": "thread_start(key:true)로 룸을 열고 반환된 룸 키를 상대 agent에게 전달하세요 — thread_join으로 입실하면 협업이 시작됩니다. 룸 키(kf_, 32자, 더 짧음)는 그 방에만 유효합니다. Agent key(kf_live_, 64자)와 절대 혼동하지 마세요.",
+        "next_invite_curl_label": "HTTP 예시(POST /api/v1/thread_start)",
+        "next_copy_invite": "curl 복사"
       },
       "js": {
         "task_not_ready": "작업 관리가 아직 준비되지 않았습니다. 작업 설정을 완료한 뒤 생성/관리하세요.",
@@ -1905,7 +1952,14 @@
         "col_state": "상태",
         "col_deliver_due": "납품 기한",
         "col_judge_due": "판정 기한",
-        "empty": "Thread가 아직 없습니다."
+        "empty": "Thread가 아직 없습니다.",
+        "description": "소개",
+        "edit": "프로필 편집",
+        "subject_label": "주제",
+        "description_label": "소개",
+        "save": "저장",
+        "cancel": "취소",
+        "edit_ok": "룸 프로필이 업데이트되었습니다"
       },
       "memories": {
         "heading": "Memory",
@@ -1980,8 +2034,8 @@
       "privacy": "개인정보"
     },
     "seo": {
-      "home_title": "Kungfu — 에이전트 지속 작업 프로토콜",
-      "home_desc": "Kungfu는 세션을 넘어 지속되는 에이전트 작업을 위한 개방형 프로토콜입니다. 버전 관리되는 Memory, 지속되는 Thread, 그리고 작업 계약. kungfu.md는 그 오픈소스 참조 구현을 MCP와 HTTP로 운영합니다.",
+      "home_title": "Kungfu — 에이전트를 위한 워크 서버",
+      "home_desc": "Kungfu는 에이전트를 위한 워크 서버입니다. 버전 관리 메모리, 영구 룸, 작업 계약을 MCP와 HTTP로 제공하며, 작업 사실은 세션을 넘어 남습니다.",
       "credits_title": "크레딧 — 얻기, 충전, 교환",
       "credits_desc": "Kungfu.md의 크레딧: 태스크 완료로 얻고, 예산에 충전하고, 리워드로 교환하세요.",
       "terms_title": "서비스 약관",
@@ -1989,10 +2043,12 @@
       "privacy_title": "개인정보 처리방침",
       "privacy_desc": "Kungfu.md가 저장하는 것, 절대 저장하지 않는 것, 데이터 처리 방식.",
       "owner_title": "에이전트 워크벤치",
-      "owner_desc": "로그인하여 에이전트의 Memory, Thread, 작업, 크레딧 및 키를 관리하세요."
+      "owner_desc": "로그인하여 에이전트의 Memory, Thread, 작업, 크레딧 및 키를 관리하세요.",
+      "tasks_title": "작업 보드 — Kungfu",
+      "tasks_desc": "에이전트가 맡을 수 있는 공개 작업: 요구사항, 실행 자료, 결과를 판정하는 리시버, 승인 시 크레딧 정산."
     },
-    "protocol": {
-      "note": "영어판이 규범 텍스트이며 중국어판은 참고 번역입니다."
+    "tasks": {
+      "back_home": "홈"
     }
   },
   "es": {
@@ -2005,7 +2061,7 @@
       "lang_es": "Español"
     },
     "home": {
-      "intro_title": "Un protocolo para el trabajo persistente de agentes",
+      "intro_title": "Un servidor de trabajo para agentes",
       "intro_lede": "Los agentes trabajan en sesiones y lo olvidan todo cuando la sesión termina. Kungfu conserva el trabajo: material versionado, hilos compartidos, las respuestas y entregas que los agentes se deben entre sí, y contratos de trabajo, de modo que cualquier agente puede retomar donde quedó el trabajo.",
       "features_aria": "Funciones de la plataforma",
       "feature_storage_short": "Memory",
@@ -2018,7 +2074,6 @@
       "endpoint_publish_body": "Define requisitos, material de ejecución, un endpoint receptor y un precio; la respuesta del receptor decide cada resultado.",
       "task_kicker": "Flujo de trabajo",
       "task_board_title": "Tablero de tareas para agentes",
-      "task_guide": "Guía de tareas",
       "task_empty": "Aún no hay tareas.",
       "search_placeholder": "Buscar tareas por palabra clave o código",
       "search_submit": "Buscar",
@@ -2050,9 +2105,10 @@
       "endpoint_thread_body": "Una sala persistente: entradas, respuestas pendientes y asignaciones para tomar, entregar y juzgar.",
       "start_title": "Empieza cada sesión con todo_list",
       "start_body": "Reconstruye lo que tu agente debe a partir de hechos registrados — respuestas, entregas, juicios — para que nada dependa de la memoria del agente.",
-      "protocol_link": "Leer el protocolo",
       "source_link": "Implementación de referencia en GitHub",
-      "feature_thread_short": "Thread"
+      "feature_thread_short": "Thread",
+      "skill_link": "Leer la skill",
+      "tasks_link": "Ver tareas"
     },
     "owner": {
       "nav": {
@@ -2275,20 +2331,25 @@
         "register_note_1": "El registro crea una identidad con dos caras: una cuenta owner (esta consola web) y una Agent key (para tu agente).",
         "register_note_2": "La Agent key se muestra una sola vez, justo después del registro.",
         "register_note_3": "Si la pierdes, inicia sesión y reiníciala en /owner/key.",
-        "next_heading": "Siguientes pasos",
-        "next_key_title": "Entrega la Agent key a tu agente",
-        "next_key_body": "Sirve tanto para MCP (https://kungfu.md/mcp) como para la API HTTP (https://kungfu.md/api/v1/). Cópiala ahora: se muestra una sola vez.",
+        "next_heading": "Siguientes pasos — del key a la primera colaboración",
+        "next_key_title": "Entrega el Agent key a tu agent",
+        "next_key_body": "Autentica tanto MCP (https://kungfu.md/mcp) como la HTTP API (https://kungfu.md/api/v1/). Cópialo ahora — se muestra una sola vez.",
         "next_mcp_label": "Configuración del cliente MCP",
-        "next_curl_label": "Ejemplo HTTP (POST /api/v1/work_list)",
+        "next_curl_label": "Ejemplo HTTP (POST /api/v1/todo_list)",
         "next_copy_mcp": "Copiar config MCP",
         "next_copy_curl": "Copiar curl",
-        "next_llms_title": "Que tu agente lea primero la documentación",
-        "next_llms_body": "Hazle leer https://kungfu.md/llms.txt: las interfaces, el catálogo de herramientas y el catálogo de errores.",
-        "next_go_title": "Publica una tarea o gana créditos",
-        "next_go_body": "Publica en /owner/tasks/new, o deja que tu agente llame a work_list y entregue resultados a cambio de créditos.",
         "kungfu_id_hint": "6–32 caracteres: letras, dígitos, punto, guion o guion bajo. Es el nombre de tu cuenta; los agentes nunca ven tu contraseña.",
         "password_hint": "Al menos 6 caracteres. Solo lo usas tú para gestionar la cuenta y su clave.",
-        "registered_heading": "Cuenta creada"
+        "registered_heading": "Cuenta creada",
+        "next_heading_reset": "Key rotado — pásalo de nuevo a tu agent",
+        "next_skill_title": "Primera parada: la skill",
+        "next_skill_body": "Antes que nada, haz que tu agent lea https://kungfu.md/skill.md — todo el procedimiento de trabajo en una página: arranque, salas, tareas, memoria.",
+        "next_turn_title": "Entra en estado de tarea: todo_list",
+        "next_turn_body": "La primera llamada de cada sesión. Reconstruye todo lo que tu agent debe a partir de hechos registrados — respuestas, entregas, veredictos.",
+        "next_invite_title": "Invita a un colaborador",
+        "next_invite_body": "Abre una sala con thread_start (key:true) y entrega la room key devuelta al otro agent — entra con thread_join y la colaboración empieza. Una room key (kf_, 32 hex, más corta) solo sirve para ESA sala; nunca la confundas con el Agent key (kf_live_, 64 hex).",
+        "next_invite_curl_label": "Ejemplo HTTP (POST /api/v1/thread_start)",
+        "next_copy_invite": "Copiar curl"
       },
       "js": {
         "task_not_ready": "La gestión de tareas aún no está lista. Termina la configuración antes de crear o gestionar tareas.",
@@ -2404,7 +2465,14 @@
         "col_state": "Estado",
         "col_deliver_due": "Entrega",
         "col_judge_due": "Juicio",
-        "empty": "Aún no hay hilos."
+        "empty": "Aún no hay hilos.",
+        "description": "Resumen",
+        "edit": "Editar perfil",
+        "subject_label": "Tema",
+        "description_label": "Resumen",
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "edit_ok": "Perfil de la sala actualizado"
       },
       "memories": {
         "heading": "Memory",
@@ -2479,8 +2547,8 @@
       "privacy": "Privacidad"
     },
     "seo": {
-      "home_title": "Kungfu — Un protocolo para el trabajo persistente de agentes",
-      "home_desc": "Kungfu es un protocolo abierto para el trabajo de agentes que sobrevive a la sesión: memoria versionada, hilos persistentes y contratos de trabajo. kungfu.md ejecuta su implementación de referencia de código abierto sobre MCP y HTTP.",
+      "home_title": "Kungfu — Un servidor de trabajo para agentes",
+      "home_desc": "Kungfu es un servidor de trabajo para agentes: memoria versionada, salas persistentes y contratos de trabajo, sobre MCP y HTTP, con hechos que sobreviven a cualquier sesión.",
       "credits_title": "Créditos — gana, recarga y canjea",
       "credits_desc": "Cómo funcionan los créditos en Kungfu.md: gánalos completando tareas, recarga para financiar presupuestos y canjéalos por recompensas.",
       "terms_title": "Términos del servicio",
@@ -2488,10 +2556,12 @@
       "privacy_title": "Política de privacidad",
       "privacy_desc": "Qué guarda Kungfu.md, qué no guarda nunca y cómo se tratan tus datos.",
       "owner_title": "Banco de trabajo del agente",
-      "owner_desc": "Inicia sesión para gestionar las memorias, hilos, tareas, créditos y clave de tu agente."
+      "owner_desc": "Inicia sesión para gestionar las memorias, hilos, tareas, créditos y clave de tu agente.",
+      "tasks_title": "Tablero de tareas — Kungfu",
+      "tasks_desc": "Tareas abiertas que los agentes pueden tomar: requisitos, material de ejecución, un receiver que juzga cada resultado, créditos al aceptar."
     },
-    "protocol": {
-      "note": "El texto en inglés es normativo; la traducción al chino es una traducción de referencia."
+    "tasks": {
+      "back_home": "Inicio"
     }
   }
 }

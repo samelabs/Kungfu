@@ -94,10 +94,26 @@ func FindOwnedActiveKungfuByCode(ctx context.Context, q pg.Querier, botID int64,
 	return scanKungfu(row)
 }
 
+// FindOwnedActiveKungfuByCodeForShare is FindOwnedActiveKungfuByCode
+// for a transaction that is ABOUT to persist a reference to this
+// memory (a task's harness_refs): FOR KEY SHARE holds the row against
+// a concurrent payload disposal until the referencing transaction
+// commits — reference creation and physical deletion serialize on the
+// row, never on a lock-free read-then-use.
+func FindOwnedActiveKungfuByCodeForShare(ctx context.Context, q pg.Querier, botID int64, code string) (*model.Kungfu, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, title, tags_json::text, description, content, checksum,
+		       visibility, status, created_at, updated_at, revision, origin
+		FROM tb_kungfus
+		WHERE code = $1 AND bot_id = $2 AND status = 'active'
+		FOR KEY SHARE`, code, botID)
+	return scanKungfu(row)
+}
+
 // -- 4a. findKungfuByCodeAnyStatus --
 // FindKungfuByCodeAnyStatus returns the memory row regardless of
 // status — the author may read any of their versions even after a
-// withdrawal (kungfu.md §5/§9), so revision reads must locate the
+// withdrawal (kungfu-protocol.md §5/§9), so revision reads must locate the
 // row first and judge authorship before validity.
 func FindKungfuByCodeAnyStatus(ctx context.Context, q pg.Querier, code string) (*model.Kungfu, error) {
 	row := q.QueryRow(ctx, `
@@ -106,6 +122,47 @@ func FindKungfuByCodeAnyStatus(ctx context.Context, q pg.Querier, code string) (
 		FROM tb_kungfus
 		WHERE code = $1`, code)
 	return scanKungfu(row)
+}
+
+// FindKungfuByCodeAnyStatusForShare is FindKungfuByCodeAnyStatus with
+// the same reference-establishing KEY SHARE lock (assignment
+// deliveries pin memories by code in JSON — the row lock is the only
+// serialization a JSON reference can get).
+func FindKungfuByCodeAnyStatusForShare(ctx context.Context, q pg.Querier, code string) (*model.Kungfu, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, code, bot_id, title, tags_json::text, description, content, checksum,
+		       visibility, status, created_at, updated_at, revision, origin
+		FROM tb_kungfus
+		WHERE code = $1
+		FOR KEY SHARE`, code)
+	return scanKungfu(row)
+}
+
+// AdoptThreadPayloadAsStandalone ends a thread payload's room-bound
+// life: the author has taken explicit version-control of the content
+// (memory_put update) or published it (memory_share) — an act of
+// managing it as an independent knowledge asset — so its life becomes
+// the author's and room disposal stops being a way for it to die.
+// Idempotent by the origin predicate; the caller owns the
+// transaction (run it beside the fact that adopts — same commit).
+func AdoptThreadPayloadAsStandalone(ctx context.Context, q pg.Querier, id int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE tb_kungfus SET origin = 'standalone' WHERE id = $1 AND origin = 'thread'`, id)
+	return err
+}
+
+// PublishKungfuByID is memory_share's one atomic statement: flip to
+// public AND adopt a thread payload in the same row write —
+// publishing is an act of managing the content as an independent
+// asset, so its life detaches from the room's inseparably from the
+// visibility change.
+func PublishKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
+	_, err := q.Exec(ctx, `
+		UPDATE tb_kungfus
+		SET visibility = 'public',
+		    origin = CASE WHEN origin = 'thread' THEN 'standalone' ELSE origin END
+		WHERE id = $1`, id)
+	return err
 }
 
 // scanKungfu scans a kungfu row with type conversion.
@@ -149,7 +206,7 @@ func SoftDeleteKungfuByID(ctx context.Context, q pg.Querier, id int64) error {
 
 // -- 7. updateContentWithRevision --
 // The versioned update, one step of the single update transaction
-// (kungfu.md §5): the caller first locks the row
+// (kungfu-protocol.md §5): the caller first locks the row
 // (LockOwnedActiveKungfuByID), then ArchiveKungfuRevision snapshots
 // the locked old version into memory_revisions, then this statement
 // overwrites the content and bumps revision = revision + 1 (relative

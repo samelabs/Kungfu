@@ -34,7 +34,7 @@ type KungfuPushResult struct {
 	Checksum   string `json:"checksum"`
 	Visibility string `json:"visibility"`
 	// Revision is the memory's version after this push: 1 on
-	// creation, previous + 1 on update (kungfu.md §5).
+	// creation, previous + 1 on update (kungfu-protocol.md §5).
 	Revision int64 `json:"revision"`
 }
 
@@ -70,7 +70,7 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			return nil, errors.New(400, "INVALID_TAGS", "Error encoding tags")
 		}
 
-		// The versioned update runs in ONE transaction (kungfu.md §5):
+		// The versioned update runs in ONE transaction (kungfu-protocol.md §5):
 		// row lock → archive the old version into memory_revisions →
 		// content update + revision bump. Concurrent updates of the
 		// same memory serialize on the row lock; each produces
@@ -98,6 +98,15 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 			payload.Title, string(tagsJSONBytes), payload.Description, payload.Content, payload.Checksum)
 		if updErr != nil {
 			return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+		}
+
+		// an explicit author update adopts a thread payload: the author
+		// is managing it as an independent knowledge asset, so its life
+		// detaches from the room's (same commit as the new version)
+		if locked.Origin == "thread" {
+			if err := repository.AdoptThreadPayloadAsStandalone(ctx, tx, locked.ID); err != nil {
+				return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred during update")
+			}
 		}
 
 		if err := tx.Commit(ctx); err != nil {
@@ -155,7 +164,10 @@ func Push(ctx context.Context, pool *pg.Pool, botID int64, input map[string]inte
 	}, nil
 }
 
-// Share makes a kungfu public.
+// Share makes a kungfu public. A thread payload published by its
+// author is adopted in the same statement: the content becomes an
+// independent knowledge asset whose life no longer ends with its
+// room's.
 // Accepts pg.Querier (satisfied by *pg.Pool) for testability.
 func Share(ctx context.Context, q pg.Querier, botID int64, code string) (map[string]interface{}, error) {
 	k, err := requireOwnedKungfu(ctx, q, botID, code, "Only the creator can change sharing status")
@@ -170,7 +182,7 @@ func Share(ctx context.Context, q pg.Querier, botID int64, code string) (map[str
 		}, nil
 	}
 
-	if err := repository.UpdateKungfuVisibilityByID(ctx, q, k.ID, "public"); err != nil {
+	if err := repository.PublishKungfuByID(ctx, q, k.ID); err != nil {
 		return nil, errors.New(500, "INTERNAL_ERROR", "Error occurred while sharing")
 	}
 	logOperation(ctx, q, &botID, "share", strPtr("kungfu"), &code,

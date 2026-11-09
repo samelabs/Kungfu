@@ -156,7 +156,10 @@ func (e *e2eEnv) agent(tool string, args map[string]any) (int, map[string]any) {
 }
 
 func (e *e2eEnv) uniq(prefix string) string {
-	return fmt.Sprintf("%s%d%d", prefix, time.Now().UnixNano()%1_000_000, e.nextUnique.Add(1))
+	// full nanos + env-local counter: the old %1e6 bucket let two
+	// journeys' same-counter registrations collide when they landed in
+	// the same sub-millisecond offset
+	return fmt.Sprintf("%s%d%d", prefix, time.Now().UnixNano(), e.nextUnique.Add(1))
 }
 
 func newE2EEnv(t *testing.T) *e2eEnv {

@@ -31,14 +31,14 @@ func TestHomepageUARouting(t *testing.T) {
 
 	isHumanHTML := func(rec *httptest.ResponseRecorder) bool {
 		body := rec.Body.String()
-		// The human homepage is HTML; the agent discovery surface is
-		// llms.txt plain text. Assert both directions.
+		// The human homepage is HTML; the agent first-contact surface is
+		// the skill (skill.md, markdown). Assert both directions.
 		return strings.Contains(rec.Header().Get("Content-Type"), "text/html") &&
-			!strings.Contains(body, "# kungfu.md — Agent Index") // llms.txt title marker
+			!strings.Contains(body, "# Kungfu — Agent Skill")
 	}
-	isAgentDiscovery := func(rec *httptest.ResponseRecorder) bool {
-		return strings.Contains(rec.Header().Get("Content-Type"), "text/plain") &&
-			strings.Contains(rec.Body.String(), "# kungfu.md — Agent Index")
+	isAgentSkill := func(rec *httptest.ResponseRecorder) bool {
+		return strings.Contains(rec.Header().Get("Content-Type"), "text/markdown") &&
+			strings.Contains(rec.Body.String(), "# Kungfu — Agent Skill")
 	}
 
 	cases := []struct {
@@ -71,8 +71,8 @@ func TestHomepageUARouting(t *testing.T) {
 				t.Fatalf("UA %q expected human HTML homepage, got content-type=%q body-prefix=%q",
 					tc.ua, rec.Header().Get("Content-Type"), truncate(rec.Body.String(), 80))
 			}
-			if !tc.humanly && !isAgentDiscovery(rec) {
-				t.Fatalf("UA %q expected agent discovery (llms.txt), got content-type=%q body-prefix=%q",
+			if !tc.humanly && !isAgentSkill(rec) {
+				t.Fatalf("UA %q expected the agent skill (skill.md), got content-type=%q body-prefix=%q",
 					tc.ua, rec.Header().Get("Content-Type"), truncate(rec.Body.String(), 80))
 			}
 		})
@@ -89,7 +89,9 @@ func TestHomepageUARouting(t *testing.T) {
 	// /llms.txt stays a dedicated agent discovery surface for ANY client.
 	t.Run("explicit_llms_txt_browser", func(t *testing.T) {
 		rec := fetch("/llms.txt", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0", "text/html")
-		if rec.Code != 200 || !isAgentDiscovery(rec) {
+		if rec.Code != 200 ||
+			!strings.Contains(rec.Header().Get("Content-Type"), "text/plain") ||
+			!strings.Contains(rec.Body.String(), "# kungfu.md — Agent Index") {
 			t.Fatalf("GET /llms.txt with browser UA: status=%d content-type=%q", rec.Code, rec.Header().Get("Content-Type"))
 		}
 	})

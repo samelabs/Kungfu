@@ -1,10 +1,11 @@
 // threads.js — the /owner/threads views (WO-30 §3): the rooms this
 // agent is in (thread_list) and one room's work set (thread_get) —
-// summary timeline, members, assignment digest. All calls go through
-// the unified owner tool bridge; every tool used is a read. Timeline
-// and assignment digests page by cursor; content written by
-// participants (subjects, summaries, notes) is rendered as escaped
-// plain text, never markup.
+// summary timeline, members, assignment digest — plus the governor's
+// profile edit (thread_update, 3.2.0). All calls go through the
+// unified owner tool bridge; apart from the profile edit every tool
+// used is a read. Timeline and assignment digests page by cursor;
+// content written by participants (subjects, summaries, notes) is
+// rendered as escaped plain text, never markup.
 
 const threadsState = {
     list: { items: [], cursor: null },
@@ -232,9 +233,67 @@ function renderThreadDetail() {
     if (meta) {
         meta.textContent = `${room.code || ''} · ${room.status || ''} · ${env.role || ''}`;
     }
+    const desc = qs('#threadDescription');
+    if (desc) desc.textContent = room.description ? String(room.description) : '';
+    // the profile edit is a governor capability on an open room; the
+    // server enforces it too (thread_update), the button just hides
+    // the form nobody may submit
+    const canEdit = String(env.role || '') === 'governor' && String(room.status || '') === 'open';
+    const toggle = qs('#threadEditToggle');
+    if (toggle) toggle.hidden = !canEdit;
+    const form = qs('#threadEditForm');
+    if (form) form.hidden = true;
+    if (canEdit) bindThreadEdit();
     renderTimelineEntries();
     renderThreadMembers();
     renderThreadAssignments();
+}
+
+// bindThreadEdit wires the profile form once: prefill from the loaded
+// room, submit through the owner tool bridge (thread_update sends both
+// fields — an untouched box re-sends the current value), then reload
+// the work set so heading, meta and description show the new profile.
+function bindThreadEdit() {
+    const btn = qs('#threadEditBtn');
+    const form = qs('#threadEditForm');
+    const cancel = qs('#threadEditCancel');
+    if (!btn || !form || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+        const room = (threadsState.detail && threadsState.detail.thread) || {};
+        const subjectBox = qs('#threadEditSubject');
+        const descBox = qs('#threadEditDescription');
+        if (subjectBox) subjectBox.value = room.subject ? String(room.subject) : '';
+        if (descBox) descBox.value = room.description ? String(room.description) : '';
+        form.hidden = false;
+    });
+    if (cancel) cancel.addEventListener('click', () => { form.hidden = true; });
+    form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const code = threadCodeFromPath();
+        if (!code) return;
+        const subjectBox = qs('#threadEditSubject');
+        const descBox = qs('#threadEditDescription');
+        const args = {thread: code};
+        // send a field only when it changed: omitted = keep on the
+        // server side, so an untouched box cannot accidentally clear
+        const room = (threadsState.detail && threadsState.detail.thread) || {};
+        if (subjectBox && subjectBox.value !== (room.subject ? String(room.subject) : '')) {
+            args.subject = subjectBox.value;
+        }
+        if (descBox && descBox.value !== (room.description ? String(room.description) : '')) {
+            args.description = descBox.value;
+        }
+        try {
+            await thrCall('thread_update', args);
+            showToast(thrT('edit_ok'), 'success');
+            form.hidden = true;
+            await loadThreadDetail();
+            renderThreadDetail();
+        } catch (error) {
+            showToast(noticeText(error), 'error');
+        }
+    });
 }
 
 // runThreadDetailView loads the room once; the timeline and assignment

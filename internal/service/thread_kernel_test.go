@@ -39,7 +39,7 @@ func threadCleanup(t *testing.T, pool *pg.Pool, bots []int64, codes ...string) {
 // threadStart opens a room and returns (code, rawKey) when issued.
 func threadStart(t *testing.T, pool *pg.Pool, bot int64, subject string, key bool, idem string) (string, string) {
 	t.Helper()
-	res, err := ThreadStart(context.Background(), pool, bot, subject, key, idem)
+	res, err := ThreadStart(context.Background(), pool, bot, subject, "", key, idem)
 	if err != nil {
 		t.Fatalf("thread_start: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestThreadDeactivationCascade(t *testing.T) {
 	}
 
 	// the deactivated account can no longer act (§4)
-	_, err = ThreadStart(ctx, pool, owner, "", false, "")
+	_, err = ThreadStart(ctx, pool, owner, "", "", false, "")
 	threadErrIs(t, err, 401, "UNAUTHORIZED")
 	_, err = ThreadJoin(ctx, pool, owner, raw, "")
 	threadErrIs(t, err, 401, "UNAUTHORIZED")
@@ -449,7 +449,7 @@ func TestThreadMemberAndRoomLimits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		id, err := repository.InsertThread(ctx, pool, c, nil)
+		id, err := repository.InsertThread(ctx, pool, c, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -458,7 +458,7 @@ func TestThreadMemberAndRoomLimits(t *testing.T) {
 		}
 		codes = append(codes, c)
 	}
-	_, err = ThreadStart(ctx, pool, joiner, "", false, "")
+	_, err = ThreadStart(ctx, pool, joiner, "", "", false, "")
 	threadErrIs(t, err, 409, "ROOM_LIMIT")
 	other, raw2 := threadStart(t, pool, owner, "", true, "")
 	codes = append(codes, other)
@@ -487,7 +487,7 @@ func TestThreadIdempotencyReceipts(t *testing.T) {
 	guest, _, _ := a7TestBot(t, pool, 5)
 	ctx := context.Background()
 
-	first, err := ThreadStart(ctx, pool, owner, "original subject", true, "idem-1")
+	first, err := ThreadStart(ctx, pool, owner, "original subject", "", true, "idem-1")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestThreadIdempotencyReceipts(t *testing.T) {
 		`UPDATE threads SET subject = 'changed' WHERE code = $1`, code); err != nil {
 		t.Fatal(err)
 	}
-	replay, err := ThreadStart(ctx, pool, owner, "original subject", true, "idem-1")
+	replay, err := ThreadStart(ctx, pool, owner, "original subject", "", true, "idem-1")
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestThreadIdempotencyReceipts(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM threads`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ThreadStart(ctx, pool, owner, "another subject", false, "idem-1")
+	_, err = ThreadStart(ctx, pool, owner, "another subject", "", false, "idem-1")
 	threadErrIs(t, err, 409, "IDEMPOTENCY_CONFLICT")
 	var after int64
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM threads`).Scan(&after); err != nil {
@@ -692,7 +692,7 @@ func TestThreadIdempotencyConcurrentSameKey(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			res, err := ThreadStart(ctx, pool, owner, "race subject", false, "idem-race")
+			res, err := ThreadStart(ctx, pool, owner, "race subject", "", false, "idem-race")
 			errs <- err
 			out <- res
 		}()
@@ -722,6 +722,105 @@ func TestThreadIdempotencyConcurrentSameKey(t *testing.T) {
 	_, _ = pool.Exec(ctx, `DELETE FROM thread_members WHERE thread_id IN (SELECT id FROM threads WHERE subject = 'race subject')`)
 	_, _ = pool.Exec(ctx, `DELETE FROM threads WHERE subject = 'race subject'`)
 	_, _ = pool.Exec(ctx, `DELETE FROM thread_idempotency WHERE account_id = $1 AND key = 'idem-race'`, owner)
+}
+
+// TestThreadUpdateProfile (3.2.0): the governor renames the room and
+// writes a description; a non-governor member cannot; a no-change
+// request is INVALID_TARGET; the empty string clears; a closed room is
+// read-only; thread_get and thread_list surface the new profile.
+// TestThreadStartLegacyReceiptReplays (3.2.0): the thread_start request
+// hash gained the description field; a receipt written before that
+// change (stored with the old no-description hash) must still replay
+// on retry — the same seam thread_post uses for encoding changes.
+func TestThreadStartLegacyReceiptReplays(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	first, err := ThreadStart(ctx, pool, owner, "legacy subject", "legacy brief", false, "idem-legacy")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	code := first["thread"].(string)
+	defer threadCleanup(t, pool, []int64{owner}, code)
+
+	// rewrite the stored receipt's hash to the pre-3.2.0 encoding —
+	// exactly what an in-flight receipt from before the upgrade holds
+	legacy := sha256Hex(fmt.Sprintf(`{"key":%t,"subject":%q}`, false, "legacy subject"))
+	if _, err := pool.Exec(ctx,
+		`UPDATE thread_idempotency SET request_hash = $1 WHERE account_id = $2 AND tool = 'thread_start' AND key = 'idem-legacy'`,
+		legacy, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := ThreadStart(ctx, pool, owner, "legacy subject", "legacy brief", false, "idem-legacy")
+	if err != nil {
+		t.Fatalf("legacy replay: %v", err)
+	}
+	if replay["thread"] != code {
+		t.Fatalf("legacy replay = %v, want the stored first result for %s", replay, code)
+	}
+}
+
+func TestThreadUpdateProfile(t *testing.T) {
+	pool := revisionTestPool(t)
+	owner, _, _ := a7TestBot(t, pool, 5)
+	guest, _, _ := a7TestBot(t, pool, 5)
+	ctx := context.Background()
+	code, raw := threadStart(t, pool, owner, "stale context name", true, "")
+	defer threadCleanup(t, pool, []int64{owner, guest}, code)
+	if _, err := ThreadJoin(ctx, pool, guest, raw, ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	// governor renames and adds a description
+	newSubject := "PoC review — payments API"
+	newDesc := "Scope: the v2 checkout retry matrix. Done = receiver 2xx on all four paths."
+	res, err := ThreadUpdateProfile(ctx, pool, owner, code, &newSubject, &newDesc, "")
+	if err != nil {
+		t.Fatalf("thread_update: %v", err)
+	}
+	if res["subject"] != newSubject || res["description"] != newDesc {
+		t.Fatalf("thread_update result = %v", res)
+	}
+
+	// projections carry the profile
+	got, err := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
+	if err != nil {
+		t.Fatalf("thread_get: %v", err)
+	}
+	room, _ := got["thread"].(map[string]any)
+	if room["subject"] != newSubject || room["description"] != newDesc {
+		t.Fatalf("thread_get room = %v", room)
+	}
+
+	// a non-governor member is rejected
+	_, err = ThreadUpdateProfile(ctx, pool, guest, code, &newSubject, nil, "")
+	threadErrIs(t, err, 403, "NOT_GOVERNOR")
+
+	// a request that changes nothing is INVALID_TARGET
+	_, err = ThreadUpdateProfile(ctx, pool, owner, code, &newSubject, &newDesc, "")
+	threadErrIs(t, err, 422, "INVALID_TARGET")
+
+	// the empty string clears the description, keeps the subject
+	cleared, err := ThreadUpdateProfile(ctx, pool, owner, code, nil, new(string), "")
+	if err != nil {
+		t.Fatalf("clear description: %v", err)
+	}
+	if _, has := cleared["description"]; has {
+		t.Fatalf("cleared description still present: %v", cleared)
+	}
+	got2, _ := ThreadGet(ctx, pool, owner, code, "", nil, "", nil, false)
+	room2, _ := got2["thread"].(map[string]any)
+	if _, has := room2["description"]; has {
+		t.Fatalf("thread_get still shows a description: %v", room2)
+	}
+
+	// a closed room is read-only
+	if _, err := ThreadClose(ctx, pool, owner, code, ""); err != nil {
+		t.Fatalf("thread_close: %v", err)
+	}
+	_, err = ThreadUpdateProfile(ctx, pool, owner, code, &newSubject, nil, "")
+	threadErrIs(t, err, 409, "THREAD_CLOSED")
 }
 
 // TestThreadListAndGetProjections: thread_get returns the room, the

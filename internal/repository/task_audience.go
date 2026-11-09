@@ -1,6 +1,6 @@
 package repository
 
-// Task 1.2 (WO-32) — restricted task audience (kungfu.md §7.2) and
+// Task 1.2 (WO-32) — restricted task audience (kungfu-protocol.md §7.2) and
 // work opportunity discovery (§8). task_audience (migration 033)
 // holds the audience as resolved account ids, written once by the
 // task_create transaction and never updated: the audience is fixed
@@ -105,14 +105,26 @@ const offeredWorkWhere = ` WHERE tb_task.status = 'open'
 // claim on. Pure count — todo_list reports it as the "tasks" side
 // of the opportunities projection.
 func CountOfferedWork(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, error) {
+	n, _, err := OfferedWorkIdentity(ctx, q, agentID, now)
+	return n, err
+}
+
+// OfferedWorkIdentity is CountOfferedWork plus the identity half of
+// the wake channel: a digest over every offered task id — one
+// aggregate, no paging, no content, no collision-prone arithmetic
+// (one task replacing another at the same count moves it).
+// todo_wait fingerprints it into wake_token.
+func OfferedWorkIdentity(ctx context.Context, q pg.Querier, agentID int64, now time.Time) (int64, string, error) {
 	var n int64
+	var digest string
 	err := q.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
-		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n)
+		SELECT COUNT(*), COALESCE(md5(string_agg(tb_task.id::text, ',' ORDER BY tb_task.id)), '')
+		FROM tb_task`+fmt.Sprintf(offeredWorkWhere, task.DefaultMaxRejectedPerAgent),
+		agentID, now.Add(-task.RejectionWindowHours*time.Hour), now).Scan(&n, &digest)
 	if err != nil {
-		return 0, fmt.Errorf("count offered work: %w", err)
+		return 0, "", fmt.Errorf("offered work identity: %w", err)
 	}
-	return n, nil
+	return n, digest, nil
 }
 
 // FindOfferedWorkPage returns ONE page of the agent's §8

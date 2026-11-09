@@ -1,6 +1,6 @@
 package repository
 
-// Thread core persistence (D2) — kungfu.md §6.1, §6.2, §6.5, §4, L3.
+// Thread core persistence (D2) — kungfu-protocol.md §6.1, §6.2, §6.5, §4, L3.
 // Every method accepts a pg.Querier so it works with both *pg.Pool
 // and pgx.Tx; room mutations run inside one caller transaction that
 // first locks the thread row (LockThreadByCode/LockThreadByID), which
@@ -20,7 +20,7 @@ import (
 	"kungfu.md/internal/publiccode"
 )
 
-// Thread vocabulary (kungfu.md §6.1–§6.5).
+// Thread vocabulary (kungfu-protocol.md §6.1–§6.5).
 const (
 	ThreadStatusOpen   = "open"
 	ThreadStatusClosed = "closed"
@@ -43,21 +43,36 @@ func GenerateUniqueThreadCode(ctx context.Context, q pg.Querier) (string, error)
 	})
 }
 
-// InsertThread creates an open room; subject may be NULL. Returns
-// the new thread id. The creator's governor membership row is a
-// separate InsertThreadMember in the same caller transaction.
-func InsertThread(ctx context.Context, q pg.Querier, code string, subject *string) (int64, error) {
+// InsertThread creates an open room; subject and description may be
+// NULL. Returns the new thread id. The creator's governor membership
+// row is a separate InsertThreadMember in the same caller transaction.
+func InsertThread(ctx context.Context, q pg.Querier, code string, subject, description *string) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx, `
-		INSERT INTO threads (code, subject) VALUES ($1, $2) RETURNING id`,
-		code, subject).Scan(&id)
+		INSERT INTO threads (code, subject, description) VALUES ($1, $2, $3) RETURNING id`,
+		code, subject, description).Scan(&id)
 	return id, err
+}
+
+// UpdateThreadProfile rewrites the room's editable profile (subject,
+// description) on an OPEN room and stamps updated_at. Returns false
+// when the room is closed — profile writes are an open-room governor
+// action.
+func UpdateThreadProfile(ctx context.Context, q pg.Querier, threadID int64, subject, description *string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE threads
+		SET subject = $1, description = $2, updated_at = NOW()
+		WHERE id = $3 AND status = 'open'`, subject, description, threadID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // FindThreadByCode returns the thread row, or nil when no such code.
 func FindThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE code = $1`, code))
 }
 
@@ -67,14 +82,14 @@ func FindThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Th
 // actions serialize (L5).
 func LockThreadByCode(ctx context.Context, q pg.Querier, code string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE code = $1 FOR UPDATE`, code))
 }
 
 // LockThreadByID is LockThreadByCode by id.
 func LockThreadByID(ctx context.Context, q pg.Querier, id int64) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE id = $1 FOR UPDATE`, id))
 }
 
@@ -83,7 +98,7 @@ func LockThreadByID(ctx context.Context, q pg.Querier, id int64) (*model.Thread,
 // closed rooms have no key (§6.5), so a dead key finds nothing.
 func FindOpenThreadByKeyHash(ctx context.Context, q pg.Querier, keyHash string) (*model.Thread, error) {
 	return scanThread(q.QueryRow(ctx, `
-		SELECT id, code, subject, status, key_hash, key_role, key_issued_at, next_seq, created_at, closed_at
+		SELECT id, code, subject, description, status, key_hash, key_role, key_issued_at, next_seq, created_at, updated_at, closed_at
 		FROM threads WHERE key_hash = $1 AND status = 'open'`, keyHash))
 }
 
@@ -139,17 +154,22 @@ func scanThread(row pgx.Row) (*model.Thread, error) {
 	var (
 		t           model.Thread
 		createdAt   time.Time
+		updatedAt   *time.Time
 		closedAt    *time.Time
 		keyIssuedAt *time.Time
 	)
-	if err := row.Scan(&t.ID, &t.Code, &t.Subject, &t.Status,
-		&t.KeyHash, &t.KeyRole, &keyIssuedAt, &t.NextSeq, &createdAt, &closedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Code, &t.Subject, &t.Description, &t.Status,
+		&t.KeyHash, &t.KeyRole, &keyIssuedAt, &t.NextSeq, &createdAt, &updatedAt, &closedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	t.CreatedAt = timeToStr(createdAt)
+	if updatedAt != nil {
+		s := timeToStr(*updatedAt)
+		t.UpdatedAt = &s
+	}
 	if closedAt != nil {
 		s := timeToStr(*closedAt)
 		t.ClosedAt = &s
@@ -295,6 +315,7 @@ func ListThreadMembers(ctx context.Context, q pg.Querier, threadID int64) ([]Thr
 type ThreadListItem struct {
 	Code             string
 	Subject          *string
+	Description      *string
 	Status           string
 	Role             string
 	JoinedViaKeyHash *string
@@ -307,7 +328,7 @@ type ThreadListItem struct {
 // last item id); status "" means both. limit ≤ 50 (§2).
 func ListThreadsForMember(ctx context.Context, q pg.Querier, accountID int64, status string, beforeID int64, limit int) ([]ThreadListItem, error) {
 	rows, err := q.Query(ctx, `
-		SELECT t.id, t.code, t.subject, t.status, m.role, m.joined_via_key_hash, m.joined_at
+		SELECT t.id, t.code, t.subject, t.description, t.status, m.role, m.joined_via_key_hash, m.joined_at
 		FROM thread_members m
 		JOIN threads t ON t.id = m.thread_id
 		WHERE m.account_id = $1
@@ -323,7 +344,7 @@ func ListThreadsForMember(ctx context.Context, q pg.Querier, accountID int64, st
 	for rows.Next() {
 		var it ThreadListItem
 		var joinedAt time.Time
-		if err := rows.Scan(&it.ID, &it.Code, &it.Subject, &it.Status, &it.Role,
+		if err := rows.Scan(&it.ID, &it.Code, &it.Subject, &it.Description, &it.Status, &it.Role,
 			&it.JoinedViaKeyHash, &joinedAt); err != nil {
 			return nil, err
 		}
@@ -371,7 +392,7 @@ func InsertThreadIdempotency(ctx context.Context, q pg.Querier, accountID int64,
 // -- §4 deactivation cascade --
 
 // TerminateAccountThreadMemberships runs the account-deactivation
-// cascade (kungfu.md §4) inside the caller's transaction: every
+// cascade (kungfu-protocol.md §4) inside the caller's transaction: every
 // membership of the account ends, and every OPEN room that would be
 // left with no governor closes in the same transaction with the
 // §6.5 effects (key group cleared, members kept read-only). Returns
@@ -467,7 +488,7 @@ func TerminateAccountThreadMemberships(ctx context.Context, q pg.Querier, botID 
 	return closed, nil
 }
 
-// -- D3: entries, receipts and the timeline (kungfu.md §6.3) --
+// -- D3: entries, receipts and the timeline (kungfu-protocol.md §6.3) --
 
 // NextThreadSeq allocates the next in-thread entry number atomically;
 // callers hold the thread row lock, so concurrent posts serialize and
@@ -690,7 +711,9 @@ func ThreadTimeline(ctx context.Context, q pg.Querier, threadID int64, beforeSeq
 
 // ThreadEntryFull is the expanded entry payload; Content is served
 // only when the pinned version is readable to members per §5/§9
-// (own pin: always; others' public pin: while public and valid).
+// (own pin: always; others' public pin: while public and valid). A
+// scrubbed entry keeps its shell here — Redacted marks the content
+// gone while seq, author, reply structure and obligations survive.
 type ThreadEntryFull struct {
 	ID         int64
 	Seq        int64
@@ -699,6 +722,7 @@ type ThreadEntryFull struct {
 	Memory     string
 	Revision   int64
 	Readable   bool
+	Redacted   bool
 	Content    *string
 	Summary    string
 	ReplyTo    *int64 // entry id of the reply target (same identifier as the timeline)
@@ -708,11 +732,14 @@ type ThreadEntryFull struct {
 }
 
 // ExpandThreadEntries loads full entries by id within one thread.
+// tb_kungfus is a LEFT join: a scrubbed entry (memory_id NULL) still
+// expands — shell facts only, never content.
 func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids []int64) ([]ThreadEntryFull, error) {
 	rows, err := q.Query(ctx, `
 		SELECT e.id, e.seq, e.author_id, b.bot_name,
-		       k.code, e.memory_revision,
-		       (k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')),
+		       COALESCE(k.code, ''), COALESCE(e.memory_revision, 0),
+		       COALESCE(k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public'), false),
+		       e.memory_id IS NULL,
 		       CASE WHEN k.bot_id = e.author_id OR (k.status = 'active' AND k.visibility = 'public')
 		            THEN CASE WHEN e.memory_revision = k.revision
 		                 THEN k.content ELSE mr.content END END,
@@ -720,7 +747,7 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		       (SELECT r.seq FROM thread_entries r WHERE r.id = e.reply_to_id), e.asked_json, to_char(e.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		FROM thread_entries e
 		JOIN tb_bots b ON b.id = e.author_id
-		JOIN tb_kungfus k ON k.id = e.memory_id
+		LEFT JOIN tb_kungfus k ON k.id = e.memory_id
 		LEFT JOIN memory_revisions mr
 		       ON mr.memory_id = e.memory_id AND mr.revision = e.memory_revision
 		WHERE e.thread_id = $1 AND e.id = ANY($2)
@@ -734,7 +761,7 @@ func ExpandThreadEntries(ctx context.Context, q pg.Querier, threadID int64, ids 
 		var it ThreadEntryFull
 		var asked []byte
 		if err := rows.Scan(&it.ID, &it.Seq, &it.AuthorID, &it.Author,
-			&it.Memory, &it.Revision, &it.Readable, &it.Content,
+			&it.Memory, &it.Revision, &it.Readable, &it.Redacted, &it.Content,
 			&it.Summary, &it.ReplyTo, &it.ReplyToSeq, &asked, &it.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -777,7 +804,7 @@ func MyPendingThreadReceipts(ctx context.Context, q pg.Querier, threadID, accoun
 	return out, rows.Err()
 }
 
-// -- D4: assignments (kungfu.md §6.4, R-18) --
+// -- D4: assignments (kungfu-protocol.md §6.4, R-18) --
 
 // InsertAssignment creates the contracted work unit bound to its
 // carrying entry; content columns are written once and never updated.
@@ -924,28 +951,75 @@ func SetAssignmentStateCAS(ctx context.Context, q pg.Querier, id int64, from, to
 	return tag.RowsAffected() == 1, nil
 }
 
-// VoidUndeliveredAssignsForMember voids the pre-delivery assigns of a
-// departing member — both sides (§6.2, R-18: as assignee AND as
-// creator). Returns the ids voided.
-func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID, accountID int64) ([]int64, error) {
+// VoidOutcome is what one batch pre-delivery settlement produced:
+// assigns that settled as timed_out under the deadline rule, and the
+// ones actually voided.
+type VoidOutcome struct {
+	TimedOut []int64
+	Voided   []int64
+}
+
+// settleUndelivered is the deadline-first core every batch void path
+// shares (L4: expiry beats void — an assign whose deliver clock ran
+// out settles as timed_out, never voided). scope is a WHERE fragment
+// over assigns ($1… args follow). Both parties of a timed_out assign
+// are notified like the recovery sweep ("exit").
+func settleUndelivered(ctx context.Context, q pg.Querier, scope string, args ...any) (VoidOutcome, error) {
+	var out VoidOutcome
 	rows, err := q.Query(ctx, `
-		UPDATE assigns SET state = 'voided', closed_at = NOW()
-		WHERE thread_id = $1 AND state IN ('open', 'taken')
-		  AND (assignee_id = $2 OR creator_id = $2)
-		RETURNING id`, threadID, accountID)
+		UPDATE assigns SET state = 'timed_out', closed_at = NOW()
+		WHERE state = 'taken' AND deliver_due_at <= NOW() AND (`+scope+`)
+		RETURNING id, assignee_id, creator_id`, args...)
 	if err != nil {
-		return nil, err
+		return out, err
+	}
+	// both parties of a timed_out assign learn ("exit", like the
+	// recovery sweep) — collected first: the notify writes must not
+	// ride the same connection as the still-open RETURNING set
+	type party struct{ assignee, creator int64 }
+	var parties []party
+	for rows.Next() {
+		var id, assignee, creator int64
+		if err := rows.Scan(&id, &assignee, &creator); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.TimedOut = append(out.TimedOut, id)
+		parties = append(parties, party{assignee, creator})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return out, err
+	}
+	rows.Close()
+	for _, p := range parties {
+		InsertNotifyOutboxIfRegistered(ctx, q, p.assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(ctx, q, p.creator, "exit", 1)
+	}
+
+	rows, err = q.Query(ctx, `
+		UPDATE assigns SET state = 'voided', closed_at = NOW()
+		WHERE state IN ('open', 'taken') AND (`+scope+`)
+		RETURNING id`, args...)
+	if err != nil {
+		return out, err
 	}
 	defer rows.Close()
-	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return out, err
 		}
-		ids = append(ids, id)
+		out.Voided = append(out.Voided, id)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
+}
+
+// VoidUndeliveredAssignsForMember settles the pre-delivery assigns of
+// a departing member — both sides (§6.2, R-18: as assignee AND as
+// creator). Returns the ids settled.
+func VoidUndeliveredAssignsForMember(ctx context.Context, q pg.Querier, threadID, accountID int64) (VoidOutcome, error) {
+	return settleUndelivered(ctx, q, `thread_id = $1 AND (assignee_id = $2 OR creator_id = $2)`, threadID, accountID)
 }
 
 // ForfeitJudgmentsForCreator permanently removes the creator's right to
@@ -961,25 +1035,10 @@ func ForfeitJudgmentsForCreator(ctx context.Context, q pg.Querier, threadID, acc
 }
 
 // VoidUndeliveredAssigns closes every pre-delivery assign of a room
-// (thread close, §6.5).
-func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) ([]int64, error) {
-	rows, err := q.Query(ctx, `
-		UPDATE assigns SET state = 'voided', closed_at = NOW()
-		WHERE thread_id = $1 AND state IN ('open', 'taken')
-		RETURNING id`, threadID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+// (thread close and disposal, §6.5) under the deadline rule — see
+// settleUndelivered.
+func VoidUndeliveredAssigns(ctx context.Context, q pg.Querier, threadID int64) (VoidOutcome, error) {
+	return settleUndelivered(ctx, q, `thread_id = $1`, threadID)
 }
 
 // RecoverAssigns materializes deadline outcomes (L4: expiry beats
@@ -1003,8 +1062,8 @@ func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (
 			return 0, err
 		}
 		n++
-		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
-		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, creator, "exit", 1)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1031,8 +1090,8 @@ func RecoverAssigns(ctx context.Context, pool *pg.Pool, now string, batch int) (
 			return n, err
 		}
 		n++
-		_ = InsertNotifyOutbox(context.Background(), pool, assignee, "exit", 1)
-		_ = InsertNotifyOutbox(context.Background(), pool, creator, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, assignee, "exit", 1)
+		InsertNotifyOutboxIfRegistered(context.Background(), pool, creator, "exit", 1)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1049,7 +1108,7 @@ func LinkEntryAssignment(ctx context.Context, q pg.Querier, entryID, assignID in
 	return err
 }
 
-// -- D5: the account-level turn list (kungfu.md §8) --
+// -- D5: the account-level turn list (kungfu-protocol.md §8) --
 
 // TodoItem is one open obligation of an account, whatever room it
 // lives in (§8: turns are a projection, never written). A Task
@@ -1072,20 +1131,13 @@ type TodoItem struct {
 	RowID      int64 // cursor component
 }
 
-// TodoItemsForAccount pages the account's open obligations, oldest
-// first, with a stable (produced, branch, id) keyset cursor — an
-// obligation settling between pages never skips or dups its
-// neighbours. threadID > 0 scopes the projection to one room (the
-// room's working-set slice; Task claims are not room facts and never
-// appear in a scoped slice); judge items only appear while the
-// creator is still a member (R-18). The assign id rides thread deliver
-// and judge items: it is the handle the next action needs. The task
-// code + claim id ride Task-engagement items for work_submit. The
-// summary of a Task item is the task title; the publisher's identity
-// is never part of the projection (task-spec §10 item 7).
-func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
-	rows, err := q.Query(ctx, `
-		SELECT * FROM (
+// todoOpenItems is the §8 open-turn projection body shared by the
+// paged read (TodoItemsForAccount) and the whole-set identity digest
+// (TodoTurnIdentity): receipts pending, taken assigns before their
+// deliver deadline, delivered assigns awaiting the creator's judgment,
+// and active unexpired Task claims. $1 = account, $2 = thread scope
+// (0 = all rooms).
+const todoOpenItems = `
 		(SELECT 1 AS branch, 'reply' AS kind, t.code AS thread, NULL::text AS task, e.id AS entry_id,
 		        r.id AS row_id, e.seq, b.bot_name AS author, COALESCE(e.summary, '') AS summary,
 		        NULL::text AS due, to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') AS produced
@@ -1120,8 +1172,39 @@ func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, thr
 		        to_char(c.expires_at, 'YYYY-MM-DD HH24:MI:SS'), to_char(c.created_at, 'YYYY-MM-DD HH24:MI:SS')
 		 FROM tb_task_claim c
 		 JOIN tb_task t ON t.id = c.task_id
-		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)
-		) items
+		 WHERE c.agent_id = $1 AND c.status = 'active' AND c.expires_at > NOW() AND $2 = 0)`
+
+// TodoTurnIdentity summarizes the account's WHOLE open turn as one
+// aggregate: the count plus a digest over every item's identity,
+// computed in the database — no page limit (a change beyond the first
+// 50 still moves it), no boundary-only sampling (a change in the
+// middle still moves it), no content.
+func TodoTurnIdentity(ctx context.Context, q pg.Querier, accountID, threadID int64) (int64, string, error) {
+	var n int64
+	var digest string
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(md5(string_agg(branch || ':' || row_id, ',' ORDER BY produced, branch, row_id)), '')
+		FROM (`+todoOpenItems+`) items`, accountID, threadID).Scan(&n, &digest)
+	if err != nil {
+		return 0, "", err
+	}
+	return n, digest, nil
+}
+
+// TodoItemsForAccount pages the account's open obligations, oldest
+// first, with a stable (produced, branch, id) keyset cursor — an
+// obligation settling between pages never skips or dups its
+// neighbours. threadID > 0 scopes the projection to one room (the
+// room's working-set slice; Task claims are not room facts and never
+// appear in a scoped slice); judge items only appear while the
+// creator is still a member (R-18). The assign id rides thread deliver
+// and judge items: it is the handle the next action needs. The task
+// code + claim id ride Task-engagement items for work_submit. The
+// summary of a Task item is the task title; the publisher's identity
+// is never part of the projection (task-spec §10 item 7).
+func TodoItemsForAccount(ctx context.Context, q pg.Querier, accountID int64, threadID int64, cursorProduced string, cursorBranch, cursorID int64, limit int) ([]TodoItem, error) {
+	rows, err := q.Query(ctx, `
+		SELECT * FROM (`+todoOpenItems+`) items
 		WHERE ($3 = '' OR (items.produced, items.branch, items.row_id) > ($3, $4, $5))
 		ORDER BY items.produced ASC, items.branch ASC, items.row_id ASC
 		LIMIT $6`, accountID, threadID, cursorProduced, cursorBranch, cursorID, limit)
@@ -1191,6 +1274,19 @@ func InsertNotifyOutbox(ctx context.Context, q pg.Querier, accountID int64, kind
 	return err
 }
 
+// InsertNotifyOutboxIfRegistered is the one gated enqueue every fact
+// writer uses: an account without a registered endpoint is never
+// written at all — a signal nobody can receive is meaningless
+// production, and registering later simply starts from the next fact
+// (a lost push is always harmless by design). Best-effort by
+// contract: a failed lookup writes nothing.
+func InsertNotifyOutboxIfRegistered(ctx context.Context, q pg.Querier, accountID int64, kind string, count int) {
+	if _, _, ok, err := FindAccountNotify(ctx, q, accountID); err != nil || !ok {
+		return
+	}
+	_ = InsertNotifyOutbox(ctx, q, accountID, kind, count)
+}
+
 type OutboxRow struct {
 	ID        int64
 	AccountID int64
@@ -1226,6 +1322,23 @@ func MarkOutboxSent(ctx context.Context, q pg.Querier, id int64, sent bool) erro
 		return err
 	}
 	_, err := q.Exec(ctx, `UPDATE notify_outbox SET attempts = attempts + 1 WHERE id = $1`, id)
+	return err
+}
+
+// DeleteOutboxRow removes one finished outbox row — a delivered
+// signal, or one that died because its account has no endpoint. The
+// outbox is an accelerator, not a log: completed work leaves nothing
+// behind (bounded recycling).
+func DeleteOutboxRow(ctx context.Context, q pg.Querier, id int64) error {
+	_, err := q.Exec(ctx, `DELETE FROM notify_outbox WHERE id = $1`, id)
+	return err
+}
+
+// DeleteAbandonedOutbox removes rows whose delivery attempts ran out
+// (attempts >= 5 and still unsent): abandoned work leaves nothing
+// behind either — a lost push is always harmless by design.
+func DeleteAbandonedOutbox(ctx context.Context, q pg.Querier) error {
+	_, err := q.Exec(ctx, `DELETE FROM notify_outbox WHERE sent_at IS NULL AND attempts >= 5`)
 	return err
 }
 
@@ -1397,6 +1510,24 @@ func AssignmentDeadlinePassed(ctx context.Context, q pg.Querier, assignID int64,
 		return false, err
 	}
 	return passed, nil
+}
+
+// ThreadOpenInviteIdentity is the open-assignment opportunity in
+// whole-set identity terms: the count plus a digest over every
+// qualifying assign id — one aggregate, no paging, no content, no
+// collision-prone arithmetic.
+func ThreadOpenInviteIdentity(ctx context.Context, q pg.Querier, accountID int64) (int64, string, error) {
+	var n int64
+	var digest string
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(md5(string_agg(a.id::text, ',' ORDER BY a.id)), '')
+		FROM assigns a
+		JOIN thread_members m ON m.thread_id = a.thread_id AND m.account_id = $1
+		WHERE a.assignee_id = $1 AND a.state = 'open'`, accountID).Scan(&n, &digest)
+	if err != nil {
+		return 0, "", err
+	}
+	return n, digest, nil
 }
 
 // ThreadOpenInviteCounts counts, per room, the OPEN assignments

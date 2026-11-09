@@ -1,6 +1,6 @@
 package mcpserver
 
-// Thread tools (D2) — kungfu.md §6.1/§6.2/§6.5 room skeleton over the
+// Thread tools (D2) — kungfu-protocol.md §6.1/§6.2/§6.5 room skeleton over the
 // thread kernel service. Thin adapters: decode → service → envelope.
 // Every write tool takes idempotency_key (L3); the envelope carries
 // the PRD §2 error-code → next_action mapping (set here, because the
@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +115,7 @@ func (w *joinFailureWindow) record(botID int64) {
 func handleThreadStart(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Subject        string `json:"subject"`
+		Description    string `json:"description"`
 		Key            bool   `json:"key"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -127,7 +129,38 @@ func handleThreadStart(ctx context.Context, deps *Deps, agent *model.Bot, args j
 	if !deps.limiter().CheckAgent(agent.ID, "thread_start") {
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_start").RetryAfter)
 	}
-	res, err := service.ThreadStart(ctx, deps.Pool, agent.ID, in.Subject, in.Key, idemKey)
+	res, err := service.ThreadStart(ctx, deps.Pool, agent.ID, in.Subject, in.Description, in.Key, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadUpdate(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string  `json:"thread"`
+		Subject        *string `json:"subject"`
+		Description    *string `json:"description"`
+		IdempotencyKey string  `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil {
+		return ToolResult{}, err
+	}
+	if strings.TrimSpace(in.Thread) == "" {
+		return ToolResult{}, apperr.New(422, "VALIDATION_FAILED", "thread is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if in.Subject == nil && in.Description == nil {
+		return ToolResult{}, apperr.New(422, "VALIDATION_FAILED",
+			"Give subject or description (omit a field to keep it, empty string to clear it)")
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadUpdateProfile(ctx, deps.Pool, agent.ID, in.Thread, in.Subject, in.Description, idemKey)
 	if err != nil {
 		return threadErrResult(err)
 	}
@@ -209,9 +242,9 @@ func handleThreadJoin(ctx context.Context, deps *Deps, agent *model.Bot, args js
 	return threadData(res)
 }
 
-// -- D3: speaking (kungfu.md §6.3) --
+// -- D3: speaking (kungfu-protocol.md §6.3) --
 
-// -- D4: assignments (kungfu.md §6.4) --
+// -- D4: assignments (kungfu-protocol.md §6.4) --
 
 func handleAssignTake(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
@@ -561,6 +594,74 @@ func handleTodoList(ctx context.Context, deps *Deps, agent *model.Bot, args json
 	return threadData(res)
 }
 
+func handleTodoWait(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Timeout int64 `json:"timeout"`
+	}
+	if err := decodeArgs(args, &in); err != nil {
+		return ToolResult{}, err
+	}
+	// clamp like page/page_size (WO-28 B8): absent or out-of-range
+	// becomes the default — a blocking read must never reject a
+	// reasonable caller over its patience knob
+	if in.Timeout < 1 || in.Timeout > 20 {
+		in.Timeout = 20
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "todo_wait") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "todo_wait").RetryAfter)
+	}
+	res, err := service.TodoWait(ctx, deps.Pool, agent.ID, in.Timeout)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadDissolve(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string `json:"thread"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Thread == "" {
+		return ToolResult{}, argError("thread is required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadDissolve(ctx, deps.Pool, agent.ID, in.Thread, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleThreadScrub(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Thread         string `json:"thread"`
+		Entry          int64  `json:"entry"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := decodeArgs(args, &in); err != nil || in.Thread == "" || in.Entry == 0 {
+		return ToolResult{}, argError("thread and entry are required")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if !deps.limiter().CheckAgent(agent.ID, "thread_write") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
+	}
+	res, err := service.ThreadScrubEntry(ctx, deps.Pool, agent.ID, in.Thread, in.Entry, idemKey)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
 func handleNotifyRegister(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		URL string `json:"url"`
@@ -583,6 +684,17 @@ func handleNotifyDelete(ctx context.Context, deps *Deps, agent *model.Bot, args 
 		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "thread_write").RetryAfter)
 	}
 	res, err := service.NotifyDelete(ctx, deps.Pool, agent.ID)
+	if err != nil {
+		return threadErrResult(err)
+	}
+	return threadData(res)
+}
+
+func handleNotifyTest(ctx context.Context, deps *Deps, agent *model.Bot, args json.RawMessage) (ToolResult, error) {
+	if !deps.limiter().CheckAgent(agent.ID, "notify_test") {
+		return ToolResult{}, rateLimited(deps.limiter().CheckAgentWithDetails(agent.ID, "notify_test").RetryAfter)
+	}
+	res, err := service.NotifyTest(ctx, deps.Pool, agent.ID)
 	if err != nil {
 		return threadErrResult(err)
 	}

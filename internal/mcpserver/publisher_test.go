@@ -451,7 +451,7 @@ func TestErrorCatalogProtocolCoverage(t *testing.T) {
 func wo7OpenTaskClaimRequired(t *testing.T, pool *pg.Pool, publisher int64) string {
 	c := wo7Contract()
 	c.Claim = task.ClaimConfig{Required: true}
-	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000)
+	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000, false, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -508,7 +508,7 @@ func syncBrokenTask(t *testing.T, pool *pg.Pool, publisher int64) string {
 	t.Helper()
 	c := wo7Contract()
 	c.Receiver = task.Receiver{URL: "https://receiver.invalid/hook"}
-	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000)
+	view, err := service.CreateTask(context.Background(), pool, publisher, c, 1000, false, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

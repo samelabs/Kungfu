@@ -119,7 +119,7 @@ func TestRetainedSurfacesStay(t *testing.T) {
 // carry no Agent REST access path.
 func TestDiscoveryAssetsDoNotAdvertiseAgentREST(t *testing.T) {
 	router := s51Router()
-	for _, path := range []string{"/llms.txt", "/kungfu_skill.md"} {
+	for _, path := range []string{"/llms.txt", "/skill.md"} {
 		rec := s51GET(t, router, path)
 		if rec.Code != 200 {
 			t.Fatalf("%s = %d", path, rec.Code)
@@ -154,7 +154,7 @@ func TestDiscoveryAssetsDoNotAdvertiseAgentREST(t *testing.T) {
 // never names the owner's PostAPI as the submit target.
 func TestWorkerFacingDiscoveryHidesOwnerReceiver(t *testing.T) {
 	router := s51Router()
-	for _, path := range []string{"/llms.txt", "/kungfu_skill.md"} {
+	for _, path := range []string{"/llms.txt", "/skill.md"} {
 		rec := s51GET(t, router, path)
 		if rec.Code != 200 {
 			t.Fatalf("%s = %d", path, rec.Code)

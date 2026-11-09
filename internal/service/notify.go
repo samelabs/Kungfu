@@ -72,6 +72,29 @@ func NotifyRegister(ctx context.Context, pool *pg.Pool, botID int64, rawURL stri
 	return map[string]any{"url": u, "verified": true, "secret": secret}, nil
 }
 
+// NotifyTest enqueues a kind="test" signal to the account's registered
+// endpoint so the whole chain (challenge → signature → wake) can be
+// verified end to end without a collaborator having to create a real
+// obligation. The signal is a doorbell like any other: no content,
+// dispatched by the same best-effort ticker.
+func NotifyTest(ctx context.Context, pool *pg.Pool, botID int64) (map[string]any, error) {
+	_, _, ok, err := repository.FindAccountNotify(ctx, pool, botID)
+	if err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error checking endpoint")
+	}
+	if !ok {
+		return nil, errors.New(422, "VALIDATION_FAILED", "no endpoint registered; notify_register first")
+	}
+	if err := repository.InsertNotifyOutbox(ctx, pool, botID, "test", 0); err != nil {
+		return nil, errors.New(500, "INTERNAL_ERROR", "Error queueing test signal")
+	}
+	return map[string]any{
+		"queued": true, "kind": "test",
+		"dispatched_within": 30,
+		"note":              "watch your endpoint for a signed {account,kind,count} POST; a lost test signal is harmless — retry",
+	}, nil
+}
+
 // NotifyDelete drops the accelerator target; facts and todo_list are
 // unaffected.
 func NotifyDelete(ctx context.Context, pool *pg.Pool, botID int64) (map[string]any, error) {
@@ -83,11 +106,17 @@ func NotifyDelete(ctx context.Context, pool *pg.Pool, botID int64) (map[string]a
 }
 
 // DispatchNotifyOutbox delivers queued signals best-effort. One
-// pass: claim a batch, POST each to the account's verified endpoint
-// with an HMAC signature, mark sent (or count the attempt).
+// pass: drop abandoned rows, claim a batch, POST each to the
+// account's verified endpoint with an HMAC signature, delete the
+// delivered ones (or count the attempt).
 func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 	tx, err := pool.TxBegin(ctx)
 	if err != nil {
+		return 0, err
+	}
+	// bounded recycling first: rows whose attempts ran out leave
+	if err := repository.DeleteAbandonedOutbox(ctx, tx); err != nil {
+		_ = pg.Rollback(tx)
 		return 0, err
 	}
 	batch, err := repository.ListUnsentOutbox(ctx, tx, 50)
@@ -96,8 +125,9 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 		return 0, err
 	}
 	if len(batch) == 0 {
-		_ = pg.Rollback(tx)
-		return 0, nil
+		// nothing to deliver: COMMIT — the abandoned-rows cleanup
+		// above stands (rolling back would resurrect them)
+		return 0, tx.Commit(ctx)
 	}
 	type notifyTarget struct {
 		row  repository.OutboxRow
@@ -111,10 +141,9 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 			continue
 		}
 		if !ok {
-			// no endpoint: the signal dies here, harmless by design
-			if err := repository.MarkOutboxSent(ctx, tx, r.ID, true); err != nil {
-				continue
-			}
+			// no endpoint (unregistered since the write, or a row from
+			// before the write gate): the signal dies and goes here
+			_ = repository.DeleteOutboxRow(ctx, tx, r.ID)
 			continue
 		}
 		targets = append(targets, notifyTarget{row: r, url: u, hmac: secret})
@@ -135,16 +164,22 @@ func DispatchNotifyOutbox(ctx context.Context, pool *pg.Pool) (int, error) {
 			"X-Kungfu-Signature": "sha256=" + hex.EncodeToString(mac.Sum(nil)),
 		}, delivery.ErrorConfig{})
 		ok := res.ResponseCode != nil && *res.ResponseCode >= 200 && *res.ResponseCode <= 299
-		if err := repository.MarkOutboxSent(context.Background(), pool, d.row.ID, ok); err == nil && ok {
-			sent++
+		if ok {
+			// delivered: the completed signal leaves nothing behind
+			if err := repository.DeleteOutboxRow(context.Background(), pool, d.row.ID); err == nil {
+				sent++
+			}
+			continue
 		}
+		_ = repository.MarkOutboxSent(context.Background(), pool, d.row.ID, false)
 	}
 	return sent, nil
 }
 
 // enqueueNotify is the in-transaction hook the fact writers call.
 func enqueueNotify(ctx context.Context, tx pgx.Tx, accountID int64, kind string, count int) {
-	// never fails the parent action: the accelerator must not be
-	// able to break the fact it decorates
-	_ = repository.InsertNotifyOutbox(ctx, tx, accountID, kind, count)
+	// never fails the parent action: the accelerator must not be able
+	// to break the fact it decorates; the write itself is gated on a
+	// registered endpoint (repository.InsertNotifyOutboxIfRegistered)
+	repository.InsertNotifyOutboxIfRegistered(ctx, tx, accountID, kind, count)
 }

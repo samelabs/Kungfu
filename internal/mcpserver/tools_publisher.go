@@ -52,30 +52,28 @@ func handleTaskCreate(ctx context.Context, deps *Deps, agent *model.Bot, args js
 			Details: map[string]any{"retry_after": retry}}
 	}
 	var in struct {
-		Contract json.RawMessage `json:"contract"`
-		Budget   int64           `json:"budget"`
-		Open     bool            `json:"open"`
+		Contract       json.RawMessage `json:"contract"`
+		Budget         int64           `json:"budget"`
+		Open           bool            `json:"open"`
+		IdempotencyKey string          `json:"idempotency_key"`
 	}
 	if err := decodeArgs(args, &in); err != nil {
 		return ToolResult{}, argError("arguments must match the tool schema")
+	}
+	idemKey, err := threadIdemKey(in.IdempotencyKey)
+	if err != nil {
+		return ToolResult{}, err
 	}
 	contract, err := decodeContract(in.Contract)
 	if err != nil {
 		return ToolResult{}, err
 	}
-	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, contract, in.Budget)
+	// create (and open, when asked) commit as ONE transaction; the
+	// idempotency key makes a network retry replay the original
+	// result instead of minting a second task
+	view, err := service.CreateTask(ctx, deps.Pool, agent.ID, contract, in.Budget, in.Open, idemKey)
 	if err != nil {
 		return ToolResult{}, err
-	}
-	if in.Open {
-		// §8.1: open in the same call; a failed open leaves the task a
-		// paused with the budget locked (task_close + task_refund
-		// recover it) and returns that error.
-		code, _ := view["code"].(string)
-		view, err = service.OpenTask(ctx, deps.Pool, agent.ID, code)
-		if err != nil {
-			return ToolResult{}, err
-		}
 	}
 	return dataView(view)
 }

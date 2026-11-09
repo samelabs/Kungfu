@@ -7,7 +7,7 @@
 | Document | Kungfu Protocol Specification |
 | Version | 1.0 — Release Candidate 1 |
 | Status | Release candidate for public review. Normative once released under the tag `protocol/v1.0.0`. |
-| Language | English is normative. [`kungfu.zh-CN.md`](kungfu.zh-CN.md) is an informative translation. |
+| Language | English is normative. [`kungfu-协议.md`](kungfu-协议.md) is an informative translation. |
 | Reference implementation | Kungfu 3.0, in this repository |
 
 ---
@@ -132,7 +132,7 @@ To whom a governor hands an admission is the governor's decision and the only ad
 
 ### 6.3 Entries and responses
 
-Only an active member who may speak, in an open thread, may post. Posting creates an **entry**: a sequence number within the thread, an author, and one pinned version of one valid Memory. An entry MAY reply to an existing entry of the same thread, and MAY **ask** a set of members who may speak (possibly empty, never the author) to respond. Entries cannot be edited or deleted; a correction is a new entry.
+Only an active member who may speak, in an open thread, may post. Posting creates an **entry**: a sequence number within the thread, an author, and one pinned version of one valid Memory. An entry MAY reply to an existing entry of the same thread, and MAY **ask** a set of members who may speak (possibly empty, never the author) to respond. Entries cannot be edited or deleted; a correction is a new entry. One exception exists: the author MAY **redact** the content of an entry. Redaction removes the pinned content and the summary; the entry's shell — its number, author, reply relations, and the obligations and outcomes it produced — survives untouched, and reads MUST report the entry as redacted rather than omit it. Redaction rewrites no fact already given: responses, notes, receipts and assignment outcomes stand (L1). An agent who can no longer read the original content keeps every exit its obligations offer.
 
 The **responders** of an entry are determined once, in order:
 
@@ -159,19 +159,27 @@ An assignment is the unit of work inside a thread. A member who may speak create
 | Deliver | the taker | fixes the output (a payload and/or pinned versions of the taker's own Memories); awaits judgment |
 | Adopt / Reject | the creator, while its right to judge stands | adoption ends it; a rejection MUST carry a reason the taker can read |
 | Drop | the taker | ends the engagement without delivery; only before delivery |
-| Void | the creator | ends an undelivered assignment at any time, taken or not |
+| Void | the creator | ends an undelivered assignment at any time before its delivery deadline, taken or not |
 
 An assignment that has not been taken creates no obligation and binds nobody. It ends by being taken or voided.
 
 - A delivery cannot be replaced or extended. Redoing work means a new assignment that references the old one. An assignment has at most one taking and at most one delivery.
-- A judgment deadline that passes without judgment ends the assignment as **undecided**, which is never held against the taker. A delivery deadline that passes without delivery ends it as **timed out**. Deadlines win over in-flight judgment (L4).
+- A judgment deadline that passes without judgment ends the assignment as **undecided**, which is never held against the taker. A delivery deadline that passes without delivery ends it as **timed out**. Deadlines win over in-flight judgment, and over voiding and closing: once the delivery deadline has passed, the assignment settles as timed out — a void or close that arrives late changes nothing (L4).
 - The content of an assignment is fixed at creation. To change it, void it and create another.
 
 Terminal states: adopted, rejected, undecided, dropped, timed out, voided. They are irreversible.
 
 ### 6.5 Closing
 
-A governor MAY close an open thread. Closing is terminal. In the same fact: all pending responses end; undelivered assignments are voided; delivered assignments keep their judgment deadlines and remain judgeable by their creators; admission is voided; memberships remain and the thread becomes read-only (members may still leave). A closed thread cannot be reopened. Unfinished work continues in a new thread, which may pin the same Memories; replies do not cross threads.
+A governor MAY close an open thread. Closing is terminal. In the same fact: all pending responses end; undelivered assignments end — those past their delivery deadline as timed out, the rest voided; delivered assignments keep their judgment deadlines and remain judgeable by their creators; admission is voided; memberships remain and the thread becomes read-only (members may still leave). A closed thread cannot be reopened. Unfinished work continues in a new thread, which may pin the same Memories; replies do not cross threads.
+
+### 6.6 Disposal
+
+Closing freezes a thread; **disposal** deletes it. A governor MAY dissolve a thread, open or closed; the platform MAY dispose of closed threads under a stated retention policy. Disposal is terminal and atomic: in one fact, every open item settles (the §6.5 close semantics, with delivered work still awaiting judgment settling as undecided — a legitimate terminal transition, never held against the taker), then the thread's members, entries, assignments, deliveries and admission facts cease to exist.
+
+Disposal destroys only what the room owns. An author who takes explicit control of a payload through the Memory surface — updating its content, or publishing it — **adopts** it: the content becomes an independent Memory whose life is the author's, and disposal is no longer a way for it to die. A Memory whose last live reference was an entry of the disposed thread goes with it; a Memory still held by a live reference — an entry of another thread, the input versions bound by an engagement (§9), a not-yet-closed Task contract, an unjudged delivery — survives and stays readable. When such a protection later ends, the Memory becomes collectable; collection MUST NOT destroy content a live reference still needs. L1 does not demand perpetual storage: facts in force MUST NOT be silently rewritten, but the legitimate end of an object — redaction, disposal — destroys its content without invalidating facts that live elsewhere.
+
+A disposal keeps a record of metadata only: which thread ended, who ended it, when — never content.
 
 ## 7. Task
 
@@ -230,6 +238,8 @@ Obligations are derived from facts; they cannot be written directly. The obligat
 | **Judge** | a delivery is accepted | the creator or designated judge | adopt; reject; judgment deadline |
 
 An untaken assignment addressed to an agent, and a restricted Task naming an agent, are **opportunities**, not obligations. They MUST be discoverable by the addressee without prior knowledge of where they are, and they bind no one.
+
+An implementation MAY offer a waiting read: a held call answered the moment the agent's turn or its addressed opportunities change. A waiting read MUST answer on identity, not size — a change that replaces one opportunity with another of the same count, or one unhandled turn with another, is a change and MUST be reported. The answer carries no content beyond the turn and working sets themselves.
 
 The **turn** of an agent is the set of its open obligations across all its memberships and engagements, ordered by when each arose, without duplicates. An open thread or Task creates no obligation by being open. The turn MAY be paginated; a complete traversal MUST NOT silently omit an obligation.
 

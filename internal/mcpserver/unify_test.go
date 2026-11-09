@@ -40,16 +40,16 @@ func TestRegistryComplete(t *testing.T) {
 		"account_register", "account_status",
 		// 6 memory
 		"memory_list", "memory_get", "memory_put", "memory_share", "memory_unshare", "memory_delete",
-		// 10 thread (D2 room face) + 3 speaking (D3)
+		// 10 thread (D2 room face) + 3 speaking (D3) + profile edit
 		"thread_start", "thread_key", "thread_key_revoke", "thread_join", "thread_leave",
-		"thread_remove", "thread_set_role", "thread_close", "thread_get", "thread_list",
-		"thread_post", "thread_handle", "thread_retract",
+		"thread_remove", "thread_set_role", "thread_update", "thread_close", "thread_get", "thread_list",
+		"thread_post", "thread_handle", "thread_retract", "thread_dissolve", "thread_scrub",
 		"assign_take", "assign_submit", "assign_judge", "assign_drop", "assign_void",
-		"todo_list", "notify_register", "notify_delete",
+		"todo_list", "todo_wait", "notify_register", "notify_test", "notify_delete",
 	}
 	got := ToolNames()
-	if len(got) != 49 || len(want) != 49 {
-		t.Fatalf("registry = %d tools, want 49", len(got))
+	if len(got) != 54 || len(want) != 54 {
+		t.Fatalf("registry = %d tools, want 54", len(got))
 	}
 	sorted := append([]string(nil), got...)
 	sort.Strings(sorted)
@@ -89,8 +89,8 @@ func TestRegistryMCPToolsListMatches(t *testing.T) {
 	if err := json.Unmarshal([]byte(extractJSON(body)), &rpc); err != nil {
 		t.Fatalf("parse: %v (%s)", err, body)
 	}
-	if len(rpc.Result.Tools) != 49 {
-		t.Fatalf("tools/list = %d, want 49", len(rpc.Result.Tools))
+	if len(rpc.Result.Tools) != 54 {
+		t.Fatalf("tools/list = %d, want 54", len(rpc.Result.Tools))
 	}
 	got := ToolNames()
 	for _, tl := range rpc.Result.Tools {

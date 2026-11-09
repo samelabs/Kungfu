@@ -148,22 +148,19 @@ func TestPM001NotifyRetryAndUnreachable(t *testing.T) {
 	if err := repository.InsertNotifyOutbox(ctx, pool, a, "reply", 1); err != nil {
 		t.Fatal(err)
 	}
-	// loopback is refused by the hardened dial — attempts accumulate
+	// loopback is refused by the hardened dial — attempts accumulate to
+	// the cap, then the abandoned row is RECYCLED (bounded: hopeless
+	// signals leave nothing behind, by the gated-outbox rules)
 	for i := 0; i < 6; i++ {
 		if _, err := DispatchNotifyOutbox(ctx, pool); err != nil {
 			t.Fatalf("dispatch: %v", err)
 		}
 	}
-	var attempts int
-	var sent any
-	_ = pool.QueryRow(ctx,
-		`SELECT attempts, sent_at FROM notify_outbox WHERE account_id=$1 ORDER BY id DESC LIMIT 1`, a).
-		Scan(&attempts, &sent)
-	if attempts < 5 || sent != nil {
-		t.Fatalf("unreachable endpoint: attempts=%d sent=%v — must cap and drop", attempts, sent)
+	if n := countRow(t, pool, `SELECT count(*) FROM notify_outbox WHERE account_id=$1`, a); n != 0 {
+		t.Fatalf("unreachable endpoint left %d rows behind — attempts must cap and the row must drop", n)
 	}
 
-	// duplicated dispatch is harmless: a sent row is never re-sent
+	// duplicated dispatch is harmless on an empty queue
 	if err := repository.InsertNotifyOutbox(ctx, pool, a, "reply", 1); err != nil {
 		t.Fatal(err)
 	}

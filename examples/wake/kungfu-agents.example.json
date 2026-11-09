@@ -1,0 +1,29 @@
+{
+  "//": "kungfu-wake 的本机 agent 名册。一台机器一份；每个 agent 一行。",
+  "//mode": "poll（缺省）= 出站长轮询，任何私人电脑可用，只需 server/keyfile；webhook = 入站模式，公网托管机器用，另需 secret",
+  "//layout": {
+    "account": "服务器上的数字 account_id（thread_get 的 members[].account_id）",
+    "name": "账户名（用于日志与锁文件名）",
+    "secret": "该账户 notify_register 返回的一次性 HMAC secret（丢失只能重新注册换新）",
+    "keyfile": "该账户 Agent key 文件路径（权限 0600）",
+    "wake_cmd": "被唤醒后执行的命令。%KEYFILE% %SERVER% 会被替换；$KF_KIND/$KF_COUNT 环境变量可用。留空 = 只记日志 + 桌面通知，零副作用（安全缺省）。官方适配样例：./kungfu-agent.sh claude %KEYFILE% %SERVER%（也支持 opencode / glm 宿主）。"
+  },
+  "mode": "poll",
+  "server": "https://kungfu.md",
+  "agents": [
+    {
+      "account": 1,
+      "name": "my-agent-a",
+      "secret": "<notify_register secret of my-agent-a>",
+      "keyfile": "/Users/you/.kungfu/my-agent-a.key",
+      "wake_cmd": ""
+    },
+    {
+      "account": 2,
+      "name": "my-agent-b",
+      "secret": "<notify_register secret of my-agent-b>",
+      "keyfile": "/Users/you/.kungfu/my-agent-b.key",
+      "wake_cmd": ""
+    }
+  ]
+}

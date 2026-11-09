@@ -282,7 +282,7 @@ func GetWork(ctx context.Context, pool *pg.Pool, agentID int64, code string, now
 	}
 	contractJSON := t.Contract
 	contractVersion := t.ContractVersion
-	if claim, err := repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err == nil && claim != nil {
+	if claim, err := repository.FindLiveClaimByTaskAgent(ctx, pool, t.ID, agentID, now); err == nil && claim != nil {
 		bound, err := repository.FindTaskContractVersion(ctx, pool, t.ID, claim.ContractVersion)
 		if err != nil {
 			return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
@@ -392,15 +392,16 @@ func GetHarness(ctx context.Context, pool *pg.Pool, agentID int64, code, refID s
 	}
 
 	// the engagement, if any: an explicit claim_id must be the
-	// caller's active claim on this task; without one, an active
-	// claim of the caller on this task serves the same read
+	// caller's live engagement on this task (an active unexpired
+	// claim, or a used one whose submission is still in flight);
+	// without one, the same validity discovers the engagement
 	var engaged *repository.ClaimRow
 	if claimID != nil {
-		engaged, err = checkClaim(ctx, pool, *claimID, agentID, t.ID, now)
+		engaged, err = checkClaimForRead(ctx, pool, *claimID, agentID, t.ID, now)
 		if err != nil {
 			return nil, err
 		}
-	} else if engaged, err = repository.FindActiveClaimByTaskAgent(ctx, pool, t.ID, agentID); err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
+	} else if engaged, err = repository.FindLiveClaimByTaskAgent(ctx, pool, t.ID, agentID, now); err != nil && !goerrors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New(0, "INTERNAL_ERROR", "Database error")
 	} else if err != nil {
 		engaged = nil

@@ -35,7 +35,7 @@ var statusByCode = map[string]int{
 	"INVALID_REQUEST_KEY":   http.StatusUnprocessableEntity,
 	"VALIDATION_FAILED":     http.StatusUnprocessableEntity,
 
-	// room-face thread tools (kungfu.md §6; D-009)
+	// room-face thread tools (kungfu-protocol.md §6; D-009)
 	"THREAD_NOT_FOUND": http.StatusNotFound,
 	"ASSIGN_NOT_FOUND": http.StatusNotFound,
 	"NOT_MEMBER":       http.StatusForbidden,

@@ -42,6 +42,13 @@ func TestComposeCloseAndJudgeDeadline(t *testing.T) {
 		`UPDATE assign_deliveries SET judge_due_at = NOW() - INTERVAL '1 second' WHERE assign_id = $1`, s); err != nil {
 		t.Fatal(err)
 	}
+	// both parties can receive: outbox writes are gated on a
+	// registered endpoint
+	for _, who := range []int64{owner, a} {
+		if err := repository.UpsertAccountNotify(ctx, pool, who, "https://endpoint.example/wake", "s3cret"); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
 	if _, err := RecoverAssigns(ctx, pool, "now", 50); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -218,6 +225,10 @@ func TestComposeDeactivationPurgesOutbox(t *testing.T) {
 	defer threadCleanup(t, pool, []int64{owner, a}, code)
 	if _, err := ThreadJoin(ctx, pool, a, raw, ""); err != nil {
 		t.Fatalf("join: %v", err)
+	}
+	// a can receive: outbox writes are gated on a registered endpoint
+	if err := repository.UpsertAccountNotify(ctx, pool, a, "https://endpoint.example/wake", "s3cret"); err != nil {
+		t.Fatalf("register: %v", err)
 	}
 	statePost(t, pool, owner, code, "you owe this", "", nil, []int64{a}, "m5")
 	var queued int
@@ -629,6 +640,10 @@ func TestExtAuditInputBoundariesAndInviteNotify(t *testing.T) {
 		t.Fatal("negative deliver_due must be rejected")
 	} else {
 		threadErrIs(t, err, 422, "VALIDATION_FAILED")
+	}
+	// a can receive: outbox writes are gated on a registered endpoint
+	if err := repository.UpsertAccountNotify(ctx, pool, a, "https://endpoint.example/wake", "s3cret"); err != nil {
+		t.Fatalf("register: %v", err)
 	}
 	// omitted due falls back to default
 	r, err := ThreadPost(ctx, pool, owner, code, "default due", "", "", nil, nil,

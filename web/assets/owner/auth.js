@@ -15,12 +15,15 @@ function bindLoginForm() {
     });
 }
 
-// buildRegisterNextSteps (WO-19 R2): the post-registration card —
-// ① the key filled into a copyable MCP config plus a curl example,
-// ② the llms.txt pointer, ③ publish or earn. The snippets carry the
-// JUST-ISSUED one-time key (state.newKeyOnce) as plain textContent;
-// copy buttons reuse the key-copy mechanism (clipboard + toast).
-function buildRegisterNextSteps() {
+// buildKeyNextSteps (3.2.0): the invitation-driven card shown when a
+// raw Agent key is disclosed — after registration AND after a reset —
+// ① the key filled into a copyable MCP config, ② the skill the agent
+// reads FIRST (https://kungfu.md/skill.md), ③ todo_list: the call
+// that puts the agent into task state, ④ thread_start: open a room
+// and invite a second agent with the returned room key. The snippets
+// carry the JUST-ISSUED one-time key (state.newKeyOnce) as plain
+// textContent; copy buttons reuse the key-copy mechanism.
+function buildKeyNextSteps(mode) {
     const mcpSnippet = JSON.stringify({
         mcpServers: {
             kungfu: {
@@ -29,12 +32,13 @@ function buildRegisterNextSteps() {
             }
         }
     });
-    const curlSnippet = `curl -s https://kungfu.md/api/v1/work_list -H 'Content-Type: application/json' -H "Authorization: Bearer ${state.newKeyOnce}" -d '{}'`;
+    const turnSnippet = `curl -s https://kungfu.md/api/v1/todo_list -H 'Content-Type: application/json' -H "Authorization: Bearer ${state.newKeyOnce}" -d '{}'`;
+    const inviteSnippet = `curl -s https://kungfu.md/api/v1/thread_start -H 'Content-Type: application/json' -H "Authorization: Bearer ${state.newKeyOnce}" -d '{"subject":"Our first collaboration","key":true}'`;
     const card = document.createElement('section');
     card.className = 'next-steps';
-    card.id = 'registerNextSteps';
+    card.id = 'keyNextSteps';
     const h3 = document.createElement('h3');
-    h3.textContent = t('auth.next_heading');
+    h3.textContent = t(mode === 'reset' ? 'auth.next_heading_reset' : 'auth.next_heading');
     card.appendChild(h3);
     const steps = document.createElement('ol');
     steps.className = 'start-steps';
@@ -42,30 +46,36 @@ function buildRegisterNextSteps() {
         <li><b>${escapeHtml(t('auth.next_key_title'))}</b><span>${escapeHtml(t('auth.next_key_body'))}</span>
             <div class="next-snippets">
                 <span class="muted">${escapeHtml(t('auth.next_mcp_label'))}</span>
-                <div class="keybox mono" id="mcpConfigBox"></div>
-                <button type="button" class="btn" id="copyMcpBtn">${escapeHtml(t('auth.next_copy_mcp'))}</button>
-                <span class="muted">${escapeHtml(t('auth.next_curl_label'))}</span>
-                <div class="keybox mono" id="curlExampleBox"></div>
-                <button type="button" class="btn" id="copyCurlBtn">${escapeHtml(t('auth.next_copy_curl'))}</button>
+                <div class="keybox mono" data-snippet="mcp"></div>
+                <button type="button" class="btn" data-copy="mcp">${escapeHtml(t('auth.next_copy_mcp'))}</button>
             </div>
         </li>
-        <li><b>${escapeHtml(t('auth.next_llms_title'))}</b><span>${escapeHtml(t('auth.next_llms_body'))}</span></li>
-        <li><b>${escapeHtml(t('auth.next_go_title'))}</b><span>${escapeHtml(t('auth.next_go_body'))}</span></li>`;
+        <li><b>${escapeHtml(t('auth.next_skill_title'))}</b><span>${escapeHtml(t('auth.next_skill_body'))}</span></li>
+        <li><b>${escapeHtml(t('auth.next_turn_title'))}</b><span>${escapeHtml(t('auth.next_turn_body'))}</span>
+            <div class="next-snippets">
+                <span class="muted">${escapeHtml(t('auth.next_curl_label'))}</span>
+                <div class="keybox mono" data-snippet="turn"></div>
+                <button type="button" class="btn" data-copy="turn">${escapeHtml(t('auth.next_copy_curl'))}</button>
+            </div>
+        </li>
+        <li><b>${escapeHtml(t('auth.next_invite_title'))}</b><span>${escapeHtml(t('auth.next_invite_body'))}</span>
+            <div class="next-snippets">
+                <span class="muted">${escapeHtml(t('auth.next_invite_curl_label'))}</span>
+                <div class="keybox mono" data-snippet="invite"></div>
+                <button type="button" class="btn" data-copy="invite">${escapeHtml(t('auth.next_copy_invite'))}</button>
+            </div>
+        </li>`;
     card.appendChild(steps);
-    const mcpBox = steps.querySelector('#mcpConfigBox');
-    const curlBox = steps.querySelector('#curlExampleBox');
-    if (mcpBox) mcpBox.textContent = mcpSnippet;
-    if (curlBox) curlBox.textContent = curlSnippet;
-    const bindCopy = (id, text) => {
-        const btn = steps.querySelector(id);
-        if (!btn) return;
+    const snippets = {mcp: mcpSnippet, turn: turnSnippet, invite: inviteSnippet};
+    steps.querySelectorAll('[data-snippet]').forEach((box) => {
+        box.textContent = snippets[box.getAttribute('data-snippet')] || '';
+    });
+    steps.querySelectorAll('[data-copy]').forEach((btn) => {
         btn.addEventListener('click', async () => {
-            await navigator.clipboard.writeText(text);
+            await navigator.clipboard.writeText(snippets[btn.getAttribute('data-copy')] || '');
             showToast(noticeText(t('auth.key_copied')), 'ok');
         });
-    };
-    bindCopy('#copyMcpBtn', mcpSnippet);
-    bindCopy('#copyCurlBtn', curlSnippet);
+    });
     return card;
 }
 
@@ -122,7 +132,7 @@ function bindRegisterForm() {
                 // pointer, and the publish/earn split. Same clipboard
                 // mechanism as the key copy; no inline handlers.
                 copyBtn.after(continueBtn);
-                copyBtn.after(buildRegisterNextSteps());
+                copyBtn.after(buildKeyNextSteps('register'));
             }
             continueBtn.addEventListener('click', async () => {
                 // The user explicitly continues; the session is created
@@ -184,6 +194,13 @@ function bindResetKey() {
             state.newKeyOnce = json.data.new_key || '';
             form.reset();
             renderKey();
+            // the reset flow gets the same invitation-driven card as
+            // registration (3.2.0): the new key has to travel to the
+            // agent again — one card, replaced per reset
+            const oldCard = qs('#keyNextSteps');
+            if (oldCard) oldCard.remove();
+            const newKeyBox = qs('#newKeyBox');
+            if (newKeyBox) newKeyBox.after(buildKeyNextSteps('reset'));
             showToast(noticeText(t('auth.key_reset')), 'ok');
         } catch (error) {
             showToast(noticeText(String(error)), 'error');
