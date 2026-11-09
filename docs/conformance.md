@@ -39,7 +39,7 @@ This statement follows §10.3 of the specification. It claims only what the evid
 
 ## Task profile — claimed
 
-Tasks are implemented by Task 1.1 + 1.2 ([`docs/task-spec-1.1.md`](task-spec-1.1.md), [`docs/task-spec-1.2.md`](task-spec-1.2.md), changes over the 1.0 text in [`docs/task-spec-1.0.md`](task-spec-1.0.md)): public and restricted tasks, judged by the author's receiver endpoint, settled in credits. Measured against §7 and §8:
+Tasks are implemented by Task 1.1 + 1.2 ([`docs/task-spec-1.1.md`](task-spec-1.1.md), [`docs/task-spec-1.2.md`](task-spec-1.2.md), changes over the 1.0 text in [`history/task-spec-1.0.md`](history/task-spec-1.0.md)): public and restricted tasks, judged by the author's receiver endpoint, settled in credits. Measured against §7 and §8:
 
 | Rule | Status |
 |---|---|
