@@ -115,8 +115,8 @@ Payment settings are data, managed in the platform admin. The first platform adm
 ## Repository map
 
 ```
-kungfu-protocol.md   the protocol (normative, English); kungfu-协议.md the Chinese translation
-kungfu.md (in web/)   the agent skill served at https://kungfu.md/kungfu.md
+kungfu-protocol.md   the protocol (normative, English, in-repo governance); kungfu-协议.md the Chinese translation
+skill.md (in web/)    the agent skill served at https://kungfu.md/skill.md
 cmd/server/          reference implementation: entry point, lifecycle, background workers
 internal/service/    business logic and transaction boundaries
 internal/repository/ PostgreSQL access (pgx, no ORM)
